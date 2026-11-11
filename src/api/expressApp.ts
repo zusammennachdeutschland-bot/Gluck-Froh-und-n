@@ -12,6 +12,36 @@ import {
 } from '../server/firebaseAdmin';
 
 const app = express();
+
+// Capacitor WebView origins only. Never use wildcard CORS for authenticated teacher APIs.
+const ALLOWED_HOMEWORK_APP_ORIGINS = new Set([
+  'https://localhost',
+  'capacitor://localhost',
+  'http://localhost'
+]);
+
+app.use((req, res, next) => {
+  const origin = String(req.headers.origin || '');
+  const isAllowedOrigin = Boolean(origin && ALLOWED_HOMEWORK_APP_ORIGINS.has(origin));
+
+  if (isAllowedOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+    res.vary('Origin');
+  }
+
+  if (req.method === 'OPTIONS') {
+    if (!isAllowedOrigin) {
+      return res.status(origin ? 403 : 204).end();
+    }
+    return res.status(204).end();
+  }
+
+  next();
+});
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -617,7 +647,7 @@ app.all('/api/teacher/assignments', async (req, res) => {
     }
     return res.json({ success: true, assignment: normalized });
   }
-  return res.json({ success: true });
+  return res.status(405).json({ success: false, error: 'Method not allowed' });
 });
 
 app.all('/api/homework/submissions', async (req, res) => {
@@ -733,10 +763,14 @@ app.all('/api/homework/submissions', async (req, res) => {
     }
     return res.json({ success: true, submission: cleanSub });
   }
-  return res.json({ success: true });
+  return res.status(405).json({ success: false, error: 'Method not allowed' });
 });
 
 app.get('/api/homework/info', async (req, res) => {
+  // Never let a browser/CDN reuse an old public assignment response after teacher deletion.
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   const id = String(req.query.id || '').trim();
   const token = req.query.token !== undefined && req.query.token !== null ? String(req.query.token).trim() : '';
   const found = await getServerAssignment(id);

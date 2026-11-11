@@ -18,6 +18,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { speakGermanText } from '../shared/audioSpeechUtils';
+import { fetchHomeworkApi } from '../shared/firebaseCloudSync';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../shared/lernstudioAudioUtils';
 import {
   HomeworkAssignment,
@@ -245,7 +246,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         const infoParams = new URLSearchParams({ id: assignmentId });
         if (shareToken) infoParams.set('token', shareToken);
 
-        const res = await fetch(`/api/homework/info?${infoParams.toString()}`).catch(() => null);
+        const res = await fetchHomeworkApi(`/api/homework/info?${infoParams.toString()}`).catch(() => null);
         let data: any = {};
         if (res) {
           const responseText = await res.text();
@@ -276,6 +277,21 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             }
             return;
           }
+        }
+
+        // Never use stale local data when the authoritative API is unreachable or fails.
+        // This is especially important after a teacher deletes an assignment.
+        if (!res) {
+          setError('تعذر الاتصال بخادم الواجبات. اتصل بالإنترنت ثم أعد فتح الرابط.');
+          return;
+        }
+        if (!res.ok) {
+          setError(
+            res.status === 404
+              ? 'هذا الواجب غير موجود على الخادم أو تم حذفه. لا يمكن فتح نسخة قديمة من الرابط.'
+              : data?.error || 'تعذر التحقق من حالة الواجب على الخادم. حاول مرة أخرى.'
+          );
+          return;
         }
 
         // A tokenized share link must never fall back to local or URL-reconstructed data.
@@ -1313,7 +1329,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     setFinalScore(syncedSubmissionObj);
 
     try {
-      const res = await fetch('/api/homework/submit', {
+      const res = await fetchHomeworkApi('/api/homework/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

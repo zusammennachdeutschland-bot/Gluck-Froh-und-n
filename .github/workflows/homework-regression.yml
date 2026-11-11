@@ -1,0 +1,147 @@
+name: Homework Regression Checks
+
+on:
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'src/api/**'
+      - 'src/shared/**'
+      - 'src/pages/HomeworkPlayerPage.tsx'
+      - 'src/tests/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/homework-regression.yml'
+  push:
+    branches:
+      - 'fix/**'
+    paths:
+      - 'src/api/**'
+      - 'src/shared/**'
+      - 'src/pages/HomeworkPlayerPage.tsx'
+      - 'src/tests/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/homework-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  homework-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Regenerate dependency lockfile
+        run: npm install --package-lock-only --legacy-peer-deps
+
+      - name: Commit synchronized lockfile to the PR branch
+        if: github.event_name == 'pull_request' && github.head_ref == 'fix/homework-create-android-api'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- package-lock.json; then
+            git add package-lock.json
+            git commit -m "chore: synchronize npm lockfile [skip ci]"
+            git push origin "HEAD:${GITHUB_HEAD_REF}"
+          fi
+
+      - name: Install dependencies from lockfile
+        run: npm ci --legacy-peer-deps
+
+      - name: Verify Capacitor package compatibility
+        run: npm ls @capacitor/android @capacitor/core @capacitor/cli
+
+      - name: Typecheck
+        run: npm run lint
+
+      - name: Run regression tests
+        run: npm test
+
+      - name: Restore pristine binaries
+        run: node scripts/restore_binaries.cjs
+
+      - name: Build web and server bundles
+        run: CI=true npm run build
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Setup Android SDK Environment
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          if [ -d "$SDK_ROOT/cmdline-tools/latest/bin" ]; then
+            echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          fi
+          if [ -d "$SDK_ROOT/platform-tools" ]; then
+            echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          fi
+
+      - name: Install Android SDK Platform 36 & Build-Tools
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          SDKMANAGER=""
+          if [ -n "$SDK_ROOT" ] && [ -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          elif command -v sdkmanager >/dev/null 2>&1; then
+            SDKMANAGER="$(command -v sdkmanager)"
+          else
+            echo "ERROR: sdkmanager not found"
+            exit 1
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" --install "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+          validate-wrappers: false
+
+      - name: Ensure valid Gradle Wrapper
+        run: |
+          cd android
+          gradle wrapper --gradle-version 8.13 --distribution-type bin
+          chmod +x gradlew
+          cat << 'EOF' > gradle/wrapper/gradle-wrapper.properties
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.13-bin.zip
+          networkTimeout=10000
+          validateDistributionUrl=true
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          EOF
+
+      - name: Build Android Debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew clean assembleDebug --stacktrace
+
+      - name: Verify Android Debug APK
+        run: |
+          test -s android/app/build/outputs/apk/debug/app-debug.apk
+          echo "Android debug APK built successfully."

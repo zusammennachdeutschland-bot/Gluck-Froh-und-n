@@ -291,6 +291,115 @@ export function getVercelPublicDomain(): string {
   return DEFAULT_VERCEL_DOMAIN;
 }
 
+
+/**
+ * Resolves homework API requests to the deployed Vercel origin on Android.
+ * Web builds remain same-origin so local development and Vercel rewrites keep working.
+ */
+export function getHomeworkApiUrl(path: string): string {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  if (!isAndroidNativePlatform()) return normalizedPath;
+
+  // Native app API traffic must use HTTPS and the configured host origin only.
+  // Ignore accidental HTTP values or saved path/query fragments in local settings.
+  try {
+    const configuredUrl = new URL(getVercelPublicDomain());
+    const safeOrigin =
+      configuredUrl.protocol === 'https:' && configuredUrl.hostname
+        ? configuredUrl.origin
+        : DEFAULT_VERCEL_DOMAIN;
+    return `${safeOrigin}${normalizedPath}`;
+  } catch {
+    return `${DEFAULT_VERCEL_DOMAIN}${normalizedPath}`;
+  }
+}
+
+/**
+ * All homework API calls are bounded. A stalled WebView request must never leave
+ * the UI in an endless loading state.
+ */
+export async function getHomeworkAuthToken(timeoutMs = 15000): Promise<string> {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error('يجب تسجيل الدخول بحساب المدرس أولاً.');
+  }
+
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const token = await Promise.race([
+      currentUser.getIdToken(),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error('انتهت مهلة التحقق من جلسة المدرس. سجّل الدخول مرة أخرى ثم حاول.')),
+          timeoutMs
+        );
+      })
+    ]);
+    if (!token) throw new Error('تعذر التحقق من جلسة المدرس. سجّل الدخول مرة أخرى.');
+    return token;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+export async function fetchHomeworkApi(
+  path: string,
+  init: RequestInit = {},
+  timeoutMs = 20000
+): Promise<Response> {
+  const controller = new AbortController();
+  let timedOut = false;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutMessage = 'انتهت مهلة الاتصال بخادم الواجبات. تحقق من الإنترنت ثم حاول مرة أخرى.';
+  const clearRequestTimeout = () => {
+    if (timeoutId) clearTimeout(timeoutId);
+    timeoutId = undefined;
+  };
+
+  timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    const response = await fetch(getHomeworkApiUrl(path), {
+      ...init,
+      signal: controller.signal
+    });
+
+    // fetch() resolves when response headers arrive, not when the body has been
+    // downloaded. Keep the timeout active until the caller consumes the body.
+    const wrapBodyReader = <T extends 'text' | 'json' | 'arrayBuffer' | 'blob' | 'formData'>(method: T) => {
+      const original = response[method].bind(response) as (...args: any[]) => Promise<any>;
+      return async (...args: any[]) => {
+        try {
+          return await original(...args);
+        } catch (error) {
+          if (timedOut) throw new Error(timeoutMessage);
+          throw error;
+        } finally {
+          clearRequestTimeout();
+        }
+      };
+    };
+
+    response.text = wrapBodyReader('text') as typeof response.text;
+    response.json = wrapBodyReader('json') as typeof response.json;
+    response.arrayBuffer = wrapBodyReader('arrayBuffer') as typeof response.arrayBuffer;
+    response.blob = wrapBodyReader('blob') as typeof response.blob;
+    response.formData = wrapBodyReader('formData') as typeof response.formData;
+
+    if (!response.body) clearRequestTimeout();
+    return response;
+  } catch (error: any) {
+    clearRequestTimeout();
+    if (timedOut || controller.signal.aborted) {
+      throw new Error(timeoutMessage);
+    }
+    throw error;
+  }
+}
+
 export function setVercelPublicDomain(domainUrl: string): string {
   let clean = (domainUrl || '').trim().replace(/\/+$/, '');
   if (!clean) {
@@ -717,8 +826,8 @@ export async function saveAssignmentToFirestore(
   const currentUser = auth.currentUser;
   if (!currentUser || currentUser.uid !== ownerUid) return false;
   try {
-    const idToken = await currentUser.getIdToken();
-    const response = await fetch('/api/teacher/assignments', {
+    const idToken = await getHomeworkAuthToken();
+    const response = await fetchHomeworkApi('/api/teacher/assignments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
       credentials: 'include',
@@ -878,8 +987,8 @@ export async function deleteAssignmentFromFirestore(
   const currentUser = auth.currentUser;
   if (!ownerUid || !currentUser || currentUser.uid !== ownerUid) return false;
   try {
-    const idToken = await currentUser.getIdToken();
-    const response = await fetch(`/api/teacher/assignments?id=${encodeURIComponent(assignmentId)}`, {
+    const idToken = await getHomeworkAuthToken();
+    const response = await fetchHomeworkApi(`/api/teacher/assignments?id=${encodeURIComponent(assignmentId)}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${idToken}` },
       credentials: 'include'

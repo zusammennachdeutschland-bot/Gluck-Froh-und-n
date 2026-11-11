@@ -7,6 +7,7 @@ import { buildHomeworkShareUrl, createHomeworkShareToken } from '../shared/homew
 import {
   getInMemoryAdminFirestore,
   getAuthoritativeFirestore,
+  softDeleteAuthoritativeAssignment,
   isExplicitTestEnvironment
 } from '../server/firebaseAdmin';
 
@@ -25,6 +26,32 @@ async function runShareTokenSecurityTests() {
 
   try {
     resetHomeworkStoresForTesting();
+
+    // Capacitor Android WebView must be able to complete the authenticated API preflight.
+    const nativePreflight = await fetch(`${baseUrl}/api/teacher/assignments`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://localhost',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'authorization,content-type'
+      }
+    });
+    assert.equal(nativePreflight.status, 204, 'Allowed Capacitor origin must pass CORS preflight');
+    assert.equal(nativePreflight.headers.get('access-control-allow-origin'), 'https://localhost');
+    assert.match(nativePreflight.headers.get('access-control-allow-headers') || '', /authorization/i);
+    assert.match(nativePreflight.headers.get('access-control-allow-headers') || '', /content-type/i);
+
+    const rejectedPreflight = await fetch(`${baseUrl}/api/teacher/assignments`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://untrusted.example',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'authorization,content-type'
+      }
+    });
+    assert.equal(rejectedPreflight.status, 403, 'Untrusted origins must not receive CORS permission');
+    assert.equal(rejectedPreflight.headers.get('access-control-allow-origin'), null);
+    console.log('✅ [CORS-01] Capacitor preflight is allowed only for explicit app origins');
 
     const teacherUid = 'teacher_st_uid_100';
     const securedHwId = `hw_sec_${Date.now()}`;
@@ -106,11 +133,23 @@ async function runShareTokenSecurityTests() {
     // TEST 4: Configured shareToken + correct token -> 200 OK Authorized
     // -------------------------------------------------------------------------
     console.log('Testing [ST-04] Configured shareToken + correct token...');
-    const correctTokenRes = await fetch(`${baseUrl}/api/homework/info?id=${securedHwId}&token=${configuredToken}`);
+    const correctTokenRes = await fetch(`${baseUrl}/api/homework/info?id=${securedHwId}&token=${configuredToken}`, {
+      headers: { Origin: 'https://localhost' }
+    });
     assert.equal(
       correctTokenRes.status,
       200,
       'Correct token must receive HTTP 200'
+    );
+    assert.equal(
+      correctTokenRes.headers.get('access-control-allow-origin'),
+      'https://localhost',
+      'Allowed Capacitor origin must receive CORS headers on actual API responses'
+    );
+    assert.match(
+      correctTokenRes.headers.get('cache-control') || '',
+      /no-store/i,
+      'Public homework info must not be cached after teacher deletion'
     );
     const correctTokenData = (await correctTokenRes.json()) as any;
     assert.equal(correctTokenData.id, securedHwId);
@@ -241,6 +280,26 @@ async function runShareTokenSecurityTests() {
     assert.equal(openData.id, openHwId);
     assert.equal(openData.title, 'Open Assignment Without Share Token');
     console.log('✅ [ST-06] Assignment without shareToken remains accessible as intended');
+
+    // A deleted assignment tombstone must stay inaccessible even for legacy links without tokens.
+    const deletedLegacyHwId = `hw_deleted_legacy_${Date.now()}`;
+    await inMemDb.collection('homework_assignments').doc(deletedLegacyHwId).set({
+      id: deletedLegacyHwId,
+      ownerUid: teacherUid,
+      title: 'Deleted legacy homework',
+      createdAt: new Date().toISOString(),
+      isActive: true,
+      audienceMode: 'open',
+      setSnapshot: { id: 'legacy-set', title: 'Legacy', items: [{ id: 'w1', german: 'Haus' }] }
+    });
+    await softDeleteAuthoritativeAssignment(deletedLegacyHwId, teacherUid);
+    const deletedLegacyInfoRes = await fetch(`${baseUrl}/api/homework/info?id=${deletedLegacyHwId}`);
+    assert.equal(
+      deletedLegacyInfoRes.status,
+      403,
+      'Deleted legacy homework without a share token must remain inaccessible'
+    );
+    console.log('✅ [ST-06A] Deleted legacy homework remains blocked even without a share token');
 
     // -------------------------------------------------------------------------
     // TEST 7: Group Assignment Roster Sanitization (No PII / student secrets)

@@ -38,7 +38,7 @@ import {
   resolveStageQuestionCount,
   calculateTotalHomeworkQuestions
 } from '../homeworkStorageSync';
-import { auth } from '../firebaseCloudSync';
+import { fetchHomeworkApi, getHomeworkAuthToken } from '../firebaseCloudSync';
 import {
   Sparkles,
   X,
@@ -78,12 +78,9 @@ interface Props {
 }
 
 async function persistHomeworkAssignmentToServer(assignment: HomeworkAssignment): Promise<any> {
-  const idToken = await auth?.currentUser?.getIdToken().catch(() => null);
-  if (!idToken) {
-    throw new Error('يجب تسجيل الدخول بحساب المدرس لحفظ الواجب ومشاركة رابطه.');
-  }
+  const idToken = await getHomeworkAuthToken();
 
-  const response = await fetch('/api/teacher/assignments', {
+  const response = await fetchHomeworkApi('/api/teacher/assignments', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -155,6 +152,9 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [createdShareLink, setCreatedShareLink] = useState<string | null>(null);
   const [createdCloudSynced, setCreatedCloudSynced] = useState<boolean>(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // Reuse the same id/token after an ambiguous timeout so retries are idempotent.
+  const pendingHomeworkIdentityRef = useRef<{ id: string; shareToken: string; key: string } | null>(null);
+
 
   // Results & Monitoring Tab State
   const [assignmentsList, setAssignmentsList] = useState<any[]>([]);
@@ -455,7 +455,39 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         questionTypes,
         sanitizedCounts
       );
-      const generatedId = createHomeworkAssignmentId();
+      const retryKey = JSON.stringify({
+        setId: currentSet.id,
+        title: title.trim(),
+        audienceMode,
+        groupId: isGroupMode ? selectedGroupId : '',
+        itemIds: finalItems.map((item) => item.id),
+        questionTypes,
+        questionCounts: sanitizedCounts,
+        maxAttempts,
+        flowMode,
+        blooketMode,
+        deadline: hasDeadline && deadlineDate ? new Date(deadlineDate).toISOString() : '',
+        ownerUid: resolvedOwnerUid || '',
+        groupName: isGroupMode && targetGroup ? targetGroup.name : '',
+        assignedStudents: isGroupMode
+          ? activeSelectedGroupStudents.map((student) => ({
+              id: student.id,
+              name: student.name,
+              code: (student as any).code || '',
+              groupId: selectedGroupId
+            })).sort((a, b) => a.id.localeCompare(b.id))
+          : []
+      });
+      const pendingIdentity =
+        pendingHomeworkIdentityRef.current?.key === retryKey
+          ? pendingHomeworkIdentityRef.current
+          : {
+              id: createHomeworkAssignmentId(),
+              shareToken: createHomeworkShareToken(),
+              key: retryKey
+            };
+      pendingHomeworkIdentityRef.current = pendingIdentity;
+      const generatedId = pendingIdentity.id;
 
       const assignedStudentsList = isGroupMode
         ? activeSelectedGroupStudents.map((s) => ({
@@ -468,7 +500,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
       const payload: HomeworkAssignment = {
         id: generatedId,
-        shareToken: createHomeworkShareToken(),
+        shareToken: pendingIdentity.shareToken,
         ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
         ...(resolvedOwnerEmail ? { ownerEmail: resolvedOwnerEmail } : {}),
         title: title.trim() || `واجب: ${currentSet.title}`,
@@ -520,84 +552,19 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       setCreatedCloudSynced(true);
       setCreatedAssignment(finalAssignment);
       setCreatedShareLink(buildHomeworkShareUrl(finalAssignment, vercelDomain));
+      pendingHomeworkIdentityRef.current = null;
       setPendingSyncCount(getPendingHomeworkSyncCount());
-    } catch {
-      if (currentSet) {
-        const chosenItems = currentSet.items.filter((it) => selectedItemIds.includes(it.id));
-        const finalItems = chosenItems.length > 0 ? chosenItems : currentSet.items;
-        const assignedStudentsList = isGroupMode
-          ? activeSelectedGroupStudents.map((s) => ({
-              id: s.id,
-              name: s.name,
-              ...((s as any).code ? { code: (s as any).code } : {}),
-              groupId: selectedGroupId
-            }))
-          : undefined;
-
-        const fallbackCounts: Partial<Record<HomeworkQuestionType, number>> = {};
-        for (const qt of questionTypes) {
-          const c = resolveStageQuestionCount(qt, finalItems.length, questionTypeCounts);
-          if (c > 0 && c < finalItems.length) {
-            fallbackCounts[qt] = c;
-          }
-        }
-        const fallbackTotalQ = calculateTotalHomeworkQuestions(
-          finalItems.length,
-          questionTypes,
-          fallbackCounts
-        );
-
-        const fallbackHw: HomeworkAssignment = {
-          id: createHomeworkAssignmentId(),
-          shareToken: createHomeworkShareToken(),
-          ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
-          ...(resolvedOwnerEmail ? { ownerEmail: resolvedOwnerEmail } : {}),
-          title: title.trim() || `واجب: ${currentSet.title}`,
-          setSnapshot: { ...currentSet, items: finalItems },
-          selectedItemIds: finalItems.map((it) => it.id),
-          flowMode,
-          questionTypes,
-          ...(Object.keys(fallbackCounts).length > 0 ? { questionTypeCounts: fallbackCounts } : {}),
-          blooketMode,
-          allowedGameModes: [blooketMode],
-          questionCount: fallbackTotalQ,
-          targetQuestionCount: fallbackTotalQ,
-          audienceMode,
-          groupId: isGroupMode ? selectedGroupId : undefined,
-          groupName: isGroupMode && targetGroup ? targetGroup.name : undefined,
-          assignedStudents: isGroupMode ? assignedStudentsList : undefined,
-          maxAttempts,
-          allowReplay: maxAttempts !== 1,
-          isActive: true,
-          status: 'active',
-          createdAt: new Date().toISOString(),
-          createdBy: 'Teacher'
-        };
-        try {
-          const serverAssignment = await persistHomeworkAssignmentToServer(fallbackHw);
-          const finalFallbackAssignment: HomeworkAssignment = {
-            ...fallbackHw,
-            ...serverAssignment,
-            id: fallbackHw.id,
-            ...(serverAssignment.ownerUid || resolvedOwnerUid
-              ? { ownerUid: serverAssignment.ownerUid || resolvedOwnerUid }
-              : {}),
-            audienceMode,
-            cloudSynced: true
-          };
-          saveLocalAssignment(finalFallbackAssignment, false);
-          setCreatedCloudSynced(true);
-          setCreatedAssignment(finalFallbackAssignment);
-          setCreatedShareLink(buildHomeworkShareUrl(finalFallbackAssignment, vercelDomain));
-        } catch (persistError) {
-          const localOnlyFallback = { ...fallbackHw, cloudSynced: false };
-          saveLocalAssignment(localOnlyFallback, false);
-          setCreatedCloudSynced(false);
-          setCreatedAssignment(localOnlyFallback);
-          setCreatedShareLink(null);
-        }
-        setPendingSyncCount(getPendingHomeworkSyncCount());
-      }
+    } catch (error: any) {
+      // Do not mint a second assignment ID after a timeout: the first request may
+      // already have committed on the server. Keep the same identity for retry.
+      setCreatedAssignment(null);
+      setCreatedShareLink(null);
+      setCreatedCloudSynced(false);
+      const rawMessage = String(error?.message || '').trim();
+      const message = /failed to fetch|networkerror|load failed/i.test(rawMessage)
+        ? 'تعذر الاتصال بخادم الواجبات. تأكد من اتصال الإنترنت ثم حاول مرة أخرى.'
+        : rawMessage;
+      setCreateError(message || 'تعذر إنشاء الواجب على الخادم. لم يتم إنشاء رابط مشاركة؛ حاول مرة أخرى.');
     } finally {
       setIsCreating(false);
     }
@@ -674,9 +641,8 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     setIsDeleting(true);
     try {
       const targetId = deleteConfirmHw.id;
-      const idToken = await auth?.currentUser?.getIdToken().catch(() => null);
-      if (!idToken) throw new Error('يجب تسجيل الدخول بحساب المدرس لحذف الواجب.');
-      const response = await fetch(`/api/teacher/assignments?id=${encodeURIComponent(targetId)}`, {
+      const idToken = await getHomeworkAuthToken();
+      const response = await fetchHomeworkApi(`/api/teacher/assignments?id=${encodeURIComponent(targetId)}`, {
         method: 'DELETE', headers: { Authorization: `Bearer ${idToken}` }, credentials: 'include'
       });
       const responseText = await response.text();
