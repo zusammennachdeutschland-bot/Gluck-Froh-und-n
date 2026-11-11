@@ -2027,6 +2027,15 @@ export async function syncAndFetchTeacherAssignments(
     saveLocalAssignment({ ...hw, ...(authUidAtStart ? { ownerUid: authUidAtStart } : {}), cloudSynced: true }, false);
   });
 
+  // A successful owner-scoped cloud read is authoritative. Remove stale local
+  // assignments absent from that account's cloud list instead of resurrecting them.
+  const cloudAssignmentIdsForOwner = new Set(cloudAssignments.map((hw) => sanitizeDocId(hw.id)));
+  for (const localHw of getLocalAssignments(scopeAtStart)) {
+    if (localHw.ownerUid === authUidAtStart && !cloudAssignmentIdsForOwner.has(sanitizeDocId(localHw.id))) {
+      deleteLocalAssignment(localHw.id, false);
+    }
+  }
+
   // Apply cloud deletion tombstones before flushing any queued local writes.
   flushPendingHomeworkCloudWrites().catch(() => {});
 
@@ -2068,7 +2077,9 @@ export async function syncAndFetchTeacherAssignments(
       if (localHw.ownerUid !== authUidAtStart) {
         continue;
       }
-      if (!cloudAssignmentIds.has(localHw.id) || localHw.cloudSynced === false) {
+      // Only update an assignment already present in the authoritative cloud list.
+      // Missing local-only records are stale cache, not new homework to resurrect.
+      if (cloudAssignmentIds.has(localHw.id) && localHw.cloudSynced === false) {
         const ok = await activeSaveAssignmentToCloud(localHw).catch(() => false);
         if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
           return [];
