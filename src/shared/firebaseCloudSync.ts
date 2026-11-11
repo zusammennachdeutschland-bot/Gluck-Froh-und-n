@@ -708,44 +708,26 @@ export async function saveAssignmentToFirestore(
   explicitOwnerUid?: string
 ): Promise<boolean> {
   if (!assignment || !assignment.id) return false;
-  const activeUid = explicitOwnerUid?.trim() || getCurrentHomeworkOwnerUid();
+  const ownerUid = explicitOwnerUid?.trim() || getCurrentHomeworkOwnerUid();
   const recordOwnerUid = assignment.ownerUid?.trim() || '';
+  if (!ownerUid || (recordOwnerUid && recordOwnerUid !== ownerUid)) return false;
 
-  // Require an authenticated ownerUid; never allow Account B to upload or overwrite Account A's assignment
-  if (!activeUid) return false;
-  if (recordOwnerUid && recordOwnerUid !== activeUid) {
-    return false;
-  }
-
-  const ownerUid = activeUid.slice(0, 128);
-  const safeId = sanitizeDocId(assignment.id);
-  const path = `homework_assignments/${safeId}`;
+  // All assignment writes go through Firebase Admin now. This keeps the server's
+  // transaction-based owner check and deletion tombstone authoritative across devices.
+  const currentUser = auth.currentUser;
+  if (!currentUser || currentUser.uid !== ownerUid) return false;
   try {
-    // Privacy hardening (V-06): strip personal teacher ownerEmail before writing to public student-accessible homework_assignments document
-    const existingSnap = await withFirestoreReadTimeout(getDoc(doc(db, 'homework_assignments', safeId)), 4000).catch(() => null);
-    if (existingSnap?.exists()) {
-      const existingData = existingSnap.data();
-      if (String(existingData?.ownerUid || '').trim() !== ownerUid || existingData?.deleted === true) return false;
-    }
-    const cleanAssignment: HomeworkAssignment = { ...assignment, id: safeId, ownerUid, cloudSynced: true };
-    delete cleanAssignment.ownerEmail;
-    const payloadJson = JSON.stringify(cleanAssignment).slice(0, 490000);
-    await executeConfirmedFirestoreWrite(
-      () =>
-        setDoc(doc(db, 'homework_assignments', safeId), {
-          id: safeId,
-          ownerUid,
-          title: (assignment.title || 'Hausaufgabe').slice(0, 290),
-          createdAt: (assignment.createdAt || new Date().toISOString()).slice(0, 60),
-          isActive: assignment.isActive !== false,
-          payloadJson
-        }),
-      12000,
-      2
-    );
-    return true;
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch('/api/teacher/assignments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+      credentials: 'include',
+      body: JSON.stringify({ ...assignment, ownerUid })
+    });
+    if (!response.ok) return false;
+    const data = await response.json().catch(() => null);
+    return data?.success === true && Boolean(data?.assignment?.id);
+  } catch {
     return false;
   }
 }
