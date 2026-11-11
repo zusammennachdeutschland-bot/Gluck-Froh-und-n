@@ -60,7 +60,7 @@ android {
         applicationId "com.glueck.teacher"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode (System.getenv("GITHUB_RUN_NUMBER") ? 300 + System.getenv("GITHUB_RUN_NUMBER").toInteger() : 300)
+        versionCode (System.getenv("APP_BUILD_NUMBER") ? System.getenv("APP_BUILD_NUMBER").toInteger() : (System.getenv("GITHUB_RUN_NUMBER") ? 300 + System.getenv("GITHUB_RUN_NUMBER").toInteger() : 300))
         versionName "3.0.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {

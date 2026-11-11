@@ -10,12 +10,19 @@ export default defineConfig(() => {
   const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
   const isElectronBuild = process.env.ELECTRON_BUILD === 'true';
 
+  const baseBuildNumber = 300;
+  const githubRunNumber = process.env.GITHUB_RUN_NUMBER ? parseInt(process.env.GITHUB_RUN_NUMBER, 10) : 0;
+  const buildNumber = process.env.APP_BUILD_NUMBER || (
+    githubRunNumber > 0 ? String(baseBuildNumber + githubRunNumber) : String(baseBuildNumber)
+  );
+  const buildTime = process.env.APP_BUILD_TIME || new Date().toISOString();
+
   return {
     base: isElectronBuild ? './' : '/',
     define: {
       __APP_VERSION__: JSON.stringify(CANONICAL_APP_VERSION),
-      __APP_BUILD_NUMBER__: JSON.stringify('300'),
-      __APP_BUILD_TIME__: JSON.stringify('2026-11-11T15:30:00.000Z')
+      __APP_BUILD_NUMBER__: JSON.stringify(buildNumber),
+      __APP_BUILD_TIME__: JSON.stringify(buildTime)
     },
     plugins: [
       react(), 
