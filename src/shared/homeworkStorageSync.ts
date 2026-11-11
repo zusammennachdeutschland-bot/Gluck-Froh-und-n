@@ -950,7 +950,7 @@ function writeLocalAssignmentsList(list: HomeworkAssignment[], explicitUid?: str
         if (!hw || !hw.id || (hw as any).deleted) return false;
         if (deletedSet.has(hw.id) || deletedSet.has(sanitizeDocId(hw.id))) return false;
         const recOwner = hw.ownerUid?.trim() || '';
-        if (isAuthenticatedScope && recOwner && recOwner !== scopeUid) {
+        if (isAuthenticatedScope && recOwner !== scopeUid) {
           return false;
         }
         return true;
