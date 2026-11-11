@@ -291,6 +291,44 @@ export function getVercelPublicDomain(): string {
   return DEFAULT_VERCEL_DOMAIN;
 }
 
+
+/**
+ * Resolves homework API requests to the deployed Vercel origin on Android.
+ * Web builds remain same-origin so local development and Vercel rewrites keep working.
+ */
+export function getHomeworkApiUrl(path: string): string {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return isAndroidNativePlatform()
+    ? `${getVercelPublicDomain()}${normalizedPath}`
+    : normalizedPath;
+}
+
+/**
+ * All homework API calls are bounded. A stalled WebView request must never leave
+ * the UI in an endless loading state.
+ */
+export async function fetchHomeworkApi(
+  path: string,
+  init: RequestInit = {},
+  timeoutMs = 20000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(getHomeworkApiUrl(path), {
+      ...init,
+      signal: controller.signal
+    });
+  } catch (error: any) {
+    if (controller.signal.aborted) {
+      throw new Error('انتهت مهلة الاتصال بخادم الواجبات. تحقق من الإنترنت ثم حاول مرة أخرى.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export function setVercelPublicDomain(domainUrl: string): string {
   let clean = (domainUrl || '').trim().replace(/\/+$/, '');
   if (!clean) {
@@ -718,7 +756,7 @@ export async function saveAssignmentToFirestore(
   if (!currentUser || currentUser.uid !== ownerUid) return false;
   try {
     const idToken = await currentUser.getIdToken();
-    const response = await fetch('/api/teacher/assignments', {
+    const response = await fetchHomeworkApi('/api/teacher/assignments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
       credentials: 'include',
@@ -879,7 +917,7 @@ export async function deleteAssignmentFromFirestore(
   if (!ownerUid || !currentUser || currentUser.uid !== ownerUid) return false;
   try {
     const idToken = await currentUser.getIdToken();
-    const response = await fetch(`/api/teacher/assignments?id=${encodeURIComponent(assignmentId)}`, {
+    const response = await fetchHomeworkApi(`/api/teacher/assignments?id=${encodeURIComponent(assignmentId)}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${idToken}` },
       credentials: 'include'
