@@ -590,6 +590,9 @@ async function writeSharedLernstudioSetChanges(changedSets: any[]): Promise<void
     if (existingData && remoteTime > localTime) continue;
     const deleted = set.deleted === true;
     const payload = JSON.stringify(set);
+    if (existingData && existingData.payloadJson === payload && Boolean(existingData.deleted) === deleted) {
+      continue;
+    }
     if (payload.length > 500000) {
       throw new Error(`Lernstudio set "${id}" exceeds the shared Firestore document size limit.`);
     }
