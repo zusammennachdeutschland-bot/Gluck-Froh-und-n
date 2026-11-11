@@ -3,7 +3,8 @@ import {
   HomeworkSubmission,
   HomeworkQuestionType,
   HomeworkAudienceMode,
-  AssignedStudentSnapshot
+  AssignedStudentSnapshot,
+  DEFAULT_HOMEWORK_QUESTION_TYPES
 } from './homeworkTypes';
 import {
   getVercelPublicDomain,
@@ -1727,6 +1728,113 @@ if (typeof window !== 'undefined') {
   });
 }
 
+const VALID_HOMEWORK_QUESTION_TYPES = new Set<HomeworkQuestionType>([
+  'true_false',
+  'choice_2',
+  'choice_all',
+  'syllables',
+  'missing_letter',
+  'missing_two_letters',
+  'full_word',
+  'mc_de_ar',
+  'listen_choose',
+  'mc_ar_de',
+  'article_quiz'
+]);
+
+/**
+ * Resolves how many questions should be asked for a specific stage (`qType`),
+ * clamped between 1 and `maxWordsCount` (or 0 when `maxWordsCount <= 0`).
+ * Defaults to `maxWordsCount` (all selected words) when no custom count is set.
+ */
+export function resolveStageQuestionCount(
+  qType: HomeworkQuestionType,
+  maxWordsCount: number,
+  questionTypeCounts?: Partial<Record<HomeworkQuestionType, number>>
+): number {
+  const safeMax = Math.max(0, Math.floor(Number(maxWordsCount) || 0));
+  if (safeMax <= 0) return 0;
+  const raw = questionTypeCounts?.[qType];
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 1) {
+    return Math.min(safeMax, Math.max(1, Math.round(raw)));
+  }
+  return safeMax;
+}
+
+/**
+ * Calculates the total number of questions across all active homework stages
+ * taking into account any per-stage custom question counts (`questionTypeCounts`).
+ */
+export function calculateTotalHomeworkQuestions(
+  wordsCount: number,
+  questionTypes?: HomeworkQuestionType[],
+  questionTypeCounts?: Partial<Record<HomeworkQuestionType, number>>
+): number {
+  const safeWords = Math.max(0, Math.floor(Number(wordsCount) || 0));
+  if (safeWords <= 0) return 0;
+  const activeTypes =
+    Array.isArray(questionTypes) && questionTypes.length > 0
+      ? questionTypes
+      : DEFAULT_HOMEWORK_QUESTION_TYPES;
+  return activeTypes.reduce(
+    (sum, qt) => sum + resolveStageQuestionCount(qt, safeWords, questionTypeCounts),
+    0
+  );
+}
+
+/**
+ * Encodes `questionTypeCounts` into a compact query parameter string (e.g. `true_false:5,choice_2:3`).
+ */
+export function encodeQuestionTypeCountsParam(
+  questionTypes?: HomeworkQuestionType[],
+  questionTypeCounts?: Partial<Record<HomeworkQuestionType, number>>,
+  maxWordsCount?: number
+): string {
+  if (!questionTypeCounts || typeof questionTypeCounts !== 'object') return '';
+  const activeTypes =
+    Array.isArray(questionTypes) && questionTypes.length > 0
+      ? questionTypes
+      : (Object.keys(questionTypeCounts) as HomeworkQuestionType[]);
+  const safeMax =
+    typeof maxWordsCount === 'number' && Number.isFinite(maxWordsCount) && maxWordsCount > 0
+      ? Math.floor(maxWordsCount)
+      : undefined;
+
+  const pairs: string[] = [];
+  for (const qt of activeTypes) {
+    if (!VALID_HOMEWORK_QUESTION_TYPES.has(qt)) continue;
+    const raw = questionTypeCounts[qt];
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 1) {
+      const clamped = safeMax ? Math.min(safeMax, Math.max(1, Math.round(raw))) : Math.max(1, Math.round(raw));
+      pairs.push(`${qt}:${clamped}`);
+    }
+  }
+  return pairs.join(',');
+}
+
+/**
+ * Parses a compact `qtc` query parameter (`true_false:5,choice_2:3`) back into a `questionTypeCounts` map.
+ */
+export function parseQuestionTypeCountsParam(
+  qtcParam: string | null | undefined
+): Partial<Record<HomeworkQuestionType, number>> {
+  const result: Partial<Record<HomeworkQuestionType, number>> = {};
+  if (!qtcParam || typeof qtcParam !== 'string') return result;
+  const entries = qtcParam
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const entry of entries) {
+    const [rawType, rawCount] = entry.split(':');
+    const qt = (rawType || '').trim() as HomeworkQuestionType;
+    const parsedCount = Number((rawCount || '').trim());
+    if (VALID_HOMEWORK_QUESTION_TYPES.has(qt) && Number.isFinite(parsedCount) && parsedCount >= 1) {
+      result[qt] = Math.max(1, Math.round(parsedCount));
+    }
+  }
+  return result;
+}
+
 /**
  * Generates the student/parent homework link using the Vercel public domain.
  * Encodes the audience mode ('am') and group metadata ('gid', 'gn') without exposing student lists.
@@ -1744,6 +1852,14 @@ export function buildHomeworkShareUrl(hw: HomeworkAssignment, overrideDomain?: s
   if (hw.flowMode) params.set('fm', hw.flowMode);
   if (hw.questionTypes && hw.questionTypes.length > 0) {
     params.set('qt', hw.questionTypes.join(','));
+  }
+  const encodedQtc = encodeQuestionTypeCountsParam(
+    hw.questionTypes,
+    hw.questionTypeCounts,
+    hw.selectedItemIds?.length || hw.setSnapshot?.items?.length
+  );
+  if (encodedQtc) {
+    params.set('qtc', encodedQtc);
   }
   if (hw.blooketMode) params.set('bm', hw.blooketMode);
   if (hw.title) params.set('t', hw.title);

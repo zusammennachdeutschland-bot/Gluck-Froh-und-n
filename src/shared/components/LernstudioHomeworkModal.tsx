@@ -34,7 +34,9 @@ import {
   getCurrentHomeworkOwnerEmail,
   migrateLegacyHomeworkForAccount,
   backfillLegacyCloudHomeworkForAccount,
-  resolveAssignmentAudienceMode
+  resolveAssignmentAudienceMode,
+  resolveStageQuestionCount,
+  calculateTotalHomeworkQuestions
 } from '../homeworkStorageSync';
 import { auth } from '../firebaseCloudSync';
 import {
@@ -110,6 +112,9 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [questionTypes, setQuestionTypes] = useState<HomeworkQuestionType[]>(
     () => [...DEFAULT_HOMEWORK_QUESTION_TYPES]
   );
+  const [questionTypeCounts, setQuestionTypeCounts] = useState<
+    Partial<Record<HomeworkQuestionType, number>>
+  >({});
   const [blooketMode] = useState<HomeworkBlooketMode>('classic_quiz');
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [maxAttempts, setMaxAttempts] = useState(0);
@@ -183,6 +188,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   useEffect(() => {
     if (currentSet?.items) {
       setSelectedItemIds(currentSet.items.map((it) => it.id));
+      setQuestionTypeCounts({});
     }
   }, [currentSet?.id]);
 
@@ -344,6 +350,45 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     });
   };
 
+  const maxStageWords = Math.max(1, selectedItemIds.length || currentSet?.items?.length || 1);
+
+  const getStageQuestionCount = (type: HomeworkQuestionType): number =>
+    resolveStageQuestionCount(type, maxStageWords, questionTypeCounts);
+
+  const setSingleStageQuestionCount = (type: HomeworkQuestionType, nextCount: number) => {
+    const clamped = Math.min(maxStageWords, Math.max(1, Math.round(nextCount)));
+    setQuestionTypeCounts((prev) => {
+      const next = { ...prev };
+      if (clamped >= maxStageWords) {
+        delete next[type];
+      } else {
+        next[type] = clamped;
+      }
+      return next;
+    });
+  };
+
+  const setAllStagesQuestionCount = (nextCount: number | 'all') => {
+    if (nextCount === 'all' || nextCount >= maxStageWords) {
+      setQuestionTypeCounts({});
+      return;
+    }
+    const clamped = Math.min(maxStageWords, Math.max(1, Math.round(nextCount)));
+    const next: Partial<Record<HomeworkQuestionType, number>> = {};
+    for (const meta of QUESTION_TYPE_META) {
+      next[meta.id] = clamped;
+    }
+    setQuestionTypeCounts(next);
+  };
+
+  const totalConfiguredQuestions = useMemo(
+    () => calculateTotalHomeworkQuestions(selectedItemIds.length, questionTypes, questionTypeCounts),
+    [selectedItemIds.length, questionTypes, questionTypeCounts]
+  );
+
+  const fullMaxQuestions = selectedItemIds.length * questionTypes.length;
+  const hasCustomStageCounts = totalConfiguredQuestions < fullMaxQuestions;
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentSet) return;
@@ -369,7 +414,18 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     try {
       const chosenItems = currentSet.items.filter((it) => selectedItemIds.includes(it.id));
       const finalItems = chosenItems.length > 0 ? chosenItems : currentSet.items;
-      const totalQ = finalItems.length * questionTypes.length;
+      const sanitizedCounts: Partial<Record<HomeworkQuestionType, number>> = {};
+      for (const qt of questionTypes) {
+        const c = resolveStageQuestionCount(qt, finalItems.length, questionTypeCounts);
+        if (c > 0 && c < finalItems.length) {
+          sanitizedCounts[qt] = c;
+        }
+      }
+      const totalQ = calculateTotalHomeworkQuestions(
+        finalItems.length,
+        questionTypes,
+        sanitizedCounts
+      );
       const generatedId = 'hw_' + Math.random().toString(36).substring(2, 8);
 
       const assignedStudentsList = isGroupMode
@@ -395,6 +451,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         selectedItemIds: finalItems.map((it) => it.id),
         flowMode,
         questionTypes,
+        ...(Object.keys(sanitizedCounts).length > 0 ? { questionTypeCounts: sanitizedCounts } : {}),
         blooketMode,
         allowedGameModes: [blooketMode],
         questionCount: totalQ,
@@ -475,6 +532,19 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
             }))
           : undefined;
 
+        const fallbackCounts: Partial<Record<HomeworkQuestionType, number>> = {};
+        for (const qt of questionTypes) {
+          const c = resolveStageQuestionCount(qt, finalItems.length, questionTypeCounts);
+          if (c > 0 && c < finalItems.length) {
+            fallbackCounts[qt] = c;
+          }
+        }
+        const fallbackTotalQ = calculateTotalHomeworkQuestions(
+          finalItems.length,
+          questionTypes,
+          fallbackCounts
+        );
+
         const fallbackHw: HomeworkAssignment = {
           id: 'hw_' + Math.random().toString(36).substring(2, 8),
           ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
@@ -484,10 +554,11 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
           selectedItemIds: finalItems.map((it) => it.id),
           flowMode,
           questionTypes,
+          ...(Object.keys(fallbackCounts).length > 0 ? { questionTypeCounts: fallbackCounts } : {}),
           blooketMode,
           allowedGameModes: [blooketMode],
-          questionCount: finalItems.length * questionTypes.length,
-          targetQuestionCount: finalItems.length * questionTypes.length,
+          questionCount: fallbackTotalQ,
+          targetQuestionCount: fallbackTotalQ,
           audienceMode,
           groupId: isGroupMode ? selectedGroupId : undefined,
           groupName: isGroupMode && targetGroup ? targetGroup.name : undefined,
@@ -875,7 +946,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                 </div>
 
                 {/* 3. Progressive Stages Grid (All 7 Active by Default, Preceded by Stage 1: Lernen) */}
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-text-main">
                       مراحل التدريب المتدرجة في رابط الواجب ({questionTypes.length} من {QUESTION_TYPE_META.length}):
@@ -894,34 +965,147 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                       {questionTypes.length === QUESTION_TYPE_META.length ? 'مرحلة واحدة فقط' : 'تحديد كل المراحل'}
                     </button>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+
+                  {/* Quick Per-Stage Question Count Preset Bar */}
+                  {maxStageWords > 1 && (
+                    <div className="p-2.5 rounded-xl bg-surface-hover border border-surface-border flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-[11px] font-bold text-text-main flex items-center gap-1.5">
+                        <span>🎯 عدد الأسئلة لكل نوع (اختياري للتقليل):</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1">
+                        {[1, 2, 3, 5, 8, 10]
+                          .filter((n) => n < maxStageWords)
+                          .map((preset) => {
+                            const allActiveMatchPreset =
+                              questionTypes.length > 0 &&
+                              questionTypes.every((qt) => getStageQuestionCount(qt) === preset);
+                            return (
+                              <button
+                                key={preset}
+                                type="button"
+                                onClick={() => setAllStagesQuestionCount(preset)}
+                                className={`px-2 py-1 rounded-lg text-[11px] font-black transition-all cursor-pointer ${
+                                  allActiveMatchPreset
+                                    ? 'bg-primary text-white shadow-2xs'
+                                    : 'bg-surface border border-surface-border text-text-muted hover:text-text-main'
+                                }`}
+                              >
+                                {preset} أسئلة
+                              </button>
+                            );
+                          })}
+                        <button
+                          type="button"
+                          onClick={() => setAllStagesQuestionCount('all')}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-black transition-all cursor-pointer ${
+                            !hasCustomStageCounts
+                              ? 'bg-primary text-white shadow-2xs'
+                              : 'bg-surface border border-surface-border text-text-muted hover:text-text-main'
+                          }`}
+                        >
+                          الكل ({maxStageWords})
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 gap-2">
                     {QUESTION_TYPE_META.map((meta, idx) => {
                       const active = questionTypes.includes(meta.id);
+                      const stageCount = getStageQuestionCount(meta.id);
+                      const isReduced = active && stageCount < maxStageWords;
                       return (
-                        <button
+                        <div
                           key={meta.id}
-                          type="button"
                           onClick={() => toggleQuestionType(meta.id)}
-                          className={`p-2.5 rounded-xl border text-right transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              toggleQuestionType(meta.id);
+                            }
+                          }}
+                          className={`p-2.5 rounded-xl border text-right transition-all flex flex-col justify-between gap-2 cursor-pointer select-none overflow-hidden min-w-0 ${
                             active
                               ? 'bg-primary/10 border-primary text-primary'
                               : 'bg-surface-hover border-surface-border text-text-muted hover:text-text-main'
                           }`}
                         >
-                          <div className="min-w-0">
-                            <div className="text-xs font-bold truncate">
-                              {meta.badgeEmoji} {idx + 1}. {meta.labelAr}
+                          <div className="flex items-center justify-between gap-2 min-w-0">
+                            <div className="min-w-0 flex-1">
+                              <div className="text-xs font-bold truncate">
+                                {meta.badgeEmoji} {idx + 1}. {meta.labelAr}
+                              </div>
+                              <div className="text-[10px] text-text-muted truncate">
+                                {meta.descAr}
+                              </div>
                             </div>
-                            <div className="text-[10px] text-text-muted truncate">
-                              {meta.descAr}
+                            <div
+                              className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${
+                                active ? 'bg-primary text-white' : 'border border-surface-border'
+                              }`}
+                            >
+                              {active ? '✓' : ''}
                             </div>
                           </div>
-                          <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${
-                            active ? 'bg-primary text-white' : 'border border-surface-border'
-                          }`}>
-                            {active ? '✓' : ''}
-                          </div>
-                        </button>
+
+                          {/* Per-Type Question Count Selector inside each active card */}
+                          {active && maxStageWords > 1 && (
+                            <div
+                              onClick={(e) => e.stopPropagation()}
+                              className="pt-1.5 mt-0.5 border-t border-primary/20 flex flex-wrap items-center justify-between gap-1 min-w-0 w-full overflow-hidden"
+                            >
+                              <span className="text-[10px] font-bold text-text-muted shrink-0">الأسئلة:</span>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  disabled={stageCount <= 1}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSingleStageQuestionCount(meta.id, stageCount - 1);
+                                  }}
+                                  className="w-5 h-5 rounded-md bg-surface border border-surface-border text-text-main flex items-center justify-center text-xs font-black hover:bg-primary hover:text-white disabled:opacity-30 disabled:pointer-events-none cursor-pointer shrink-0 transition-colors"
+                                  title="تقليل عدد أسئلة هذا النوع"
+                                >
+                                  −
+                                </button>
+                                <select
+                                  value={stageCount}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    setSingleStageQuestionCount(meta.id, Number(e.target.value));
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className={`px-1 py-0.5 rounded-md text-[10px] font-black outline-none cursor-pointer border max-w-[58px] shrink-0 text-center ${
+                                    isReduced
+                                      ? 'bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-300'
+                                      : 'bg-surface border-surface-border text-primary'
+                                  }`}
+                                  title="اختر عدد الأسئلة لهذا النوع"
+                                >
+                                  {Array.from({ length: maxStageWords }, (_, i) => i + 1).map((num) => (
+                                    <option key={num} value={num}>
+                                      {num === maxStageWords ? `${num} (الكل)` : `${num}`}
+                                    </option>
+                                  ))}
+                                </select>
+                                <button
+                                  type="button"
+                                  disabled={stageCount >= maxStageWords}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSingleStageQuestionCount(meta.id, stageCount + 1);
+                                  }}
+                                  className="w-5 h-5 rounded-md bg-surface border border-surface-border text-text-main flex items-center justify-center text-xs font-black hover:bg-primary hover:text-white disabled:opacity-30 disabled:pointer-events-none cursor-pointer shrink-0 transition-colors"
+                                  title="زيادة عدد أسئلة هذا النوع"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       );
                     })}
                   </div>
@@ -973,12 +1157,34 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
                 {/* Submit Action Banner */}
                 <div className="bg-surface-hover border border-surface-border rounded-xl p-3 flex flex-wrap items-center justify-between gap-2.5">
-                  <div className="text-xs font-bold text-text-main">
-                    الأسئلة الإجمالية:{' '}
-                    <span className="text-primary font-black">
-                      {selectedItemIds.length * questionTypes.length} سؤال
-                    </span>{' '}
-                    ({selectedItemIds.length} كلمة × {questionTypes.length} مراحل)
+                  <div className="space-y-0.5">
+                    <div className="text-xs font-bold text-text-main">
+                      الأسئلة الإجمالية:{' '}
+                      <span className="text-primary font-black">
+                        {totalConfiguredQuestions} سؤال
+                      </span>{' '}
+                      {hasCustomStageCounts ? (
+                        <span className="text-[11px] text-amber-600 dark:text-amber-400 font-bold">
+                          (مُخفّضة من {fullMaxQuestions} سؤال عبر {questionTypes.length} مراحل)
+                        </span>
+                      ) : (
+                        <span>
+                          ({selectedItemIds.length} كلمة × {questionTypes.length} مراحل)
+                        </span>
+                      )}
+                    </div>
+                    {hasCustomStageCounts && (
+                      <div className="text-[10px] text-text-muted flex flex-wrap items-center gap-1.5">
+                        <span>تم تخصيص عدد الأسئلة لبعض المراحل</span>
+                        <button
+                          type="button"
+                          onClick={() => setAllStagesQuestionCount('all')}
+                          className="text-primary font-bold hover:underline cursor-pointer"
+                        >
+                          (إعادة للكل: {fullMaxQuestions} سؤال)
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <button

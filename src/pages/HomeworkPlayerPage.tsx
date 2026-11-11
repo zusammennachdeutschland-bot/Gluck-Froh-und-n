@@ -49,7 +49,10 @@ import {
   getAuthorizedGroupStudentsForAssignment,
   normalizeHomeworkAssignment,
   getOrCreateOpenParticipantId,
-  validateHomeworkSubmissionIdentity
+  validateHomeworkSubmissionIdentity,
+  resolveStageQuestionCount,
+  calculateTotalHomeworkQuestions,
+  parseQuestionTypeCountsParam
 } from '../shared/homeworkStorageSync';
 import {
   splitGermanIntoSyllables,
@@ -233,6 +236,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         setLoading(true);
         setError(null);
 
+        const searchParams = new URLSearchParams(window.location.search);
+        const urlQtc = parseQuestionTypeCountsParam(searchParams.get('qtc'));
+        const hasUrlQtc = Object.keys(urlQtc).length > 0;
+
         // 1. Check Firebase Firestore first (works seamlessly between Main App & Vercel!)
         const cloudHw = await fetchAssignmentFromFirestore(assignmentId).catch(() => null);
         if (cloudHw && cloudHw.setSnapshot) {
@@ -240,7 +247,11 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             setError('هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
             return;
           }
-          setAssignment(normalizeHomeworkAssignment(cloudHw));
+          const mergedCloud =
+            !cloudHw.questionTypeCounts && hasUrlQtc
+              ? { ...cloudHw, questionTypeCounts: urlQtc }
+              : cloudHw;
+          setAssignment(normalizeHomeworkAssignment(mergedCloud));
           return;
         }
 
@@ -263,7 +274,11 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
               setError('هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
               return;
             }
-            const normalized = normalizeHomeworkAssignment(data);
+            const mergedApi =
+              !data.questionTypeCounts && hasUrlQtc
+                ? { ...data, questionTypeCounts: urlQtc }
+                : data;
+            const normalized = normalizeHomeworkAssignment(mergedApi);
             setAssignment(normalized);
             if (Array.isArray(data.leaderboard) && data.leaderboard.length > 0) {
               setLeaderboard(data.leaderboard);
@@ -279,12 +294,15 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             setError('هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
             return;
           }
-          setAssignment(normalizeHomeworkAssignment(localFound));
+          const mergedLocal =
+            !localFound.questionTypeCounts && hasUrlQtc
+              ? { ...localFound, questionTypeCounts: urlQtc }
+              : localFound;
+          setAssignment(normalizeHomeworkAssignment(mergedLocal));
           return;
         }
 
         // 4. Fallback: Parse query parameters from share URL (ONLY allowed for 'open' assignments)
-        const searchParams = new URLSearchParams(window.location.search);
         const amParam = searchParams.get('am');
         const gidParam = searchParams.get('gid');
 
@@ -329,6 +347,12 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             const items = selectedIds.length > 0
               ? foundSet.items.filter((it: any) => selectedIds.includes(it.id))
               : foundSet.items;
+            const resolvedFallbackItems = items.length > 0 ? items : foundSet.items;
+            const resolvedTotalQ = calculateTotalHomeworkQuestions(
+              resolvedFallbackItems.length,
+              questionTypesParam,
+              hasUrlQtc ? urlQtc : undefined
+            );
 
             const fallbackHw: HomeworkAssignment = {
               id: assignmentId,
@@ -338,14 +362,16 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
                 id: foundSet.id,
                 title: foundSet.title,
                 category: (foundSet as any).category || foundSet.topic || '',
-                items: items.length > 0 ? items : foundSet.items
+                items: resolvedFallbackItems
               },
               selectedItemIds: selectedIds,
               flowMode: flowModeParam,
               questionTypes: questionTypesParam,
+              ...(hasUrlQtc ? { questionTypeCounts: urlQtc } : {}),
               blooketMode: 'classic_quiz',
               allowedGameModes: ['classic_quiz'],
-              questionCount: (items.length > 0 ? items : foundSet.items).length * questionTypesParam.length,
+              questionCount: resolvedTotalQ,
+              targetQuestionCount: resolvedTotalQ,
               maxAttempts: 3,
               allowReplay: true,
               isActive: true,
@@ -400,7 +426,23 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       const stageTitle = `المرحلة ${stageIdx + 1}: ${meta?.labelAr || 'سؤال تفاعلي'}`;
       const stageEmoji = meta?.badgeEmoji || '🎯';
 
-      studyItems.forEach((item, itemIdx) => {
+      const stageQuestionCount = resolveStageQuestionCount(
+        qType,
+        studyItems.length,
+        assignment?.questionTypeCounts
+      );
+
+      // Select `stageQuestionCount` items deterministically, rotating start offset by stageIdx
+      // so reduced question counts still test all vocabulary words evenly across stages.
+      const stageItems =
+        stageQuestionCount >= studyItems.length
+          ? studyItems
+          : Array.from({ length: stageQuestionCount }, (_, k) => {
+              const rotatedIdx = (stageIdx * stageQuestionCount + k) % studyItems.length;
+              return studyItems[rotatedIdx];
+            });
+
+      stageItems.forEach((item, itemIdx) => {
         const qId = `${item.id}_${qType}_${itemIdx}`;
         const otherItems = allSetItems.filter((x) => x.id !== item.id);
         const seed = stageIdx * 97 + itemIdx * 31 + (item.german?.length || 5);

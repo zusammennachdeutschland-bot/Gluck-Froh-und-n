@@ -93,6 +93,7 @@ export interface HomeworkAssignment {
   selectedItemIds?: string[]; // Specific word IDs selected by teacher
   flowMode?: HomeworkFlowMode; // 'teacher_then_quiz' | 'quiz_only'
   questionTypes?: HomeworkQuestionType[]; // Ordered question types selected by teacher
+  questionTypeCounts?: Partial<Record<HomeworkQuestionType, number>>; // Custom question count per selected question type/stage
   blooketMode?: HomeworkBlooketMode; // 'gold_quest' | 'tower_energy' | 'classic_quiz'
   allowedGameModes: string[];
   questionCount: number;

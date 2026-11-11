@@ -381,6 +381,16 @@ export function toPublicAssignmentDto(hw: any): any {
     audienceMode: mode,
     allowedGameModes: Array.isArray(normalized.allowedGameModes) ? normalized.allowedGameModes : ['classic_quiz'],
     questionCount: typeof normalized.questionCount === 'number' ? normalized.questionCount : undefined,
+    ...(typeof normalized.targetQuestionCount === 'number'
+      ? { targetQuestionCount: normalized.targetQuestionCount }
+      : {}),
+    ...(Array.isArray(normalized.questionTypes) ? { questionTypes: normalized.questionTypes } : {}),
+    ...(normalized.questionTypeCounts && typeof normalized.questionTypeCounts === 'object'
+      ? { questionTypeCounts: normalized.questionTypeCounts }
+      : {}),
+    ...(Array.isArray(normalized.selectedItemIds) ? { selectedItemIds: normalized.selectedItemIds } : {}),
+    ...(normalized.flowMode ? { flowMode: String(normalized.flowMode) } : {}),
+    ...(normalized.blooketMode ? { blooketMode: String(normalized.blooketMode) } : {}),
     maxAttempts: typeof normalized.maxAttempts === 'number' ? normalized.maxAttempts : undefined,
     allowReplay: typeof normalized.allowReplay === 'boolean' ? normalized.allowReplay : true,
     setSnapshot: sanitizePublicSetSnapshot(normalized.setSnapshot),
