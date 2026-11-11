@@ -124,6 +124,7 @@ jobs:
         run: |
           cd android
           gradle wrapper --gradle-version 8.13 --distribution-type bin
+          chmod +x gradlew
           cat << 'EOF' > gradle/wrapper/gradle-wrapper.properties
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
