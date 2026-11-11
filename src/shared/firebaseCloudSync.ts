@@ -940,7 +940,7 @@ export async function deleteAssignmentFromFirestore(
   const currentUser = auth.currentUser;
   if (!ownerUid || !currentUser || currentUser.uid !== ownerUid) return false;
   try {
-    const idToken = await currentUser.getIdToken();
+    const idToken = await getHomeworkAuthToken();
     const response = await fetchHomeworkApi(`/api/teacher/assignments?id=${encodeURIComponent(assignmentId)}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${idToken}` },
