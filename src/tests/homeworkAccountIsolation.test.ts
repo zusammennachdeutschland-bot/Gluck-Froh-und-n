@@ -260,15 +260,15 @@ class FirestoreHomeworkRulesEvaluator {
   private isValidLernstudioSet(data: Record<string, any>): boolean {
     if (!data || typeof data !== 'object') return false;
     const keys = Object.keys(data);
-    const required = ['id', 'ownerUid', 'title', 'updatedAt', 'payloadJson'];
-    const allowed = new Set(['id', 'ownerUid', 'title', 'updatedAt', 'payloadJson', 'ownerEmail']);
+    const required = ['id', 'title', 'payloadJson', 'updatedAtIso'];
+    const allowed = new Set(['id', 'title', 'category', 'payloadJson', 'updatedAtIso', 'deleted']);
     if (!required.every((k) => keys.includes(k))) return false;
     if (!keys.every((k) => allowed.has(k))) return false;
     return (
       typeof data.id === 'string' && data.id.length >= 1 && data.id.length <= 128 &&
-      typeof data.ownerUid === 'string' && data.ownerUid.length >= 1 && data.ownerUid.length <= 128 &&
       typeof data.title === 'string' && data.title.length >= 1 && data.title.length <= 300 &&
-      typeof data.updatedAt === 'string' && data.updatedAt.length >= 1 && data.updatedAt.length <= 64 &&
+      typeof data.updatedAtIso === 'string' && data.updatedAtIso.length >= 1 && data.updatedAtIso.length <= 64 &&
+      (!('deleted' in data) || typeof data.deleted === 'boolean') &&
       typeof data.payloadJson === 'string' && data.payloadJson.length >= 2 && data.payloadJson.length <= 500000
     );
   }
@@ -327,8 +327,8 @@ class FirestoreHomeworkRulesEvaluator {
     return this.isValidId(setId) && this.lernstudioSets.has(setId);
   }
 
-  canListLernstudioSet(auth: { uid: string } | null, docData: Record<string, any>): boolean {
-    return auth !== null && docData.ownerUid === auth.uid;
+  canListLernstudioSet(auth: { uid: string } | null, _docData: Record<string, any>): boolean {
+    return auth !== null;
   }
 
   canCreateLernstudioSet(auth: { uid: string } | null, setId: string, incoming: Record<string, any>): boolean {
@@ -336,26 +336,16 @@ class FirestoreHomeworkRulesEvaluator {
       auth !== null &&
       this.isValidId(setId) &&
       this.isValidLernstudioSet(incoming) &&
-      incoming.id === setId &&
-      incoming.ownerUid === auth.uid
+      incoming.id === setId
     );
   }
 
   canUpdateLernstudioSet(auth: { uid: string } | null, setId: string, incoming: Record<string, any>): boolean {
-    const existing = this.lernstudioSets.get(setId);
-    if (!existing || !auth || !this.isValidId(setId) || !this.isValidLernstudioSet(incoming) || incoming.id !== setId) {
-      return false;
-    }
-    return (
-      (existing.ownerUid === auth.uid && incoming.ownerUid === existing.ownerUid) ||
-      ((!('ownerUid' in existing) || existing.ownerUid === '') && incoming.ownerUid === auth.uid)
-    );
+    return !!auth && this.isValidId(setId) && this.isValidLernstudioSet(incoming) && incoming.id === setId;
   }
 
   canDeleteLernstudioSet(auth: { uid: string } | null, setId: string): boolean {
-    const existing = this.lernstudioSets.get(setId);
-    if (!existing) return false;
-    return auth !== null && this.isValidId(setId) && existing.ownerUid === auth.uid;
+    return auth !== null && this.isValidId(setId) && this.lernstudioSets.has(setId);
   }
 
   canGetAssignment(auth: { uid: string } | null, assignmentId: string): boolean {
@@ -1696,7 +1686,7 @@ async function runAllIsolationTests() {
 
   await runTest(
     'V-06',
-    'Public homework documents strip ownerEmail, lernstudio_sets enforce ownerUid isolation, and backup import verifies ownership',
+    'Public homework documents strip ownerEmail, Lernstudio sets are shared across teacher accounts, and backup import verifies ownership',
     async () => {
       // 1. Verify Express /api/homework/info strips ownerEmail from public response
       const server = expressApp.listen(0);
@@ -1912,17 +1902,21 @@ async function runAllIsolationTests() {
         id: 'set_teacher_a_custom',
         ownerUid: UID_TEACHER_A,
         title: 'مجموعة كلمات المعلم أ',
-        updatedAt: '2026-03-01T10:00:00.000Z',
-        payloadJson: JSON.stringify({ id: 'set_teacher_a_custom', ownerUid: UID_TEACHER_A })
+        updatedAtIso: '2026-03-01T10:00:00.000Z',
+        payloadJson: JSON.stringify({ id: 'set_teacher_a_custom' })
       };
       assert.equal(rules.canCreateLernstudioSet({ uid: UID_TEACHER_A }, setADoc.id, setADoc), true);
-      assert.equal(rules.canCreateLernstudioSet({ uid: UID_TEACHER_B }, setADoc.id, setADoc), false);
       rules.lernstudioSets.set(setADoc.id, setADoc);
 
       assert.equal(rules.canListLernstudioSet({ uid: UID_TEACHER_A }, setADoc), true);
-      assert.equal(rules.canListLernstudioSet({ uid: UID_TEACHER_B }, setADoc), false);
-      assert.equal(rules.canUpdateLernstudioSet({ uid: UID_TEACHER_B }, setADoc.id, setADoc), false);
-      assert.equal(rules.canDeleteLernstudioSet({ uid: UID_TEACHER_B }, setADoc.id), false);
+      assert.equal(rules.canListLernstudioSet({ uid: UID_TEACHER_B }, setADoc), true,
+        'Teacher B must list the same shared Lernstudio library');
+      assert.equal(rules.canUpdateLernstudioSet({ uid: UID_TEACHER_B }, setADoc.id, setADoc), true,
+        'Teacher B must edit a shared set created by Teacher A');
+      assert.equal(rules.canDeleteLernstudioSet({ uid: UID_TEACHER_B }, setADoc.id), true,
+        'Teacher B must delete a shared set created by Teacher A');
+      assert.equal(rules.canListLernstudioSet(null, setADoc), false,
+        'Unauthenticated users must not enumerate the shared set library');
 
       // 3. Verify deterministic backup import claim check rejects unowned/ambiguous and foreign assignments
       const ambiguousBackupHw = makeAssignment({
