@@ -265,53 +265,25 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     }
   };
 
-  // Real-time Firestore listener while modal is open (strictly scoped by activeAuthUid)
+  // Real-time Firestore listener, cross-tab storage listener & periodic live refresh while modal is open
   useEffect(() => {
     if (!isOpen) return;
     loadAllAssignments();
 
-    if (!activeAuthUid) {
-      return;
-    }
-
-    const unsubAssignments = subscribeAssignmentsFromFirestore((cloudHwList) => {
-      cloudHwList.forEach((hw) => {
-        if (hw.ownerUid && hw.ownerUid !== activeAuthUid) return;
-        if (!isAssignmentDeletedLocally(hw.id, activeAuthUid)) {
-          saveLocalAssignment({ ...hw, ownerUid: activeAuthUid, cloudSynced: true }, false);
-        }
-      });
-      syncAndFetchTeacherAssignments(studentsRef.current).then((list) => {
-        setAssignmentsList(list);
-        setPendingSyncCount(getPendingHomeworkSyncCount(activeAuthUid));
-      });
-    }, activeAuthUid);
-
-    const unsubSubmissions = subscribeSubmissionsFromFirestore(
-      null,
-      (cloudSubs) => {
-        const activeIds = new Set(
-          getLocalAssignments(activeAuthUid).flatMap((a) => [a.id, sanitizeDocId(a.id)])
-        );
-        cloudSubs.forEach((sub) => {
-          if (sub.ownerUid && sub.ownerUid !== activeAuthUid) return;
-          if (
-            !isAssignmentDeletedLocally(sub.assignmentId, activeAuthUid) &&
-            (activeIds.has(sub.assignmentId) || activeIds.has(sanitizeDocId(sub.assignmentId)))
-          ) {
-            saveLocalSubmission({ ...sub, ownerUid: activeAuthUid, cloudSynced: true }, false);
-          }
-        });
-        syncAndFetchTeacherAssignments(studentsRef.current).then((list) => {
+    const refreshCurrentState = () => {
+      syncAndFetchTeacherAssignments(studentsRef.current)
+        .then((list) => {
           setAssignmentsList(list);
           setPendingSyncCount(getPendingHomeworkSyncCount(activeAuthUid));
-        });
-        const currentDetailId = selectedDetailsIdRef.current;
-        if (currentDetailId) {
-          fetchAssignmentDetailsWithSync(currentDetailId, studentsRef.current).then((d) => {
+        })
+        .catch(() => {});
+
+      const currentDetailId = selectedDetailsIdRef.current;
+      if (currentDetailId) {
+        fetchAssignmentDetailsWithSync(currentDetailId, studentsRef.current)
+          .then((d) => {
             if (d) {
               setSelectedDetails(d);
-              // Keep open student answer inspector live-updated if new answers arrive
               setInspectingSubmission((prevSub) => {
                 if (!prevSub) return null;
                 const updatedMatch = (d.submissions || []).find((s: HomeworkSubmission) => s.id === prevSub.id);
@@ -331,13 +303,57 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                 return studentMatch?.attempts || prevAttempts;
               });
             }
-          });
+          })
+          .catch(() => {});
+      }
+    };
+
+    window.addEventListener('storage', refreshCurrentState);
+    window.addEventListener('glueck-homework-sync-updated', refreshCurrentState);
+    const livePollTimer = window.setInterval(refreshCurrentState, 4000);
+
+    if (!activeAuthUid) {
+      return () => {
+        window.removeEventListener('storage', refreshCurrentState);
+        window.removeEventListener('glueck-homework-sync-updated', refreshCurrentState);
+        window.clearInterval(livePollTimer);
+      };
+    }
+
+    const unsubAssignments = subscribeAssignmentsFromFirestore((cloudHwList) => {
+      cloudHwList.forEach((hw) => {
+        if (hw.ownerUid && hw.ownerUid !== activeAuthUid) return;
+        if (!isAssignmentDeletedLocally(hw.id, activeAuthUid)) {
+          saveLocalAssignment({ ...hw, ownerUid: activeAuthUid, cloudSynced: true }, false);
         }
+      });
+      refreshCurrentState();
+    }, activeAuthUid);
+
+    const unsubSubmissions = subscribeSubmissionsFromFirestore(
+      null,
+      (cloudSubs) => {
+        const activeIds = new Set(
+          getLocalAssignments(activeAuthUid).flatMap((a) => [a.id, sanitizeDocId(a.id)])
+        );
+        cloudSubs.forEach((sub) => {
+          if (sub.ownerUid && sub.ownerUid !== activeAuthUid) return;
+          if (
+            !isAssignmentDeletedLocally(sub.assignmentId, activeAuthUid) &&
+            (activeIds.has(sub.assignmentId) || activeIds.has(sanitizeDocId(sub.assignmentId)))
+          ) {
+            saveLocalSubmission({ ...sub, ownerUid: activeAuthUid, cloudSynced: true }, false);
+          }
+        });
+        refreshCurrentState();
       },
       activeAuthUid
     );
 
     return () => {
+      window.removeEventListener('storage', refreshCurrentState);
+      window.removeEventListener('glueck-homework-sync-updated', refreshCurrentState);
+      window.clearInterval(livePollTimer);
       unsubAssignments();
       unsubSubmissions();
     };
@@ -1429,7 +1445,14 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                             {inspectingSubmission.status === 'in_progress' && !inspectingSubmission.completedAt ? (
                               <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[10px] font-bold flex items-center gap-1">
                                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
-                                يحل الآن مباشرة ({inspectingSubmission.responses?.length || 0} / {inspectingSubmission.totalQuestions})
+                                {(inspectingSubmission.responses?.length || 0) === 0
+                                  ? inspectingSubmission.completedStudyPhase
+                                    ? `دخل الواجب · يحل الآن السؤال 1 من ${inspectingSubmission.totalQuestions}`
+                                    : `دخل الواجب الآن · في مرحلة تعلم الكلمات (قبل السؤال 1 من ${inspectingSubmission.totalQuestions})`
+                                  : `يحل الآن مباشرة · في السؤال ${Math.min(
+                                      inspectingSubmission.totalQuestions || 1,
+                                      (inspectingSubmission.responses?.length || 0) + 1
+                                    )} من ${inspectingSubmission.totalQuestions} (أجاب على ${inspectingSubmission.responses?.length || 0})`}
                               </span>
                             ) : (
                               <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold">
@@ -1693,7 +1716,15 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                                         </span>
                                       ) : isInProgress ? (
                                         <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                                          · <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" /> قيد الحل الآن ({st.answeredCount}/{st.totalQuestions})
+                                          · <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />{' '}
+                                          {(st.answeredCount || 0) === 0
+                                            ? st.latestAttempt?.completedStudyPhase
+                                              ? `دخل الواجب · يحل السؤال 1 من ${st.totalQuestions}`
+                                              : `دخل الواجب الآن · يدرس الكلمات (0/${st.totalQuestions})`
+                                            : `يحل الآن · في السؤال ${Math.min(
+                                                st.totalQuestions || 1,
+                                                (st.answeredCount || 0) + 1
+                                              )} من ${st.totalQuestions} (أجاب على ${st.answeredCount})`}
                                         </span>
                                       ) : (
                                         <span className="text-[10px] font-semibold text-text-muted">
@@ -1858,7 +1889,15 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                                       <span className="text-xs sm:text-sm font-bold text-text-main">{sub.studentName}</span>
                                       {isSubInProgress ? (
                                         <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
-                                          · قيد الحل ({sub.responses?.length || 0}/{sub.totalQuestions})
+                                          ·{' '}
+                                          {(sub.responses?.length || 0) === 0
+                                            ? sub.completedStudyPhase
+                                              ? `دخل الواجب · يحل السؤال 1 من ${sub.totalQuestions}`
+                                              : `دخل الواجب الآن · يدرس الكلمات (0/${sub.totalQuestions})`
+                                            : `في السؤال ${Math.min(
+                                                sub.totalQuestions || 1,
+                                                (sub.responses?.length || 0) + 1
+                                              )} من ${sub.totalQuestions} (أجاب على ${sub.responses?.length || 0})`}
                                         </span>
                                       ) : (
                                         <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">

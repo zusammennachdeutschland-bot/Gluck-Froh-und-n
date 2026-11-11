@@ -4,12 +4,19 @@ import path from 'path';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+export const CANONICAL_APP_VERSION = '3.0.0';
+
 export default defineConfig(() => {
   const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
   const isElectronBuild = process.env.ELECTRON_BUILD === 'true';
 
   return {
     base: isElectronBuild ? './' : '/',
+    define: {
+      __APP_VERSION__: JSON.stringify(CANONICAL_APP_VERSION),
+      __APP_BUILD_NUMBER__: JSON.stringify('300'),
+      __APP_BUILD_TIME__: JSON.stringify('2026-11-11T15:30:00.000Z')
+    },
     plugins: [
       react(), 
       tailwindcss(),

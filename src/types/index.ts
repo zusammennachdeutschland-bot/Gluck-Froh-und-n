@@ -17,7 +17,7 @@ export type LessonStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelle
 // ==========================================
 export const CURRENT_SYNC_PROTOCOL_VERSION = 2;
 export const MIN_SUPPORTED_SYNC_PROTOCOL_VERSION = 1;
-export const APP_BUILD_VERSION = '2.4.0';
+export const APP_BUILD_VERSION = '3.0.0';
 
 export type SyncCapability = 
   | 'core_entities'      // Students, Groups, Lessons, Payments (v1)
@@ -38,7 +38,7 @@ export const DEFAULT_CAPABILITIES: SyncCapability[] = [
 export interface ProtocolHeader {
   protocolVersion: number;       // e.g., 2
   minSupportedVersion: number;   // e.g., 1
-  appVersion: string;            // e.g., "2.4.0"
+  appVersion: string;            // e.g., "3.0.0"
   capabilities: SyncCapability[];
   timestamp?: number;
 }

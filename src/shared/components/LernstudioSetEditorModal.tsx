@@ -8,6 +8,7 @@ interface Props {
   isOpen: boolean;
   setToEdit?: LernstudioSet | null;
   groups: Group[];
+  teacherName?: string;
   language?: string;
   onClose: () => void;
   onSaveSet: (set: LernstudioSet) => void;
@@ -17,6 +18,7 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
   isOpen,
   setToEdit,
   groups,
+  teacherName,
   language = 'ar',
   onClose,
   onSaveSet
@@ -84,6 +86,9 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
       return;
     }
 
+    const resolvedTeacherName =
+      setToEdit?.createdByTeacherName?.trim() || teacherName?.trim() || undefined;
+
     const updatedSet: LernstudioSet = {
       id: setToEdit?.id || `set_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       title: title.trim(),
@@ -92,6 +97,8 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
       level,
       difficulty,
       assignedGroupId: assignedGroupId || undefined,
+      ...(resolvedTeacherName ? { createdByTeacherName: resolvedTeacherName } : {}),
+      ...(setToEdit?.createdByUid ? { createdByUid: setToEdit.createdByUid } : {}),
       description: description.trim() || undefined,
       items: validItems,
       createdAt: setToEdit?.createdAt || new Date().toISOString(),

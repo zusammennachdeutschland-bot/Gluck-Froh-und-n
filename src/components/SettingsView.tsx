@@ -22,6 +22,7 @@ import { GoogleCloudSyncCard } from './GoogleCloudSyncCard';
 import { isBackupFileSizeValid } from '../utils/backupEngine';
 import { AndroidKeystoreSection } from './AndroidKeystoreSection';
 import { getActiveCloudUser, getLastCloudSyncTime } from '../services/firebaseWorkspaceSync';
+import { APP_VERSION, APP_BUILD_NUMBER, formatAppBuildTimestamp } from '../shared/appVersion';
 
 type SettingsCategory = 
   | 'downloaded_files'
@@ -401,7 +402,7 @@ export const SettingsView: React.FC = () => {
       description: t('auto_application_information_and_ve'),
       icon: Info,
       color: 'bg-primary/10 text-primary dark:text-primary border-primary-border dark:border-primary-border',
-      badge: 'v3.0 • Pro'
+      badge: `v${APP_VERSION} • #${APP_BUILD_NUMBER}`
     }
   ];
 
@@ -450,14 +451,74 @@ export const SettingsView: React.FC = () => {
       {/* Sidebar / List View */}
       <div className={`w-full lg:w-1/3 shrink-0 lg:sticky lg:top-16 space-y-2.5 ${activeCategory !== null ? 'hidden lg:block' : 'block'}`}>
         {/* Main Title Header */}
-        <div>
-          <h2 className="text-sm sm:text-base font-black text-text-main flex items-center gap-1.5 sm:gap-2">
-            <Settings className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
-            <span>{t('settings_title')}</span>
-          </h2>
-          <p className="text-[10px] sm:text-[11px] text-slate-500 mt-0.5">
-            {t('auto_select_a_section_to_manage_app')}
-          </p>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h2 className="text-sm sm:text-base font-black text-text-main flex items-center gap-1.5 sm:gap-2">
+              <Settings className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
+              <span>{t('settings_title')}</span>
+            </h2>
+            <p className="text-[10px] sm:text-[11px] text-slate-500 mt-0.5">
+              {t('auto_select_a_section_to_manage_app')}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setActiveCategory('about')}
+            className="px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary/15 border border-primary/25 text-primary text-[10.5px] font-mono font-black shrink-0 flex items-center gap-1.5 cursor-pointer transition-all"
+            title={_t('رقم إصدار التطبيق وتاريخ التحديث', 'App Version & Build Number', 'App-Version & Build-Nummer')}
+          >
+            <span>v{APP_VERSION}</span>
+            <span className="opacity-60">•</span>
+            <span>#{APP_BUILD_NUMBER}</span>
+          </button>
+        </div>
+
+        {/* Dedicated App Version & Build Verification Strip */}
+        <div className="bg-surface border border-surface-border rounded-xl p-2.5 shadow-2xs flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="p-1.5 rounded-lg bg-primary/10 text-primary border border-primary/20 shrink-0">
+              <Info className="w-3.5 h-3.5" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-black text-text-main">
+                  {_t('إصدار التطبيق:', 'App Version:', 'App-Version:')}
+                </span>
+                <span className="text-[11px] font-mono font-black text-primary" dir="ltr">
+                  v{APP_VERSION} (Build #{APP_BUILD_NUMBER})
+                </span>
+              </div>
+              <p className="text-[10px] text-text-muted truncate mt-0.5">
+                {_t('آخر تحديث للنسخة:', 'Last build update:', 'Letztes Build-Update:')}{' '}
+                <span className="font-mono font-semibold" dir="ltr">{formatAppBuildTimestamp(language)}</span>
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              const info = `Glück v${APP_VERSION} (Build #${APP_BUILD_NUMBER}) • Updated: ${formatAppBuildTimestamp(language)}`;
+              navigator.clipboard.writeText(info);
+              setCopiedBuildInfo(true);
+              setTimeout(() => setCopiedBuildInfo(false), 2000);
+            }}
+            className="px-2 py-1 rounded-lg bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-700 text-text-main border border-surface-border text-[10px] font-bold shrink-0 flex items-center gap-1 cursor-pointer transition-all"
+            title={_t('نسخ رقم الإصدار', 'Copy Version Number', 'Versionsnummer kopieren')}
+          >
+            {copiedBuildInfo ? (
+              <>
+                <Check className="w-3 h-3 text-emerald-500" />
+                <span className="text-emerald-600 dark:text-emerald-400">{_t('نُسخ', 'Copied', 'Kopiert')}</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-3 h-3 text-slate-400" />
+                <span>{_t('نسخ', 'Copy', 'Kopieren')}</span>
+              </>
+            )}
+          </button>
         </div>
 
 
@@ -1576,12 +1637,15 @@ export const SettingsView: React.FC = () => {
                   <h1 className="text-base sm:text-lg font-black text-text-main">
                     Glück fröhlich und froh
                   </h1>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary-soft text-primary border border-primary-border">
-                    v3.0 Pro
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-primary-soft text-primary border border-primary-border" dir="ltr">
+                    v{APP_VERSION} • Build #{APP_BUILD_NUMBER}
                   </span>
                 </div>
                 <p className="text-xs text-primary font-bold">
                   {t('auto_german_teacher_management_syst')}
+                </p>
+                <p className="text-[11px] text-text-muted font-mono" dir="ltr">
+                  {_t('تاريخ بناء النسخة:', 'Build Timestamp:', 'Build-Zeitstempel:')} {formatAppBuildTimestamp(language)}
                 </p>
               </div>
             </div>
@@ -1617,7 +1681,7 @@ export const SettingsView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
-                  const info = `Glück fröhlich und froh v3.0 • Mr. Abdul Rahman • Offline-First`;
+                  const info = `Glück fröhlich und froh v${APP_VERSION} (Build #${APP_BUILD_NUMBER}) • Updated: ${formatAppBuildTimestamp(language)} • Mr. Abdul Rahman`;
                   navigator.clipboard.writeText(info);
                   setCopiedBuildInfo(true);
                   setTimeout(() => setCopiedBuildInfo(false), 2000);

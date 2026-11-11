@@ -1190,6 +1190,27 @@ export function getLocalSubmissions(explicitUid?: string | null): HomeworkSubmis
       }
       return true;
     });
+
+    if (isAuthenticatedScope) {
+      const ownedAssignmentIds = new Set(
+        getLocalAssignments(scopeUid).flatMap((a) => [a.id, sanitizeDocId(a.id)])
+      );
+      if (ownedAssignmentIds.size > 0) {
+        const unauthRaw = localStorage.getItem(getSubmissionsStorageKey(UNAUTHENTICATED_HOMEWORK_SCOPE));
+        const unauthParsed: HomeworkSubmission[] = unauthRaw ? JSON.parse(unauthRaw) : [];
+        for (const s of unauthParsed) {
+          if (!s || !s.assignmentId) continue;
+          if (deletedSet.has(s.assignmentId) || deletedSet.has(sanitizeDocId(s.assignmentId))) continue;
+          if (!ownedAssignmentIds.has(s.assignmentId) && !ownedAssignmentIds.has(sanitizeDocId(s.assignmentId))) {
+            continue;
+          }
+          const recOwner = s.ownerUid?.trim() || '';
+          if (recOwner && recOwner !== scopeUid) continue;
+          active.push({ ...s, ownerUid: scopeUid });
+        }
+      }
+    }
+
     return deduplicateSubmissions(active);
   } catch {
     return [];

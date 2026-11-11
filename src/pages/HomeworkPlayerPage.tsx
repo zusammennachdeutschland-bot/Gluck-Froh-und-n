@@ -265,10 +265,12 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
               setError('هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
               return;
             }
+            const localMatch = getLocalAssignments().find((a) => a.id === assignmentId);
+            const resolvedOwner = data.ownerUid || urlOwnerUid || localMatch?.ownerUid || undefined;
             const mergedApi = {
               ...data,
               ...(!data.questionTypeCounts && hasUrlQtc ? { questionTypeCounts: urlQtc } : {}),
-              ...(!data.ownerUid && urlOwnerUid ? { ownerUid: urlOwnerUid } : {})
+              ...(resolvedOwner ? { ownerUid: resolvedOwner } : {})
             };
             const normalized = normalizeHomeworkAssignment(mergedApi);
             setAssignment(normalized);
@@ -1247,7 +1249,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
   const syncLiveProgressToFirestore = (
     currResponses: HomeworkQuestionResponse[],
     currGold: number,
-    currMaxStreak: number
+    currMaxStreak: number,
+    studyCompletedOverride?: boolean
   ) => {
     if (!assignmentId || !studentName.trim()) return;
     const correctCount = currResponses.filter((r) => r.isCorrect).length;
@@ -1283,7 +1286,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       accuracy: localScorePct,
       goldEarned: currGold,
       maxStreak: currMaxStreak,
-      completedStudyPhase,
+      completedStudyPhase: studyCompletedOverride ?? completedStudyPhase,
       responses: currResponses
     };
 
@@ -1817,6 +1820,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
                     setCompletedStudyPhase(true);
                     setCurrentIdx(0);
                     setPhase('quiz');
+                    syncLiveProgressToFirestore(responses, gold, maxStreak, true);
                   }}
                   className="flex-1 py-2.5 px-4 rounded-xl bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all"
                 >

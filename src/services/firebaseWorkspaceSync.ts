@@ -561,7 +561,21 @@ function mergeSharedLernstudioSets(localSets: any[], sharedSets: any[]): any[] {
     const local = byId.get(id);
     const localTime = Number(local?.updatedAt) || Date.parse(local?.updatedAtIso || '') || 0;
     const sharedTime = Number(set.updatedAt) || Date.parse(set.updatedAtIso || '') || 0;
-    if (!local || sharedTime >= localTime) byId.set(id, set);
+    const creatorName = set.createdByTeacherName?.trim() || local?.createdByTeacherName?.trim() || undefined;
+    const creatorUid = set.createdByUid?.trim() || local?.createdByUid?.trim() || undefined;
+    if (!local || sharedTime >= localTime) {
+      byId.set(id, {
+        ...set,
+        ...(creatorName ? { createdByTeacherName: creatorName } : {}),
+        ...(creatorUid ? { createdByUid: creatorUid } : {})
+      });
+    } else if (local && (creatorName || creatorUid)) {
+      byId.set(id, {
+        ...local,
+        ...(creatorName ? { createdByTeacherName: creatorName } : {}),
+        ...(creatorUid ? { createdByUid: creatorUid } : {})
+      });
+    }
   }
   return Array.from(byId.values()).filter((set) => !set.deleted);
 }

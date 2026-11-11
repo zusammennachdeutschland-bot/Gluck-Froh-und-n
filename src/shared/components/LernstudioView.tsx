@@ -131,8 +131,16 @@ export const LernstudioView: React.FC<Props> = ({
 
   // Cloud Firestore Real-time Sync
   const handleSaveSetWithCloud = (set: LernstudioSet) => {
-    onSaveSet(set);
-    saveLernstudioSetToFirestore(set).catch(() => {});
+    const isBuiltin = isBuiltinLernstudioSet(set);
+    const enrichedSet: LernstudioSet = isBuiltin
+      ? set
+      : {
+          ...set,
+          createdByTeacherName: set.createdByTeacherName?.trim() || teacherName?.trim() || undefined,
+          createdByUid: set.createdByUid?.trim() || activeAuthUid || undefined
+        };
+    onSaveSet(enrichedSet);
+    saveLernstudioSetToFirestore(enrichedSet).catch(() => {});
   };
 
   const handleDeleteSetWithCloud = (setId: string) => {
@@ -146,11 +154,19 @@ export const LernstudioView: React.FC<Props> = ({
     if (!activeAuthUid) return;
     const unsub = subscribeLernstudioSetsFromFirestore((cloudSets) => {
       if (cloudSets.length > 0) {
-        const existingIds = new Set(sets.map((s) => s.id));
+        const localById = new Map<string, LernstudioSet>(sets.map((s) => [s.id, s]));
         cloudSets.forEach((cs) => {
-          if ((cs as any).ownerUid && (cs as any).ownerUid !== activeAuthUid) return;
-          if (!existingIds.has(cs.id)) {
-            onSaveSet(cs);
+          if (!cs || !cs.id || (cs as any).deleted) return;
+          const existing = localById.get(cs.id);
+          const localTime = Number(existing?.updatedAt) || 0;
+          const cloudTime = Number(cs.updatedAt) || 0;
+          if (!existing || cloudTime > localTime || (!existing.createdByTeacherName && cs.createdByTeacherName)) {
+            onSaveSet({
+              ...existing,
+              ...cs,
+              createdByTeacherName: cs.createdByTeacherName?.trim() || existing?.createdByTeacherName?.trim() || undefined,
+              createdByUid: cs.createdByUid?.trim() || existing?.createdByUid?.trim() || undefined
+            });
           }
         });
       }
@@ -284,9 +300,23 @@ export const LernstudioView: React.FC<Props> = ({
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSourceFilter, setSelectedSourceFilter] = useState<SetSourceFilter>('all');
+  const [selectedTeacherFilter, setSelectedTeacherFilter] = useState<string>('all');
   const [selectedGradeFilter, setSelectedGradeFilter] = useState<string>('all');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [selectedGroupFilter, setSelectedGroupFilter] = useState<string>('all');
+
+  const getEffectiveSetTeacherName = React.useCallback(
+    (set: LernstudioSet): string => {
+      if (!set || isBuiltinLernstudioSet(set)) return '';
+      const explicitName = set.createdByTeacherName?.trim();
+      if (explicitName) return explicitName;
+      if (!set.createdByUid || (activeAuthUid && set.createdByUid === activeAuthUid)) {
+        return teacherName?.trim() || '';
+      }
+      return '';
+    },
+    [teacherName, activeAuthUid]
+  );
 
   // Dynamic counts for custom created sets vs ready-made built-in curriculum sets
   const { customSetsCount, builtinSetsCount } = useMemo(() => {
@@ -302,6 +332,21 @@ export const LernstudioView: React.FC<Props> = ({
     });
     return { customSetsCount: custom, builtinSetsCount: builtin };
   }, [sets]);
+
+  // Dynamic Creator Teachers from custom/shared sets
+  const availableTeachers = useMemo(() => {
+    const map = new Map<string, number>();
+    sets.forEach((s) => {
+      if (!s || !s.id || s.isArchived || isBuiltinLernstudioSet(s)) return;
+      const tName = getEffectiveSetTeacherName(s);
+      if (tName) {
+        map.set(tName, (map.get(tName) || 0) + 1);
+      }
+    });
+    return Array.from(map.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'ar'));
+  }, [sets, getEffectiveSetTeacherName]);
 
   // Dynamic Categories from available sets
   const availableCategories = useMemo(() => {
@@ -327,20 +372,31 @@ export const LernstudioView: React.FC<Props> = ({
       // Deduplicate by ID
       if (seenIds.has(set.id)) return false;
 
-      // Deduplicate by Title
-      const cleanTitleKey = (set.title || '').replace(/\((Copy|نسخة)\)/gi, '').trim().toLowerCase();
+      const isBuiltin = isBuiltinLernstudioSet(set);
+      const effectiveTeacher = getEffectiveSetTeacherName(set);
+
+      // Deduplicate built-in sets by title, and custom sets by (title + creator teacher)
+      const cleanTitleBase = (set.title || '').replace(/\((Copy|نسخة)\)/gi, '').trim().toLowerCase();
+      const cleanTitleKey = isBuiltin
+        ? cleanTitleBase
+        : `${cleanTitleBase}::${effectiveTeacher.toLowerCase() || set.id}`;
       if (cleanTitleKey && seenTitles.has(cleanTitleKey)) {
         return false;
       }
 
       // Filter by Source (All / My Custom Sets / Built-in Ready Curriculum)
-      const isBuiltin = isBuiltinLernstudioSet(set);
       const matchSource =
         selectedSourceFilter === 'all'
           ? true
           : selectedSourceFilter === 'custom'
           ? !isBuiltin
           : isBuiltin;
+
+      // Filter by Creator Teacher Name
+      const matchTeacher =
+        selectedTeacherFilter === 'all'
+          ? true
+          : !isBuiltin && effectiveTeacher === selectedTeacherFilter;
 
       const matchGrade = matchesGradeFilter(set, selectedGradeFilter);
       const matchCategory = selectedCategoryFilter === 'all' || set.topic === selectedCategoryFilter;
@@ -351,16 +407,17 @@ export const LernstudioView: React.FC<Props> = ({
         !q ||
         set.title.toLowerCase().includes(q) ||
         (set.topic && set.topic.toLowerCase().includes(q)) ||
-        (set.grade && set.grade.toLowerCase().includes(q));
+        (set.grade && set.grade.toLowerCase().includes(q)) ||
+        (effectiveTeacher && effectiveTeacher.toLowerCase().includes(q));
 
-      if (matchSource && matchGrade && matchCategory && matchGroup && matchQuery) {
+      if (matchSource && matchTeacher && matchGrade && matchCategory && matchGroup && matchQuery) {
         seenIds.add(set.id);
         if (cleanTitleKey) seenTitles.add(cleanTitleKey);
         return true;
       }
       return false;
     });
-  }, [sets, selectedSourceFilter, selectedGradeFilter, selectedCategoryFilter, selectedGroupFilter, searchTerm]);
+  }, [sets, selectedSourceFilter, selectedTeacherFilter, selectedGradeFilter, selectedCategoryFilter, selectedGroupFilter, searchTerm, getEffectiveSetTeacherName]);
 
   // Pagination State & Logic
   const ITEMS_PER_PAGE = 12;
@@ -368,7 +425,7 @@ export const LernstudioView: React.FC<Props> = ({
 
   React.useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedSourceFilter, selectedGradeFilter, selectedCategoryFilter, selectedGroupFilter]);
+  }, [searchTerm, selectedSourceFilter, selectedTeacherFilter, selectedGradeFilter, selectedCategoryFilter, selectedGroupFilter]);
 
   const totalPages = Math.ceil(filteredSets.length / ITEMS_PER_PAGE) || 1;
   const paginatedSets = useMemo(() => {
@@ -378,6 +435,7 @@ export const LernstudioView: React.FC<Props> = ({
 
   // Handlers
   const handleCopySetCode = (set: LernstudioSet) => {
+    const creatorName = getEffectiveSetTeacherName(set);
     const setExportData = {
       title: set.title,
       topic: set.topic || 'ألماني',
@@ -386,6 +444,7 @@ export const LernstudioView: React.FC<Props> = ({
       difficulty: set.difficulty || 'medium',
       hasArticles: set.hasArticles !== false,
       sentenceBuilderSupported: set.sentenceBuilderSupported !== false,
+      ...(creatorName ? { createdByTeacherName: creatorName } : {}),
       description: set.description || `مجموعة ${set.title}`,
       items: (set.items || []).map((it) => ({
         german: it.german,
@@ -1032,15 +1091,37 @@ export const LernstudioView: React.FC<Props> = ({
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 w-full sm:w-auto shrink-0 min-w-0">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 w-full sm:w-auto shrink-0 min-w-0">
             <select
               value={selectedSourceFilter}
               onChange={(e) => setSelectedSourceFilter(e.target.value as SetSourceFilter)}
               className="w-full sm:w-auto px-2.5 py-1.5 bg-surface-hover/70 border border-surface-border rounded-lg text-xs font-medium text-text-main focus:outline-none focus:ring-1 focus:ring-primary min-w-0 truncate cursor-pointer"
             >
               <option value="all">🏷️ {language === 'ar' ? 'المصدر: الكل' : language === 'de' ? 'Quelle: Alle' : 'Source: All'} ({sets.length})</option>
-              <option value="custom">✍️ {language === 'ar' ? 'مجموعاتي الخاصة' : language === 'de' ? 'Meine Sets' : 'My Sets'} ({customSetsCount})</option>
+              <option value="custom">✍️ {language === 'ar' ? 'مجموعات المعلمين' : language === 'de' ? 'Lehrer-Sets' : 'Teacher Sets'} ({customSetsCount})</option>
               <option value="builtin">🇩🇪 {language === 'ar' ? 'المناهج الجاهزة' : language === 'de' ? 'Lehrplan-Sets' : 'Curriculum Sets'} ({builtinSetsCount})</option>
+            </select>
+
+            <select
+              value={selectedTeacherFilter}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedTeacherFilter(val);
+                if (val !== 'all' && selectedSourceFilter === 'builtin') {
+                  setSelectedSourceFilter('all');
+                }
+              }}
+              className="w-full sm:w-auto px-2.5 py-1.5 bg-surface-hover/70 border border-surface-border rounded-lg text-xs font-medium text-text-main focus:outline-none focus:ring-1 focus:ring-primary min-w-0 truncate cursor-pointer"
+            >
+              <option value="all">
+                👨‍🏫 {language === 'ar' ? 'المعلم: الكل' : language === 'de' ? 'Lehrer: Alle' : 'Teacher: All'}
+                {availableTeachers.length > 0 ? ` (${availableTeachers.length})` : ''}
+              </option>
+              {availableTeachers.map((tItem) => (
+                <option key={tItem.name} value={tItem.name}>
+                  أ. {tItem.name} ({tItem.count})
+                </option>
+              ))}
             </select>
 
             <select
@@ -1084,6 +1165,49 @@ export const LernstudioView: React.FC<Props> = ({
           </div>
         </div>
 
+        {/* Quick Creator Teacher Filter Strip */}
+        {availableTeachers.length > 0 && (
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+            <span className="text-[11px] font-bold text-text-muted shrink-0">
+              {language === 'ar' ? '👨‍🏫 فلتر المعلم:' : language === 'de' ? '👨‍🏫 Lehrer:' : '👨‍🏫 Teacher:'}
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectedTeacherFilter('all')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 cursor-pointer transition-all border ${
+                selectedTeacherFilter === 'all'
+                  ? 'bg-primary text-white border-primary shadow-2xs'
+                  : 'bg-surface hover:bg-surface-hover text-text-muted border-surface-border'
+              }`}
+            >
+              {language === 'ar' ? 'الكل' : language === 'de' ? 'Alle' : 'All'}
+            </button>
+            {availableTeachers.map((tItem) => {
+              const active = selectedTeacherFilter === tItem.name;
+              return (
+                <button
+                  key={tItem.name}
+                  type="button"
+                  onClick={() => {
+                    setSelectedTeacherFilter(active ? 'all' : tItem.name);
+                    if (!active && selectedSourceFilter === 'builtin') {
+                      setSelectedSourceFilter('all');
+                    }
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 cursor-pointer transition-all border flex items-center gap-1 ${
+                    active
+                      ? 'bg-primary text-white border-primary shadow-2xs'
+                      : 'bg-surface hover:bg-surface-hover text-text-main border-surface-border'
+                  }`}
+                >
+                  <span>أ. {tItem.name}</span>
+                  <span className="opacity-75 tabular-nums">({tItem.count})</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* Unboxed Metadata Line (Glück Zero-Pill Discipline) */}
         <div className="flex flex-wrap items-center justify-between gap-2 px-0.5 text-xs text-text-muted tabular-nums">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -1106,10 +1230,11 @@ export const LernstudioView: React.FC<Props> = ({
               </>
             )}
           </div>
-          {(selectedSourceFilter !== 'all' || selectedGradeFilter !== 'all' || selectedCategoryFilter !== 'all' || searchTerm || selectedGroupFilter !== 'all') && (
+          {(selectedSourceFilter !== 'all' || selectedTeacherFilter !== 'all' || selectedGradeFilter !== 'all' || selectedCategoryFilter !== 'all' || searchTerm || selectedGroupFilter !== 'all') && (
             <button
               onClick={() => {
                 setSelectedSourceFilter('all');
+                setSelectedTeacherFilter('all');
                 setSelectedGradeFilter('all');
                 setSelectedCategoryFilter('all');
                 setSelectedGroupFilter('all');
@@ -1144,6 +1269,7 @@ export const LernstudioView: React.FC<Props> = ({
                 const itemCount = set.items?.length || 0;
                 const assignedGroup = groups.find((g) => g.id === set.assignedGroupId);
                 const isCustom = !isBuiltinLernstudioSet(set);
+                const creatorTeacher = getEffectiveSetTeacherName(set);
 
                 return (
                   <div
@@ -1166,7 +1292,9 @@ export const LernstudioView: React.FC<Props> = ({
                           <span aria-hidden="true">·</span>
                           <span className="font-medium text-text-muted">
                             {isCustom
-                              ? (language === 'ar' ? 'مجموعتي الخاصة' : language === 'de' ? 'Mein Set' : 'Custom')
+                              ? creatorTeacher
+                                ? `👨‍🏫 أ. ${creatorTeacher}`
+                                : (language === 'ar' ? 'مجموعتي الخاصة' : language === 'de' ? 'Mein Set' : 'Custom')
                               : (language === 'ar' ? 'منهاج جاهز' : language === 'de' ? 'Lehrplan' : 'Curriculum')}
                           </span>
                         </div>
@@ -1353,6 +1481,7 @@ export const LernstudioView: React.FC<Props> = ({
             isOpen={isSetEditorOpen}
             setToEdit={setToEdit}
             groups={groups}
+            teacherName={teacherName}
             onClose={() => setIsSetEditorOpen(false)}
             onSaveSet={handleSaveSetWithCloud}
           />
@@ -1361,6 +1490,7 @@ export const LernstudioView: React.FC<Props> = ({
         {isAiModalOpen && (
           <LernstudioAiModal
             isOpen={isAiModalOpen}
+            teacherName={teacherName}
             language={language}
             onClose={() => setIsAiModalOpen(false)}
             onImportSet={handleSaveSetWithCloud}

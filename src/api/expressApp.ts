@@ -865,13 +865,14 @@ app.post('/api/homework/submit', async (req, res) => {
       }
     }
 
-    // 2. Check setSnapshot items
+    // 2. Check setSnapshot items (only when itemId/expectedField is explicitly targeted or isCorrect is omitted)
     const serverItems = Array.isArray(setSnapshot?.items) ? setSnapshot.items : [];
-    if (targetQId && serverItems.length > 0) {
-      const itemMatch = serverItems.find((it: any) => String(it.id) === String(targetQId));
+    const itemLookupId = r.itemId || r.exerciseId || (r.expectedField ? targetQId : undefined);
+    if (itemLookupId && serverItems.length > 0 && (r.expectedField || typeof r.isCorrect !== 'boolean')) {
+      const itemMatch = serverItems.find((it: any) => String(it.id) === String(itemLookupId));
       if (itemMatch) {
-        const studentAns = String(r.selectedAnswer ?? r.answer ?? r.submittedAnswer ?? r.text ?? '').trim();
-        const type = String(r.type || r.mode || '').toLowerCase();
+        const studentAns = String(r.selectedAnswer ?? r.studentAnswer ?? r.answer ?? r.submittedAnswer ?? r.text ?? '').trim();
+        const type = String(r.type || r.questionType || r.mode || '').toLowerCase();
         let expected: string | undefined;
 
         if (type.includes('article') || type.includes('der_die_das') || r.expectedField === 'article') {
@@ -901,12 +902,15 @@ app.post('/api/homework/submit', async (req, res) => {
     return r;
   });
 
+  const isInProgress = body.status === 'in_progress' && !body.completedAt;
   const correctCount = verifiedResponses.filter((r: any) => r && r.isCorrect).length;
-  const totalQ = verifiedResponses.length;
+  const totalQ = isInProgress
+    ? Math.max(verifiedResponses.length, Number(body.totalQuestions) || 0)
+    : verifiedResponses.length;
   const pct = totalQ > 0 ? Math.round((correctCount / totalQ) * 100) : 0;
   const nowIso = new Date().toISOString();
   const startMs = body.startedAt ? new Date(body.startedAt).getTime() : Date.now() - totalQ * 4000;
-  const timeSpentSeconds = Math.max(5, Math.round((Date.now() - startMs) / 1000));
+  const timeSpentSeconds = Math.max(isInProgress ? 1 : 5, Math.round((Date.now() - startMs) / 1000));
   const resolvedOwnerUid = hwOwnerUid || bodyOwnerUid || undefined;
 
   const submission: any = {
@@ -920,9 +924,9 @@ app.post('/api/homework/submit', async (req, res) => {
     groupId: check.normalizedGroupId,
     studentName: check.normalizedStudentName,
     attemptNumber: body.attemptNumber || 1,
-    status: 'completed',
+    status: isInProgress ? 'in_progress' : 'completed',
     startedAt: body.startedAt || nowIso,
-    completedAt: body.completedAt || nowIso,
+    completedAt: isInProgress ? '' : (body.completedAt || nowIso),
     updatedAt: nowIso,
     timeSpentSeconds,
     totalQuestions: totalQ,

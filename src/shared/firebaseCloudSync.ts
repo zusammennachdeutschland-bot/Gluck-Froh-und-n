@@ -1004,12 +1004,58 @@ export async function saveSubmissionToFirestore(
   const safeId = sanitizeDocId(submission.id);
   const safeAssignmentId = sanitizeDocId(submission.assignmentId);
   const path = `homework_submissions/${safeId}`;
-  try {
-    let resolvedOwnerUid =
-      submission.ownerUid?.trim() ||
-      explicitOwnerUid?.trim() ||
-      '';
 
+  const isCompleted =
+    submission.status === 'completed' || (!submission.status && Boolean(submission.completedAt));
+  const statusValue = isCompleted ? 'completed' : 'in_progress';
+  const nowIso = new Date().toISOString();
+  const completedAtValue = isCompleted ? (submission.completedAt || nowIso).slice(0, 60) : '';
+  const attemptSecret = submission.attemptSecret?.trim()
+    ? submission.attemptSecret.trim().slice(0, 120)
+    : undefined;
+
+  let resolvedOwnerUid =
+    submission.ownerUid?.trim() ||
+    explicitOwnerUid?.trim() ||
+    '';
+
+  let apiOk = false;
+  try {
+    if (typeof fetch === 'function' && typeof window !== 'undefined') {
+      const urlToken = new URLSearchParams(window.location.search).get('token')?.trim() || '';
+      const urlOwnerUid = new URLSearchParams(window.location.search).get('ou')?.trim() || '';
+      if (!resolvedOwnerUid && urlOwnerUid) {
+        resolvedOwnerUid = urlOwnerUid;
+      }
+      const res = await fetch('/api/homework/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...submission,
+          id: safeId,
+          assignmentId: safeAssignmentId,
+          ...(urlToken ? { token: urlToken } : {}),
+          ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
+          ...(attemptSecret ? { attemptSecret } : {}),
+          status: statusValue,
+          completedAt: completedAtValue
+        })
+      }).catch(() => null);
+
+      if (res && res.ok) {
+        apiOk = true;
+        const data = await res.json().catch(() => null);
+        const serverOwnerUid = data?.submission?.ownerUid;
+        if (!resolvedOwnerUid && typeof serverOwnerUid === 'string' && serverOwnerUid.trim()) {
+          resolvedOwnerUid = serverOwnerUid.trim();
+        }
+      }
+    }
+  } catch {
+    // Best-effort API sync; continue to Firestore
+  }
+
+  try {
     if (!resolvedOwnerUid) {
       const parentHw = await fetchAssignmentFromFirestore(safeAssignmentId).catch(() => null);
       if (parentHw) {
@@ -1028,18 +1074,10 @@ export async function saveSubmissionToFirestore(
     }
 
     if (!resolvedOwnerUid) {
-      return false;
+      return apiOk;
     }
 
     const ownerUid = resolvedOwnerUid.slice(0, 128);
-    const isCompleted = submission.status === 'completed' || (!submission.status && Boolean(submission.completedAt));
-    const statusValue = isCompleted ? 'completed' : 'in_progress';
-    const nowIso = new Date().toISOString();
-    const completedAtValue = isCompleted ? (submission.completedAt || nowIso).slice(0, 60) : '';
-    const attemptSecret = submission.attemptSecret?.trim()
-      ? submission.attemptSecret.trim().slice(0, 120)
-      : undefined;
-
     const normalized: HomeworkSubmission = {
       ...submission,
       id: safeId,
@@ -1070,14 +1108,58 @@ export async function saveSubmissionToFirestore(
           ...(attemptSecret ? { attemptSecret } : {}),
           payloadJson
         }),
-      12000,
-      2
+      8000,
+      1
     );
     return true;
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
-    return false;
+    if (!apiOk) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+    return apiOk;
   }
+}
+
+function mergeSubmissionLists(
+  primary: HomeworkSubmission[],
+  secondary: HomeworkSubmission[]
+): HomeworkSubmission[] {
+  const byId = new Map<string, HomeworkSubmission>();
+  for (const sub of [...secondary, ...primary]) {
+    if (!sub || !sub.id) continue;
+    const existing = byId.get(sub.id);
+    if (!existing) {
+      byId.set(sub.id, sub);
+      continue;
+    }
+    const existingCompleted =
+      existing.status === 'completed' || (!existing.status && Boolean(existing.completedAt));
+    const subCompleted =
+      sub.status === 'completed' || (!sub.status && Boolean(sub.completedAt));
+    if (subCompleted && !existingCompleted) {
+      byId.set(sub.id, sub);
+      continue;
+    }
+    if (existingCompleted && !subCompleted) {
+      continue;
+    }
+    const existingAnswers = Array.isArray(existing.responses) ? existing.responses.length : 0;
+    const subAnswers = Array.isArray(sub.responses) ? sub.responses.length : 0;
+    if (subAnswers > existingAnswers) {
+      byId.set(sub.id, sub);
+      continue;
+    }
+    const existingTime = new Date(existing.updatedAt || existing.completedAt || existing.startedAt || 0).getTime();
+    const subTime = new Date(sub.updatedAt || sub.completedAt || sub.startedAt || 0).getTime();
+    if (subTime >= existingTime) {
+      byId.set(sub.id, sub);
+    }
+  }
+  return Array.from(byId.values()).sort(
+    (a, b) =>
+      new Date(b.updatedAt || b.completedAt || b.startedAt || 0).getTime() -
+      new Date(a.updatedAt || a.completedAt || a.startedAt || 0).getTime()
+  );
 }
 
 export async function fetchSubmissionsForAssignmentFromFirestore(
@@ -1087,6 +1169,35 @@ export async function fetchSubmissionsForAssignmentFromFirestore(
   const safeAssignmentId = sanitizeDocId(assignmentId);
   const requiredOwnerUid = explicitOwnerUid?.trim() || getCurrentHomeworkOwnerUid() || undefined;
   const path = 'homework_submissions';
+
+  let apiList: HomeworkSubmission[] = [];
+  if (typeof fetch === 'function' && typeof window !== 'undefined' && auth.currentUser) {
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      if (idToken) {
+        const res = await fetch(
+          `/api/homework/submissions?assignmentId=${encodeURIComponent(safeAssignmentId)}`,
+          {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${idToken}` }
+          }
+        ).catch(() => null);
+        if (res && res.ok) {
+          const data = await res.json().catch(() => null);
+          if (Array.isArray(data?.submissions)) {
+            apiList = data.submissions.map((s: HomeworkSubmission) => ({
+              ...s,
+              ...(requiredOwnerUid ? { ownerUid: requiredOwnerUid } : {}),
+              cloudSynced: true
+            }));
+          }
+        }
+      }
+    } catch {
+      // Ignore API fetch error and rely on Firestore
+    }
+  }
+
   try {
     const q = requiredOwnerUid
       ? query(
@@ -1119,12 +1230,11 @@ export async function fetchSubmissionsForAssignmentFromFirestore(
         // Ignore
       }
     });
-    return list.sort(
-      (a, b) =>
-        new Date(b.updatedAt || b.completedAt || b.startedAt || 0).getTime() -
-        new Date(a.updatedAt || a.completedAt || a.startedAt || 0).getTime()
-    );
+    return mergeSubmissionLists(list, apiList);
   } catch (error) {
+    if (apiList.length > 0) {
+      return apiList;
+    }
     handleFirestoreError(error, OperationType.LIST, path);
     return [];
   }
@@ -1138,6 +1248,34 @@ export async function fetchAllSubmissionsFromFirestore(
     return [];
   }
   const path = 'homework_submissions';
+
+  let apiList: HomeworkSubmission[] = [];
+  if (typeof fetch === 'function' && typeof window !== 'undefined' && auth.currentUser) {
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      if (idToken) {
+        const res = await fetch('/api/homework/submissions', {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${idToken}` }
+        }).catch(() => null);
+        if (res && res.ok) {
+          const data = await res.json().catch(() => null);
+          if (Array.isArray(data?.submissions)) {
+            apiList = data.submissions
+              .filter((s: HomeworkSubmission) => !s.ownerUid || s.ownerUid === ownerUid)
+              .map((s: HomeworkSubmission) => ({
+                ...s,
+                ownerUid,
+                cloudSynced: true
+              }));
+          }
+        }
+      }
+    } catch {
+      // Ignore API fetch error
+    }
+  }
+
   try {
     const q = query(collection(db, 'homework_submissions'), where('ownerUid', '==', ownerUid));
     const snap = await withFirestoreReadTimeout(getDocs(q), 5000);
@@ -1164,12 +1302,11 @@ export async function fetchAllSubmissionsFromFirestore(
         // Ignore
       }
     });
-    return list.sort(
-      (a, b) =>
-        new Date(b.updatedAt || b.completedAt || b.startedAt || 0).getTime() -
-        new Date(a.updatedAt || a.completedAt || a.startedAt || 0).getTime()
-    );
+    return mergeSubmissionLists(list, apiList);
   } catch (error) {
+    if (apiList.length > 0) {
+      return apiList;
+    }
     handleFirestoreError(error, OperationType.LIST, path);
     throw error;
   }
@@ -1234,7 +1371,7 @@ export function subscribeSubmissionsFromFirestore(
 }
 
 // ============================================================================
-// FIRESTORE LERNSTUDIO SETS SYNC (Main App <-> Vercel, Scoped by ownerUid)
+// FIRESTORE LERNSTUDIO SETS SYNC (Shared Library Across Authenticated Teachers)
 // ============================================================================
 export async function saveLernstudioSetToFirestore(setItem: LernstudioSet): Promise<boolean> {
   if (!setItem || !setItem.id) return false;
@@ -1243,13 +1380,19 @@ export async function saveLernstudioSetToFirestore(setItem: LernstudioSet): Prom
   const safeId = sanitizeDocId(setItem.id);
   const path = `lernstudio_sets/${safeId}`;
   try {
-    const payloadJson = JSON.stringify({ ...setItem, ownerUid }).slice(0, 490000);
+    const cleanSet: any = {
+      ...setItem,
+      id: safeId,
+      ...(setItem.createdByUid || ownerUid ? { createdByUid: setItem.createdByUid || ownerUid } : {})
+    };
+    delete cleanSet.ownerUid;
+    delete cleanSet.ownerEmail;
+    const payloadJson = JSON.stringify(cleanSet).slice(0, 490000);
     await executeConfirmedFirestoreWrite(() =>
       setDoc(doc(db, 'lernstudio_sets', safeId), {
         id: safeId,
-        ownerUid: ownerUid.slice(0, 128),
         title: (setItem.title || 'Set').slice(0, 290),
-        category: ((setItem as any).category || (setItem as any).topic || 'general').slice(0, 110),
+        category: ((setItem as any).category || (setItem as any).topic || 'general').slice(0, 95),
         payloadJson,
         updatedAtIso: new Date().toISOString()
       })
@@ -1303,7 +1446,7 @@ export function subscribeLernstudioSetsFromFirestore(
     onUpdate([]);
     return () => {};
   }
-  const q = query(collection(db, 'lernstudio_sets'), where('ownerUid', '==', ownerUid));
+  const q = collection(db, 'lernstudio_sets');
   return onSnapshot(
     q,
     (snap) => {
@@ -1311,9 +1454,12 @@ export function subscribeLernstudioSetsFromFirestore(
       snap.forEach((docSnap) => {
         try {
           const data = docSnap.data();
-          if (data?.ownerUid && data.ownerUid !== ownerUid) return;
+          if (data?.deleted === true) return;
           if (data?.payloadJson) {
-            list.push(JSON.parse(data.payloadJson));
+            const parsed = JSON.parse(data.payloadJson);
+            if (parsed && !parsed.deleted) {
+              list.push(parsed);
+            }
           }
         } catch {
           // Ignore

@@ -7,12 +7,13 @@ import { X, Copy, Check, Sparkles, Download, AlertCircle, FileText, BookOpen } f
 
 interface Props {
   isOpen: boolean;
+  teacherName?: string;
   language?: string;
   onClose: () => void;
   onImportSet: (newSet: LernstudioSet) => void;
 }
 
-export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', onClose, onImportSet }) => {
+export const LernstudioAiModal: React.FC<Props> = ({ isOpen, teacherName, language = 'ar', onClose, onImportSet }) => {
   const [activeTab, setActiveTab] = useState<'generate' | 'import'>('generate');
 
   // Generator Config
@@ -80,6 +81,9 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
   const handleConfirmImport = () => {
     if (!parsedPreview || !parsedPreview.items) return;
 
+    const resolvedTeacherName =
+      (parsedPreview as any).createdByTeacherName?.trim() || teacherName?.trim() || undefined;
+
     const fullSet: LernstudioSet = {
       id: `set_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       title: parsedPreview.title || topic || 'مجموعة مستوردة',
@@ -89,6 +93,7 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, language = 'ar', on
       difficulty: parsedPreview.difficulty || difficulty,
       hasArticles: parsedPreview.hasArticles,
       sentenceBuilderSupported: parsedPreview.sentenceBuilderSupported,
+      ...(resolvedTeacherName ? { createdByTeacherName: resolvedTeacherName } : {}),
       description: parsedPreview.description || `مجموعة ${parsedPreview.title}`,
       items: parsedPreview.items,
       customExercises: parsedPreview.customExercises,

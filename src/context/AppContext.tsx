@@ -958,11 +958,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   });
 
   const saveLernstudioSet = (newSet: LernstudioSet) => {
-    const mutated = wrapMutation(newSet);
+    const profileTeacherName = (
+      profile?.displayNameAr?.trim() ||
+      profile?.nameAr?.trim() ||
+      profile?.displayName?.trim() ||
+      profile?.displayNameEn?.trim() ||
+      profile?.nameEn?.trim() ||
+      ''
+    );
+    const isBuiltin =
+      Boolean(newSet?.id) &&
+      (newSet.id.startsWith('curric_') ||
+        newSet.id.startsWith('set_def_') ||
+        DEFAULT_LERNSTUDIO_SETS.some((ds) => ds.id === newSet.id));
+
     setLernstudioSets(prev => {
-      const exists = prev.some(s => s.id === newSet.id);
+      const existing = prev.find(s => s.id === newSet.id);
+      const resolvedCreatorName = isBuiltin
+        ? undefined
+        : (newSet.createdByTeacherName?.trim() ||
+           existing?.createdByTeacherName?.trim() ||
+           profileTeacherName ||
+           undefined);
+      const resolvedCreatorUid = isBuiltin
+        ? undefined
+        : (newSet.createdByUid?.trim() ||
+           existing?.createdByUid?.trim() ||
+           getCurrentHomeworkOwnerUid() ||
+           undefined);
+
+      const mutated = wrapMutation({
+        ...newSet,
+        ...(resolvedCreatorName ? { createdByTeacherName: resolvedCreatorName } : {}),
+        ...(resolvedCreatorUid ? { createdByUid: resolvedCreatorUid } : {})
+      });
+
       let updated: LernstudioSet[];
-      if (exists) {
+      if (existing) {
         updated = prev.map(s => s.id === newSet.id ? mutated : s);
       } else {
         updated = [mutated, ...prev];

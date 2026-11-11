@@ -108,6 +108,8 @@ export interface LernstudioSet {
   items: LernstudioItem[];
   customExercises?: LernstudioExercise[];
   assignedGroupId?: string;
+  createdByTeacherName?: string;
+  createdByUid?: string;
   isArchived?: boolean;
   createdAt: string;
   updatedAt: number;

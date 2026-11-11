@@ -589,7 +589,7 @@ function MainApp() {
                   sets={lernstudioSets || []}
                   groups={groups || []}
                   schoolName={profile?.displayNameAr || profile?.displayName || 'Glück'}
-                  teacherName={profile?.displayName}
+                  teacherName={profile?.displayNameAr || profile?.nameAr || profile?.displayName || profile?.displayNameEn}
                   onSaveSet={saveLernstudioSet}
                   onDeleteSet={deleteLernstudioSet}
                   language={language}
@@ -644,7 +644,7 @@ function MainApp() {
                         sets={lernstudioSets || []}
                         groups={groups || []}
                         schoolName={profile?.displayNameAr || profile?.displayName || 'Glück'}
-                        teacherName={profile?.displayName}
+                        teacherName={profile?.displayNameAr || profile?.nameAr || profile?.displayName || profile?.displayNameEn}
                         onSaveSet={saveLernstudioSet}
                         onDeleteSet={deleteLernstudioSet}
                         language={language}
