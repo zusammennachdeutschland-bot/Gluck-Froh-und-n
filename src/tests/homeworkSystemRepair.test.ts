@@ -145,6 +145,7 @@ function getLocalSubmissionsForAssignment(assignmentId: string): HomeworkSubmiss
 function resetAllState() {
   mockStorage.clear();
   resetHomeworkStoresForTesting();
+  __setHomeworkAuthUserForTests(null);
   __setHomeworkSyncTransportForTests({
     saveAssignment: async () => true,
     saveSubmission: async () => true,
