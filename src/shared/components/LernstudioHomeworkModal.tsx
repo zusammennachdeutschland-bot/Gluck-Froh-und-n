@@ -38,7 +38,7 @@ import {
   resolveStageQuestionCount,
   calculateTotalHomeworkQuestions
 } from '../homeworkStorageSync';
-import { auth, fetchHomeworkApi } from '../firebaseCloudSync';
+import { fetchHomeworkApi, getHomeworkAuthToken } from '../firebaseCloudSync';
 import {
   Sparkles,
   X,
@@ -78,10 +78,7 @@ interface Props {
 }
 
 async function persistHomeworkAssignmentToServer(assignment: HomeworkAssignment): Promise<any> {
-  const idToken = await auth?.currentUser?.getIdToken().catch(() => null);
-  if (!idToken) {
-    throw new Error('يجب تسجيل الدخول بحساب المدرس لحفظ الواجب ومشاركة رابطه.');
-  }
+  const idToken = await getHomeworkAuthToken();
 
   const response = await fetchHomeworkApi('/api/teacher/assignments', {
     method: 'POST',
@@ -627,8 +624,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     setIsDeleting(true);
     try {
       const targetId = deleteConfirmHw.id;
-      const idToken = await auth?.currentUser?.getIdToken().catch(() => null);
-      if (!idToken) throw new Error('يجب تسجيل الدخول بحساب المدرس لحذف الواجب.');
+      const idToken = await getHomeworkAuthToken();
       const response = await fetchHomeworkApi(`/api/teacher/assignments?id=${encodeURIComponent(targetId)}`, {
         method: 'DELETE', headers: { Authorization: `Bearer ${idToken}` }, credentials: 'include'
       });
