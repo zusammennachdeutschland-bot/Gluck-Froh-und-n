@@ -33,6 +33,13 @@ import { resolveStudentReportAttendance } from '../utils/lessonUtils';
 import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
 import { getLocalDateStr, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
 import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesService';
+import { useSyncedHomeworkData } from '../hooks/useSyncedHomeworkData';
+import {
+  findLatestEligiblePreviousLesson,
+  formatStudentPersonalPreviousHwLines,
+  resolveLinkedOnlineHomeworkForLesson,
+  resolveStudentPersonalOnlineHomeworkResult
+} from '../utils/lessonHomeworkLinkUtils';
 
 interface WhatsAppDispatchQueueModalProps {
   isOpen: boolean;
@@ -56,6 +63,7 @@ export const WhatsAppDispatchQueueModal: React.FC<WhatsAppDispatchQueueModalProp
   initialDate
 }) => {
   const { students, groups, lessons, profile, updateLesson, saveLessonReport, _t, language, t } = useApp();
+  const { assignments: syncedAssignments, submissions: syncedSubmissions, currentOwnerUid } = useSyncedHomeworkData();
 
   // 1. Day / Date Selection State
   // Modes: 'today' | 'yesterday' | 'before_yesterday' | 'custom' | 'all'
@@ -358,16 +366,63 @@ export const WhatsAppDispatchQueueModal: React.FC<WhatsAppDispatchQueueModalProp
   const activeStudent: Student | undefined = queueStudents[currentIndex];
   const activeStudentLesson: Lesson = (activeStudent ? studentLessonMap[activeStudent.id] : undefined) || fallbackSyntheticLesson;
 
-  // Resolve message for current student
+  // Resolve message for current student (strictly isolated personal previous HW result + valid current HW short link)
   const activeMessageText = useMemo(() => {
     if (!activeStudent) return '';
+    const currentHw = resolveLinkedOnlineHomeworkForLesson(activeStudentLesson, syncedAssignments, {
+      currentOwnerUid
+    });
+    const prevEligibleLesson = findLatestEligiblePreviousLesson(
+      {
+        ...activeStudentLesson,
+        studentId: activeStudent.id,
+        studentName: activeStudent.name
+      },
+      lessons || [],
+      { requireCompletedOrReported: true }
+    );
+    const prevHw = prevEligibleLesson?.report?.onlineHomeworkAssignmentId
+      ? resolveLinkedOnlineHomeworkForLesson(prevEligibleLesson, syncedAssignments, {
+          currentOwnerUid
+        })
+      : null;
+    const prevPersonal =
+      prevHw?.assignment && prevHw.status !== 'unauthorized'
+        ? resolveStudentPersonalOnlineHomeworkResult(
+            prevHw.assignment,
+            syncedSubmissions,
+            activeStudent,
+            prevEligibleLesson,
+            { currentOwnerUid }
+          )
+        : null;
+    const previousOnlineResultLines =
+      prevPersonal && !prevPersonal.wasAbsent
+        ? formatStudentPersonalPreviousHwLines(prevPersonal, 'ar')
+        : [];
+
     return buildQueueMessageForStudent(activeStudent, activeStudentLesson, profile, {
       templateType,
       customTemplate: customTemplateText,
       group: targetGroup,
-      targetRecipient: recipientTarget
+      targetRecipient: recipientTarget,
+      onlineHomeworkTitle: currentHw?.title,
+      onlineHomeworkShareUrl: currentHw?.isValid ? currentHw.shareUrl : null,
+      previousOnlineResultLines
     });
-  }, [activeStudent, activeStudentLesson, profile, templateType, customTemplateText, targetGroup, recipientTarget]);
+  }, [
+    activeStudent,
+    activeStudentLesson,
+    profile,
+    templateType,
+    customTemplateText,
+    targetGroup,
+    recipientTarget,
+    syncedAssignments,
+    syncedSubmissions,
+    currentOwnerUid,
+    lessons
+  ]);
 
   // Reset custom edit when active student changes
   useEffect(() => {

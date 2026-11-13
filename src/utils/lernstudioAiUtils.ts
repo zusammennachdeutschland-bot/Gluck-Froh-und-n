@@ -20,6 +20,7 @@ export interface PromptGenConfig {
   level: LernstudioLevel;
   difficulty: LernstudioDifficulty;
   itemCount: number | 'auto';
+  teacherName?: string;
   includeSentences?: boolean;
   includeExercises?: boolean;
   includeVerbConjugation?: boolean;
@@ -131,6 +132,7 @@ JSON-STRUKTUR:
   "grade": "${config.grade || ''}",
   "level": "${config.level}",
   "difficulty": "${config.difficulty}",
+  "createdByTeacherName": "${(config.teacherName || '').replace(/"/g, '')}",
   "hasArticles": true,
   "sentenceBuilderSupported": true,
   "description": "Lern-Set zum Thema ${config.topic} (${config.level})",
@@ -409,12 +411,20 @@ export function validateAndParseLernstudioJson(
       ? Boolean(parsed.hasArticles) && itemsWithRealArticles.length >= 1
       : itemsWithRealArticles.length >= 2;
 
+    const rawTeacherName =
+      parsed.createdByTeacherName || parsed.teacherName || parsed.creatorName || parsed.author;
+    const cleanedTeacherName =
+      typeof rawTeacherName === 'string' && rawTeacherName.trim()
+        ? rawTeacherName.trim()
+        : undefined;
+
     const newSet: Partial<LernstudioSet> = {
       title,
       topic,
       grade: parsed.grade ? String(parsed.grade).trim() : undefined,
       level,
       difficulty,
+      ...(cleanedTeacherName ? { createdByTeacherName: cleanedTeacherName } : {}),
       hasArticles,
       sentenceBuilderSupported: true,
       description: parsed.description ? String(parsed.description).trim() : `مجموعة ${topic} (${level})`,

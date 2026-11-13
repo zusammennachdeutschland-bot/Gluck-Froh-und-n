@@ -886,6 +886,9 @@ export interface LessonReport {
   savedAt?: string;
   scores?: any;
   studentScores?: Record<string, any>;
+  onlineHomeworkAssignmentId?: string;
+  onlineHomeworkShortId?: string;
+  onlineHomeworkTitle?: string;
 }
 
 export interface DeletedItem<T> {

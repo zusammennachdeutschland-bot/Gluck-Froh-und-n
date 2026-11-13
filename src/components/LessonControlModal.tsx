@@ -6,7 +6,7 @@ import {
   X, Play, Pause, Square, Video, MapPin, Send, Phone, CheckCircle2, Check,
   Clock, AlertCircle, Sparkles, FileText, Award, DollarSign, ExternalLink, Navigation,
   Zap, UserPlus, XCircle, Ban, Edit2, Plus, Minus, ClipboardCheck, Wallet, Landmark,
-  MessageCircle, Users
+  MessageCircle, Users, Copy, Trash2, RefreshCw, BookOpen, Link2
 } from 'lucide-react';
 import { ParentSummaryModal } from './ParentSummaryModal';
 import { StudentSessionPerformanceSelector } from './StudentSessionPerformanceSelector';
@@ -14,6 +14,9 @@ import { ArabicParentReportModal } from './ArabicParentReportModal';
 import { LessonReminderModal } from './LessonReminderModal';
 import { HomeworkFollowUpModal } from './HomeworkFollowUpModal';
 import { GroupProfileModal } from './GroupProfileModal';
+import { LernstudioHomeworkModal } from '../shared/components/LernstudioHomeworkModal';
+import { useSyncedHomeworkData } from '../hooks/useSyncedHomeworkData';
+import { resolveLinkedOnlineHomeworkForLesson } from '../utils/lessonHomeworkLinkUtils';
 import { getPendingHomeworkFollowUps } from '../utils/homeworkFollowUpUtils';
 import { buildWhatsAppUrl, formatWhatsAppPhone, resolveStudentWhatsAppContact } from '../utils/phoneUtils';
 import { getTeacherArabicName, getTeacherEnglishName } from '../utils/teacherUtils';
@@ -44,8 +47,11 @@ export const LessonControlModal: React.FC = () => {
     financeAccounts,
     markCyclePaymentPaid,
     updateLessonPaymentStatus,
-    payments
+    payments,
+    lernstudioSets
   } = useApp();
+
+  const { assignments: syncedHomeworkAssignments, currentOwnerUid: homeworkOwnerUid } = useSyncedHomeworkData();
 
   // Cancel Lesson state
   const [showCancelPrompt, setShowCancelPrompt] = useState(false);
@@ -68,6 +74,11 @@ export const LessonControlModal: React.FC = () => {
   // Brand new Session Report Fields (Unifying lesson & student details)
   const [lessonWhatWasTaught, setLessonWhatWasTaught] = useState('');
   const [lessonNextHomework, setLessonNextHomework] = useState('');
+  const [onlineHomeworkAssignmentId, setOnlineHomeworkAssignmentId] = useState('');
+  const [onlineHomeworkShortId, setOnlineHomeworkShortId] = useState('');
+  const [onlineHomeworkTitle, setOnlineHomeworkTitle] = useState('');
+  const [showOnlineHomeworkModal, setShowOnlineHomeworkModal] = useState(false);
+  const [copiedOnlineHwLink, setCopiedOnlineHwLink] = useState(false);
   const [lessonPreviousHomework, setLessonPreviousHomework] = useState('');
   const [lessonRecordingLink, setLessonRecordingLink] = useState('');
   const [lessonRecordingLink2, setLessonRecordingLink2] = useState('');
@@ -211,6 +222,9 @@ export const LessonControlModal: React.FC = () => {
       setAttendance(selectedLesson.report.attendanceStatus || 'present');
       setLessonWhatWasTaught(selectedLesson.report.teacherNotes || '');
       setLessonNextHomework(selectedLesson.report.homeworkDescription || '');
+      setOnlineHomeworkAssignmentId(selectedLesson.report.onlineHomeworkAssignmentId || '');
+      setOnlineHomeworkShortId(selectedLesson.report.onlineHomeworkShortId || '');
+      setOnlineHomeworkTitle(selectedLesson.report.onlineHomeworkTitle || '');
       setLessonPreviousHomework(
         selectedLesson.report.arabicPreviousHomework || 
         selectedLesson.report.previousHomeworkDescription || 
@@ -289,6 +303,9 @@ export const LessonControlModal: React.FC = () => {
       setPackageChoice(selectedLesson.totalSessionsInPackage || 4);
       setLessonWhatWasTaught('');
       setLessonNextHomework('');
+      setOnlineHomeworkAssignmentId('');
+      setOnlineHomeworkShortId('');
+      setOnlineHomeworkTitle('');
       setLessonPreviousHomework(detectedPreviousHomework || '');
       setLessonRecordingLink(selectedLesson.recordingLink || '');
       setLessonRecordingLink2(selectedLesson.recordingLink2 || '');
@@ -353,6 +370,9 @@ export const LessonControlModal: React.FC = () => {
             if (draft.teacherNotes) setTeacherNotes(draft.teacherNotes);
             if (draft.lessonWhatWasTaught) setLessonWhatWasTaught(draft.lessonWhatWasTaught);
             if (draft.lessonNextHomework) setLessonNextHomework(draft.lessonNextHomework);
+            if (draft.onlineHomeworkAssignmentId) setOnlineHomeworkAssignmentId(draft.onlineHomeworkAssignmentId);
+            if (draft.onlineHomeworkShortId) setOnlineHomeworkShortId(draft.onlineHomeworkShortId);
+            if (draft.onlineHomeworkTitle) setOnlineHomeworkTitle(draft.onlineHomeworkTitle);
             if (draft.lessonPreviousHomework) setLessonPreviousHomework(draft.lessonPreviousHomework);
             if (draft.lessonRecordingLink) setLessonRecordingLink(draft.lessonRecordingLink);
             if (draft.lessonRecordingLink2) {
@@ -375,14 +395,15 @@ export const LessonControlModal: React.FC = () => {
 
   // Auto-save report draft as teacher types
   useEffect(() => {
-    if (selectedLesson && (lessonWhatWasTaught || lessonNextHomework || lessonPreviousHomework || lessonRecordingLink || lessonRecordingLink2 || teacherNotes || homeworkTitle || homeworkDescription)) {
+    if (selectedLesson && (lessonWhatWasTaught || lessonNextHomework || onlineHomeworkAssignmentId || lessonPreviousHomework || lessonRecordingLink || lessonRecordingLink2 || teacherNotes || homeworkTitle || homeworkDescription)) {
       storage.setItem(`dl_draft_report_${selectedLesson.id}`, {
         attendance, studentAttendance, homeworkStatus, homeworkTitle, homeworkDescription,
         quizScore, examScore, participationScore, teacherNotes,
-        lessonWhatWasTaught, lessonNextHomework, lessonPreviousHomework, lessonRecordingLink, lessonRecordingLink2, studentHomeworkDone, studentDictationGrade, studentExamGrade, studentNotes, studentPerformance
+        lessonWhatWasTaught, lessonNextHomework, onlineHomeworkAssignmentId, onlineHomeworkShortId, onlineHomeworkTitle,
+        lessonPreviousHomework, lessonRecordingLink, lessonRecordingLink2, studentHomeworkDone, studentDictationGrade, studentExamGrade, studentNotes, studentPerformance
       });
     }
-  }, [selectedLesson?.id, attendance, studentAttendance, homeworkStatus, homeworkTitle, homeworkDescription, quizScore, examScore, participationScore, teacherNotes, lessonWhatWasTaught, lessonNextHomework, lessonPreviousHomework, lessonRecordingLink, lessonRecordingLink2, studentHomeworkDone, studentDictationGrade, studentExamGrade, studentNotes, studentPerformance]);
+  }, [selectedLesson?.id, attendance, studentAttendance, homeworkStatus, homeworkTitle, homeworkDescription, quizScore, examScore, participationScore, teacherNotes, lessonWhatWasTaught, lessonNextHomework, onlineHomeworkAssignmentId, onlineHomeworkShortId, onlineHomeworkTitle, lessonPreviousHomework, lessonRecordingLink, lessonRecordingLink2, studentHomeworkDone, studentDictationGrade, studentExamGrade, studentNotes, studentPerformance]);
 
   const handleSendPaymentReminder = () => {
     const teacherAr = getTeacherArabicName(profile, 'المعلم');
@@ -513,11 +534,12 @@ export const LessonControlModal: React.FC = () => {
     setCustomSessionNumber(clampedNumber);
 
     // Save in-progress draft immediately so user inputs are never lost
-    if (lessonWhatWasTaught || lessonNextHomework || lessonPreviousHomework) {
+    if (lessonWhatWasTaught || lessonNextHomework || onlineHomeworkAssignmentId || lessonPreviousHomework) {
       storage.setItem(`dl_draft_report_${selectedLesson.id}`, {
         attendance, studentAttendance, homeworkStatus, homeworkTitle, homeworkDescription,
         quizScore, examScore, participationScore, teacherNotes: lessonWhatWasTaught || teacherNotes,
-        lessonWhatWasTaught, lessonNextHomework, lessonPreviousHomework, lessonRecordingLink, lessonRecordingLink2,
+        lessonWhatWasTaught, lessonNextHomework, onlineHomeworkAssignmentId, onlineHomeworkShortId, onlineHomeworkTitle,
+        lessonPreviousHomework, lessonRecordingLink, lessonRecordingLink2,
         studentHomeworkDone, studentDictationGrade, studentExamGrade, studentNotes, studentPerformance
       });
     }
@@ -781,7 +803,10 @@ export const LessonControlModal: React.FC = () => {
     if (e) e.preventDefault();
     const qId = targetStudent?.id || quickStudentSynthetic.id;
     const defaultTaught = lessonWhatWasTaught.trim() || (isQuick ? `حصة تجريبية / سريعة: ${selectedLesson.studentName || selectedLesson.title}` : 'تم شرح درس اليوم ومراجعته');
-    const defaultHw = lessonNextHomework.trim() || (isQuick ? 'متابعة ما تم شرحه والتطبيقات' : 'مراجعة وحل التدريبات');
+    const hasAttachedOnlineHw = Boolean(onlineHomeworkAssignmentId.trim());
+    const defaultHw = lessonNextHomework.trim()
+      ? lessonNextHomework.trim()
+      : (hasAttachedOnlineHw ? '' : (isQuick ? 'متابعة ما تم شرحه والتطبيقات' : 'مراجعة وحل التدريبات'));
 
     const finalStudentAttendance = { ...studentAttendance };
     const finalStudentHomeworkDone = { ...studentHomeworkDone };
@@ -816,6 +841,9 @@ export const LessonControlModal: React.FC = () => {
       homeworkStatus: 'assigned',
       homeworkTitle: defaultHw,
       homeworkDescription: defaultHw,
+      onlineHomeworkAssignmentId: onlineHomeworkAssignmentId.trim() || undefined,
+      onlineHomeworkShortId: onlineHomeworkShortId.trim() || undefined,
+      onlineHomeworkTitle: onlineHomeworkTitle.trim() || undefined,
       teacherNotes: defaultTaught,
       arabicTopicsExplained: defaultTaught,
       arabicHomeworkRequired: defaultHw,
@@ -1120,6 +1148,26 @@ export const LessonControlModal: React.FC = () => {
                         {selectedLesson.report.homeworkTitle}
                       </p>
                     )}
+                    {(() => {
+                      const linkedQuickInfo = resolveLinkedOnlineHomeworkForLesson(selectedLesson, syncedHomeworkAssignments, {
+                        currentOwnerUid: homeworkOwnerUid
+                      });
+                      if (!linkedQuickInfo) return null;
+                      return (
+                        <div className="mt-1 pt-1 border-t border-surface-border/60 flex items-center justify-between gap-1.5">
+                          <span className="text-[10px] font-bold text-primary truncate">
+                            🎮 {linkedQuickInfo.title}
+                          </span>
+                          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 ${
+                            linkedQuickInfo.isValid
+                              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                              : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
+                          }`}>
+                            {linkedQuickInfo.isValid ? _t('نشط', 'Active', 'Aktiv') : linkedQuickInfo.statusLabelAr}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
@@ -1414,7 +1462,7 @@ export const LessonControlModal: React.FC = () => {
                 const isReportFormValid = (() => {
                   if (isQuick) return true; // Quick lesson can always be completed with instant defaults
                   if (!lessonWhatWasTaught.trim()) return false;
-                  if (!lessonNextHomework.trim()) return false;
+                  if (!lessonNextHomework.trim() && !onlineHomeworkAssignmentId.trim()) return false;
                   return true;
                 })();
 
@@ -1630,6 +1678,153 @@ export const LessonControlModal: React.FC = () => {
                         placeholder={t('auto_enter_details_of_homework_pag')}
                       />
                     </div>
+
+                    {/* Optional Online Homework Attachment (Full Existing Homework Creation Flow) */}
+                    {(() => {
+                      const attachedValidation = onlineHomeworkAssignmentId.trim()
+                        ? resolveLinkedOnlineHomeworkForLesson(
+                            {
+                              ...selectedLesson,
+                              report: {
+                                ...(selectedLesson.report || {}),
+                                attendanceStatus: attendance,
+                                homeworkStatus,
+                                homeworkTitle,
+                                homeworkDescription,
+                                onlineHomeworkAssignmentId: onlineHomeworkAssignmentId.trim(),
+                                onlineHomeworkShortId: onlineHomeworkShortId.trim() || undefined,
+                                onlineHomeworkTitle: onlineHomeworkTitle.trim() || undefined,
+                                quizScore,
+                                examScore,
+                                participationScore,
+                                paymentStatus,
+                                amountPaid,
+                                teacherNotes
+                              }
+                            },
+                            syncedHomeworkAssignments,
+                            { currentOwnerUid: homeworkOwnerUid }
+                          )
+                        : null;
+
+                      return (
+                        <div className="bg-surface p-3 rounded-xl border border-surface-border space-y-2">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-1.5">
+                              <BookOpen className="w-4 h-4 text-primary shrink-0" />
+                              <span className="text-xs font-black text-text-main">
+                                {_t('Online Homework (اختياري)', 'Online Homework (Optional)', 'Online-Hausaufgabe (Optional)')}
+                              </span>
+                            </div>
+
+                            {!attachedValidation ? (
+                              <button
+                                type="button"
+                                onClick={() => setShowOnlineHomeworkModal(true)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black bg-primary hover:bg-primary-hover text-white transition-all shadow-2xs active:scale-95 cursor-pointer"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>{_t('إضافة Homework', 'Add Homework', 'Hausaufgabe hinzufügen')}</span>
+                              </button>
+                            ) : (
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setShowOnlineHomeworkModal(true)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-primary-soft hover:bg-primary/15 text-primary border border-primary-border/60 transition-all cursor-pointer"
+                                  title={_t('استبدال الواجب الأونلاين بواجب جديد', 'Replace Online Homework', 'Online-Hausaufgabe ersetzen')}
+                                >
+                                  <RefreshCw className="w-3 h-3" />
+                                  <span>{_t('استبدال', 'Replace', 'Ersetzen')}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOnlineHomeworkAssignmentId('');
+                                    setOnlineHomeworkShortId('');
+                                    setOnlineHomeworkTitle('');
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-950/30 dark:hover:bg-red-950/50 dark:text-red-400 border border-red-200 dark:border-red-900/50 transition-all cursor-pointer"
+                                  title={_t('إزالة الربط من التقرير دون حذف الواجب', 'Detach from report without deleting assignment', 'Verknüpfung entfernen')}
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                  <span>{_t('إزالة', 'Remove', 'Entfernen')}</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          {attachedValidation ? (
+                            <div className="p-2.5 rounded-lg bg-surface-hover/80 border border-surface-border space-y-1.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-extrabold text-text-main truncate">
+                                  🎯 {attachedValidation.title}
+                                </span>
+                                <span
+                                  className={`text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 ${
+                                    attachedValidation.isValid
+                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
+                                      : attachedValidation.isPendingSync
+                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300'
+                                      : 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300'
+                                  }`}
+                                >
+                                  {_t(attachedValidation.statusLabelAr, attachedValidation.statusLabelEn, attachedValidation.statusLabelDe)}
+                                </span>
+                              </div>
+
+                              {attachedValidation.isValid && attachedValidation.shareUrl ? (
+                                <div className="flex items-center justify-between gap-2 bg-surface px-2.5 py-1.5 rounded-lg border border-surface-border/80" dir="ltr">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <Link2 className="w-3.5 h-3.5 text-primary shrink-0" />
+                                    <span className="text-[11px] font-mono text-primary truncate">
+                                      {attachedValidation.shareUrl}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        navigator.clipboard.writeText(attachedValidation.shareUrl!);
+                                        setCopiedOnlineHwLink(true);
+                                        setTimeout(() => setCopiedOnlineHwLink(false), 2000);
+                                      }}
+                                      className="px-2 py-1 text-[10px] font-bold bg-primary-soft text-primary hover:bg-primary/20 rounded-md flex items-center gap-1 cursor-pointer"
+                                    >
+                                      {copiedOnlineHwLink ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                                      <span>{copiedOnlineHwLink ? _t('تم النسخ', 'Copied', 'Kopiert') : _t('نسخ', 'Copy', 'Kopieren')}</span>
+                                    </button>
+                                    <a
+                                      href={attachedValidation.shareUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="p-1 text-primary hover:bg-primary-soft rounded-md"
+                                      title={_t('فتح الرابط', 'Open link', 'Link öffnen')}
+                                    >
+                                      <ExternalLink className="w-3.5 h-3.5" />
+                                    </a>
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="text-[11px] text-text-muted font-medium">
+                                  {attachedValidation.isPendingSync
+                                    ? _t('سيتم تفعيل الرابط تلقائياً فور اكتمال الحفظ السحابي.', 'Link will become shareable as soon as cloud sync completes.', 'Link wird nach der Cloud-Synchronisierung aktiv.')
+                                    : _t('لن يتم إظهار هذا الرابط للطلاب أو أولياء الأمور لعدم صلاحيته.', 'This invalid/deleted link will not be shared with students or parents.', 'Dieser ungültige Link wird nicht geteilt.')}
+                                </p>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="text-[11px] text-text-muted">
+                              {_t(
+                                'يمكنك إرفاق واجب تفاعلي أونلاين داخل التقرير بجانب الواجب النصي أو بدلاً منه.',
+                                'Optionally create and attach an interactive online homework right inside this report.',
+                                'Optional eine interaktive Online-Hausaufgabe erstellen und direkt anfügen.'
+                              )}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* Lecture / Session Recording Links */}
                     <div className="space-y-2 bg-surface p-3 sm:p-3.5 rounded-xl border border-surface-border">
@@ -2347,7 +2542,7 @@ export const LessonControlModal: React.FC = () => {
                         </div>
                         <ul className="list-disc list-inside space-y-0.5 text-[10px] font-black pr-1">
                           {!lessonWhatWasTaught.trim() && <li>{t('auto_subject_taught_field')}</li>}
-                          {!lessonNextHomework.trim() && <li>{t('auto_next_homework_field')}</li>}
+                          {!lessonNextHomework.trim() && !onlineHomeworkAssignmentId.trim() && <li>{t('auto_next_homework_field')}</li>}
                         </ul>
                       </div>
                     )}
@@ -2411,6 +2606,9 @@ export const LessonControlModal: React.FC = () => {
               homeworkStatus,
               homeworkTitle: lessonNextHomework || homeworkTitle,
               homeworkDescription: lessonNextHomework || homeworkDescription,
+              onlineHomeworkAssignmentId: (showReportForm || isEditingReport) ? (onlineHomeworkAssignmentId.trim() || undefined) : selectedLesson.report?.onlineHomeworkAssignmentId,
+              onlineHomeworkShortId: (showReportForm || isEditingReport) ? (onlineHomeworkShortId.trim() || undefined) : selectedLesson.report?.onlineHomeworkShortId,
+              onlineHomeworkTitle: (showReportForm || isEditingReport) ? (onlineHomeworkTitle.trim() || undefined) : selectedLesson.report?.onlineHomeworkTitle,
               teacherNotes: lessonWhatWasTaught || teacherNotes,
               arabicTopicsExplained: lessonWhatWasTaught || teacherNotes,
               arabicHomeworkRequired: lessonNextHomework || homeworkDescription,
@@ -2437,6 +2635,9 @@ export const LessonControlModal: React.FC = () => {
             }
             saveLessonReport(selectedLesson.id, {
               ...(selectedLesson.report || {}),
+              onlineHomeworkAssignmentId: (showReportForm || isEditingReport) ? (onlineHomeworkAssignmentId.trim() || undefined) : selectedLesson.report?.onlineHomeworkAssignmentId,
+              onlineHomeworkShortId: (showReportForm || isEditingReport) ? (onlineHomeworkShortId.trim() || undefined) : selectedLesson.report?.onlineHomeworkShortId,
+              onlineHomeworkTitle: (showReportForm || isEditingReport) ? (onlineHomeworkTitle.trim() || undefined) : selectedLesson.report?.onlineHomeworkTitle,
               recordingLink: extraFields?.recordingLink !== undefined ? extraFields.recordingLink : (lessonRecordingLink.trim() || undefined),
               recordingLink2: extraFields?.recordingLink2 !== undefined ? extraFields.recordingLink2 : (lessonRecordingLink2.trim() || undefined),
               arabicFullGeneratedReport: arabicReportText,
@@ -2450,6 +2651,31 @@ export const LessonControlModal: React.FC = () => {
             });
           }}
           onGoToHomeScreen={closeLessonControl}
+        />
+      )}
+
+      {/* Full Online Homework Creation Overlay (returns directly to this open report with all inputs preserved) */}
+      {showOnlineHomeworkModal && (
+        <LernstudioHomeworkModal
+          isOpen={showOnlineHomeworkModal}
+          onClose={() => setShowOnlineHomeworkModal(false)}
+          sets={lernstudioSets}
+          initialTab="create"
+          initialAudienceMode={targetGroup ? 'group' : 'open'}
+          initialGroupId={targetGroup?.id}
+          initialTitle={
+            lessonWhatWasTaught.trim()
+              ? `${targetGroup?.name || selectedLesson.studentName || selectedLesson.title} — ${lessonWhatWasTaught.trim().slice(0, 40)}`
+              : `${targetGroup?.name || selectedLesson.studentName || selectedLesson.title}`
+          }
+          autoCloseOnCreate={true}
+          onAssignmentConfirmed={(assignment) => {
+            setOnlineHomeworkAssignmentId(assignment.id);
+            setOnlineHomeworkShortId(assignment.shortId || '');
+            setOnlineHomeworkTitle(assignment.title || '');
+            setShowReportForm(true);
+            setShowOnlineHomeworkModal(false);
+          }}
         />
       )}
 

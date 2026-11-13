@@ -590,29 +590,15 @@ async function writeSharedLernstudioSetChanges(changedSets: any[]): Promise<void
     const target = doc(db, 'lernstudio_sets', id);
     const localTime = Number(set.updatedAt) || Date.parse(set.updatedAtIso || '') || Date.now();
     const deleted = set.deleted === true;
-    const payloadSet = { ...set };
-    // Shared library records do not carry one teacher account's identity into another.
-    delete payloadSet.ownerUid;
-    delete payloadSet.ownerEmail;
-    const payload = JSON.stringify(payloadSet);
-    if (payload.length > 500000) {
-      throw new Error(`Lernstudio set "${id}" exceeds the shared Firestore document size limit.`);
-    }
-    const docData: any = {
-      id,
-      title: String(set.title || (deleted ? 'Deleted set' : 'Untitled set')).slice(0, 300),
-      payloadJson: payload,
-      updatedAtIso: new Date(localTime).toISOString(),
-      ...(typeof set.category === 'string' ? { category: set.category.slice(0, 100) } : {}),
-      ...(deleted ? { deleted: true } : {})
-    };
 
-    // Transactional read/compare/write prevents a slower device from overwriting a newer shared edit.
+    // Transactional read/compare/write prevents a slower device from overwriting a newer shared edit
+    // and guarantees createdByTeacherName / createdByUid remain permanently fixed on the set.
     await executeSafeFirestoreWrite(() => runTransaction(db, async (transaction) => {
       const existingSnap = await transaction.get(target);
+      let existingSet: any = null;
+      let existingData: any = null;
       if (existingSnap.exists()) {
-        const existingData = existingSnap.data();
-        let existingSet: any = null;
+        existingData = existingSnap.data();
         try {
           existingSet = existingData?.payloadJson ? JSON.parse(existingData.payloadJson) : null;
         } catch {
@@ -620,8 +606,34 @@ async function writeSharedLernstudioSetChanges(changedSets: any[]): Promise<void
         }
         const remoteTime = Number(existingSet?.updatedAt) || Date.parse(existingData?.updatedAtIso || '') || 0;
         if (remoteTime > localTime) return;
-        if (existingData?.payloadJson === payload && Boolean(existingData?.deleted) === deleted) return;
       }
+
+      const payloadSet: any = { ...set };
+      delete payloadSet.ownerUid;
+      delete payloadSet.ownerEmail;
+      if (!payloadSet.createdByTeacherName && existingSet?.createdByTeacherName) {
+        payloadSet.createdByTeacherName = existingSet.createdByTeacherName;
+      }
+      if (!payloadSet.createdByUid && existingSet?.createdByUid) {
+        payloadSet.createdByUid = existingSet.createdByUid;
+      }
+
+      const payload = JSON.stringify(payloadSet);
+      if (payload.length > 500000) {
+        throw new Error(`Lernstudio set "${id}" exceeds the shared Firestore document size limit.`);
+      }
+      if (existingData && existingData.payloadJson === payload && Boolean(existingData.deleted) === deleted) {
+        return;
+      }
+
+      const docData: any = {
+        id,
+        title: String(set.title || (deleted ? 'Deleted set' : 'Untitled set')).slice(0, 120),
+        payloadJson: payload,
+        updatedAtIso: new Date(localTime).toISOString(),
+        ...(typeof set.category === 'string' ? { category: set.category.slice(0, 45) } : {}),
+        ...(deleted ? { deleted: true } : {})
+      };
       transaction.set(target, docData);
     }));
   }
@@ -1612,19 +1624,32 @@ export async function uploadWorkspaceToGoogleCloud(
     // Check Cloud-side pause and generation marker first (cross-device protection)
     const controlState = await getCloudSyncControlState(uid);
     if (controlState.isPaused) {
-      return {
-        success: false,
-        syncedAtIso: nowIso,
-        error: 'Cloud synchronization is currently paused for this workspace. Use explicit manual reactivation.'
-      };
+      if (options?.isManual && !controlState.isError) {
+        const reactRes = await reactivateCloudSync(uid);
+        if (reactRes.success) {
+          controlState.isPaused = false;
+          controlState.syncGeneration = reactRes.newGeneration;
+        }
+      }
+      if (controlState.isPaused) {
+        return {
+          success: false,
+          syncedAtIso: nowIso,
+          error: 'Cloud synchronization is currently paused for this workspace. Use explicit manual reactivation.'
+        };
+      }
     }
     const localActiveGen = getLocalActiveGeneration();
     if (localActiveGen && controlState.syncGeneration && localActiveGen !== controlState.syncGeneration) {
-      return {
-        success: false,
-        syncedAtIso: nowIso,
-        error: 'Stale sync generation detected. Cloud workspace generation mismatch. Sync paused for safety.'
-      };
+      if (options?.isManual) {
+        setLocalActiveGeneration(controlState.syncGeneration);
+      } else {
+        return {
+          success: false,
+          syncedAtIso: nowIso,
+          error: 'Stale sync generation detected. Cloud workspace generation mismatch. Sync paused for safety.'
+        };
+      }
     }
     const targetGeneration = controlState.syncGeneration || 'gen_initial';
     if (!localActiveGen && controlState.syncGeneration) {

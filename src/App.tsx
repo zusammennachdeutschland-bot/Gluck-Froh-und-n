@@ -122,6 +122,18 @@ function MainApp() {
     if (!url) return;
     console.log('Handling deep link URL:', url);
 
+    // 0. Handle Homework Short Links (/Herr-Abdul-rahman/{SHORT_ID}) and Long Links (/homework/{id})
+    const shortMatch = url.match(/(\/Herr-Abdul-rahman\/[^/?#]+(?:\?[^#]*)?)/i);
+    if (shortMatch && shortMatch[1]) {
+      window.location.href = shortMatch[1];
+      return;
+    }
+    const longHwMatch = url.match(/(\/homework\/[^/?#]+(?:\?[^#]*)?)/i);
+    if (longHwMatch && longHwMatch[1]) {
+      window.location.href = longHwMatch[1];
+      return;
+    }
+
     // 1. Handle Lesson Deep Links: ags19://lesson/{id} or glueck://lesson/{id}
     if (url.includes('ags19://lesson/') || url.includes('glueck://lesson/')) {
       const rawId = url.includes('ags19://lesson/')
@@ -688,15 +700,49 @@ import { storage } from './services/storageService';
 import { sanitizeInitialData, clearAllLocalDataAndReset } from './services/dataSanitizer';
 import { HomeworkPlayerPage } from './pages/HomeworkPlayerPage';
 
+function isHomeworkLocation(): boolean {
+  if (typeof window === 'undefined') return false;
+  const pathname = window.location.pathname || '/';
+  const hash = (window.location.hash || '').replace(/^#/, '');
+  const search = window.location.search || '';
+  if (
+    pathname.startsWith('/homework/') ||
+    /(?:^|\/)Herr-Abdul-rahman(\/|$)/i.test(pathname) ||
+    hash.startsWith('/homework/') ||
+    /(?:^|\/)Herr-Abdul-rahman(\/|$)/i.test(hash)
+  ) {
+    return true;
+  }
+  if (search) {
+    try {
+      const params = new URLSearchParams(search);
+      if (params.get('shortId')?.trim()) return true;
+    } catch {
+      // Ignore
+    }
+  }
+  return false;
+}
+
 export default function App() {
-  const pathname = typeof window !== 'undefined' ? window.location.pathname : '/';
+  const [isHwRoute, setIsHwRoute] = useState<boolean>(() => isHomeworkLocation());
   const [initialData, setInitialData] = useState<any>(null);
   const [loadError, setLoadError] = useState(false);
   const [errorDetails, setErrorDetails] = useState('');
 
-  if (pathname.startsWith('/homework/')) {
-    return <HomeworkPlayerPage />;
-  }
+  useEffect(() => {
+    const syncRoute = () => {
+      setIsHwRoute(isHomeworkLocation());
+    };
+    window.addEventListener('popstate', syncRoute);
+    window.addEventListener('hashchange', syncRoute);
+    window.addEventListener('glueck-route-change', syncRoute);
+    return () => {
+      window.removeEventListener('popstate', syncRoute);
+      window.removeEventListener('hashchange', syncRoute);
+      window.removeEventListener('glueck-route-change', syncRoute);
+    };
+  }, []);
 
   const runDataLoader = useCallback(async (isMounted: boolean) => {
     try {
@@ -758,12 +804,17 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (isHwRoute) return;
     let isMounted = true;
     runDataLoader(isMounted);
     return () => {
       isMounted = false;
     };
-  }, [runDataLoader]);
+  }, [runDataLoader, isHwRoute]);
+
+  if (isHwRoute) {
+    return <HomeworkPlayerPage />;
+  }
 
   if (loadError) {
     return (

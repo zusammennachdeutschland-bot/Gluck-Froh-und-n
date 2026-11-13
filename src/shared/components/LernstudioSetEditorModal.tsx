@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { LernstudioSet, LernstudioItem, LernstudioLevel, LernstudioDifficulty } from '../../types/lernstudio';
 import { Group } from '../../types';
 import { PROGRAM_GRADES } from '../../utils/lernstudioTranslations';
+import { auth } from '../firebaseCloudSync';
 import { X, Plus, Trash2, Save, Sparkles } from 'lucide-react';
 
 interface Props {
@@ -23,12 +24,19 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
   onClose,
   onSaveSet
 }) => {
+  const defaultCreatorName =
+    setToEdit?.createdByTeacherName?.trim() ||
+    teacherName?.trim() ||
+    auth?.currentUser?.displayName?.trim() ||
+    '';
+
   const [title, setTitle] = useState(setToEdit?.title || '');
   const [topic, setTopic] = useState(setToEdit?.topic || '');
   const [grade, setGrade] = useState(setToEdit?.grade || '');
   const [level, setLevel] = useState<LernstudioLevel>(setToEdit?.level || 'A1');
   const [difficulty, setDifficulty] = useState<LernstudioDifficulty>(setToEdit?.difficulty || 'medium');
   const [assignedGroupId, setAssignedGroupId] = useState(setToEdit?.assignedGroupId || '');
+  const [creatorTeacherName, setCreatorTeacherName] = useState(defaultCreatorName);
   const [description, setDescription] = useState(setToEdit?.description || '');
 
   const [items, setItems] = useState<LernstudioItem[]>(
@@ -87,7 +95,11 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
     }
 
     const resolvedTeacherName =
-      setToEdit?.createdByTeacherName?.trim() || teacherName?.trim() || undefined;
+      creatorTeacherName.trim() ||
+      setToEdit?.createdByTeacherName?.trim() ||
+      teacherName?.trim() ||
+      auth?.currentUser?.displayName?.trim() ||
+      undefined;
 
     const updatedSet: LernstudioSet = {
       id: setToEdit?.id || `set_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -159,6 +171,20 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
 
             <div>
               <label className="text-xs font-bold text-text-muted block mb-1">
+                {language === 'ar' ? 'اسم المدرس مُنشئ المجموعة: *' : language === 'de' ? 'Name des Lehrers (Ersteller): *' : 'Creator Teacher Name: *'}
+              </label>
+              <input
+                type="text"
+                required
+                value={creatorTeacherName}
+                onChange={(e) => setCreatorTeacherName(e.target.value)}
+                placeholder={language === 'ar' ? 'مثال: أ. محمد / Herr Ahmed' : 'Lehrername'}
+                className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-text-muted block mb-1">
                 {language === 'ar' ? 'المستوى الأوروبي (CEFR):' : language === 'de' ? 'CEFR-Niveau:' : 'CEFR Level:'}
               </label>
               <select
@@ -206,7 +232,7 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
               </select>
             </div>
 
-            <div>
+            <div className="sm:col-span-3">
               <label className="text-xs font-bold text-text-muted block mb-1">
                 {language === 'ar' ? 'ربط بجروب معين (اختياري):' : language === 'de' ? 'Gruppe zuordnen (optional):' : 'Assign Group (optional):'}
               </label>

@@ -383,6 +383,34 @@ function encodeSubmissionDocument(submission: any): Record<string, any> {
   });
 }
 
+function encodeShortLinkDocument(assignment: any, verifiedOwnerUid: string): Record<string, any> {
+  const shortId = String(assignment.shortId || '').trim();
+  const isActive = assignment.isActive !== false && assignment.deleted !== true && assignment.status !== 'closed';
+  const nowIso = new Date().toISOString();
+  const publicSafeCopy = cleanForFirestore({
+    ...assignment,
+    ownerUid: verifiedOwnerUid,
+    isActive
+  });
+  delete publicSafeCopy.ownerEmail;
+  if (publicSafeCopy.setSnapshot && typeof publicSafeCopy.setSnapshot === 'object') {
+    const cleanSet = { ...publicSafeCopy.setSnapshot };
+    delete cleanSet.ownerEmail;
+    publicSafeCopy.setSnapshot = cleanSet;
+  }
+  return cleanForFirestore({
+    shortId,
+    assignmentId: String(assignment.id).trim(),
+    ownerUid: verifiedOwnerUid,
+    ...(assignment.shareToken ? { shareToken: String(assignment.shareToken).trim().slice(0, 128) } : {}),
+    isActive,
+    ...(assignment.deleted === true ? { deleted: true } : {}),
+    createdAt: String(assignment.createdAt || nowIso).slice(0, 60),
+    updatedAt: nowIso.slice(0, 60),
+    payloadJson: isActive ? JSON.stringify(publicSafeCopy) : JSON.stringify({ revoked: true, deleted: Boolean(assignment.deleted) })
+  });
+}
+
 // --- Authoritative Assignment Operations ---
 
 export async function getAuthoritativeAssignment(id: string): Promise<any | null> {
@@ -391,6 +419,65 @@ export async function getAuthoritativeAssignment(id: string): Promise<any | null
   const snap = await db.collection('homework_assignments').doc(id.trim()).get();
   if (!snap.exists) return null;
   return decodeAssignmentDocument(snap.data());
+}
+
+export async function getAuthoritativeShortLink(shortId: string): Promise<{
+  status: 'resolved' | 'revoked' | 'not_found' | 'invalid_id';
+  shortId: string;
+  assignmentId?: string;
+  assignment?: any;
+}> {
+  const cleanShortId = String(shortId || '').trim();
+  if (!cleanShortId || !/^[A-Za-z0-9]{6,10}$/.test(cleanShortId)) {
+    return { status: 'invalid_id', shortId: cleanShortId };
+  }
+  const db = getAuthoritativeFirestore();
+  const shortSnap = await db.collection('homework_short_links').doc(cleanShortId).get();
+  if (shortSnap.exists) {
+    const rawShort = shortSnap.data() || {};
+    const targetAssignmentId = String(rawShort.assignmentId || '').trim();
+    if (rawShort.deleted === true || rawShort.isActive === false) {
+      return { status: 'revoked', shortId: cleanShortId, assignmentId: targetAssignmentId || undefined };
+    }
+    if (targetAssignmentId) {
+      const parentHw = await getAuthoritativeAssignment(targetAssignmentId);
+      if (parentHw) {
+        if (parentHw.deleted === true || parentHw.isActive === false || parentHw.status === 'closed') {
+          return { status: 'revoked', shortId: cleanShortId, assignmentId: targetAssignmentId };
+        }
+        return {
+          status: 'resolved',
+          shortId: cleanShortId,
+          assignmentId: parentHw.id,
+          assignment: { ...parentHw, shortId: cleanShortId }
+        };
+      }
+    }
+    if (typeof rawShort.payloadJson === 'string') {
+      try {
+        const parsed = JSON.parse(rawShort.payloadJson);
+        if (parsed?.revoked === true || parsed?.deleted === true || parsed?.isActive === false || parsed?.status === 'closed') {
+          return { status: 'revoked', shortId: cleanShortId, assignmentId: targetAssignmentId || parsed?.id };
+        }
+        if (parsed && parsed.id) {
+          return {
+            status: 'resolved',
+            shortId: cleanShortId,
+            assignmentId: String(parsed.id),
+            assignment: {
+              ...parsed,
+              shortId: cleanShortId,
+              ...(rawShort.ownerUid ? { ownerUid: String(rawShort.ownerUid).trim() } : {}),
+              ...(rawShort.shareToken ? { shareToken: String(rawShort.shareToken).trim() } : {})
+            }
+          };
+        }
+      } catch {
+        // Ignore malformed payloadJson
+      }
+    }
+  }
+  return { status: 'not_found', shortId: cleanShortId };
 }
 
 export async function listAuthoritativeAssignments(ownerUid: string): Promise<any[]> {
@@ -411,14 +498,30 @@ export async function saveAuthoritativeAssignment(assignment: any, verifiedOwner
   }
 
   const cleanId = String(assignment.id).trim();
+  const cleanShortId = assignment.shortId ? String(assignment.shortId).trim() : '';
+  if (cleanShortId && !/^[A-Za-z0-9]{6,10}$/.test(cleanShortId)) {
+    const err: any = new Error('Invalid shortId format: must be 6-10 alphanumeric characters');
+    err.status = 400;
+    throw err;
+  }
+
   const db = getAuthoritativeFirestore();
   const docRef = db.collection('homework_assignments').doc(cleanId);
-  const cleaned = cleanForFirestore({ ...assignment, id: cleanId, ownerUid: verifiedOwnerUid, isActive: assignment.isActive !== false, updatedAt: new Date().toISOString() });
+  const shortRef = cleanShortId ? db.collection('homework_short_links').doc(cleanShortId) : null;
+  const cleaned = cleanForFirestore({
+    ...assignment,
+    id: cleanId,
+    ...(cleanShortId ? { shortId: cleanShortId } : {}),
+    ownerUid: verifiedOwnerUid,
+    isActive: assignment.isActive !== false && assignment.status !== 'closed' && assignment.deleted !== true,
+    updatedAt: new Date().toISOString()
+  });
   delete cleaned.ownerEmail;
   const encoded = encodeAssignmentDocument(cleaned);
-  // Owner check and write happen atomically to prevent cross-account ID collisions.
+  // Owner check, short-link collision check, and write happen atomically to prevent cross-account ID or shortId collisions.
   await db.runTransaction(async (transaction: any) => {
     const existingSnap = await transaction.get(docRef);
+    let previousShortId = '';
     if (existingSnap.exists) {
       const existing = decodeAssignmentDocument(existingSnap.data());
       if (String(existing?.ownerUid || '').trim() !== verifiedOwnerUid) {
@@ -427,8 +530,40 @@ export async function saveAuthoritativeAssignment(assignment: any, verifiedOwner
       if (existing?.deleted === true) {
         const err: any = new Error('This homework was deleted and cannot be reactivated. Create a new homework instead.'); err.status = 410; throw err;
       }
+      previousShortId = existing?.shortId ? String(existing.shortId).trim() : '';
+    }
+    if (shortRef) {
+      const existingShortSnap = await transaction.get(shortRef);
+      if (existingShortSnap.exists) {
+        const shortData = existingShortSnap.data() || {};
+        if (
+          String(shortData.assignmentId || '').trim() !== cleanId ||
+          String(shortData.ownerUid || '').trim() !== verifiedOwnerUid
+        ) {
+          const err: any = new Error('Conflict: Short homework code is already in use by another assignment.');
+          err.status = 409;
+          err.code = 'SHORT_ID_COLLISION';
+          throw err;
+        }
+      }
     }
     transaction.set(docRef, encoded);
+    if (shortRef) {
+      transaction.set(shortRef, encodeShortLinkDocument(cleaned, verifiedOwnerUid));
+    }
+    if (previousShortId && previousShortId !== cleanShortId && /^[A-Za-z0-9]{6,10}$/.test(previousShortId)) {
+      const oldShortRef = db.collection('homework_short_links').doc(previousShortId);
+      transaction.set(oldShortRef, {
+        shortId: previousShortId,
+        assignmentId: cleanId,
+        ownerUid: verifiedOwnerUid,
+        isActive: false,
+        deleted: true,
+        createdAt: String(cleaned.createdAt || new Date().toISOString()).slice(0, 60),
+        updatedAt: new Date().toISOString().slice(0, 60),
+        payloadJson: JSON.stringify({ revoked: true, deleted: true })
+      });
+    }
   });
   return cleaned;
 }
@@ -444,9 +579,24 @@ export async function softDeleteAuthoritativeAssignment(id: string, verifiedOwne
     const existing = decodeAssignmentDocument(snap.data());
     if (existing.ownerUid !== verifiedOwnerUid) { const err: any = new Error('Forbidden: This homework belongs to another teacher account'); err.status = 403; throw err; }
     if (existing.deleted === true) { deletedAssignment = existing; return; }
-    deletedAssignment = cleanForFirestore({ ...existing, ownerUid: verifiedOwnerUid, deleted: true, isActive: false, status: 'deleted', deletedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    const nowIso = new Date().toISOString();
+    deletedAssignment = cleanForFirestore({ ...existing, ownerUid: verifiedOwnerUid, deleted: true, isActive: false, status: 'deleted', deletedAt: nowIso, updatedAt: nowIso });
     delete deletedAssignment.ownerEmail;
     transaction.set(docRef, encodeAssignmentDocument(deletedAssignment));
+    const existingShortId = existing?.shortId ? String(existing.shortId).trim() : '';
+    if (existingShortId && /^[A-Za-z0-9]{6,10}$/.test(existingShortId)) {
+      const shortRef = db.collection('homework_short_links').doc(existingShortId);
+      transaction.set(shortRef, {
+        shortId: existingShortId,
+        assignmentId: String(existing.id).trim(),
+        ownerUid: verifiedOwnerUid,
+        isActive: false,
+        deleted: true,
+        createdAt: String(existing.createdAt || nowIso).slice(0, 60),
+        updatedAt: nowIso.slice(0, 60),
+        payloadJson: JSON.stringify({ revoked: true, deleted: true })
+      });
+    }
   });
   return deletedAssignment;
 }

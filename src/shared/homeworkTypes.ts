@@ -53,6 +53,43 @@ export interface HomeworkQuestionResponse {
   timeSpentSeconds: number;
 }
 
+export type HomeworkBonusCardType =
+  | 'gold_bonus'
+  | 'lucky_card'
+  | 'double_points'
+  | 'time_bonus'
+  | 'time_freeze'
+  | 'slow_motion'
+  | 'oops'
+  | 'bad_luck';
+
+export interface HomeworkAppliedBonusCard {
+  roundId: string;
+  cardType: HomeworkBonusCardType;
+  titleEn: string;
+  titleAr: string;
+  effectSummaryAr: string;
+  pointsDelta: number;
+  timeDeltaSeconds: number;
+  appliedAt: string;
+  triggerQuestionId: string;
+}
+
+export interface HomeworkGamificationSnapshot {
+  points: number;
+  streak: number;
+  maxStreak: number;
+  doublePointsActive: boolean;
+  timeRemainingSeconds: number;
+  initialTimerSeconds: number;
+  freezeRemainingSeconds: number;
+  slowMotionRemainingSeconds: number;
+  slowMotionTickParity?: number;
+  processedQuestionIds: string[];
+  appliedBonusRoundIds: string[];
+  bonusHistory: HomeworkAppliedBonusCard[];
+}
+
 export interface HomeworkSubmission {
   id: string; // e.g. "sub_abc123"
   assignmentId: string;
@@ -80,11 +117,13 @@ export interface HomeworkSubmission {
   maxStreak?: number;
   completedStudyPhase?: boolean;
   cloudSynced?: boolean;
+  gamification?: HomeworkGamificationSnapshot;
   responses: HomeworkQuestionResponse[];
 }
 
 export interface HomeworkAssignment {
   id: string; // e.g. "hw_abc123"
+  shortId?: string; // 7-char URL-safe short code for /Herr-Abdul-rahman/{shortId}
   ownerUid?: string; // Teacher Firebase Auth UID (mandatory security authority for cloud sync)
   ownerEmail?: string; // Optional teacher email (display/audit only)
   shareToken?: string; // Public student share token
@@ -116,6 +155,34 @@ export interface HomeworkAssignment {
   cloudCreatePending?: boolean; // Only true for a new assignment created offline and safe to retry under its owner account.
 }
 
+export interface HomeworkShortLinkRecord {
+  shortId: string;
+  assignmentId: string;
+  ownerUid: string;
+  shareToken?: string;
+  isActive: boolean;
+  deleted?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+  assignmentSnapshot?: HomeworkAssignment;
+}
+
+export type HomeworkShortLinkResolutionStatus =
+  | 'resolved'
+  | 'revoked'
+  | 'not_found'
+  | 'invalid_id'
+  | 'network_error';
+
+export interface HomeworkShortLinkResolutionResult {
+  status: HomeworkShortLinkResolutionStatus;
+  shortId: string;
+  assignmentId?: string;
+  assignment?: HomeworkAssignment;
+  error?: string;
+  errorMessageAr?: string;
+}
+
 export interface HomeworkSummaryStats {
   assignmentId: string;
   totalSubmissions: number;
@@ -129,3 +196,4 @@ export interface HomeworkSummaryStats {
     accuracyPercentage: number;
   }[];
 }
+

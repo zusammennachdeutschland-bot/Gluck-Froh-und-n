@@ -3,6 +3,7 @@ import {
   HomeworkSubmission,
   HomeworkQuestionType,
   HomeworkAudienceMode,
+  HomeworkShortLinkResolutionResult,
   AssignedStudentSnapshot,
   DEFAULT_HOMEWORK_QUESTION_TYPES
 } from './homeworkTypes';
@@ -17,6 +18,9 @@ import {
   subscribeAssignmentsFromFirestore,
   deleteAssignmentFromFirestore,
   deleteSubmissionsForAssignmentFromFirestore,
+  saveShortLinkToFirestore,
+  revokeShortLinkInFirestore,
+  fetchShortLinkFromFirestore,
   saveSubmissionToFirestore,
   fetchSubmissionsForAssignmentFromFirestore,
   fetchAllSubmissionsFromFirestore,
@@ -42,6 +46,9 @@ export {
   subscribeAssignmentsFromFirestore,
   deleteAssignmentFromFirestore,
   deleteSubmissionsForAssignmentFromFirestore,
+  saveShortLinkToFirestore,
+  revokeShortLinkInFirestore,
+  fetchShortLinkFromFirestore,
   saveSubmissionToFirestore,
   fetchSubmissionsForAssignmentFromFirestore,
   fetchAllSubmissionsFromFirestore,
@@ -60,6 +67,7 @@ export const LEGACY_ASSIGNMENTS_KEY = 'glueck_hw_assignments_v2';
 export const LEGACY_SUBMISSIONS_KEY = 'glueck_hw_submissions_v2';
 export const LEGACY_DELETED_ASSIGNMENTS_KEY = 'glueck_hw_deleted_ids_v2';
 export const QUARANTINED_LEGACY_HOMEWORK_KEY = 'glueck_hw_quarantined_legacy_v3';
+export const REVOKED_SHORT_IDS_STORAGE_KEY = 'glueck_hw_revoked_short_ids_v1';
 export const UNAUTHENTICATED_HOMEWORK_SCOPE = 'local_unauthenticated';
 const OPEN_PARTICIPANT_PREFIX = 'glueck_hw_open_pid_';
 const STUDENT_DEVICE_TOKEN_PREFIX = 'glueck_hw_dev_tok_';
@@ -972,10 +980,11 @@ export interface HomeworkCloudTransportOverride {
   saveAssignment?: (hw: HomeworkAssignment) => Promise<boolean>;
   saveSubmission?: (sub: HomeworkSubmission) => Promise<boolean>;
   fetchAssignment?: (id: string) => Promise<HomeworkAssignment | null>;
+  fetchShortLink?: (shortId: string) => Promise<any>;
   fetchSubmissionsForAssignment?: (id: string) => Promise<HomeworkSubmission[]>;
   fetchAllAssignments?: (ownerUid?: string) => Promise<HomeworkAssignment[]>;
   fetchAllSubmissions?: (ownerUid?: string) => Promise<HomeworkSubmission[]>;
-  deleteAssignment?: (id: string, ownerUid?: string) => Promise<boolean>;
+  deleteAssignment?: (id: string, ownerUid?: string, shortIdHint?: string) => Promise<boolean>;
   deleteSubmissionsForAssignment?: (id: string, ownerUid?: string) => Promise<boolean>;
 }
 
@@ -1007,6 +1016,11 @@ const activeFetchAssignmentFromCloud = (id: string) =>
     ? testCloudTransport.fetchAssignment(id)
     : fetchAssignmentFromFirestore(id);
 
+const activeFetchShortLinkFromCloud = (shortId: string) =>
+  testCloudTransport?.fetchShortLink
+    ? testCloudTransport.fetchShortLink(shortId)
+    : fetchShortLinkFromFirestore(shortId);
+
 const activeFetchSubmissionsForAssignmentFromCloud = (id: string) =>
   testCloudTransport?.fetchSubmissionsForAssignment
     ? testCloudTransport.fetchSubmissionsForAssignment(id)
@@ -1022,15 +1036,79 @@ const activeFetchAllSubmissionsFromCloud = (ownerUid?: string) =>
     ? testCloudTransport.fetchAllSubmissions(ownerUid)
     : fetchAllSubmissionsFromFirestore(ownerUid);
 
-const activeDeleteAssignmentFromCloud = (id: string, ownerUid?: string) =>
+const activeDeleteAssignmentFromCloud = (id: string, ownerUid?: string, shortIdHint?: string) =>
   testCloudTransport?.deleteAssignment
-    ? testCloudTransport.deleteAssignment(id, ownerUid)
-    : deleteAssignmentFromFirestore(id, ownerUid);
+    ? testCloudTransport.deleteAssignment(id, ownerUid, shortIdHint)
+    : deleteAssignmentFromFirestore(id, ownerUid, shortIdHint);
 
 const activeDeleteSubmissionsForAssignmentFromCloud = (id: string, ownerUid?: string) =>
   testCloudTransport?.deleteSubmissionsForAssignment
     ? testCloudTransport.deleteSubmissionsForAssignment(id, ownerUid)
     : deleteSubmissionsForAssignmentFromFirestore(id, ownerUid);
+
+export function getRevokedShortIdsLocally(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(REVOKED_SHORT_IDS_STORAGE_KEY);
+    const parsed: string[] = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((s) => typeof s === 'string' && s.length > 0) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function isShortIdRevokedLocally(shortId?: string | null): boolean {
+  const clean = (shortId || '').trim();
+  if (!clean) return false;
+  return getRevokedShortIdsLocally().has(clean);
+}
+
+export function markShortIdRevokedLocally(shortId?: string | null): void {
+  const clean = (shortId || '').trim();
+  if (typeof window === 'undefined' || !clean) return;
+  try {
+    const set = getRevokedShortIdsLocally();
+    set.add(clean);
+    localStorage.setItem(REVOKED_SHORT_IDS_STORAGE_KEY, JSON.stringify(Array.from(set).slice(-1000)));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+const inFlightAssignmentSaves = new Set<string>();
+const recentlyConfirmedAssignmentSaves = new Map<string, number>();
+
+function markAssignmentRecentlySaved(assignmentId: string, ttlMs = 60000): void {
+  if (!assignmentId) return;
+  const expiry = Date.now() + ttlMs;
+  const safeId = sanitizeDocId(assignmentId);
+  recentlyConfirmedAssignmentSaves.set(assignmentId, expiry);
+  recentlyConfirmedAssignmentSaves.set(safeId, expiry);
+}
+
+function clearAssignmentRecentlySaved(assignmentId: string): void {
+  if (!assignmentId) return;
+  const safeId = sanitizeDocId(assignmentId);
+  recentlyConfirmedAssignmentSaves.delete(assignmentId);
+  recentlyConfirmedAssignmentSaves.delete(safeId);
+}
+
+function isAssignmentProtectedFromRemotePrune(assignmentId: string): boolean {
+  if (!assignmentId) return false;
+  const safeId = sanitizeDocId(assignmentId);
+  if (inFlightAssignmentSaves.has(assignmentId) || inFlightAssignmentSaves.has(safeId)) {
+    return true;
+  }
+  const now = Date.now();
+  const exp1 = recentlyConfirmedAssignmentSaves.get(assignmentId) || 0;
+  const exp2 = recentlyConfirmedAssignmentSaves.get(safeId) || 0;
+  if (exp1 > now || exp2 > now) {
+    return true;
+  }
+  if (exp1 > 0) recentlyConfirmedAssignmentSaves.delete(assignmentId);
+  if (exp2 > 0) recentlyConfirmedAssignmentSaves.delete(safeId);
+  return false;
+}
 
 export function saveLocalAssignment(hw: HomeworkAssignment, syncCloud = true): void {
   if (typeof window === 'undefined' || !hw || !hw.id) return;
@@ -1043,7 +1121,11 @@ export function saveLocalAssignment(hw: HomeworkAssignment, syncCloud = true): v
     return;
   }
 
-  if ((hw as any).deleted) { deleteLocalAssignment(hw.id, false); return; }
+  if ((hw as any).deleted) {
+    if (hw.shortId) markShortIdRevokedLocally(hw.shortId);
+    deleteLocalAssignment(hw.id, false);
+    return;
+  }
   if (isAssignmentDeletedLocally(hw.id, scopeUid)) return;
 
   const currentList = getLocalAssignments(scopeUid);
@@ -1056,17 +1138,32 @@ export function saveLocalAssignment(hw: HomeworkAssignment, syncCloud = true): v
   const resolvedOwnerUid = activeUid || recordOwnerUid || existing?.ownerUid || undefined;
   const resolvedOwnerEmail =
     hw.ownerEmail?.trim() || getCurrentHomeworkOwnerEmail() || existing?.ownerEmail || undefined;
+  const resolvedShortId = hw.shortId?.trim() || existing?.shortId?.trim() || undefined;
+
+  if ((hw.isActive === false || hw.status === 'closed') && resolvedShortId) {
+    markShortIdRevokedLocally(resolvedShortId);
+  }
 
   const normalizedHw = normalizeHomeworkAssignment({
     ...existing,
     ...hw,
+    ...(resolvedShortId ? { shortId: resolvedShortId } : {}),
     ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
     ...(resolvedOwnerEmail ? { ownerEmail: resolvedOwnerEmail } : {})
   });
+  const resolvedCloudSynced = syncCloud
+    ? false
+    : (hw.cloudSynced ?? existing?.cloudSynced ?? true);
+  const resolvedCreatePending =
+    (hw as any).cloudCreatePending !== undefined
+      ? Boolean((hw as any).cloudCreatePending)
+      : resolvedCloudSynced === false && Boolean((existing as any)?.cloudCreatePending);
+
   const initialRecord: HomeworkAssignment = {
     ...normalizedHw,
-    cloudSynced: syncCloud ? false : (hw.cloudSynced ?? existing?.cloudSynced ?? true)
-  };
+    cloudSynced: resolvedCloudSynced,
+    ...(resolvedCreatePending ? { cloudCreatePending: true } : { cloudCreatePending: false })
+  } as HomeworkAssignment;
 
   const current = currentList.filter((a) => a.id !== hw.id);
   current.unshift(initialRecord);
@@ -1074,13 +1171,15 @@ export function saveLocalAssignment(hw: HomeworkAssignment, syncCloud = true): v
 
   if (syncCloud) {
     const scopeAtStart = scopeUid;
+    markAssignmentRecentlySaved(hw.id);
     activeSaveAssignmentToCloud(initialRecord)
       .then((ok) => {
         if (!ok) return;
         // Abort if account switched while cloud write was in flight
         if (getActiveHomeworkScopeUid() !== scopeAtStart) return;
+        markAssignmentRecentlySaved(hw.id);
         const updated = getLocalAssignments(scopeAtStart).map((a) =>
-          a.id === hw.id ? { ...a, cloudSynced: true } : a
+          a.id === hw.id ? ({ ...a, cloudSynced: true, cloudCreatePending: false } as HomeworkAssignment) : a
         );
         writeLocalAssignmentsList(updated, scopeAtStart);
         notifyHomeworkSyncStateChanged();
@@ -1101,7 +1200,8 @@ export async function saveAssignmentWithConfirmation(hw: HomeworkAssignment): Pr
     throw new Error('لا يمكن حفظ أو تعديل واجب تابع لحساب آخر.');
   }
 
-  const existing = getLocalAssignments(scopeAtStart).find((a) => a.id === hw.id);
+  const localList = getLocalAssignments(scopeAtStart);
+  const existing = localList.find((a) => a.id === hw.id);
   if (existing?.ownerUid && recordOwnerUid && existing.ownerUid !== recordOwnerUid) {
     throw new Error('لا يمكن تغيير ملكية الواجب بعد إنشائه.');
   }
@@ -1110,27 +1210,81 @@ export async function saveAssignmentWithConfirmation(hw: HomeworkAssignment): Pr
   const resolvedOwnerEmail =
     hw.ownerEmail?.trim() || getCurrentHomeworkOwnerEmail() || existing?.ownerEmail || undefined;
 
-  const normalizedHw = normalizeHomeworkAssignment({
+  const existingShortIds = new Set(
+    localList
+      .filter((a) => a.id !== hw.id && a.shortId)
+      .map((a) => String(a.shortId).trim())
+  );
+  let candidateShortId = (hw.shortId || existing?.shortId || '').trim();
+  if (!isValidHomeworkShortId(candidateShortId) || existingShortIds.has(candidateShortId)) {
+    candidateShortId = createHomeworkShortId(7, existingShortIds);
+  }
+
+  let normalizedHw = normalizeHomeworkAssignment({
     ...existing,
     ...hw,
+    shortId: candidateShortId,
     ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
     ...(resolvedOwnerEmail ? { ownerEmail: resolvedOwnerEmail } : {})
   });
 
-  saveLocalAssignment({ ...normalizedHw, cloudSynced: false }, false);
-  const cloudOk = await activeSaveAssignmentToCloud(normalizedHw);
-  const finalHw: HomeworkAssignment = {
-    ...normalizedHw,
-    cloudSynced: cloudOk,
-    // Only assignments created through this confirmed save flow are eligible for safe offline retry.
-    // Legacy local-only records intentionally remain ineligible to prevent resurrection.
-    ...(cloudOk ? { cloudCreatePending: false } : { cloudCreatePending: true })
-  };
-  if (getActiveHomeworkScopeUid() === scopeAtStart) {
-    saveLocalAssignment(finalHw, false);
-    notifyHomeworkSyncStateChanged();
+  const safeId = sanitizeDocId(normalizedHw.id);
+  inFlightAssignmentSaves.add(normalizedHw.id);
+  inFlightAssignmentSaves.add(safeId);
+  markAssignmentRecentlySaved(normalizedHw.id);
+
+  try {
+    saveLocalAssignment(
+      { ...normalizedHw, cloudSynced: false, cloudCreatePending: true } as HomeworkAssignment,
+      false
+    );
+
+    let cloudOk = false;
+    const triedShortIds = new Set<string>(existingShortIds);
+    for (let attempt = 0; attempt < 5; attempt++) {
+      triedShortIds.add(normalizedHw.shortId || '');
+      try {
+        cloudOk = await activeSaveAssignmentToCloud(normalizedHw);
+        break;
+      } catch (err: any) {
+        const isCollision =
+          err?.code === 'SHORT_ID_COLLISION' ||
+          String(err?.message || '').includes('SHORT_ID_COLLISION') ||
+          err?.status === 409;
+        if (isCollision && attempt < 4) {
+          const freshShortId = createHomeworkShortId(7, triedShortIds);
+          normalizedHw = {
+            ...normalizedHw,
+            shortId: freshShortId
+          };
+          saveLocalAssignment(
+            { ...normalizedHw, cloudSynced: false, cloudCreatePending: true } as HomeworkAssignment,
+            false
+          );
+          continue;
+        }
+        cloudOk = false;
+        break;
+      }
+    }
+
+    markAssignmentRecentlySaved(normalizedHw.id);
+    const finalHw: HomeworkAssignment = {
+      ...normalizedHw,
+      cloudSynced: cloudOk,
+      // Only assignments created through this confirmed save flow are eligible for safe offline retry.
+      // Legacy local-only records intentionally remain ineligible to prevent resurrection.
+      ...(cloudOk ? { cloudCreatePending: false } : { cloudCreatePending: true })
+    };
+    if (getActiveHomeworkScopeUid() === scopeAtStart) {
+      saveLocalAssignment(finalHw, false);
+      notifyHomeworkSyncStateChanged();
+    }
+    return { assignment: finalHw, cloudSynced: cloudOk };
+  } finally {
+    inFlightAssignmentSaves.delete(normalizedHw.id);
+    inFlightAssignmentSaves.delete(safeId);
   }
-  return { assignment: finalHw, cloudSynced: cloudOk };
 }
 
 export function deleteLocalAssignment(assignmentId: string, syncCloud = true): void {
@@ -1146,6 +1300,12 @@ export function deleteLocalAssignment(assignmentId: string, syncCloud = true): v
     return;
   }
 
+  const existingShortId = existing?.shortId?.trim() || undefined;
+  if (existingShortId) {
+    markShortIdRevokedLocally(existingShortId);
+  }
+
+  clearAssignmentRecentlySaved(assignmentId);
   markAssignmentDeletedLocally(assignmentId, scopeUid);
   try {
     const remainingAssignments = getLocalAssignments(scopeUid).filter(
@@ -1160,7 +1320,14 @@ export function deleteLocalAssignment(assignmentId: string, syncCloud = true): v
 
     window.dispatchEvent(
       new CustomEvent('gluck-homework-deleted', {
-        detail: { assignmentId, safeId, remainingAssignments, remainingSubmissions, ownerUid: activeUid }
+        detail: {
+          assignmentId,
+          safeId,
+          shortId: existingShortId,
+          remainingAssignments,
+          remainingSubmissions,
+          ownerUid: activeUid
+        }
       })
     );
     notifyHomeworkSyncStateChanged();
@@ -1168,7 +1335,7 @@ export function deleteLocalAssignment(assignmentId: string, syncCloud = true): v
     // Ignore storage errors
   }
   if (syncCloud) {
-    activeDeleteAssignmentFromCloud(assignmentId, activeUid || undefined).catch(() => {});
+    activeDeleteAssignmentFromCloud(assignmentId, activeUid || undefined, existingShortId).catch(() => {});
     activeDeleteSubmissionsForAssignmentFromCloud(assignmentId, activeUid || undefined).catch(() => {});
   }
 }
@@ -1872,17 +2039,127 @@ export function createHomeworkShareToken(): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+export const HOMEWORK_SHORT_LINK_PATH_SEGMENT = 'Herr-Abdul-rahman';
+const SHORT_ID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+
 /**
- * Generates the student/parent homework link using the Vercel public domain.
- * Encodes the audience mode ('am') and group metadata ('gid', 'gn') without exposing student lists.
+ * Validates that a candidate shortId is a 6–10 character alphanumeric URL-safe code.
  */
-export function buildHomeworkShareUrl(hw: HomeworkAssignment, overrideDomain?: string): string {
+export function isValidHomeworkShortId(shortId: string | null | undefined): boolean {
+  if (!shortId || typeof shortId !== 'string') return false;
+  return /^[A-Za-z0-9]{6,10}$/.test(shortId.trim());
+}
+
+/**
+ * Extracts `{SHORT_ID}` if the pathname/hash matches `/Herr-Abdul-rahman/{SHORT_ID}`.
+ * Returns an empty string if the path is not a short homework route.
+ */
+export function extractShortIdFromPathname(pathname?: string): string {
+  const candidates: string[] = [];
+  if (typeof pathname === 'string') {
+    candidates.push(pathname);
+  } else if (typeof window !== 'undefined') {
+    candidates.push(window.location.pathname || '');
+    if (window.location.hash) {
+      candidates.push(window.location.hash.replace(/^#/, ''));
+    }
+  }
+
+  for (const rawPath of candidates) {
+    const match = rawPath.match(/(?:^|\/)Herr-Abdul-rahman\/([^/?#]+)\/?/i);
+    if (match && match[1]) {
+      try {
+        return decodeURIComponent(match[1]).trim();
+      } catch {
+        return match[1].trim();
+      }
+    }
+  }
+
+  if (pathname === undefined && typeof window !== 'undefined' && window.location.search) {
+    try {
+      const qShort = new URLSearchParams(window.location.search).get('shortId')?.trim() || '';
+      if (qShort) return qShort;
+    } catch {
+      // Ignore URLSearchParams errors
+    }
+  }
+
+  return '';
+}
+
+/**
+ * Generates a cryptographically random 7-character URL-safe alphanumeric short ID.
+ * Checks against local assignments and any caller-provided set to prevent collisions.
+ */
+export function createHomeworkShortId(
+  length = 7,
+  existingShortIds?: Iterable<string>
+): string {
+  const cryptoApi = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined;
+  if (!cryptoApi || typeof cryptoApi.getRandomValues !== 'function') {
+    throw new Error('Secure random number generation is unavailable; cannot create a homework short ID.');
+  }
+  const safeLength = Math.min(10, Math.max(6, Math.floor(length || 7)));
+  const knownIds = new Set<string>();
+  if (existingShortIds) {
+    for (const id of existingShortIds) {
+      if (id) knownIds.add(String(id).trim());
+    }
+  }
+  for (const localHw of getLocalAssignments()) {
+    if (localHw?.shortId) {
+      knownIds.add(String(localHw.shortId).trim());
+    }
+  }
+  for (const revokedId of getRevokedShortIdsLocally()) {
+    if (revokedId) knownIds.add(String(revokedId).trim());
+  }
+
+  for (let attempt = 0; attempt < 32; attempt++) {
+    const bytes = new Uint8Array(safeLength);
+    cryptoApi.getRandomValues(bytes);
+    let candidate = '';
+    for (let i = 0; i < safeLength; i++) {
+      candidate += SHORT_ID_ALPHABET[bytes[i] % SHORT_ID_ALPHABET.length];
+    }
+    if (!knownIds.has(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error('Failed to generate a unique homework short ID after multiple attempts.');
+}
+
+/**
+ * Formats the canonical internal short homework link:
+ * `https://YOUR_DOMAIN/Herr-Abdul-rahman/{SHORT_ID}`
+ */
+export function buildShortHomeworkShareUrl(
+  hwOrShortId: HomeworkAssignment | { shortId?: string } | string,
+  overrideDomain?: string
+): string {
+  const baseDomain = (overrideDomain || getVercelPublicDomain()).replace(/\/+$/, '');
+  const rawShortId =
+    typeof hwOrShortId === 'string'
+      ? hwOrShortId.trim()
+      : (hwOrShortId?.shortId || '').trim();
+  if (!isValidHomeworkShortId(rawShortId)) {
+    throw new Error('Cannot build short homework URL without a valid shortId.');
+  }
+  return `${baseDomain}/${HOMEWORK_SHORT_LINK_PATH_SEGMENT}/${rawShortId}`;
+}
+
+/**
+ * Builds the legacy long homework link (`/homework/{id}?...`) for backward compatibility.
+ */
+export function buildLegacyHomeworkShareUrl(hw: HomeworkAssignment, overrideDomain?: string): string {
   const baseDomain = (overrideDomain || getVercelPublicDomain()).replace(/\/+$/, '');
   const mode = resolveAssignmentAudienceMode(hw);
   const params = new URLSearchParams();
   params.set('am', mode);
   if (hw.shareToken?.trim()) params.set('token', hw.shareToken.trim());
-  if (hw.ownerUid?.trim()) params.set('ou', hw.ownerUid.trim());
+  const resolvedOwnerUid = hw.ownerUid?.trim() || getCurrentHomeworkOwnerUid() || '';
+  if (resolvedOwnerUid) params.set('ou', resolvedOwnerUid);
   if (mode === 'group' && hw.groupId) {
     params.set('gid', hw.groupId);
     if (hw.groupName) params.set('gn', hw.groupName);
@@ -1914,7 +2191,327 @@ export function buildHomeworkShareUrl(hw: HomeworkAssignment, overrideDomain?: s
   if (hw.selectedItemIds && hw.selectedItemIds.length > 0) {
     params.set('ids', hw.selectedItemIds.join(','));
   }
+  if (Array.isArray(hw.setSnapshot?.items) && hw.setSnapshot.items.length > 0) {
+    const selectedSet =
+      Array.isArray(hw.selectedItemIds) && hw.selectedItemIds.length > 0
+        ? new Set(hw.selectedItemIds)
+        : null;
+    const targetItems = selectedSet
+      ? hw.setSnapshot.items.filter((it: any) => it && selectedSet.has(it.id))
+      : hw.setSnapshot.items;
+    const compactWords = (targetItems.length > 0 ? targetItems : hw.setSnapshot.items)
+      .slice(0, 40)
+      .filter((it: any) => it && it.id && it.german && it.arabic)
+      .map((it: any) => {
+        const cleanId = String(it.id).trim().replace(/[|~]/g, '_');
+        const cleanDe = String(it.german).trim().replace(/[|~]/g, ' ');
+        const cleanAr = String(it.arabic).trim().replace(/[|~]/g, ' ');
+        const cleanEmoji = String(it.emoji || '📘').trim().replace(/[|~]/g, '');
+        return `${cleanId}~${cleanDe}~${cleanAr}~${cleanEmoji}`;
+      })
+      .join('|');
+    if (compactWords && compactWords.length <= 1800) {
+      params.set('w', compactWords);
+    }
+  }
   return `${baseDomain}/homework/${hw.id}?${params.toString()}`;
+}
+
+/**
+ * Generates the student/parent homework share link using the Vercel public domain.
+ * Returns `https://YOUR_DOMAIN/Herr-Abdul-rahman/{SHORT_ID}` when `shortId` is present on the assignment,
+ * while preserving backward compatibility for legacy assignments without `shortId`.
+ */
+export function buildHomeworkShareUrl(hw: HomeworkAssignment, overrideDomain?: string): string {
+  if (hw && isValidHomeworkShortId(hw.shortId)) {
+    return buildShortHomeworkShareUrl(hw, overrideDomain);
+  }
+  return buildLegacyHomeworkShareUrl(hw, overrideDomain);
+}
+
+/**
+ * Resolves a short homework ID (`Herr-Abdul-rahman/{SHORT_ID}`) across:
+ * 1. Cloud transport override (when testing) or Express API (`/api/homework/short/:shortId`)
+ * 2. Local storage cache (`dl_homework_assignments`)
+ * 3. Direct Firebase Firestore lookup (`homework_short_links/{shortId}`)
+ */
+export async function resolveHomeworkShortLink(
+  shortId: string
+): Promise<HomeworkShortLinkResolutionResult> {
+  const cleanShortId = String(shortId || '').trim();
+  if (!isValidHomeworkShortId(cleanShortId)) {
+    return {
+      status: 'invalid_id',
+      shortId: cleanShortId,
+      error: 'رابط الواجب غير صالح — يرجى التأكد من نسخ الرابط بالكامل.'
+    };
+  }
+
+  if (isShortIdRevokedLocally(cleanShortId)) {
+    return {
+      status: 'revoked',
+      shortId: cleanShortId,
+      error: 'تم حذف هذا الواجب أو إيقاف الرابط من قِبل المعلم.'
+    };
+  }
+
+  let encounteredNetworkFailure = false;
+
+  // 1. If a test cloud transport override is registered, query it first
+  if (testCloudTransport?.fetchShortLink) {
+    try {
+      const overrideDoc: any = await testCloudTransport.fetchShortLink(cleanShortId);
+      if (overrideDoc) {
+        if (overrideDoc.status === 'resolved' && overrideDoc.assignment) {
+          return {
+            status: 'resolved',
+            shortId: cleanShortId,
+            assignment: normalizeHomeworkAssignment({
+              ...overrideDoc.assignment,
+              shortId: cleanShortId
+            })
+          };
+        }
+        if (
+          overrideDoc.deleted === true ||
+          overrideDoc.isActive === false ||
+          overrideDoc.revoked === true ||
+          overrideDoc.status === 'revoked' ||
+          overrideDoc.status === 'deleted' ||
+          overrideDoc.status === 'closed'
+        ) {
+          markShortIdRevokedLocally(cleanShortId);
+          return {
+            status: 'revoked',
+            shortId: cleanShortId,
+            error: 'تم حذف هذا الواجب أو إيقاف الرابط من قِبل المعلم.'
+          };
+        }
+        const embeddedHw = overrideDoc.assignment || (overrideDoc.setSnapshot ? overrideDoc : null);
+        if (embeddedHw && embeddedHw.setSnapshot) {
+          if (
+            isAssignmentDeletedLocally(embeddedHw.id, overrideDoc.ownerUid || embeddedHw.ownerUid) ||
+            !isHomeworkAssignmentOpenForStudents(embeddedHw)
+          ) {
+            markShortIdRevokedLocally(cleanShortId);
+            return {
+              status: 'revoked',
+              shortId: cleanShortId,
+              error: 'تم حذف هذا الواجب أو إيقاف الرابط من قِبل المعلم.'
+            };
+          }
+          const normalized = normalizeHomeworkAssignment({
+            ...embeddedHw,
+            shortId: cleanShortId,
+            ...(overrideDoc.ownerUid ? { ownerUid: overrideDoc.ownerUid } : {})
+          });
+          return {
+            status: 'resolved',
+            shortId: cleanShortId,
+            assignment: normalized
+          };
+        }
+      }
+    } catch {
+      encounteredNetworkFailure = true;
+    }
+  }
+
+  // 2. Query Express API `/api/homework/short/:shortId` when running in browser/HTTP context
+  if (!testCloudTransport && typeof fetch === 'function') {
+    try {
+      const res = await fetch(`/api/homework/short/${encodeURIComponent(cleanShortId)}`);
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = {};
+      }
+
+      if (res.status === 400) {
+        return {
+          status: 'invalid_id',
+          shortId: cleanShortId,
+          error: data?.error || 'رابط الواجب غير صالح.'
+        };
+      }
+      if (res.status === 410 || res.status === 403) {
+        markShortIdRevokedLocally(cleanShortId);
+        return {
+          status: 'revoked',
+          shortId: cleanShortId,
+          error: data?.error || 'تم حذف هذا الواجب أو إيقاف الرابط من قِبل المعلم.'
+        };
+      }
+      if (res.ok && data?.assignment && data.assignment.setSnapshot) {
+        const hwData = data.assignment;
+        if (!isHomeworkAssignmentOpenForStudents(hwData)) {
+          markShortIdRevokedLocally(cleanShortId);
+          return {
+            status: 'revoked',
+            shortId: cleanShortId,
+            error: 'هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.'
+          };
+        }
+        const localMatch = getLocalAssignments().find((a) => a.id === hwData.id);
+        const normalized = normalizeHomeworkAssignment({
+          ...hwData,
+          shortId: cleanShortId,
+          ...(localMatch?.ownerUid && !hwData.ownerUid ? { ownerUid: localMatch.ownerUid } : {})
+        });
+        return {
+          status: 'resolved',
+          shortId: cleanShortId,
+          assignment: normalized
+        };
+      }
+    } catch {
+      encounteredNetworkFailure = true;
+    }
+  }
+
+  // 3. Check local storage assignments
+  const localMatch = getLocalAssignments().find(
+    (a) => a && typeof a.shortId === 'string' && a.shortId.trim() === cleanShortId
+  );
+  if (localMatch) {
+    if (
+      (localMatch as any).deleted === true ||
+      isAssignmentDeletedLocally(localMatch.id, localMatch.ownerUid) ||
+      !isHomeworkAssignmentOpenForStudents(localMatch)
+    ) {
+      markShortIdRevokedLocally(cleanShortId);
+      return {
+        status: 'revoked',
+        shortId: cleanShortId,
+        error: 'تم حذف هذا الواجب أو إيقاف الرابط من قِبل المعلم.'
+      };
+    }
+    if (localMatch.setSnapshot) {
+      return {
+        status: 'resolved',
+        shortId: cleanShortId,
+        assignment: normalizeHomeworkAssignment({ ...localMatch, shortId: cleanShortId })
+      };
+    }
+  }
+
+  // 4. Query Firestore `homework_short_links/{shortId}` directly (supports serverless / static hosting & cross-device students)
+  if (!testCloudTransport) {
+    try {
+      const cloudShortDoc: any = await fetchShortLinkFromFirestore(cleanShortId);
+      if (cloudShortDoc) {
+        if (cloudShortDoc.status === 'resolved' && cloudShortDoc.assignment) {
+          if (
+            isAssignmentDeletedLocally(
+              cloudShortDoc.assignment.id,
+              cloudShortDoc.assignment.ownerUid
+            ) ||
+            !isHomeworkAssignmentOpenForStudents(cloudShortDoc.assignment)
+          ) {
+            markShortIdRevokedLocally(cleanShortId);
+            return {
+              status: 'revoked',
+              shortId: cleanShortId,
+              error: 'تم حذف هذا الواجب أو إيقاف الرابط من قِبل المعلم.'
+            };
+          }
+          return {
+            status: 'resolved',
+            shortId: cleanShortId,
+            assignment: normalizeHomeworkAssignment({
+              ...cloudShortDoc.assignment,
+              shortId: cleanShortId
+            })
+          };
+        }
+        if (
+          cloudShortDoc.deleted === true ||
+          cloudShortDoc.isActive === false ||
+          cloudShortDoc.revoked === true ||
+          cloudShortDoc.status === 'revoked' ||
+          cloudShortDoc.status === 'deleted' ||
+          cloudShortDoc.status === 'closed'
+        ) {
+          markShortIdRevokedLocally(cleanShortId);
+          return {
+            status: 'revoked',
+            shortId: cleanShortId,
+            error: 'تم حذف هذا الواجب أو إيقاف الرابط من قِبل المعلم.'
+          };
+        }
+
+        const embeddedHw =
+          cloudShortDoc.assignment || (cloudShortDoc.setSnapshot ? cloudShortDoc : null);
+        if (embeddedHw && embeddedHw.setSnapshot) {
+          if (
+            isAssignmentDeletedLocally(embeddedHw.id, cloudShortDoc.ownerUid || embeddedHw.ownerUid) ||
+            !isHomeworkAssignmentOpenForStudents(embeddedHw)
+          ) {
+            markShortIdRevokedLocally(cleanShortId);
+            return {
+              status: 'revoked',
+              shortId: cleanShortId,
+              error: 'تم حذف هذا الواجب أو إيقاف الرابط من قِبل المعلم.'
+            };
+          }
+          const normalized = normalizeHomeworkAssignment({
+            ...embeddedHw,
+            shortId: cleanShortId,
+            ...(cloudShortDoc.ownerUid ? { ownerUid: cloudShortDoc.ownerUid } : {})
+          });
+          return {
+            status: 'resolved',
+            shortId: cleanShortId,
+            assignment: normalized
+          };
+        }
+
+        if (cloudShortDoc.assignmentId) {
+          const targetHw = await activeFetchAssignmentFromCloud(cloudShortDoc.assignmentId).catch(() => null);
+          if (targetHw && targetHw.setSnapshot) {
+            if (!isHomeworkAssignmentOpenForStudents(targetHw)) {
+              markShortIdRevokedLocally(cleanShortId);
+              return {
+                status: 'revoked',
+                shortId: cleanShortId,
+                error: 'تم حذف هذا الواجب أو إيقاف الرابط من قِبل المعلم.'
+              };
+            }
+            const normalized = normalizeHomeworkAssignment({
+              ...targetHw,
+              shortId: cleanShortId,
+              ...(cloudShortDoc.ownerUid && !targetHw.ownerUid ? { ownerUid: cloudShortDoc.ownerUid } : {})
+            });
+            return {
+              status: 'resolved',
+              shortId: cleanShortId,
+              assignment: normalized
+            };
+          }
+        }
+      }
+    } catch {
+      encounteredNetworkFailure = true;
+    }
+  }
+
+  const isBrowserOffline =
+    typeof navigator !== 'undefined' && navigator.onLine === false;
+  if (isBrowserOffline || encounteredNetworkFailure) {
+    return {
+      status: 'network_error',
+      shortId: cleanShortId,
+      error: 'تعذر الاتصال بالسحابة لتحميل الواجب — يرجى التحقق من اتصال الإنترنت والمحاولة مرة أخرى.'
+    };
+  }
+
+  return {
+    status: 'not_found',
+    shortId: cleanShortId,
+    error: 'لم يتم العثور على هذا الواجب — قد يكون الرابط غير صحيح أو لم تتم مزامنته بعد.'
+  };
 }
 
 /**
@@ -2028,6 +2625,9 @@ export async function syncAndFetchTeacherAssignments(
 ): Promise<any[]> {
   const scopeAtStart = getActiveHomeworkScopeUid();
   const authUidAtStart = getCurrentHomeworkOwnerUid();
+  const localIdsBeforeCloudFetch = new Set(
+    getLocalAssignments(scopeAtStart).flatMap((a) => [a.id, sanitizeDocId(a.id)])
+  );
 
   // Read authoritative cloud state first. A failed read must never be treated as an empty account.
   let cloudAssignments: HomeworkAssignment[] = [];
@@ -2085,9 +2685,6 @@ export async function syncAndFetchTeacherAssignments(
   );
   writeLocalSubmissionsList(validLocalSubmissions, scopeAtStart);
 
-  // Flush any pending homework writes in the background
-  flushPendingHomeworkCloudWrites().catch(() => {});
-
   if (authUidAtStart) {
     const cloudAssignmentIds = new Set(cloudAssignments.flatMap((a) => [a.id, sanitizeDocId(a.id)]));
     for (const localHw of localAssignments) {
@@ -2096,6 +2693,13 @@ export async function syncAndFetchTeacherAssignments(
       }
       // Never upload an assignment unless its ownerUid matches the authenticated account
       if (localHw.ownerUid !== authUidAtStart) {
+        continue;
+      }
+      // Never delete or race with an assignment that is currently in flight or was just created/confirmed
+      if (
+        isAssignmentProtectedFromRemotePrune(localHw.id) ||
+        !localIdsBeforeCloudFetch.has(localHw.id)
+      ) {
         continue;
       }
       const isMissingFromCloud =
@@ -2112,6 +2716,7 @@ export async function syncAndFetchTeacherAssignments(
             return [];
           }
           if (ok) {
+            markAssignmentRecentlySaved(localHw.id);
             saveLocalAssignment({ ...localHw, ownerUid: authUidAtStart, cloudSynced: true, cloudCreatePending: false } as HomeworkAssignment, false);
           }
         }

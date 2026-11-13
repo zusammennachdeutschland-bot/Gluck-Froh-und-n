@@ -3,6 +3,7 @@ import { LernstudioSet, LernstudioLevel, LernstudioDifficulty } from '../../type
 import { generateLernstudioPrompt, validateAndParseLernstudioJson, validateLernstudioSetForWorksheet } from '../../utils/lernstudioAiUtils';
 import { CHILDREN_TOPICS_PRESETS, CHILDREN_LEVEL_CATEGORIES } from '../../data/childrenTopicsPreset';
 import { PROGRAM_GRADES } from '../../utils/lernstudioTranslations';
+import { auth } from '../firebaseCloudSync';
 import { X, Copy, Check, Sparkles, Download, AlertCircle, FileText, BookOpen } from 'lucide-react';
 
 interface Props {
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export const LernstudioAiModal: React.FC<Props> = ({ isOpen, teacherName, language = 'ar', onClose, onImportSet }) => {
+  const defaultCreatorName = teacherName?.trim() || auth?.currentUser?.displayName?.trim() || '';
   const [activeTab, setActiveTab] = useState<'generate' | 'import'>('generate');
 
   // Generator Config
@@ -28,6 +30,7 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, teacherName, langua
 
   // Importer Config
   const [pastedJson, setPastedJson] = useState('');
+  const [creatorTeacherName, setCreatorTeacherName] = useState(defaultCreatorName);
   const [importError, setImportError] = useState<string | null>(null);
   const [parsedPreview, setParsedPreview] = useState<Partial<LernstudioSet> | null>(null);
 
@@ -50,6 +53,7 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, teacherName, langua
     level,
     difficulty,
     itemCount,
+    teacherName: creatorTeacherName.trim() || defaultCreatorName || undefined,
     includeVerbConjugation
   });
 
@@ -68,6 +72,11 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, teacherName, langua
     if (result.success && result.data) {
       const valRes = validateLernstudioSetForWorksheet(result.data);
       setParsedPreview(valRes.repairedSet);
+      if (valRes.repairedSet.createdByTeacherName?.trim()) {
+        setCreatorTeacherName(valRes.repairedSet.createdByTeacherName.trim());
+      } else if (!creatorTeacherName.trim() && defaultCreatorName) {
+        setCreatorTeacherName(defaultCreatorName);
+      }
       setValidationInfo({
         warnings: valRes.warnings,
         repairedCount: valRes.repairedCount
@@ -82,7 +91,11 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, teacherName, langua
     if (!parsedPreview || !parsedPreview.items) return;
 
     const resolvedTeacherName =
-      (parsedPreview as any).createdByTeacherName?.trim() || teacherName?.trim() || undefined;
+      creatorTeacherName.trim() ||
+      (parsedPreview as any).createdByTeacherName?.trim() ||
+      teacherName?.trim() ||
+      auth?.currentUser?.displayName?.trim() ||
+      undefined;
 
     const fullSet: LernstudioSet = {
       id: `set_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -309,6 +322,19 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, teacherName, langua
             </div>
           ) : (
             <div className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-text-main block">
+                  {language === 'ar' ? 'اسم المدرس مُنشئ المجموعة (يُثبّت على الـ Set للفلترة): *' : 'Creator Teacher Name: *'}
+                </label>
+                <input
+                  type="text"
+                  value={creatorTeacherName}
+                  onChange={(e) => setCreatorTeacherName(e.target.value)}
+                  placeholder={language === 'ar' ? 'مثال: أ. محمد / Herr Ahmed' : 'Lehrername'}
+                  className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
+                />
+              </div>
+
               <div className="space-y-1.5">
                 <label className="text-xs font-black text-text-main block">
                   الصق كود JSON الصادر من الذكاء الاصطناعي هنا:

@@ -1,16 +1,29 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { calculateDuePaymentCycles } from '../utils/paymentUtils';
 import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
 import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
+import { useSyncedHomeworkData } from '../hooks/useSyncedHomeworkData';
+import { buildSmartDailySummaryHomeworkInsights } from '../utils/lessonHomeworkLinkUtils';
 
-import { Sparkles, Clock, Users, BookOpen, AlertCircle, Wallet } from 'lucide-react';
+import {
+  Sparkles,
+  Clock,
+  Users,
+  BookOpen,
+  AlertCircle,
+  Wallet,
+  ChevronDown,
+  ChevronUp,
+  FileText,
+  CheckCircle2,
+  ClipboardCheck
+} from 'lucide-react';
 
 export const SmartDailySummaryWidget: React.FC = () => {
-  const { lessons, students, groups, payments, profile, language, t } = useApp();
-
-  // Helper for inline translations
-  
+  const { lessons, students, groups, payments, profile, language, t, _t } = useApp();
+  const { assignments: syncedAssignments, submissions: syncedSubmissions, currentOwnerUid } = useSyncedHomeworkData();
+  const [isAlertsExpanded, setIsAlertsExpanded] = useState(false);
 
   const todayStr = formatLocalDate();
 
@@ -91,6 +104,18 @@ export const SmartDailySummaryWidget: React.FC = () => {
     const dueCycles = calculateDuePaymentCycles(students, groups, lessons, payments);
     const lateStudentsCount = new Set(dueCycles.map(c => c.studentId)).size;
 
+    // Verified reports & Online Homework insights
+    const hwInsights = buildSmartDailySummaryHomeworkInsights({
+      todayStr,
+      todaysLessons,
+      allLessons: lessons,
+      students,
+      groups,
+      assignments: syncedAssignments,
+      submissions: syncedSubmissions,
+      currentOwnerUid
+    });
+
     // First lesson time today
     const firstLessonTime = todaysLessons[0]?.time || null;
 
@@ -163,9 +188,17 @@ export const SmartDailySummaryWidget: React.FC = () => {
       lateStudentsCount,
       firstLessonTime: firstLessonTime ? formatTime12h(firstLessonTime) : null,
       text,
-      currency
+      currency,
+      hwInsights
     };
-  }, [lessons, students, groups, payments, profile, todayStr, language, t]);
+  }, [lessons, students, groups, payments, profile, todayStr, language, t, syncedAssignments, syncedSubmissions, currentOwnerUid]);
+
+  const { hwInsights } = summary;
+  const hasAlerts = hwInsights.alerts.length > 0;
+  const showHomeworkStrip =
+    hwInsights.lessonsNeedingReportCount > 0 ||
+    hwInsights.previousLinkedLessonsCount > 0 ||
+    hasAlerts;
 
   return (
     <div className="relative overflow-hidden bg-surface border border-primary-border dark:border-primary-border rounded-xl p-2 sm:p-2.5 shadow-2xs transition-all">
@@ -195,7 +228,7 @@ export const SmartDailySummaryWidget: React.FC = () => {
         </p>
       </div>
 
-      {/* Metrics Row */}
+      {/* Primary Metrics Row */}
       <div className="relative z-10 grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2">
         {/* Lessons count */}
         <div className="flex items-center gap-1.5 bg-surface-hover border border-surface-border p-1.5 sm:p-2 rounded-lg transition-all">
@@ -275,6 +308,126 @@ export const SmartDailySummaryWidget: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Compact Reports & Online Homework Counters + Expandable Action Alerts */}
+      {showHomeworkStrip && (
+        <div className="relative z-10 mt-1.5 pt-1.5 border-t border-surface-border/70 space-y-1.5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+            {/* Lessons Needing Report Today */}
+            <div className="flex items-center gap-1.5 bg-surface-hover border border-surface-border px-2 py-1 rounded-lg">
+              <FileText className="w-3 h-3 text-primary shrink-0" />
+              <div className="min-w-0">
+                <div className="text-[9px] font-bold text-text-muted truncate">
+                  {_t('تحتاج تقرير اليوم', 'Need Report', 'Bericht offen')}
+                </div>
+                <div className="text-[11px] font-black font-mono text-text-main">
+                  {hwInsights.lessonsNeedingReportCount}
+                </div>
+              </div>
+            </div>
+
+            {/* Previous Linked Online Homeworks */}
+            <div className="flex items-center gap-1.5 bg-surface-hover border border-surface-border px-2 py-1 rounded-lg">
+              <ClipboardCheck className="w-3 h-3 text-primary shrink-0" />
+              <div className="min-w-0">
+                <div className="text-[9px] font-bold text-text-muted truncate">
+                  {_t('واجبات سابقة مرتبطة', 'Linked Prev HWs', 'Verknüpfte HA')}
+                </div>
+                <div className="text-[11px] font-black font-mono text-text-main">
+                  {hwInsights.activeLinkedHomeworksCount}
+                  {hwInsights.invalidLinkedHomeworksCount > 0 && (
+                    <span className="text-[9px] text-red-500 ml-1">
+                      (+{hwInsights.invalidLinkedHomeworksCount} {_t('ملغي', 'inv.', 'ung.')})
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Students Not Solved / Needing Follow-Up */}
+            <div className="flex items-center gap-1.5 bg-surface-hover border border-surface-border px-2 py-1 rounded-lg">
+              <AlertCircle className={`w-3 h-3 shrink-0 ${hwInsights.followUpStudentsCount > 0 ? 'text-amber-500' : 'text-text-muted'}`} />
+              <div className="min-w-0">
+                <div className="text-[9px] font-bold text-text-muted truncate">
+                  {_t('متابعة / لم يحلوا', 'Follow-Up / Unsolved', 'Offen / Fokus')}
+                </div>
+                <div className="text-[11px] font-black font-mono text-text-main">
+                  {hwInsights.followUpStudentsCount}
+                  {hwInsights.unsubmittedStudentsCount > 0 && (
+                    <span className="text-[9px] font-bold text-text-muted ml-1">
+                      ({hwInsights.unsubmittedStudentsCount} {_t('لم يحل', 'unsub.', 'offen')})
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Confirmed Solved & Avg Accuracy */}
+            <div className="flex items-center gap-1.5 bg-surface-hover border border-surface-border px-2 py-1 rounded-lg">
+              <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+              <div className="min-w-0">
+                <div className="text-[9px] font-bold text-text-muted truncate">
+                  {_t('ملخص الحل والدقة', 'Solved & Avg', 'Erledigt & Ø')}
+                </div>
+                <div className="text-[11px] font-black font-mono text-emerald-700 dark:text-emerald-300">
+                  {hwInsights.totalTrackedStudentsCount > 0
+                    ? `${hwInsights.completedStudentsCount}/${hwInsights.totalTrackedStudentsCount}`
+                    : '0'}
+                  {hwInsights.confirmedAverageAccuracy !== null && (
+                    <span className="text-[9.5px] ml-1">({hwInsights.confirmedAverageAccuracy}%)</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {hasAlerts && (
+            <div className="space-y-1">
+              <button
+                type="button"
+                onClick={() => setIsAlertsExpanded((prev) => !prev)}
+                className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-amber-50/80 hover:bg-amber-100/70 dark:bg-amber-950/25 dark:hover:bg-amber-950/40 border border-amber-200/70 dark:border-amber-900/50 text-[11px] font-black text-amber-900 dark:text-amber-200 transition-colors cursor-pointer"
+              >
+                <span className="flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  <span>
+                    {_t(
+                      `تنبيهات تحتاج انتباهك اليوم (${hwInsights.alerts.length})`,
+                      `Action Alerts Needing Attention Today (${hwInsights.alerts.length})`,
+                      `Wichtige Hinweise heute (${hwInsights.alerts.length})`
+                    )}
+                  </span>
+                </span>
+                {isAlertsExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              </button>
+
+              {isAlertsExpanded && (
+                <div className="space-y-1 max-h-44 overflow-y-auto pt-0.5">
+                  {hwInsights.alerts.map((al) => (
+                    <div
+                      key={al.id}
+                      className={`px-2.5 py-1.5 rounded-lg border text-[11px] flex flex-col gap-0.5 ${
+                        al.severity === 'high'
+                          ? 'bg-red-50/70 dark:bg-red-950/20 border-red-200/70 dark:border-red-900/40'
+                          : 'bg-surface-hover border-surface-border'
+                      }`}
+                    >
+                      <span className="font-black text-text-main">
+                        {language === 'en' ? al.titleEn : language === 'de' ? al.titleDe : al.titleAr}
+                      </span>
+                      {(al.detailAr || al.detailEn || al.detailDe) && (
+                        <span className="text-[10px] font-bold text-text-muted">
+                          {language === 'en' ? al.detailEn : language === 'de' ? al.detailDe : al.detailAr}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

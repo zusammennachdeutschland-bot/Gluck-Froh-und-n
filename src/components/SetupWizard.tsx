@@ -382,6 +382,16 @@ export const SetupWizard: React.FC = () => {
 
   // Check if wizard should be open on initial load & subscribe to auth
   useEffect(() => {
+    const rawPath = typeof window !== 'undefined' ? window.location.pathname || '' : '';
+    const rawHash = typeof window !== 'undefined' ? window.location.hash || '' : '';
+    const isHomeworkUrl =
+      /(?:^|\/)(?:homework|Herr-Abdul-rahman)(\/|$)/i.test(rawPath) ||
+      /(?:^|\/)(?:homework|Herr-Abdul-rahman)(\/|$)/i.test(rawHash.replace(/^#/, ''));
+    if (isHomeworkUrl) {
+      setIsOpen(false);
+      return;
+    }
+
     const isCompleted = localStorage.getItem('dl_setup_completed') === 'true';
     if (!isCompleted || !profile.displayName || profile.displayName.trim() === '' || profile.displayName === 'Teacher' || profile.displayName === 'أ. أحمد محمود') {
       setIsOpen(true);
@@ -428,7 +438,12 @@ export const SetupWizard: React.FC = () => {
     return () => window.removeEventListener('open-setup-wizard', handleManualOpen);
   }, []);
 
-  if (!isOpen) {
+  const isHomeworkRouteNow =
+    typeof window !== 'undefined' &&
+    (/(?:^|\/)(?:homework|Herr-Abdul-rahman)(\/|$)/i.test(window.location.pathname || '') ||
+      /(?:^|\/)(?:homework|Herr-Abdul-rahman)(\/|$)/i.test((window.location.hash || '').replace(/^#/, '')));
+
+  if (!isOpen || isHomeworkRouteNow) {
     return null;
   }
 

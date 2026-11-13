@@ -59,6 +59,7 @@ export type SetSourceFilter = 'all' | 'custom' | 'builtin';
 import { CHILDREN_LEVEL_CATEGORIES } from '../../data/childrenTopicsPreset';
 import { useApp } from '../../context/AppContext';
 import {
+  auth,
   saveLernstudioSetToFirestore,
   deleteLernstudioSetFromFirestore,
   subscribeLernstudioSetsFromFirestore,
@@ -132,11 +133,13 @@ export const LernstudioView: React.FC<Props> = ({
   // Cloud Firestore Real-time Sync
   const handleSaveSetWithCloud = (set: LernstudioSet) => {
     const isBuiltin = isBuiltinLernstudioSet(set);
+    const fallbackTeacherName =
+      teacherName?.trim() || auth?.currentUser?.displayName?.trim() || undefined;
     const enrichedSet: LernstudioSet = isBuiltin
       ? set
       : {
           ...set,
-          createdByTeacherName: set.createdByTeacherName?.trim() || teacherName?.trim() || undefined,
+          createdByTeacherName: set.createdByTeacherName?.trim() || fallbackTeacherName,
           createdByUid: set.createdByUid?.trim() || activeAuthUid || undefined
         };
     onSaveSet(enrichedSet);
@@ -149,6 +152,32 @@ export const LernstudioView: React.FC<Props> = ({
   };
 
   const [activeAuthUid, setActiveAuthUid] = useState<string | null>(() => getCurrentHomeworkOwnerUid());
+
+  // Automatically backfill and fix createdByTeacherName on any local custom sets created by this teacher that lack it
+  const backfilledSetIdsRef = React.useRef<Set<string>>(new Set());
+  React.useEffect(() => {
+    const resolvedMyName =
+      teacherName?.trim() || auth?.currentUser?.displayName?.trim() || '';
+    if (!resolvedMyName) return;
+
+    sets.forEach((s) => {
+      if (!s || !s.id || s.isArchived || isBuiltinLernstudioSet(s)) return;
+      if (s.createdByTeacherName?.trim()) return;
+      if (s.createdByUid && activeAuthUid && s.createdByUid !== activeAuthUid) return;
+      if (backfilledSetIdsRef.current.has(s.id)) return;
+
+      backfilledSetIdsRef.current.add(s.id);
+      const stamped: LernstudioSet = {
+        ...s,
+        createdByTeacherName: resolvedMyName,
+        ...(s.createdByUid || activeAuthUid ? { createdByUid: s.createdByUid || activeAuthUid || undefined } : {})
+      };
+      onSaveSet(stamped);
+      if (activeAuthUid) {
+        saveLernstudioSetToFirestore(stamped).catch(() => {});
+      }
+    });
+  }, [sets, teacherName, activeAuthUid]);
 
   React.useEffect(() => {
     if (!activeAuthUid) return;
@@ -311,7 +340,7 @@ export const LernstudioView: React.FC<Props> = ({
       const explicitName = set.createdByTeacherName?.trim();
       if (explicitName) return explicitName;
       if (!set.createdByUid || (activeAuthUid && set.createdByUid === activeAuthUid)) {
-        return teacherName?.trim() || '';
+        return teacherName?.trim() || auth?.currentUser?.displayName?.trim() || '';
       }
       return '';
     },

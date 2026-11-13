@@ -26,6 +26,7 @@ import {
   getVercelPublicDomain,
   createHomeworkShareToken,
   createHomeworkAssignmentId,
+  createHomeworkShortId,
   flushPendingHomeworkCloudWrites,
   getPendingHomeworkSyncCount,
   saveLernstudioSetToFirestore,
@@ -39,7 +40,7 @@ import {
   resolveStageQuestionCount,
   calculateTotalHomeworkQuestions
 } from '../homeworkStorageSync';
-import { auth } from '../firebaseCloudSync';
+import { auth, signInTeacherWithGoogle } from '../firebaseCloudSync';
 import {
   Sparkles,
   X,
@@ -76,6 +77,11 @@ interface Props {
   defaultSet?: LernstudioSet | null;
   initialTab?: 'create' | 'results';
   language?: string;
+  initialAudienceMode?: HomeworkAudienceMode;
+  initialGroupId?: string;
+  initialTitle?: string;
+  autoCloseOnCreate?: boolean;
+  onAssignmentConfirmed?: (assignment: HomeworkAssignment) => void;
 }
 
 async function persistHomeworkAssignmentToServer(assignment: HomeworkAssignment): Promise<any> {
@@ -122,7 +128,12 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   onClose,
   sets,
   defaultSet,
-  initialTab
+  initialTab,
+  initialAudienceMode,
+  initialGroupId,
+  initialTitle,
+  autoCloseOnCreate,
+  onAssignmentConfirmed
 }) => {
   const { groups, students = [] } = useApp();
   const [activeTab, setActiveTab] = useState<'create' | 'results'>(initialTab || 'create');
@@ -202,7 +213,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     [sets, selectedSetId, defaultSet]
   );
 
-  // Sync activeTab when modal opens
+  // Sync activeTab & contextual defaults when modal opens
   useEffect(() => {
     if (isOpen) {
       if (initialTab) {
@@ -210,10 +221,26 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       } else if (defaultSet) {
         setActiveTab('create');
       }
+      if (initialAudienceMode) {
+        setAudienceMode(initialAudienceMode);
+      }
+      if (initialGroupId && groups.some((g) => g.id === initialGroupId)) {
+        setSelectedGroupId(initialGroupId);
+      }
+      if (initialTitle !== undefined) {
+        setTitle(initialTitle);
+      }
+      if (autoCloseOnCreate) {
+        setCreatedAssignment(null);
+        setCreatedShareLink(null);
+      }
+      if ((!selectedSetId || !sets.some((s) => s.id === selectedSetId)) && (defaultSet || sets[0])) {
+        setSelectedSetId(defaultSet?.id || sets[0]?.id || '');
+      }
       setCreateError(null);
       setPendingSyncCount(getPendingHomeworkSyncCount());
     }
-  }, [isOpen, initialTab, defaultSet]);
+  }, [isOpen, initialTab, defaultSet, initialAudienceMode, initialGroupId, initialTitle, autoCloseOnCreate, groups, sets]);
 
   // Initialize selectedItemIds when set changes
   useEffect(() => {
@@ -485,6 +512,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
       const payload: HomeworkAssignment = {
         id: generatedId,
+        shortId: createHomeworkShortId(7),
         shareToken: createHomeworkShareToken(),
         ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
         ...(resolvedOwnerEmail ? { ownerEmail: resolvedOwnerEmail } : {}),
@@ -516,10 +544,11 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         createdBy: 'Teacher'
       };
 
-      // Ensure the vocabulary set itself is also synced to Firestore so fallback student links can always load it
-      saveLernstudioSetToFirestore(currentSet).catch(() => false);
-
-      const confirmRes = await saveAssignmentWithConfirmation(payload);
+      // Ensure both the vocabulary set and the homework assignment are synced to Firestore in parallel
+      const [, confirmRes] = await Promise.all([
+        saveLernstudioSetToFirestore(currentSet).catch(() => false),
+        saveAssignmentWithConfirmation(payload)
+      ]);
       const serverAssignment = await persistHomeworkAssignmentToServer(confirmRes.assignment).catch(() => null);
       const isCloudSynced = Boolean(confirmRes.cloudSynced || serverAssignment?.id);
 
@@ -527,6 +556,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         ...confirmRes.assignment,
         ...(serverAssignment || {}),
         id: payload.id,
+        shortId: confirmRes.assignment.shortId || serverAssignment?.shortId || payload.shortId,
         ...(serverAssignment?.ownerUid || resolvedOwnerUid
           ? { ownerUid: serverAssignment?.ownerUid || resolvedOwnerUid }
           : {}),
@@ -536,11 +566,41 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       };
 
       saveLocalAssignment(finalAssignment, false);
+      window.dispatchEvent(new CustomEvent('glueck-homework-sync-updated'));
+      setAssignmentsList((prev) => [
+        {
+          ...finalAssignment,
+          status: 'active',
+          submissionCount: 0,
+          completedStudentsCount: 0,
+          inProgressStudentsCount: 0,
+          assignedStudentsCount: isGroupMode ? (assignedStudentsList?.length || 0) : 0,
+          avgAccuracy: 0,
+          avgScore: 0,
+          recentSubmissions: []
+        },
+        ...prev.filter((a) => a.id !== finalAssignment.id)
+      ]);
       setCreatedCloudSynced(isCloudSynced);
       setCreatedAssignment(finalAssignment);
       setCreatedShareLink(buildHomeworkShareUrl(finalAssignment, vercelDomain));
       setPendingSyncCount(getPendingHomeworkSyncCount());
+
+      if (onAssignmentConfirmed) {
+        onAssignmentConfirmed(finalAssignment);
+      }
+
+      if (autoCloseOnCreate) {
+        loadAllAssignments().catch(() => {});
+        onClose();
+        return;
+      }
+
       await loadAllAssignments().catch(() => {});
+      const refreshedLocal = getLocalAssignments().find((a) => a.id === finalAssignment.id);
+      if (refreshedLocal?.cloudSynced) {
+        setCreatedCloudSynced(true);
+      }
     } catch (err: any) {
       setCreateError(err?.message || 'حدث خطأ غير متوقع أثناء إنشاء الواجب.');
     } finally {
@@ -737,8 +797,33 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
           </div>
         </div>
 
+        {/* Unauthenticated Cloud Sync Warning Banner */}
+        {!activeAuthUid && (
+          <div className="px-4 py-2.5 bg-rose-500/10 border-b border-rose-500/20 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-1.5 text-rose-700 dark:text-rose-300 font-bold">
+              <CloudOff className="w-4 h-4 shrink-0" />
+              <span>أنت غير مسجل الدخول حالياً بحساب Google؛ لن يتم رفع الواجبات للسحابة أو استقبال حلول الطلاب حتى تسجل الدخول.</span>
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await signInTeacherWithGoogle();
+                  await handleFlushPendingSync();
+                } catch {
+                  // Ignore sign-in popup cancellation
+                }
+              }}
+              className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer shrink-0"
+            >
+              <Cloud className="w-3.5 h-3.5" />
+              <span>تسجيل الدخول بحساب Google وتفعيل المزامنة</span>
+            </button>
+          </div>
+        )}
+
         {/* Pending Cloud Sync Banner (distinguishes local-only data from confirmed cloud data) */}
-        {pendingSyncCount > 0 && (
+        {activeAuthUid && pendingSyncCount > 0 && (
           <div className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 flex items-center justify-between gap-2 text-xs">
             <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-300 font-bold">
               <CloudOff className="w-3.5 h-3.5 shrink-0" />
@@ -1191,81 +1276,150 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
             ) : (
               /* ================= CREATED SHARE SCREEN ================= */
               <div className="space-y-4 text-center py-4">
-                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto border border-emerald-500/20">
-                  <CheckCircle2 className="w-6 h-6" />
+                <div
+                  className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto border ${
+                    createdCloudSynced
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                      : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                  }`}
+                >
+                  {createdCloudSynced ? (
+                    <CheckCircle2 className="w-6 h-6" />
+                  ) : (
+                    <CloudOff className="w-6 h-6" />
+                  )}
                 </div>
 
                 <div className="space-y-1">
-                  <h4 className="text-base sm:text-lg font-black text-text-main">تم تجهيز الواجب بنجاح</h4>
+                  <h4 className="text-base sm:text-lg font-black text-text-main">
+                    {createdCloudSynced
+                      ? 'تم تجهيز الواجب والرابط القصير بنجاح'
+                      : 'بانتظار تأكيد المزامنة السحابية لتفعيل الرابط'}
+                  </h4>
                   <p className="text-xs text-text-muted">
-                    انسخ الرابط وأرسله للطلاب — ستظهر إجابات ومحاولات كل طالب لحظياً داخل التطبيق
+                    {createdCloudSynced
+                      ? 'انسخ الرابط القصير وأرسله للطلاب — ستظهر إجابات ومحاولات كل طالب لحظياً داخل التطبيق'
+                      : 'لا يتم عرض الرابط كجاهز للمشاركة حتى يكتمل حفظه سحابياً في Firestore لضمان فتحه لدى جميع الطلاب'}
                   </p>
                   <div className="pt-1">
                     {createdCloudSynced ? (
                       <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold">
-                        <Cloud className="w-3 h-3" /> تمت مزامنة الواجب سحابياً مع Firestore ✓
+                        <Cloud className="w-3 h-3" /> تمت مزامنة الرابط القصير سحابياً مع Firestore ✓
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[11px] font-bold">
-                        <CloudOff className="w-3 h-3" /> محفوظ محلياً — سيتم رفعه للسحابة عند استقرار الاتصال
+                        <CloudOff className="w-3 h-3" /> محفوظ محلياً — اضغط تأكيد المزامنة بالأسفل لتفعيل الرابط القصير
                       </span>
                     )}
                   </div>
                 </div>
 
-                <div className="bg-surface-hover border border-surface-border rounded-xl p-2.5 flex items-center gap-2 max-w-xl mx-auto">
-                  <input
-                    type="text"
-                    readOnly
-                    dir="ltr"
-                    value={createdShareLink}
-                    className="bg-transparent text-text-main font-mono text-xs flex-1 outline-none truncate"
-                  />
-                  <button
-                    onClick={() => handleCopy(createdShareLink, 'created')}
-                    className="px-3 py-1.5 bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs"
-                  >
-                    {copiedId === 'created' ? (
-                      <>
-                        <Check className="w-3.5 h-3.5" /> تم النسخ!
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" /> نسخ الرابط
-                      </>
-                    )}
-                  </button>
-                </div>
+                {createdCloudSynced ? (
+                  <>
+                    <div className="bg-surface-hover border border-surface-border rounded-xl p-2.5 flex items-center gap-2 max-w-xl mx-auto">
+                      <input
+                        type="text"
+                        readOnly
+                        dir="ltr"
+                        value={createdShareLink}
+                        className="bg-transparent text-text-main font-mono text-xs flex-1 outline-none truncate"
+                      />
+                      <button
+                        onClick={() => handleCopy(createdShareLink, 'created')}
+                        className="px-3 py-1.5 bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs"
+                      >
+                        {copiedId === 'created' ? (
+                          <>
+                            <Check className="w-3.5 h-3.5" /> تم النسخ!
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" /> نسخ الرابط
+                          </>
+                        )}
+                      </button>
+                    </div>
 
-                <div className="flex flex-wrap gap-2 justify-center pt-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const groupLabel = createdAssignment?.groupName ? ` [${createdAssignment.groupName}]` : '';
-                      const msg = `🇩🇪 *واجب الألماني التفاعلي (Glück Lernstudio)*${groupLabel}\n📚 *${createdAssignment?.title || 'واجب جديد'}*\n\nيرجى الضغط على الرابط التالي لبدء حل الواجب:\n${createdShareLink}`;
-                      navigator.clipboard.writeText(msg);
-                      setCopiedId('whatsapp_msg');
-                      setTimeout(() => setCopiedId(null), 2500);
-                    }}
-                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs"
-                  >
-                    <Share2 className="w-3.5 h-3.5" />
-                    <span>
-                      {copiedId === 'whatsapp_msg'
-                        ? 'تم نسخ رسالة واتساب! ✓'
-                        : 'نسخ رسالة واتساب لولي الأمر'}
-                    </span>
-                  </button>
+                    <div className="flex flex-wrap gap-2 justify-center pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const groupLabel = createdAssignment?.groupName ? ` [${createdAssignment.groupName}]` : '';
+                          const msg = `🇩🇪 *واجب الألماني التفاعلي (Glück Lernstudio)*${groupLabel}\n📚 *${createdAssignment?.title || 'واجب جديد'}*\n\nيرجى الضغط على الرابط التالي لبدء حل الواجب:\n${createdShareLink}`;
+                          navigator.clipboard.writeText(msg);
+                          setCopiedId('whatsapp_msg');
+                          setTimeout(() => setCopiedId(null), 2500);
+                        }}
+                        className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      >
+                        <Share2 className="w-3.5 h-3.5" />
+                        <span>
+                          {copiedId === 'whatsapp_msg'
+                            ? 'تم نسخ رسالة واتساب! ✓'
+                            : 'نسخ رسالة واتساب لولي الأمر'}
+                        </span>
+                      </button>
 
-                  <a
-                    href={createdShareLink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="px-3.5 py-2 bg-surface hover:bg-surface-hover border border-surface-border text-text-main text-xs font-semibold rounded-xl flex items-center gap-1.5"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5 text-primary" /> فتح الواجب تجريبياً
-                  </a>
+                      <a
+                        href={
+                          createdAssignment?.shortId
+                            ? `/Herr-Abdul-rahman/${createdAssignment.shortId}`
+                            : createdShareLink
+                        }
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => {
+                          if (createdAssignment?.shortId && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+                            e.preventDefault();
+                            window.history.pushState({}, '', `/Herr-Abdul-rahman/${createdAssignment.shortId}`);
+                            window.dispatchEvent(new Event('glueck-route-change'));
+                          }
+                        }}
+                        className="px-3.5 py-2 bg-surface hover:bg-surface-hover border border-surface-border text-text-main text-xs font-semibold rounded-xl flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5 text-primary" /> فتح الواجب تجريبياً
+                      </a>
+                    </div>
+                  </>
+                ) : (
+                  <div className="max-w-md mx-auto bg-amber-500/5 border border-amber-500/20 rounded-xl p-4 space-y-3">
+                    <p className="text-xs text-text-muted leading-relaxed">
+                      تم حفظ الواجب على جهازك، ولكن لم يتم تأكيد رفعه إلى Firestore بعد. يرجى التأكد من اتصالك بالإنترنت والضغط على الزر أدناه لتفعيل الرابط القصير قبل إرساله للطلاب.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={flushingPending}
+                      onClick={async () => {
+                        if (!createdAssignment) return;
+                        setFlushingPending(true);
+                        try {
+                          const retryRes = await saveAssignmentWithConfirmation(createdAssignment);
+                          const serverHw = await persistHomeworkAssignmentToServer(retryRes.assignment).catch(() => null);
+                          const synced = Boolean(retryRes.cloudSynced || serverHw?.id);
+                          const updatedHw: HomeworkAssignment = {
+                            ...retryRes.assignment,
+                            ...(serverHw || {}),
+                            cloudSynced: synced,
+                            cloudCreatePending: !synced
+                          };
+                          saveLocalAssignment(updatedHw, false);
+                          setCreatedAssignment(updatedHw);
+                          setCreatedCloudSynced(synced);
+                          setCreatedShareLink(buildHomeworkShareUrl(updatedHw, vercelDomain));
+                          setPendingSyncCount(getPendingHomeworkSyncCount());
+                        } finally {
+                          setFlushingPending(false);
+                        }
+                      }}
+                      className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-xl inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${flushingPending ? 'animate-spin' : ''}`} />
+                      <span>{flushingPending ? 'جاري تأكيد الحفظ السحابي...' : 'تأكيد الحفظ السحابي وتفعيل الرابط القصير'}</span>
+                    </button>
+                  </div>
+                )}
 
+                <div className="flex flex-wrap gap-2 justify-center pt-1">
                   <button
                     type="button"
                     onClick={() => {

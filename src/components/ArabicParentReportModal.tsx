@@ -18,6 +18,13 @@ import { escapeHtml } from '../utils/securityUtils';
 import { WhatsAppDispatchQueueModal } from './WhatsAppDispatchQueueModal';
 import { recordStudentReportDispatched, isStudentReportDispatched } from '../utils/whatsappQueueUtils';
 import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesService';
+import { useSyncedHomeworkData } from '../hooks/useSyncedHomeworkData';
+import {
+  findLatestEligiblePreviousLesson,
+  formatStudentPersonalPreviousHwLines,
+  resolveLinkedOnlineHomeworkForLesson,
+  resolveStudentPersonalOnlineHomeworkResult
+} from '../utils/lessonHomeworkLinkUtils';
 
 export { isLikelyFemaleStudent } from '../utils/genderUtils';
 export { resolveTaughtTodayTopic, resolveStudentReportAttendance, resolveReportHomework, resolvePreviousHomeworkStatusText } from '../utils/lessonUtils';
@@ -105,6 +112,7 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   onGoToHomeScreen
 }) => {
   const { students, groups, lessons, updateLesson, saveLessonReport, _t, language, t, reportLanguage, reportT } = useApp();
+  const { assignments: syncedAssignments, submissions: syncedSubmissions, currentOwnerUid } = useSyncedHomeworkData();
   const [copied, setCopied] = useState(false);
   const [showGroupProfile, setShowGroupProfile] = useState(false);
   const [showDispatchQueueModal, setShowDispatchQueueModal] = useState(false);
@@ -406,6 +414,9 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
       recordingLink2: rec2,
       report: {
         ...(lesson.report || {}),
+        onlineHomeworkAssignmentId: localReport?.onlineHomeworkAssignmentId ?? lesson.report?.onlineHomeworkAssignmentId,
+        onlineHomeworkShortId: localReport?.onlineHomeworkShortId ?? lesson.report?.onlineHomeworkShortId,
+        onlineHomeworkTitle: localReport?.onlineHomeworkTitle ?? lesson.report?.onlineHomeworkTitle,
         recordingLink: rec1,
         recordingLink2: rec2,
         arabicFullGeneratedReport: textToCheck,
@@ -416,6 +427,9 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
 
     saveLessonReport(lesson.id, {
       ...(lesson.report || {}),
+      onlineHomeworkAssignmentId: localReport?.onlineHomeworkAssignmentId ?? lesson.report?.onlineHomeworkAssignmentId,
+      onlineHomeworkShortId: localReport?.onlineHomeworkShortId ?? lesson.report?.onlineHomeworkShortId,
+      onlineHomeworkTitle: localReport?.onlineHomeworkTitle ?? lesson.report?.onlineHomeworkTitle,
       recordingLink: rec1,
       recordingLink2: rec2,
       arabicFullGeneratedReport: textToCheck,
@@ -490,6 +504,67 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
     [lesson.report, localReport, reportLanguage]
   );
 
+  // Resolve Current Lesson Online Homework (verified live; never shares invalid/deleted/revoked short links)
+  const effectiveCurrentReport = useMemo<Partial<LessonReport>>(
+    () => ({ ...(lesson.report || {}), ...(localReport || {}) }),
+    [lesson.report, localReport]
+  );
+
+  const currentOnlineHwInfo = useMemo(() => {
+    if (!effectiveCurrentReport.onlineHomeworkAssignmentId?.trim()) return null;
+    return resolveLinkedOnlineHomeworkForLesson(
+      { ...lesson, report: effectiveCurrentReport as LessonReport },
+      syncedAssignments,
+      { currentOwnerUid }
+    );
+  }, [lesson, effectiveCurrentReport, syncedAssignments, currentOwnerUid]);
+
+  // Resolve Previous Lesson Online Homework strictly from latest eligible prior lesson of the same group/student
+  const latestPrevEligibleLesson = useMemo(() => {
+    return findLatestEligiblePreviousLesson(
+      {
+        ...lesson,
+        studentId: activeStudent?.id ?? lesson.studentId,
+        studentName: activeStudent?.name ?? lesson.studentName
+      },
+      lessons || [],
+      { requireCompletedOrReported: true }
+    );
+  }, [lesson, activeStudent?.id, activeStudent?.name, lessons]);
+
+  const prevOnlineHwInfo = useMemo(() => {
+    if (!latestPrevEligibleLesson?.report?.onlineHomeworkAssignmentId?.trim()) return null;
+    return resolveLinkedOnlineHomeworkForLesson(latestPrevEligibleLesson, syncedAssignments, {
+      currentOwnerUid
+    });
+  }, [latestPrevEligibleLesson, syncedAssignments, currentOwnerUid]);
+
+  const prevStudentOnlineResult = useMemo(() => {
+    if (!prevOnlineHwInfo?.assignment || !activeStudent) return null;
+    if (prevOnlineHwInfo.status === 'unauthorized') return null;
+    return resolveStudentPersonalOnlineHomeworkResult(
+      prevOnlineHwInfo.assignment,
+      syncedSubmissions,
+      activeStudent,
+      latestPrevEligibleLesson,
+      { currentOwnerUid }
+    );
+  }, [prevOnlineHwInfo, syncedSubmissions, activeStudent, latestPrevEligibleLesson, currentOwnerUid]);
+
+  const formatCurrentHomeworkWithOnline = (baseHwText: string, lang: 'ar' | 'en' | 'de'): string => {
+    const cleanBase = baseHwText.trim();
+    if (!currentOnlineHwInfo?.isValid || !currentOnlineHwInfo.shareUrl) {
+      return cleanBase;
+    }
+    const onlinePart =
+      lang === 'en'
+        ? `🎯 Online HW: ${currentOnlineHwInfo.title}\n🔗 Link: ${currentOnlineHwInfo.shareUrl}`
+        : lang === 'de'
+        ? `🎯 Online-Aufgabe: ${currentOnlineHwInfo.title}\n🔗 Link: ${currentOnlineHwInfo.shareUrl}`
+        : `🎯 واجب أونلاين: ${currentOnlineHwInfo.title}\n🔗 رابط الواجب: ${currentOnlineHwInfo.shareUrl}`;
+    return [cleanBase, onlinePart].filter(Boolean).join('\n');
+  };
+
   const unrecordedStudents = useMemo(() => {
     if (isGroupLesson) {
       return groupStudents.filter(
@@ -507,7 +582,8 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   // Generate Bulk Group Report Text
   const getBulkReportText = () => {
     const taughtToday = taughtTodayInfo.text;
-    const nextHomework = homeworkInfo.text;
+    const bulkLang: 'ar' | 'en' | 'de' = reportLanguage === 'en' ? 'en' : reportLanguage === 'de' ? 'de' : 'ar';
+    const nextHomework = formatCurrentHomeworkWithOnline(homeworkInfo.text, bulkLang);
     
     const isLessonToday = Boolean(lesson.date && lesson.date === getLocalDateStr());
     const dayName = getLessonArabicDay(lesson.date, lesson.dayOfWeek);
@@ -690,7 +766,8 @@ ${topicBlock}${hwBlock}${prevHwBlock}${recordingSection}
   // Streamlined Student Report (اليوم والتاريخ + اللي اتشرح + الهومورك اللي جاي بس)
   const getStudentCleanReportText = () => {
     const taughtToday = taughtTodayInfo.text;
-    const nextHomework = homeworkInfo.text;
+    const studentLang: 'ar' | 'en' | 'de' = reportLanguage === 'en' ? 'en' : reportLanguage === 'de' ? 'de' : 'ar';
+    const nextHomework = formatCurrentHomeworkWithOnline(homeworkInfo.text, studentLang);
     const dayName = getLessonArabicDay(lesson.date, lesson.dayOfWeek);
     const dateFormatted = formatArabicDate(lesson.date);
 
@@ -833,7 +910,12 @@ ${topicBlock}${hwBlock}${prevHwBlock}${recordingSection}
       : perfFeedback;
 
     const taughtToday = taughtTodayInfo.text;
-    const nextHomework = homeworkInfo.text;
+    const activeReportLang: 'ar' | 'en' | 'de' = reportLanguage === 'en' ? 'en' : reportLanguage === 'de' ? 'de' : 'ar';
+    const nextHomework = formatCurrentHomeworkWithOnline(homeworkInfo.text, activeReportLang);
+    const personalOnlinePrevLines =
+      !isAbsent && prevStudentOnlineResult && !prevStudentOnlineResult.wasAbsent
+        ? formatStudentPersonalPreviousHwLines(prevStudentOnlineResult, activeReportLang)
+        : [];
     const cleanStudentNote = studentNote.trim();
 
     const teacherArName = getTeacherArabicName(profile, 'المعلم');
@@ -868,6 +950,9 @@ ${topicBlock}${hwBlock}${prevHwBlock}${recordingSection}
           }
         } else if (previousHomework.trim()) {
           body += `\n• Previous Homework: ${previousHomework.trim()}`;
+        }
+        if (personalOnlinePrevLines.length > 0) {
+          body += `\n${personalOnlinePrevLines.join('\n')}`;
         }
         if (dictationScore) body += `\n• Quiz / Dictation: ${dictationScore}`;
         if (examScore) body += `\n• Exam Score: ${examScore}`;
@@ -904,6 +989,9 @@ ${topicBlock}${hwBlock}${prevHwBlock}${recordingSection}
           }
         } else if (previousHomework.trim()) {
           body += `\n• Vorherige Hausaufgabe: ${previousHomework.trim()}`;
+        }
+        if (personalOnlinePrevLines.length > 0) {
+          body += `\n${personalOnlinePrevLines.join('\n')}`;
         }
         if (dictationScore) body += `\n• Diktat / Quiz: ${dictationScore}`;
         if (examScore) body += `\n• Prüfung / Test: ${examScore}`;
@@ -982,14 +1070,17 @@ ${selectedOutro}`;
       }
 
       let prevHwSection = '';
-      if (hasHwStatus) {
-        if (hwDone === 'none') {
+      if (hasHwStatus || personalOnlinePrevLines.length > 0) {
+        if (hwDone === 'none' && personalOnlinePrevLines.length === 0) {
           prevHwSection = `\n\n📋 الواجب السابق:\n• لا يوجد واجب سابق`;
         } else {
-          const prevHwEgyptian = previousHomework.trim()
-            ? `• الواجب كان: ${previousHomework.trim()}\n• حالة الحل: ${homeworkOption}`
-            : homeworkOption;
-          prevHwSection = `\n\n📋 حل الواجب السابق:\n${prevHwEgyptian}`;
+          const manualPart = hasHwStatus
+            ? (previousHomework.trim()
+                ? `• الواجب كان: ${previousHomework.trim()}\n• حالة الحل: ${homeworkOption}`
+                : homeworkOption)
+            : '';
+          const combinedPrev = [manualPart, ...personalOnlinePrevLines].filter(Boolean).join('\n');
+          prevHwSection = `\n\n📋 حل الواجب السابق:\n${combinedPrev}`;
         }
       }
 
@@ -1042,6 +1133,9 @@ ${dayDateLine} ${timeLine ? `• ${timeLine}` : ''}
             : homeworkOption;
           evalLines.push(`• الواجب السابق: ${prevHwConcise}`);
         }
+      }
+      if (personalOnlinePrevLines.length > 0) {
+        evalLines.push(...personalOnlinePrevLines);
       }
 
       if (hasExam && hasDictation) {
@@ -1104,14 +1198,17 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
     }
 
     let prevHwSection = '';
-    if (hasHwStatus) {
-      if (hwDone === 'none') {
+    if (hasHwStatus || personalOnlinePrevLines.length > 0) {
+      if (hwDone === 'none' && personalOnlinePrevLines.length === 0) {
         prevHwSection = `\n\n📋 الواجب السابق:\n• لا يوجد واجب سابق`;
       } else {
-        const prevHwStandard = previousHomework.trim()
-          ? `• موضوع الواجب: ${previousHomework.trim()}\n• حالة الإنجاز: ${homeworkOption}`
-          : homeworkOption;
-        prevHwSection = `\n\n📋 الواجب السابق:\n${prevHwStandard}`;
+        const manualPart = hasHwStatus
+          ? (previousHomework.trim()
+              ? `• موضوع الواجب: ${previousHomework.trim()}\n• حالة الإنجاز: ${homeworkOption}`
+              : homeworkOption)
+          : '';
+        const combinedPrev = [manualPart, ...personalOnlinePrevLines].filter(Boolean).join('\n');
+        prevHwSection = `\n\n📋 الواجب السابق:\n${combinedPrev}`;
       }
     }
 
@@ -1153,7 +1250,9 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
     reportLanguage,
     showAbsentNamesInGroupReport,
     taughtTodayInfo,
-    homeworkInfo
+    homeworkInfo,
+    currentOnlineHwInfo,
+    prevStudentOnlineResult
   ]);
 
   const handleCopyText = () => {
@@ -1762,6 +1861,52 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
                 </button>
               )}
             </div>
+
+            {(currentOnlineHwInfo || (activeTab === 'individual' && prevStudentOnlineResult)) && (
+              <div className="pt-1.5 border-t border-surface-border/70 grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[10.5px]">
+                {currentOnlineHwInfo && (
+                  <div className={`px-2 py-1.5 rounded-lg border ${
+                    currentOnlineHwInfo.isValid
+                      ? 'bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/40'
+                      : 'bg-red-50/70 dark:bg-red-950/20 border-red-200 dark:border-red-900/40'
+                  }`}>
+                    <div className="font-black text-text-main truncate">
+                      🎯 {_t('واجب الحصة الحالية:', 'Current Online HW:', 'Aktuelle Online-HA:')} {currentOnlineHwInfo.title}
+                    </div>
+                    <div className={`font-bold truncate ${currentOnlineHwInfo.isValid ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-600 dark:text-red-400'}`}>
+                      {currentOnlineHwInfo.isValid && currentOnlineHwInfo.shareUrl
+                        ? currentOnlineHwInfo.shareUrl
+                        : _t(currentOnlineHwInfo.statusLabelAr, currentOnlineHwInfo.statusLabelEn, currentOnlineHwInfo.statusLabelDe)}
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'individual' && prevStudentOnlineResult && (
+                  <div className="px-2 py-1.5 rounded-lg border bg-primary-soft/40 border-primary-border/50">
+                    <div className="font-black text-text-main truncate">
+                      📋 {_t('نتيجة الطالب في الواجب السابق:', 'Student Prev HW Result:', 'Ergebnis letzte HA:')} {prevStudentOnlineResult.assignmentTitle}
+                    </div>
+                    <div className="font-bold text-primary truncate">
+                      {prevStudentOnlineResult.wasAbsent
+                        ? _t('كان غائباً عن الحصة السابقة', 'Absent in previous lesson', 'Abwesend')
+                        : prevStudentOnlineResult.status === 'completed'
+                        ? _t(
+                            `تم الحل (${prevStudentOnlineResult.bestAccuracy}%) • ${prevStudentOnlineResult.attemptsCount} محاولة`,
+                            `Solved (${prevStudentOnlineResult.bestAccuracy}%) • ${prevStudentOnlineResult.attemptsCount} attempt(s)`,
+                            `Erledigt (${prevStudentOnlineResult.bestAccuracy}%)`
+                          )
+                        : prevStudentOnlineResult.status === 'in_progress'
+                        ? _t(
+                            `بدأ الحل (${prevStudentOnlineResult.answeredCount}/${prevStudentOnlineResult.totalQuestions || '?'})`,
+                            `In progress (${prevStudentOnlineResult.answeredCount}/${prevStudentOnlineResult.totalQuestions || '?'})`,
+                            `Begonnen`
+                          )
+                        : _t('لم يحل الواجب بعد ❌', 'Not solved yet ❌', 'Noch nicht erledigt ❌')}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Lecture / Session Recording Links */}

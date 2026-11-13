@@ -2,6 +2,7 @@ import express from 'express';
 import crypto from 'crypto';
 import {
   getAuthoritativeAssignment,
+  getAuthoritativeShortLink,
   listAuthoritativeAssignments,
   saveAuthoritativeAssignment,
   softDeleteAuthoritativeAssignment,
@@ -376,6 +377,7 @@ export function toPublicAssignmentDto(hw: any): any {
 
   const publicDto: any = {
     id: String(normalized.id || ''),
+    ...(normalized.shortId ? { shortId: String(normalized.shortId).trim() } : {}),
     title: String(normalized.title || ''),
     createdAt: String(normalized.createdAt || ''),
     isActive: Boolean(normalized.isActive),
@@ -705,7 +707,11 @@ app.all('/api/homework/submissions', async (req, res) => {
 
     const configuredShareToken =
       targetHw.shareToken !== undefined && targetHw.shareToken !== null ? String(targetHw.shareToken).trim() : '';
-    if (configuredShareToken) {
+    const configuredShortId =
+      targetHw.shortId !== undefined && targetHw.shortId !== null ? String(targetHw.shortId).trim() : '';
+    const providedShortId = String(body.shortId || req.query.shortId || '').trim();
+    const shortIdAuthorized = Boolean(configuredShortId && providedShortId && providedShortId === configuredShortId);
+    if (configuredShareToken && !shortIdAuthorized) {
       const providedToken = String(body.token || body.shareToken || req.query.token || '').trim();
       if (!providedToken || providedToken !== configuredShareToken) {
         return res.status(403).json({
@@ -758,7 +764,77 @@ app.all('/api/homework/submissions', async (req, res) => {
   return res.json({ success: true });
 });
 
+app.get('/api/homework/short/:shortId', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  const shortId = String(req.params.shortId || '').trim();
+  if (!shortId || !/^[A-Za-z0-9]{6,10}$/.test(shortId)) {
+    return res.status(400).json({
+      error: 'رمز رابط الواجب المختصر غير صالح.',
+      status: 'invalid_id'
+    });
+  }
+  try {
+    const resolved = await getAuthoritativeShortLink(shortId);
+    if (resolved.status === 'invalid_id') {
+      return res.status(400).json({
+        error: 'رمز رابط الواجب المختصر غير صالح.',
+        status: 'invalid_id'
+      });
+    }
+    if (resolved.status === 'revoked') {
+      return res.status(410).json({
+        error: 'هذا الواجب تم حذفه أو إيقاف رابطه من قِبل المعلم.',
+        status: 'revoked'
+      });
+    }
+    if (resolved.status === 'not_found' || !resolved.assignment) {
+      return res.status(404).json({
+        error: 'رابط الواجب غير موجود أو منتهي الصلاحية.',
+        status: 'not_found'
+      });
+    }
+    if (!isServerAssignmentOpen(resolved.assignment)) {
+      return res.status(410).json({
+        error: 'هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.',
+        status: 'revoked'
+      });
+    }
+    return res.json({
+      status: 'resolved',
+      shortId,
+      assignment: sanitizePublicAssignmentInfo({ ...resolved.assignment, shortId })
+    });
+  } catch (err: any) {
+    return res.status(err?.status || 500).json({
+      error: err?.message || 'Short link lookup unavailable',
+      status: 'network_error'
+    });
+  }
+});
+
 app.get('/api/homework/info', async (req, res) => {
+  const shortIdParam = req.query.shortId ? String(req.query.shortId).trim() : '';
+  if (shortIdParam) {
+    try {
+      const resolved = await getAuthoritativeShortLink(shortIdParam);
+      if (resolved.status === 'invalid_id') {
+        return res.status(400).json({ error: 'رمز رابط الواجب المختصر غير صالح.', status: 'invalid_id' });
+      }
+      if (resolved.status === 'revoked') {
+        return res.status(410).json({ error: 'هذا الواجب تم حذفه أو إيقاف رابطه من قِبل المعلم.', status: 'revoked' });
+      }
+      if (resolved.status === 'not_found' || !resolved.assignment) {
+        return res.status(404).json({ error: 'Assignment not found', status: 'not_found' });
+      }
+      if (!isServerAssignmentOpen(resolved.assignment)) {
+        return res.status(403).json({ error: 'Assignment is closed or inactive', status: 'revoked' });
+      }
+      return res.json(sanitizePublicAssignmentInfo({ ...resolved.assignment, shortId: shortIdParam }));
+    } catch (err: any) {
+      return res.status(err?.status || 500).json({ error: err?.message || 'Assignment lookup unavailable' });
+    }
+  }
+
   const id = String(req.query.id || '').trim();
   const token = req.query.token !== undefined && req.query.token !== null ? String(req.query.token).trim() : '';
   let found: any = null;
@@ -813,10 +889,14 @@ app.post('/api/homework/submit', async (req, res) => {
     });
   }
 
-  // Strict Share Token Enforcement: tokenized assignments require an exact match for every submission.
+  // Strict Share Token / ShortId Capability Enforcement:
   const configuredShareToken =
     targetHw.shareToken !== undefined && targetHw.shareToken !== null ? String(targetHw.shareToken).trim() : '';
-  if (configuredShareToken) {
+  const configuredShortId =
+    targetHw.shortId !== undefined && targetHw.shortId !== null ? String(targetHw.shortId).trim() : '';
+  const providedShortId = String(body.shortId || req.query.shortId || '').trim();
+  const shortIdAuthorized = Boolean(configuredShortId && providedShortId && providedShortId === configuredShortId);
+  if (configuredShareToken && !shortIdAuthorized) {
     const providedToken = String(body.token || body.shareToken || req.query.token || '').trim();
     if (!providedToken || providedToken !== configuredShareToken) {
       return res.status(403).json({
@@ -938,6 +1018,9 @@ app.post('/api/homework/submit', async (req, res) => {
     goldEarned: body.goldEarned || 0,
     maxStreak: body.maxStreak || 0,
     completedStudyPhase: Boolean(body.completedStudyPhase),
+    ...(body.gamification && typeof body.gamification === 'object'
+      ? { gamification: body.gamification }
+      : {}),
     responses: verifiedResponses
   };
 

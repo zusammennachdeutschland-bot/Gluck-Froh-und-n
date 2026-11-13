@@ -158,6 +158,47 @@
         }
       },
       "required": ["id", "categoryKey", "chunkIndex", "totalChunks", "updatedAtMs", "updatedAtIso", "deviceId", "payloadChunk"]
+    },
+    "HomeworkShortLinkDoc": {
+      "title": "HomeworkShortLinkDoc",
+      "description": "Short homework link lookup mapping /Herr-Abdul-rahman/{shortId} to its homework assignment",
+      "type": "object",
+      "properties": {
+        "shortId": {
+          "type": "string",
+          "maxLength": 10,
+          "pattern": "^[A-Za-z0-9]{6,10}$"
+        },
+        "assignmentId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "shareToken": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "isActive": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "payloadJson": {
+          "type": "string",
+          "maxLength": 500000
+        }
+      },
+      "required": ["shortId", "assignmentId", "ownerUid", "isActive", "createdAt", "payloadJson"]
     }
   },
   "firestore": {
@@ -168,6 +209,10 @@
     "/homework_assignments/{assignmentId}": {
       "schema": { "$ref": "#/entities/HomeworkAssignmentDoc" },
       "description": "Homework assignments created by teacher and played by students"
+    },
+    "/homework_short_links/{shortId}": {
+      "schema": { "$ref": "#/entities/HomeworkShortLinkDoc" },
+      "description": "Short homework link mappings (/Herr-Abdul-rahman/{shortId})"
     },
     "/homework_submissions/{submissionId}": {
       "schema": { "$ref": "#/entities/HomeworkSubmissionDoc" },

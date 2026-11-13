@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { PendingFollowUp } from '../utils/homeworkFollowUpUtils';
-import { X, Check, Send, BookOpen, User, Sparkles, AtSign, Phone, Copy, Users, CheckCircle2, Link as LinkIcon, ExternalLink, MessageSquare } from 'lucide-react';
+import { X, Check, Send, BookOpen, User, Sparkles, AtSign, Phone, Copy, Users, CheckCircle2, Link as LinkIcon, ExternalLink, MessageSquare, AlertCircle, Clock } from 'lucide-react';
 import { buildWhatsAppUrl, resolveStudentWhatsAppContact } from '../utils/phoneUtils';
 import { getStudentRoleLabel, isLikelyFemaleStudent } from '../utils/genderUtils';
 import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { getTimeBasedGreeting } from '../utils/greetingUtils';
 import { isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
+import { useSyncedHomeworkData } from '../hooks/useSyncedHomeworkData';
+import { evaluateOnlineHomeworkFollowUp, resolveLinkedOnlineHomeworkForLesson } from '../utils/lessonHomeworkLinkUtils';
+import { normalizeName } from '../utils/lessonUtils';
 
 interface HomeworkFollowUpModalProps {
   pendingFollowUps: PendingFollowUp[];
@@ -16,18 +19,23 @@ interface HomeworkFollowUpModalProps {
 
 export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pendingFollowUps, initialGroupId, onClose }) => {
   const { students, groups, updateGroup, updateLesson, profile, _t, reportLanguage } = useApp();
+  const { assignments: syncedAssignments, submissions: syncedSubmissions, currentOwnerUid } = useSyncedHomeworkData();
   const currentMsgLang = reportLanguage || 'ar';
   
-  const [selectedGroup, setSelectedGroup] = useState<PendingFollowUp | null>(
-    initialGroupId ? pendingFollowUps.find(p => p.groupId === initialGroupId) || null : null
-  );
+  const [selectedGroup, setSelectedGroup] = useState<PendingFollowUp | null>(() => {
+    const initial = initialGroupId ? pendingFollowUps.find(p => p.groupId === initialGroupId) || null : null;
+    return initial;
+  });
   
   // Tab mode: 'group' (WhatsApp Group Link) | 'individual' (Private Messages)
-  const [viewMode, setViewMode] = useState<'group' | 'individual'>('group');
+  const [viewMode, setViewMode] = useState<'group' | 'individual'>(
+    selectedGroup?.scopeType === 'student' ? 'individual' : 'group'
+  );
   const [followUpStyle, setFollowUpStyle] = useState<'egyptian' | 'standard'>('egyptian');
   const [sentContacts, setSentContacts] = useState<Set<string>>(new Set());
   const [copiedContact, setCopiedContact] = useState<string | null>(null);
   const [copiedGroupToast, setCopiedGroupToast] = useState<boolean>(false);
+  const [copiedShortLinkToast, setCopiedShortLinkToast] = useState<boolean>(false);
 
   // Group WhatsApp Link editing state
   const [newGroupLinkInput, setNewGroupLinkInput] = useState<string>('');
@@ -155,12 +163,58 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
     }
 
     const resolvedHomework = (hwDesc || arabicHw || legacyHwStr || hwTitle || '').trim();
-    const homeworkText = resolvedHomework || _t('متابعة ما تم شرحه وحل التدريبات والأنشطة المقررة', 'Follow up on lesson and complete assigned exercises', 'Lektion nacharbeiten und Hausaufgaben erledigen');
+    const liveOnlineValidation = resolveLinkedOnlineHomeworkForLesson(prevLesson, syncedAssignments, {
+      currentOwnerUid
+    });
+    const activeOnlineValidation = liveOnlineValidation || selectedGroup.onlineLinkValidation || null;
+    const activeOnlineSummary =
+      activeOnlineValidation?.assignment &&
+      activeOnlineValidation.status !== 'unauthorized' &&
+      activeOnlineValidation.status !== 'deleted'
+        ? evaluateOnlineHomeworkFollowUp(
+            activeOnlineValidation.assignment,
+            syncedSubmissions,
+            students.filter((s) => s && !s.deleted && s.status !== 'archived'),
+            prevLesson
+          )
+        : selectedGroup.onlineFollowUpSummary || null;
+
+    const validOnlineUrlPart =
+      activeOnlineValidation?.isValid && activeOnlineValidation.shareUrl
+        ? `\n🔗 ${activeOnlineValidation.title}: ${activeOnlineValidation.shareUrl}`
+        : '';
+
+    const homeworkText =
+      (resolvedHomework ||
+        (activeOnlineValidation?.isValid
+          ? `${activeOnlineValidation.title}`
+          : _t(
+              'متابعة ما تم شرحه وحل التدريبات والأنشطة المقررة',
+              'Follow up on lesson and complete assigned exercises',
+              'Lektion nacharbeiten und Hausaufgaben erledigen'
+            ))) + validOnlineUrlPart;
 
     const teacherSign = profile.displayNameAr || (profile.displayName ? `أ/ ${profile.displayName}` : '');
 
     const lessonDate = selectedGroup.latestCompletedLesson?.date;
-    const groupStudents = students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === selectedGroup.groupId && (!lessonDate || isStudentMatchingLessonWeek(s.scheduleRecurrence, lessonDate)));
+    const isPrivateScope = selectedGroup.scopeType === 'student' || !prevLesson?.groupId || prevLesson.groupId === 'quick_group';
+    const groupStudents = isPrivateScope
+      ? students.filter(
+          (s) =>
+            s &&
+            !s.deleted &&
+            s.status !== 'archived' &&
+            ((selectedGroup.studentId && s.id === selectedGroup.studentId) ||
+              (prevLesson?.studentId && s.id === prevLesson.studentId) ||
+              (prevLesson?.studentName && normalizeName(s.name) === normalizeName(prevLesson.studentName)))
+        )
+      : students.filter(
+          (s) =>
+            !s.deleted &&
+            s.status !== 'archived' &&
+            s.groupId === selectedGroup.groupId &&
+            (!lessonDate || isStudentMatchingLessonWeek(s.scheduleRecurrence, lessonDate))
+        );
     const allStudentNames = groupStudents.map(s => {
       if (currentMsgLang === 'de' || currentMsgLang === 'en') {
         return s.certificateName || s.displayNameEn || s.nameEn || s.name;
@@ -356,7 +410,195 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
               </div>
             </div>
 
+            {/* Online Homework Status & Student Completion Breakdown */}
+            {activeOnlineValidation && (
+              <div className="bg-surface border border-surface-border p-3.5 rounded-xl space-y-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-black uppercase text-text-muted block">
+                      {_t('الواجب الأونلاين المرتبط بآخر حصة سابقة', 'Online Homework from Previous Lesson', 'Online-Aufgabe aus letzter Stunde')}
+                    </span>
+                    <h4 className="text-xs sm:text-sm font-black text-text-main truncate">
+                      🎯 {activeOnlineValidation.title}
+                    </h4>
+                  </div>
+                  <span
+                    className={`text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 ${
+                      activeOnlineValidation.isValid
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
+                        : activeOnlineValidation.isPendingSync
+                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300'
+                        : 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300'
+                    }`}
+                  >
+                    {_t(activeOnlineValidation.statusLabelAr, activeOnlineValidation.statusLabelEn, activeOnlineValidation.statusLabelDe)}
+                  </span>
+                </div>
+
+                {activeOnlineValidation.isValid && activeOnlineValidation.shareUrl ? (
+                  <div className="flex items-center justify-between gap-2 bg-surface-hover px-2.5 py-1.5 rounded-lg border border-surface-border" dir="ltr">
+                    <span className="text-[11px] font-mono text-primary truncate">
+                      {activeOnlineValidation.shareUrl}
+                    </span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(activeOnlineValidation.shareUrl!);
+                          setCopiedShortLinkToast(true);
+                          setTimeout(() => setCopiedShortLinkToast(false), 2000);
+                        }}
+                        className="px-2 py-1 text-[10px] font-bold bg-primary-soft text-primary hover:bg-primary/20 rounded-md flex items-center gap-1 cursor-pointer"
+                      >
+                        {copiedShortLinkToast ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedShortLinkToast ? _t('تم', 'Copied', 'Kopiert') : _t('نسخ', 'Copy', 'Kopieren')}</span>
+                      </button>
+                      <a
+                        href={activeOnlineValidation.shareUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-1 text-primary hover:bg-primary-soft rounded-md"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-[11px] font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/40 px-2.5 py-1.5 rounded-lg">
+                    {_t(
+                      'الرابط غير صالح للمشاركة حالياً (محذوف أو موقوف أو بانتظار المزامنة).',
+                      'Link is currently unavailable for sharing (deleted, revoked, closed, or pending sync).',
+                      'Link derzeit nicht teilbar.'
+                    )}
+                  </div>
+                )}
+
+                {activeOnlineSummary && (
+                  <div className="space-y-2.5">
+                    {/* Summary KPI Counters */}
+                    <div className="grid grid-cols-4 gap-1.5 text-center">
+                      <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-900/50">
+                        <div className="text-xs font-black font-mono text-emerald-700 dark:text-emerald-300">
+                          {activeOnlineSummary.solvedCount}
+                        </div>
+                        <div className="text-[9.5px] font-bold text-emerald-700/80 dark:text-emerald-400">
+                          {_t('تم الحل', 'Solved', 'Erledigt')}
+                        </div>
+                      </div>
+                      <div className="p-2 rounded-lg bg-slate-50 dark:bg-slate-900/60 border border-surface-border">
+                        <div className="text-xs font-black font-mono text-text-main">
+                          {activeOnlineSummary.notStartedCount + activeOnlineSummary.inProgressCount}
+                        </div>
+                        <div className="text-[9.5px] font-bold text-text-muted">
+                          {_t('لم يكتمل', 'Pending', 'Offen')}
+                        </div>
+                      </div>
+                      <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-900/50">
+                        <div className="text-xs font-black font-mono text-amber-700 dark:text-amber-300">
+                          {activeOnlineSummary.needsFollowUpCount}
+                        </div>
+                        <div className="text-[9.5px] font-bold text-amber-700/80 dark:text-amber-400">
+                          {_t('متابعة', 'Follow-up', 'Fokus')}
+                        </div>
+                      </div>
+                      <div className="p-2 rounded-lg bg-primary-soft/50 border border-primary-border/40">
+                        <div className="text-xs font-black font-mono text-primary">
+                          {activeOnlineSummary.averageAccuracy !== null ? `${activeOnlineSummary.averageAccuracy}%` : '—'}
+                        </div>
+                        <div className="text-[9.5px] font-bold text-text-muted">
+                          {_t('متوسط الدقة', 'Avg Score', 'Schnitt')}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Students Needing Follow-Up (< 50% or not completed yet) */}
+                    {activeOnlineSummary.followUpStudents.length > 0 && (
+                      <div className="space-y-1">
+                        <span className="text-[10.5px] font-black text-amber-700 dark:text-amber-300 flex items-center gap-1">
+                          <AlertCircle className="w-3.5 h-3.5" />
+                          {_t(
+                            `طلاب يحتاجون إلى متابعة (أقل من 50% أو لم يكتمل) (${activeOnlineSummary.followUpStudents.length})`,
+                            `Students Needing Follow-Up (<50% or incomplete) (${activeOnlineSummary.followUpStudents.length})`,
+                            `Nachverfolgung erforderlich (${activeOnlineSummary.followUpStudents.length})`
+                          )}
+                        </span>
+                        <div className="space-y-1 max-h-36 overflow-y-auto">
+                          {activeOnlineSummary.followUpStudents.map((st) => (
+                            <div
+                              key={st.studentId}
+                              className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40 text-[11px]"
+                            >
+                              <span className="font-bold text-text-main truncate">{st.studentName}</span>
+                              <div className="flex items-center gap-1.5 shrink-0 font-mono text-[10px]">
+                                {st.rawProgressStatus === 'completed' ? (
+                                  <span className="font-black text-amber-700 dark:text-amber-300">
+                                    {st.bestAccuracy}% ({st.bestCorrectCount}/{st.totalQuestions || '?'})
+                                  </span>
+                                ) : st.rawProgressStatus === 'in_progress' ? (
+                                  <span className="font-bold text-amber-700 dark:text-amber-300">
+                                    ⏳ {st.answeredCount}/{st.totalQuestions || '?'}
+                                  </span>
+                                ) : (
+                                  <span className="font-bold text-red-600 dark:text-red-400">
+                                    ❌ {_t('لم يحل بعد', 'Not solved', 'Nicht erledigt')}
+                                  </span>
+                                )}
+                                {st.attemptsCount > 0 && (
+                                  <span className="text-[9.5px] bg-surface px-1.5 py-0.5 rounded border border-surface-border text-text-muted">
+                                    {st.attemptsCount} {_t('محاولة', 'att.', 'Vers.')}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Solved Students (>= 50% or all solved breakdown) */}
+                    {activeOnlineSummary.solvedStudents.length > 0 && (
+                      <div className="space-y-1">
+                        <span className="text-[10.5px] font-black text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          {_t(`طلاب حلوا الواجب (${activeOnlineSummary.solvedStudents.length})`, `Solved (${activeOnlineSummary.solvedStudents.length})`, `Erledigt (${activeOnlineSummary.solvedStudents.length})`)}
+                        </span>
+                        <div className="space-y-1 max-h-32 overflow-y-auto">
+                          {activeOnlineSummary.solvedStudents.map((st) => (
+                            <div
+                              key={st.studentId}
+                              className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-emerald-50/50 dark:bg-emerald-950/15 border border-emerald-200/50 dark:border-emerald-900/30 text-[11px]"
+                            >
+                              <span className="font-bold text-text-main truncate">{st.studentName}</span>
+                              <div className="flex items-center gap-1.5 shrink-0 font-mono text-[10px]">
+                                <span className={`font-black ${st.bestAccuracy < 50 ? 'text-amber-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
+                                  {st.bestAccuracy}%
+                                  {st.totalQuestions > 0 ? ` (${st.bestCorrectCount}/${st.totalQuestions})` : ''}
+                                </span>
+                                <span className="text-[9.5px] bg-surface px-1.5 py-0.5 rounded border border-surface-border text-text-muted">
+                                  {st.attemptsCount} {_t('محاولة', 'att.', 'Vers.')}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Absent Students (kept separate) */}
+                    {activeOnlineSummary.absentStudents.length > 0 && (
+                      <div className="text-[10.5px] text-text-muted bg-surface-hover px-2.5 py-1.5 rounded-lg border border-surface-border flex items-center gap-1.5 flex-wrap">
+                        <Clock className="w-3 h-3 shrink-0" />
+                        <span className="font-bold">{_t('غائب في هذه الحصة:', 'Absent in lesson:', 'Abwesend:')}</span>
+                        <span>{activeOnlineSummary.absentStudents.map((s) => s.studentName).join('، ')}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* SENDING MODE SELECTOR TABS: GROUP VS INDIVIDUAL */}
+            {!isPrivateScope && (
             <div className="grid grid-cols-2 gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl">
               <button
                 type="button"
@@ -384,6 +626,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
                 <span>{_t('👤 إرسال فردي لكل ولي أمر', 'Individual Parents', 'Einzelne Eltern')}</span>
               </button>
             </div>
+            )}
 
             {/* Toast feedback when copied */}
             {copiedGroupToast && (
@@ -394,7 +637,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
             )}
 
             {/* TAB 1: GROUP WHATSAPP MODE */}
-            {viewMode === 'group' && (
+            {!isPrivateScope && viewMode === 'group' && (
               <div className="space-y-3.5 animate-fade-in">
                 {/* Style Selector */}
                 <div className="flex items-center justify-between bg-surface border border-surface-border p-2.5 rounded-xl">
@@ -537,7 +780,7 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
             )}
 
             {/* TAB 2: INDIVIDUAL PARENTS MODE */}
-            {viewMode === 'individual' && (
+            {(isPrivateScope || viewMode === 'individual') && (
               <div className="space-y-3 animate-fade-in">
                 <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
                   <h3 className="text-xs sm:text-sm font-black text-text-main flex items-center gap-1.5">
@@ -734,17 +977,48 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
                 key={p.groupId}
                 onClick={() => {
                   setSelectedGroup(p);
+                  setViewMode(p.scopeType === 'student' ? 'individual' : 'group');
                   setSentContacts(new Set());
                 }}
-                className="flex items-center justify-between p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer border-b border-surface-border last:border-0 transition-colors"
+                className="flex items-center justify-between gap-2 p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer border-b border-surface-border last:border-0 transition-colors"
               >
-                <div className="flex items-center gap-2">
-                  <BookOpen className="w-4 h-4 text-amber-500" />
-                  <span className="font-bold text-sm sm:text-base text-text-main">{p.groupName}</span>
+                <div className="min-w-0 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-amber-500 shrink-0" />
+                    <span className="font-bold text-sm sm:text-base text-text-main truncate">{p.groupName}</span>
+                    {p.scopeType === 'student' && (
+                      <span className="text-[10px] font-bold bg-primary-soft text-primary px-1.5 py-0.5 rounded">
+                        {_t('طالب فردي', 'Private', 'Einzeln')}
+                      </span>
+                    )}
+                  </div>
+                  {p.hasOnlineHomework && p.onlineLinkValidation && (
+                    <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+                      <span className="text-primary font-bold truncate max-w-[200px]">
+                        🎯 {p.onlineLinkValidation.title}
+                      </span>
+                      {p.onlineFollowUpSummary ? (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-surface-hover border border-surface-border text-text-muted">
+                          ✅ {p.onlineFollowUpSummary.solvedCount}/{p.onlineFollowUpSummary.totalTrackedCount}
+                          {(p.needsFollowUpCount || 0) > 0 ? ` • ⚠️ ${p.needsFollowUpCount} ${_t('متابعة', 'follow-up', 'offen')}` : ''}
+                        </span>
+                      ) : !p.onlineLinkValidation.isValid ? (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400">
+                          {_t(p.onlineLinkValidation.statusLabelAr, p.onlineLinkValidation.statusLabelEn, p.onlineLinkValidation.statusLabelDe)}
+                        </span>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
-                <span className="text-xs font-black bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-400 px-2 py-1 rounded-md">
-                  {p.isToday ? _t('اليوم', 'Today', 'Heute') : p.isTomorrow ? _t('غداً', 'Tomorrow', 'Morgen') : p.nextLessonDateStr}
-                </span>
+                {p.nextLessonDateStr ? (
+                  <span className="text-xs font-black bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-400 px-2 py-1 rounded-md shrink-0">
+                    {p.isToday ? _t('اليوم', 'Today', 'Heute') : p.isTomorrow ? _t('غداً', 'Tomorrow', 'Morgen') : p.nextLessonDateStr}
+                  </span>
+                ) : (
+                  <span className="text-xs font-black bg-primary-soft text-primary px-2 py-1 rounded-md shrink-0">
+                    {_t('واجب أونلاين', 'Online HW', 'Online-HA')}
+                  </span>
+                )}
               </div>
             ))
           )}

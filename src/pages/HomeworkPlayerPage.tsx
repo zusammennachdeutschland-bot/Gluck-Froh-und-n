@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion } from 'motion/react';
 import confetti from 'canvas-confetti';
 import {
   Volume2,
+  VolumeX,
   Snail,
   CheckCircle2,
   XCircle,
@@ -15,10 +16,37 @@ import {
   Check,
   X,
   CloudOff,
-  RefreshCw
+  RefreshCw,
+  Clock,
+  Snowflake,
+  Gauge,
+  Zap
 } from 'lucide-react';
 import { speakGermanText } from '../shared/audioSpeechUtils';
-import { playLernstudioSound, playGermanVoiceFeedback } from '../shared/lernstudioAudioUtils';
+import {
+  playLernstudioSound,
+  playGermanVoiceFeedback,
+  isSoundMuted,
+  setSoundMuted
+} from '../shared/lernstudioAudioUtils';
+import { useGameEffects } from '../shared/components/effects/useGameEffects';
+import { HomeworkBonusCardOverlay } from '../shared/components/HomeworkBonusCardOverlay';
+import {
+  HomeworkGamificationState,
+  PendingBonusRound,
+  BonusCardInstance,
+  STREAK_TRIGGER_THRESHOLD,
+  createInitialGamificationState,
+  toGamificationSnapshot,
+  restoreGamificationStateFromSnapshot,
+  applyAnswerGamification,
+  applyBonusCardSelection,
+  tickGamificationTimer,
+  formatHudTimer,
+  saveActiveHomeworkSession,
+  loadActiveHomeworkSession,
+  clearActiveHomeworkSession
+} from '../shared/homeworkGamification';
 import {
   HomeworkAssignment,
   HomeworkAudienceMode,
@@ -26,18 +54,17 @@ import {
   HomeworkQuestionType,
   HomeworkFlowMode,
   HomeworkSubmission,
+  HomeworkShortLinkResolutionStatus,
   DEFAULT_HOMEWORK_QUESTION_TYPES
 } from '../shared/homeworkTypes';
 import { DEFAULT_LERNSTUDIO_SETS } from '../shared/defaultLernstudioSets';
 import {
   getLocalAssignments,
   getStudentLocalSubmissions,
-  saveLocalAssignment,
   saveLocalSubmission,
   getQuestionTypeMeta,
   fetchAssignmentFromFirestore,
   fetchLernstudioSetFromFirestore,
-  saveAssignmentToFirestore,
   subscribeSubmissionsFromFirestore,
   buildDeterministicSubmissionId,
   getOrCreateStudentAttemptSecret,
@@ -52,7 +79,9 @@ import {
   validateHomeworkSubmissionIdentity,
   resolveStageQuestionCount,
   calculateTotalHomeworkQuestions,
-  parseQuestionTypeCountsParam
+  parseQuestionTypeCountsParam,
+  extractShortIdFromPathname,
+  resolveHomeworkShortLink
 } from '../shared/homeworkStorageSync';
 import {
   splitGermanIntoSyllables,
@@ -61,6 +90,7 @@ import {
 
 interface Props {
   assignmentId?: string;
+  shortId?: string;
 }
 
 interface HomeworkTileChoice {
@@ -123,15 +153,28 @@ function deterministicShuffle<T>(arr: T[], seedOffset: number): T[] {
   return copy;
 }
 
-export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) => {
-  const assignmentId =
-    propId ||
-    window.location.pathname.replace(/^\/homework\/?/, '').split('/')[0] ||
-    '';
+export const HomeworkPlayerPage: React.FC<Props> = ({
+  assignmentId: propId,
+  shortId: propShortId
+}) => {
+  const rawPathname = typeof window !== 'undefined' ? window.location.pathname : '';
+  const extractedShortId = extractShortIdFromPathname();
+  const isShortRoute = Boolean(
+    propShortId ||
+      extractedShortId ||
+      /(?:^|\/)Herr-Abdul-rahman(\/|$)/i.test(rawPathname)
+  );
+  const shortIdFromUrl = (propShortId || extractedShortId || '').trim();
+  const routeAssignmentId = isShortRoute
+    ? ''
+    : propId || rawPathname.replace(/^\/homework\/?/, '').split('/')[0] || '';
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [resolutionStatus, setResolutionStatus] = useState<HomeworkShortLinkResolutionStatus | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
   const [assignment, setAssignment] = useState<HomeworkAssignment | null>(null);
+  const assignmentId = assignment?.id || routeAssignmentId;
   const [, setLeaderboard] = useState<any[]>([]);
 
   // Student Flow State (Never reads or falls back to localStorage dl_students)
@@ -179,8 +222,38 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
   const [startTime, setStartTime] = useState<string | null>(null);
   const [cloudSyncState, setCloudSyncState] = useState<'idle' | 'syncing' | 'synced' | 'pending_retry'>('idle');
   const [retryingCloudSync, setRetryingCloudSync] = useState(false);
-  const activeSubmissionIdRef = React.useRef<string>('sub_' + Math.random().toString(36).substring(2, 9));
-  const isSubmittingRef = React.useRef<boolean>(false);
+  const activeSubmissionIdRef = useRef<string>('sub_' + Math.random().toString(36).substring(2, 9));
+  const isSubmittingRef = useRef<boolean>(false);
+
+  // Gamification & Bonus Card Round State
+  const [gamification, setGamification] = useState<HomeworkGamificationState>(() =>
+    createInitialGamificationState(10)
+  );
+  const gamificationRef = useRef<HomeworkGamificationState>(gamification);
+  const [activeOverlayRound, setActiveOverlayRound] = useState<PendingBonusRound | null>(null);
+  const [soundMutedState, setSoundMutedState] = useState<boolean>(() => isSoundMuted());
+  const processedQuestionIdsRef = useRef<Set<string>>(new Set());
+  const latestResponsesRef = useRef<HomeworkQuestionResponse[]>([]);
+  const pendingPostBonusRef = useRef<{
+    nextResponses: HomeworkQuestionResponse[];
+  } | null>(null);
+  const advanceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasRestoredSessionRef = useRef<string>('');
+  const gameEffects = useGameEffects('de');
+
+  const syncGamificationState = useCallback((nextState: HomeworkGamificationState) => {
+    gamificationRef.current = nextState;
+    setGamification(nextState);
+    setGold(nextState.points);
+    setStreak(nextState.streak);
+    setMaxStreak(nextState.maxStreak);
+  }, []);
+
+  const toggleHudMute = useCallback(() => {
+    const nextMuted = !soundMutedState;
+    setSoundMutedState(nextMuted);
+    setSoundMuted(nextMuted);
+  }, [soundMutedState]);
 
   // Automatically flush any pending homework cloud writes when connectivity resumes
   useEffect(() => {
@@ -229,12 +302,27 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     return () => unsub();
   }, [assignmentId, assignment?.ownerUid]);
 
-  // Load Assignment (Primary: Firebase Firestore -> Secondary: API -> Fallback: Local/URL for open mode only)
+  // Load Assignment (Supports both /Herr-Abdul-rahman/{SHORT_ID} and legacy /homework/{assignmentId})
   useEffect(() => {
     async function loadHomework() {
       try {
         setLoading(true);
         setError(null);
+        setResolutionStatus(null);
+
+        if (isShortRoute) {
+          const resolved = await resolveHomeworkShortLink(shortIdFromUrl);
+          setResolutionStatus(resolved.status);
+          if (resolved.status === 'resolved' && resolved.assignment) {
+            setAssignment(resolved.assignment);
+            return;
+          }
+          setError(
+            resolved.error ||
+              'تعذر فتح هذا الواجب. قد يكون الرابط غير صالح أو تم إيقافه من قِبل المعلم.'
+          );
+          return;
+        }
 
         const searchParams = new URLSearchParams(window.location.search);
         const urlQtc = parseQuestionTypeCountsParam(searchParams.get('qtc'));
@@ -242,7 +330,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         const shareToken = (searchParams.get('token') || '').trim();
         const urlOwnerUid = (searchParams.get('ou') || '').trim();
 
-        const infoParams = new URLSearchParams({ id: assignmentId });
+        const infoParams = new URLSearchParams({ id: routeAssignmentId });
         if (shareToken) infoParams.set('token', shareToken);
 
         const res = await fetch(`/api/homework/info?${infoParams.toString()}`).catch(() => null);
@@ -265,7 +353,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
               setError('هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
               return;
             }
-            const localMatch = getLocalAssignments().find((a) => a.id === assignmentId);
+            const localMatch = getLocalAssignments().find((a) => a.id === routeAssignmentId);
             const resolvedOwner = data.ownerUid || urlOwnerUid || localMatch?.ownerUid || undefined;
             const mergedApi = {
               ...data,
@@ -282,7 +370,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         }
 
         // 2. Check local assignments cache (verifying shareToken if configured on the local record)
-        const localFound = getLocalAssignments().find((a) => a.id === assignmentId);
+        const localFound = getLocalAssignments().find((a) => a.id === routeAssignmentId);
         if (localFound && localFound.setSnapshot) {
           const localToken = (localFound.shareToken || '').trim();
           if (localToken && shareToken !== localToken) {
@@ -304,7 +392,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
 
         // 3. Check Firestore directly if authenticated as owning teacher
         if (getCurrentHomeworkOwnerUid()) {
-          const cloudFound = await fetchAssignmentFromFirestore(assignmentId).catch(() => null);
+          const cloudFound = await fetchAssignmentFromFirestore(routeAssignmentId).catch(() => null);
           if (cloudFound && cloudFound.setSnapshot) {
             const cloudToken = (cloudFound.shareToken || '').trim();
             if (cloudToken && shareToken !== cloudToken) {
@@ -353,7 +441,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         }
 
         const setId = searchParams.get('s');
-        if (setId) {
+        const compactWordsParam = (searchParams.get('w') || '').trim();
+        if (setId || compactWordsParam) {
           const titleParam = searchParams.get('t') || 'واجب منزلي تفاعلي';
           const flowModeParam: HomeworkFlowMode = 'teacher_then_quiz';
           const qtParam = searchParams.get('qt');
@@ -363,8 +452,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
           const idsParam = searchParams.get('ids');
           const selectedIds = idsParam ? idsParam.split(',') : [];
 
-          let foundSet: any = DEFAULT_LERNSTUDIO_SETS.find((st) => st.id === setId) || null;
-          if (!foundSet) {
+          let foundSet: any = setId ? DEFAULT_LERNSTUDIO_SETS.find((st) => st.id === setId) || null : null;
+          if (!foundSet && setId) {
             try {
               const rawSets = localStorage.getItem('dl_lernstudio_sets');
               if (rawSets) {
@@ -377,8 +466,31 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
               // Ignore local parse errors
             }
           }
-          if (!foundSet) {
+          if (!foundSet && setId) {
             foundSet = await fetchLernstudioSetFromFirestore(setId).catch(() => null);
+          }
+          if (!foundSet && compactWordsParam) {
+            const parsedItems = compactWordsParam
+              .split('|')
+              .map((entry, idx) => {
+                const [rawId, rawDe, rawAr, rawEmoji] = entry.split('~');
+                const id = (rawId || `w_${idx + 1}`).trim();
+                const german = (rawDe || '').trim();
+                const arabic = (rawAr || '').trim();
+                const emoji = (rawEmoji || '📘').trim() || '📘';
+                return german && arabic
+                  ? { id, german, arabic, emoji }
+                  : null;
+              })
+              .filter(Boolean);
+            if (parsedItems.length > 0) {
+              foundSet = {
+                id: setId || `set_${routeAssignmentId}`,
+                title: titleParam,
+                category: 'general',
+                items: parsedItems
+              };
+            }
           }
 
           if (foundSet && Array.isArray(foundSet.items) && foundSet.items.length > 0) {
@@ -393,7 +505,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
             );
 
             const fallbackHw: HomeworkAssignment = {
-              id: assignmentId,
+              id: routeAssignmentId,
               title: titleParam,
               ...(shareToken ? { shareToken } : {}),
               ...(urlOwnerUid ? { ownerUid: urlOwnerUid } : {}),
@@ -439,7 +551,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       }
     }
     loadHomework();
-  }, [assignmentId]);
+  }, [routeAssignmentId, isShortRoute, shortIdFromUrl, reloadNonce]);
 
   // Active vocabulary items selected by the teacher
   const studyItems = useMemo(() => {
@@ -907,11 +1019,13 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
   const currentQuestion = quizQuestions[currentIdx];
   const currentStudyItem = studyItems[studyIndex];
 
-  // Auto-pronounce word when entering Teacher Study card or Question
+  // Auto-pronounce word when entering Teacher Study card or Question (paused when muted or Bonus Round active)
   useEffect(() => {
     if (phase === 'teacher_study' && currentStudyItem?.german) {
       const timer = setTimeout(() => {
-        speakGermanText(currentStudyItem.german, 0.9);
+        if (!isSoundMuted()) {
+          speakGermanText(currentStudyItem.german, 0.9);
+        }
       }, 250);
       return () => clearTimeout(timer);
     }
@@ -925,12 +1039,16 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       setUsedTileIds([]);
       setErrorTileId(null);
       setWrongStepsCount(0);
-      const timer = setTimeout(() => {
-        speakGermanText(currentQuestion.germanWord, 0.9);
-      }, 250);
-      return () => clearTimeout(timer);
+      if (!gamificationRef.current.pendingBonusRound && !activeOverlayRound) {
+        const timer = setTimeout(() => {
+          if (!isSoundMuted()) {
+            speakGermanText(currentQuestion.germanWord, 0.9);
+          }
+        }, 250);
+        return () => clearTimeout(timer);
+      }
     }
-  }, [phase, currentIdx, currentQuestion]);
+  }, [phase, currentIdx, currentQuestion?.id]);
 
   // Merged submissions (Cloud + Local student scope) for accurate attempt tracking and enforcement
   const mergedSubmissionsForAssignment = useMemo(() => {
@@ -1033,6 +1151,19 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     activeSubmissionIdRef.current = deterministicId;
     const attemptSecret = getOrCreateStudentAttemptSecret(deterministicId);
 
+    const initialGam = createInitialGamificationState(
+      quizQuestions.length,
+      assignment?.timeLimitMinutes
+    );
+    processedQuestionIdsRef.current = new Set();
+    pendingPostBonusRef.current = null;
+    setActiveOverlayRound(null);
+    latestResponsesRef.current = [];
+    setResponses([]);
+    setSelectedChoice(null);
+    setFeedback(null);
+    syncGamificationState(initialGam);
+
     const nowIso = new Date().toISOString();
     setStartTime(nowIso);
     playLernstudioSound('powerup_star');
@@ -1063,6 +1194,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       goldEarned: 0,
       maxStreak: 0,
       completedStudyPhase: false,
+      gamification: toGamificationSnapshot(initialGam),
       responses: []
     };
     setCloudSyncState('syncing');
@@ -1074,6 +1206,25 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         setCloudSyncState('pending_retry');
       });
 
+    const initialPhase = studyItems.length > 0 ? 'teacher_study' : 'quiz';
+    saveActiveHomeworkSession({
+      version: 1,
+      assignmentId,
+      submissionId: deterministicId,
+      attemptNumber: nextAttempt,
+      studentName: finalStudentName,
+      selectedStudentId: finalStudentId || '',
+      openParticipantId: finalParticipantId || '',
+      phase: initialPhase,
+      studyIndex: 0,
+      currentIdx: 0,
+      completedStudyPhase: studyItems.length === 0,
+      startTime: nowIso,
+      responses: [],
+      gamification: initialGam,
+      updatedAtMs: Date.now()
+    });
+
     if (studyItems.length > 0) {
       setStudyIndex(0);
       setPhase('teacher_study');
@@ -1083,7 +1234,184 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     }
   };
 
-  const advanceToNextQuestion = (nextResponses: HomeworkQuestionResponse[], currentGold: number, currentMaxStreak: number) => {
+  const persistCurrentActiveSession = useCallback(
+    (overrides?: {
+      phase?: 'teacher_study' | 'quiz';
+      studyIndex?: number;
+      currentIdx?: number;
+      completedStudyPhase?: boolean;
+      responses?: HomeworkQuestionResponse[];
+      gamification?: HomeworkGamificationState;
+    }) => {
+      if (!assignmentId || !studentName.trim()) return;
+      const targetPhase = overrides?.phase ?? (phase === 'teacher_study' || phase === 'quiz' ? phase : null);
+      if (!targetPhase) return;
+      saveActiveHomeworkSession({
+        version: 1,
+        assignmentId,
+        submissionId: activeSubmissionIdRef.current,
+        attemptNumber: currentAttemptNumber,
+        studentName: studentName.trim(),
+        selectedStudentId: audienceMode === 'group' ? selectedStudentId : '',
+        openParticipantId: audienceMode === 'open' ? resolvedOpenPid : '',
+        phase: targetPhase,
+        studyIndex: overrides?.studyIndex ?? studyIndex,
+        currentIdx: overrides?.currentIdx ?? currentIdx,
+        completedStudyPhase: overrides?.completedStudyPhase ?? completedStudyPhase,
+        startTime: startTime || new Date().toISOString(),
+        responses: overrides?.responses ?? latestResponsesRef.current,
+        gamification: overrides?.gamification ?? gamificationRef.current,
+        updatedAtMs: Date.now()
+      });
+    },
+    [
+      assignmentId,
+      studentName,
+      phase,
+      currentAttemptNumber,
+      audienceMode,
+      selectedStudentId,
+      resolvedOpenPid,
+      studyIndex,
+      currentIdx,
+      completedStudyPhase,
+      startTime
+    ]
+  );
+
+  // Restore unfinished homework session safely on refresh without duplicating points or rewards
+  useEffect(() => {
+    if (!assignmentId || quizQuestions.length === 0) return;
+    if (hasRestoredSessionRef.current === assignmentId) return;
+    hasRestoredSessionRef.current = assignmentId;
+
+    const saved = loadActiveHomeworkSession(assignmentId);
+    if (!saved) {
+      if (phase === 'lobby') {
+        const fresh = createInitialGamificationState(quizQuestions.length, assignment?.timeLimitMinutes);
+        syncGamificationState(fresh);
+      }
+      return;
+    }
+
+    const alreadySubmitted = mergedSubmissionsForAssignment.some(
+      (s) =>
+        s.id === saved.submissionId &&
+        (s.status === 'completed' || (!s.status && Boolean(s.completedAt)))
+    );
+    if (alreadySubmitted || !isHomeworkAssignmentOpenForStudents(assignment)) {
+      clearActiveHomeworkSession(assignmentId);
+      return;
+    }
+
+    const restoredSnap = toGamificationSnapshot(saved.gamification);
+    const restoredGamBase = restoreGamificationStateFromSnapshot(
+      restoredSnap,
+      quizQuestions.length,
+      assignment?.timeLimitMinutes
+    );
+
+    const savedPending = saved.gamification?.pendingBonusRound || null;
+    const unappliedPendingRound =
+      savedPending && !restoredGamBase.appliedBonusRoundIds.includes(savedPending.roundId)
+        ? savedPending
+        : null;
+
+    const restoredGam: HomeworkGamificationState = {
+      ...restoredGamBase,
+      pendingBonusRound: unappliedPendingRound
+    };
+
+    processedQuestionIdsRef.current = new Set(restoredGam.processedQuestionIds);
+    latestResponsesRef.current = Array.isArray(saved.responses) ? saved.responses : [];
+    activeSubmissionIdRef.current = saved.submissionId;
+    isSubmittingRef.current = false;
+
+    setStudentName(saved.studentName || '');
+    setSelectedStudentId(saved.selectedStudentId || '');
+    setOpenParticipantId(saved.openParticipantId || '');
+    setCurrentAttemptNumber(saved.attemptNumber || 1);
+    setStartTime(saved.startTime || new Date().toISOString());
+    setCompletedStudyPhase(Boolean(saved.completedStudyPhase));
+    setResponses(latestResponsesRef.current);
+    syncGamificationState(restoredGam);
+
+    if (saved.phase === 'teacher_study' && studyItems.length > 0) {
+      setStudyIndex(Math.max(0, Math.min(saved.studyIndex || 0, studyItems.length - 1)));
+      setPhase('teacher_study');
+      return;
+    }
+
+    const clampedIdx = Math.max(0, Math.min(saved.currentIdx || 0, quizQuestions.length - 1));
+    if (unappliedPendingRound) {
+      setCurrentIdx(clampedIdx);
+      setPhase('quiz');
+      pendingPostBonusRef.current = { nextResponses: latestResponsesRef.current };
+      setActiveOverlayRound(unappliedPendingRound);
+      return;
+    }
+
+    // Ensure we land on the first unanswered question if currentIdx was already answered before refresh
+    let targetIdx = clampedIdx;
+    while (
+      targetIdx < quizQuestions.length &&
+      restoredGam.processedQuestionIds.includes(quizQuestions[targetIdx].id)
+    ) {
+      targetIdx++;
+    }
+
+    if (targetIdx >= quizQuestions.length && latestResponsesRef.current.length > 0) {
+      setPhase('quiz');
+      handleFinishHomework(latestResponsesRef.current, restoredGam.points, restoredGam.maxStreak);
+    } else {
+      setCurrentIdx(Math.min(targetIdx, Math.max(0, quizQuestions.length - 1)));
+      setPhase('quiz');
+    }
+  }, [assignmentId, assignment, quizQuestions, studyItems.length, mergedSubmissionsForAssignment, phase, syncGamificationState]);
+
+  // Countdown Timer loop during active Quiz phase (paused while Bonus Card Round is open)
+  useEffect(() => {
+    if (phase !== 'quiz') return;
+    const interval = setInterval(() => {
+      if (isSubmittingRef.current) return;
+      const prev = gamificationRef.current;
+      if (prev.pendingBonusRound || activeOverlayRound || prev.timeRemainingSeconds <= 0) return;
+
+      const next = tickGamificationTimer(prev, false);
+      if (next !== prev) {
+        syncGamificationState(next);
+        if (next.timeRemainingSeconds === 0 && prev.timeRemainingSeconds > 0) {
+          handleFinishHomework(latestResponsesRef.current, next.points, next.maxStreak);
+        }
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [phase, activeOverlayRound, syncGamificationState]);
+
+  // Persist active session periodically & on navigation transitions so page refresh preserves exact timer & state
+  useEffect(() => {
+    if (phase !== 'teacher_study' && phase !== 'quiz') return;
+    persistCurrentActiveSession();
+    const saveTick = setInterval(() => {
+      persistCurrentActiveSession();
+    }, 3000);
+    return () => clearInterval(saveTick);
+  }, [phase, studyIndex, currentIdx, persistCurrentActiveSession]);
+
+  // Cleanup advance timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (advanceTimeoutRef.current) {
+        clearTimeout(advanceTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const advanceToNextQuestion = (
+    nextResponses: HomeworkQuestionResponse[],
+    currentGold: number,
+    currentMaxStreak: number
+  ) => {
     setSelectedChoice(null);
     setFeedback(null);
     setMultiStepIdx(0);
@@ -1093,36 +1421,104 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     setWrongStepsCount(0);
 
     if (currentIdx + 1 < quizQuestions.length) {
-      setCurrentIdx(currentIdx + 1);
+      const nextIdx = currentIdx + 1;
+      setCurrentIdx(nextIdx);
+      persistCurrentActiveSession({
+        phase: 'quiz',
+        currentIdx: nextIdx,
+        responses: nextResponses,
+        gamification: gamificationRef.current
+      });
     } else {
       handleFinishHomework(nextResponses, currentGold, currentMaxStreak);
     }
   };
 
+  const handlePickBonusCard = useCallback(
+    (cardInstanceId: string): BonusCardInstance | null => {
+      const currentGam = gamificationRef.current;
+      const res = applyBonusCardSelection(currentGam, cardInstanceId);
+      if (res.selectedCard && !res.alreadyApplied) {
+        syncGamificationState(res.nextState);
+        persistCurrentActiveSession({
+          gamification: res.nextState
+        });
+        syncLiveProgressToFirestore(
+          latestResponsesRef.current,
+          res.nextState.points,
+          res.nextState.maxStreak,
+          undefined,
+          toGamificationSnapshot(res.nextState)
+        );
+        if (res.selectedCard.pointsDelta !== 0) {
+          gameEffects.triggerScorePopup(
+            res.selectedCard.pointsDelta > 0
+              ? `+${res.selectedCard.pointsDelta}`
+              : `${res.selectedCard.pointsDelta}`,
+            50,
+            24,
+            res.selectedCard.pointsDelta > 0
+          );
+        }
+      }
+      return res.selectedCard;
+    },
+    [syncGamificationState, persistCurrentActiveSession, gameEffects]
+  );
+
+  const handleBonusRoundComplete = useCallback(() => {
+    setActiveOverlayRound(null);
+    const pending = pendingPostBonusRef.current;
+    pendingPostBonusRef.current = null;
+    const latestGam = gamificationRef.current;
+    const targetResponses = pending ? pending.nextResponses : latestResponsesRef.current;
+    advanceToNextQuestion(targetResponses, latestGam.points, latestGam.maxStreak);
+  }, [currentIdx, quizQuestions.length]);
+
   const recordQuestionCompletion = (studentAnswerStr: string, isCorrect: boolean) => {
     if (!currentQuestion) return;
-    setFeedback(isCorrect ? 'correct' : 'wrong');
-
-    let nextGold = gold;
-    let nextStreak = streak;
-    let nextMaxStreak = maxStreak;
-
-    if (isCorrect) {
-      nextStreak = streak + 1;
-      nextMaxStreak = Math.max(maxStreak, nextStreak);
-      nextGold = gold + 100 * Math.min(3, nextStreak);
-      setStreak(nextStreak);
-      setMaxStreak(nextMaxStreak);
-      setGold(nextGold);
-      playLernstudioSound('correct');
-      playGermanVoiceFeedback('richtig');
-    } else {
-      setStreak(0);
-      playLernstudioSound('wrong');
-      playGermanVoiceFeedback('noch_einmal');
+    if (!studentAnswerStr || !studentAnswerStr.trim()) return;
+    if (
+      processedQuestionIdsRef.current.has(currentQuestion.id) ||
+      gamificationRef.current.processedQuestionIds.includes(currentQuestion.id)
+    ) {
+      return;
     }
 
-    speakGermanText(currentQuestion.germanWord, 0.9);
+    const transition = applyAnswerGamification(gamificationRef.current, {
+      questionId: currentQuestion.id,
+      questionIndex: currentIdx,
+      isCorrect,
+      isAnswered: true
+    });
+    if (transition.ignoredDuplicate) return;
+
+    processedQuestionIdsRef.current.add(currentQuestion.id);
+    const nextGam = transition.nextState;
+    syncGamificationState(nextGam);
+    setFeedback(isCorrect ? 'correct' : 'wrong');
+
+    if (isCorrect) {
+      playLernstudioSound(transition.doubledApplied ? 'combo_ding' : 'correct');
+      playGermanVoiceFeedback(transition.doubledApplied ? 'fantastisch' : 'richtig');
+      gameEffects.triggerScorePopup(
+        transition.doubledApplied ? `+${transition.pointsDelta} (×2!)` : `+${transition.pointsDelta}`,
+        50,
+        28,
+        transition.doubledApplied ? '#8B5CF6' : true
+      );
+      if (transition.doubledApplied || nextGam.streak >= STREAK_TRIGGER_THRESHOLD) {
+        gameEffects.triggerSparkles(50, 32, transition.doubledApplied ? '#8B5CF6' : '#F59E0B');
+      }
+    } else {
+      playLernstudioSound('wrong');
+      playGermanVoiceFeedback('noch_einmal');
+      gameEffects.triggerScorePopup(`${transition.pointsDelta || -5}`, 50, 28, false);
+    }
+
+    if (!isSoundMuted()) {
+      speakGermanText(currentQuestion.germanWord, 0.9);
+    }
 
     const elapsedSec = Math.max(1, Math.round((Date.now() - questionStartMs) / 1000));
     const newResponse: HomeworkQuestionResponse = {
@@ -1136,19 +1532,39 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       timeSpentSeconds: elapsedSec
     };
 
-    const nextResponses = [...responses, newResponse];
+    const nextResponses = [...latestResponsesRef.current, newResponse];
+    latestResponsesRef.current = nextResponses;
     setResponses(nextResponses);
 
-    // Sync progress answer-by-answer in real-time to Firestore so the teacher sees live question-by-question student progress
-    syncLiveProgressToFirestore(nextResponses, nextGold, nextMaxStreak);
+    const snapshot = toGamificationSnapshot(nextGam);
+    syncLiveProgressToFirestore(nextResponses, nextGam.points, nextGam.maxStreak, undefined, snapshot);
+    persistCurrentActiveSession({
+      phase: 'quiz',
+      currentIdx,
+      responses: nextResponses,
+      gamification: nextGam
+    });
 
-    setTimeout(() => {
-      advanceToNextQuestion(nextResponses, nextGold, nextMaxStreak);
-    }, 1050);
+    if (advanceTimeoutRef.current) {
+      clearTimeout(advanceTimeoutRef.current);
+    }
+
+    if (transition.triggeredBonusRound && nextGam.pendingBonusRound) {
+      const triggeredRound = nextGam.pendingBonusRound;
+      pendingPostBonusRef.current = { nextResponses };
+      advanceTimeoutRef.current = setTimeout(() => {
+        setActiveOverlayRound(triggeredRound);
+      }, 650);
+    } else {
+      advanceTimeoutRef.current = setTimeout(() => {
+        advanceToNextQuestion(nextResponses, nextGam.points, nextGam.maxStreak);
+      }, 950);
+    }
   };
 
   const handleSelectOption = (chosenOption: string) => {
-    if (selectedChoice !== null || !currentQuestion) return;
+    if (selectedChoice !== null || !currentQuestion || !chosenOption || !chosenOption.trim()) return;
+    if (processedQuestionIdsRef.current.has(currentQuestion.id)) return;
     setSelectedChoice(chosenOption);
     const isCorrect = chosenOption.trim().toLowerCase() === currentQuestion.correctAnswer.trim().toLowerCase();
     recordQuestionCompletion(chosenOption, isCorrect);
@@ -1250,7 +1666,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     currResponses: HomeworkQuestionResponse[],
     currGold: number,
     currMaxStreak: number,
-    studyCompletedOverride?: boolean
+    studyCompletedOverride?: boolean,
+    gamificationSnapshotOverride?: ReturnType<typeof toGamificationSnapshot>
   ) => {
     if (!assignmentId || !studentName.trim()) return;
     const correctCount = currResponses.filter((r) => r.isCorrect).length;
@@ -1261,6 +1678,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     const timeSpentSeconds = Math.max(1, Math.round((Date.now() - startMs) / 1000));
 
     const attemptSecret = getOrCreateStudentAttemptSecret(activeSubmissionIdRef.current);
+    const snap = gamificationSnapshotOverride ?? toGamificationSnapshot(gamificationRef.current);
 
     const liveSubmissionObj: HomeworkSubmission = {
       id: activeSubmissionIdRef.current,
@@ -1287,6 +1705,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       goldEarned: currGold,
       maxStreak: currMaxStreak,
       completedStudyPhase: studyCompletedOverride ?? completedStudyPhase,
+      gamification: snap,
       responses: currResponses
     };
 
@@ -1311,14 +1730,18 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       return;
     }
     isSubmittingRef.current = true;
+    clearActiveHomeworkSession(assignmentId);
+    setActiveOverlayRound(null);
+    pendingPostBonusRef.current = null;
 
     setPhase('completed');
     setSubmitting(true);
     setCloudSyncState('syncing');
     confetti({ particleCount: 100, spread: 80, origin: { y: 0.6 } });
 
+    const finalSnapshot = toGamificationSnapshot(gamificationRef.current);
     const correctCount = allResponses.filter((r) => r.isCorrect).length;
-    const totalQ = allResponses.length;
+    const totalQ = Math.max(quizQuestions.length || 0, allResponses.length);
     const localScorePct = totalQ > 0 ? Math.round((correctCount / totalQ) * 100) : 0;
     const completedAtIso = new Date().toISOString();
     const startMs = startTime ? new Date(startTime).getTime() : Date.now() - totalQ * 4000;
@@ -1350,6 +1773,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
       goldEarned: finalGoldValue,
       maxStreak: finalMaxStreak,
       completedStudyPhase,
+      gamification: finalSnapshot,
       responses: allResponses
     };
 
@@ -1363,15 +1787,16 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     setFinalScore(syncedSubmissionObj);
 
     try {
+      const urlShareToken = new URLSearchParams(window.location.search).get('token')?.trim() || '';
+      const activeShortId = (assignment?.shortId || shortIdFromUrl || '').trim();
       const res = await fetch('/api/homework/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: activeSubmissionIdRef.current,
           assignmentId,
-          ...(new URLSearchParams(window.location.search).get('token')?.trim()
-            ? { token: new URLSearchParams(window.location.search).get('token')!.trim() }
-            : {}),
+          ...(urlShareToken ? { token: urlShareToken } : {}),
+          ...(activeShortId ? { shortId: activeShortId } : {}),
           ...(assignment?.ownerUid ? { ownerUid: assignment.ownerUid } : {}),
           attemptSecret,
           audienceMode,
@@ -1385,7 +1810,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
           completedAt: completedAtIso,
           goldEarned: finalGoldValue,
           maxStreak: finalMaxStreak,
-          completedStudyPhase
+          completedStudyPhase,
+          gamification: finalSnapshot
         })
       });
 
@@ -1410,6 +1836,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
           attemptNumber: currentAttemptNumber,
           status: 'completed',
           completedAt: completedAtIso,
+          gamification: data.submission.gamification || finalSnapshot,
           cloudSynced: isSynced
         };
         saveLocalSubmission(mergedFinal, !isSynced);
@@ -1463,18 +1890,46 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     return (
       <div className="min-h-screen bg-background text-text-main flex items-center justify-center p-4 font-sans" dir="rtl">
         <div className="max-w-md w-full bg-surface border border-surface-border p-6 rounded-2xl text-center space-y-4 shadow-xs">
-          <XCircle className="w-10 h-10 text-rose-500 mx-auto" />
-          <h2 className="text-base font-bold text-text-main">تنبيه بخصوص الواجب</h2>
+          {resolutionStatus === 'network_error' ? (
+            <CloudOff className="w-10 h-10 text-amber-500 mx-auto" />
+          ) : (
+            <XCircle className="w-10 h-10 text-rose-500 mx-auto" />
+          )}
+          <h2 className="text-base font-bold text-text-main">
+            {resolutionStatus === 'revoked'
+              ? 'تم إيقاف أو حذف هذا الواجب'
+              : resolutionStatus === 'invalid_id'
+              ? 'رابط الواجب غير صالح'
+              : resolutionStatus === 'network_error'
+              ? 'تعذر الاتصال بالسحابة'
+              : 'تنبيه بخصوص الواجب'}
+          </h2>
           <p className="text-xs text-text-muted">{error}</p>
-          <button
-            type="button"
-            onClick={() => {
-              try { window.close(); } catch {}
-            }}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-text-main font-bold text-xs transition-colors shadow-2xs cursor-pointer"
-          >
-            <span>إغلاق الصفحة</span>
-          </button>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {(resolutionStatus === 'network_error' || resolutionStatus === 'not_found') && (
+              <button
+                type="button"
+                onClick={() => setReloadNonce((n) => n + 1)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-hover text-white font-bold text-xs transition-colors shadow-2xs cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>إعادة المحاولة</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                try { window.close(); } catch {}
+                if (typeof window !== 'undefined') {
+                  window.history.pushState({}, '', '/');
+                  window.dispatchEvent(new Event('glueck-route-change'));
+                }
+              }}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-text-main font-bold text-xs transition-colors shadow-2xs cursor-pointer"
+            >
+              <span>إغلاق الصفحة</span>
+            </button>
+          </div>
           <p className="text-[11px] text-text-muted pt-2 select-none">
             von Herr Abdul-rahman
           </p>
@@ -1653,6 +2108,106 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
     );
   }
 
+  // Reusable compact always-visible HUD (top of homework screen)
+  const renderCompactGamificationHud = (isStudyPhase: boolean) => {
+    const isFrozen = gamification.freezeRemainingSeconds > 0;
+    const isSlowMo = gamification.slowMotionRemainingSeconds > 0;
+    const isLowTime = !isStudyPhase && !isFrozen && gamification.timeRemainingSeconds <= 20;
+
+    return (
+      <div className="max-w-3xl w-full mx-auto sticky top-2 z-30 mb-3">
+        <div className="bg-surface/95 backdrop-blur-md border border-surface-border rounded-2xl px-3 py-2 shadow-sm flex flex-wrap items-center justify-between gap-2">
+          {/* Countdown Timer & Powerup Modifiers */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <span
+              className={`px-2.5 py-1 rounded-xl border text-xs font-black font-mono tabular-nums inline-flex items-center gap-1.5 ${
+                isFrozen
+                  ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-600 dark:text-cyan-300'
+                  : isSlowMo
+                  ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-600 dark:text-indigo-300'
+                  : isLowTime
+                  ? 'bg-rose-500/15 border-rose-500/40 text-rose-600 dark:text-rose-400 animate-pulse'
+                  : 'bg-surface-hover border-surface-border text-text-main'
+              }`}
+            >
+              {isFrozen ? (
+                <Snowflake className="w-3.5 h-3.5 shrink-0" />
+              ) : isSlowMo ? (
+                <Gauge className="w-3.5 h-3.5 shrink-0" />
+              ) : (
+                <Clock className="w-3.5 h-3.5 text-primary shrink-0" />
+              )}
+              <span>{formatHudTimer(gamification.timeRemainingSeconds)}</span>
+              {isFrozen && (
+                <span className="text-[10px] font-sans font-bold">
+                  تجميد ({gamification.freezeRemainingSeconds}ث)
+                </span>
+              )}
+              {!isFrozen && isSlowMo && (
+                <span className="text-[10px] font-sans font-bold">
+                  إبطاء ({gamification.slowMotionRemainingSeconds}ث)
+                </span>
+              )}
+            </span>
+
+            {isStudyPhase ? (
+              <span className="px-2.5 py-1 rounded-xl bg-surface-hover border border-surface-border text-primary text-xs font-bold tabular-nums">
+                📖 {studyIndex + 1} / {studyItems.length}
+              </span>
+            ) : (
+              <span className="px-2.5 py-1 rounded-xl bg-surface-hover border border-surface-border text-text-main text-xs font-bold tabular-nums">
+                {currentIdx + 1} / {quizQuestions.length}
+              </span>
+            )}
+          </div>
+
+          {/* Points, Streak toward Bonus Card Round, Double Points badge & Audio Mute */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <span
+              className={`px-2.5 py-1 rounded-xl border text-xs font-bold inline-flex items-center gap-1 tabular-nums ${
+                gamification.streak >= STREAK_TRIGGER_THRESHOLD - 2
+                  ? 'bg-orange-500/15 border-orange-500/40 text-orange-600 dark:text-orange-400'
+                  : 'bg-surface-hover border-surface-border text-text-muted'
+              }`}
+              title="أجب 10 إجابات متتالية صحيحة لفتح جولة بطاقات المكافآت"
+            >
+              <Flame className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+              <span>
+                {gamification.streak}/{STREAK_TRIGGER_THRESHOLD}
+              </span>
+            </span>
+
+            <span className="px-2.5 py-1 rounded-xl bg-amber-500/15 border border-amber-500/35 text-amber-700 dark:text-amber-300 text-xs font-black inline-flex items-center gap-1 tabular-nums">
+              <Coins className="w-3.5 h-3.5 shrink-0" />
+              <span>{gamification.points} نقطة</span>
+            </span>
+
+            {gamification.doublePointsActive && (
+              <span className="px-2 py-1 rounded-xl bg-violet-500/15 border border-violet-500/40 text-violet-600 dark:text-violet-300 text-[11px] font-black inline-flex items-center gap-1">
+                <Zap className="w-3 h-3 shrink-0" />
+                <span>×2</span>
+              </span>
+            )}
+
+            <button
+              type="button"
+              onClick={toggleHudMute}
+              aria-label={soundMutedState ? 'تشغيل الصوت' : 'كتم الصوت'}
+              title={soundMutedState ? 'تشغيل الصوت' : 'كتم الصوت'}
+              className={`p-1.5 rounded-xl border text-xs transition-colors cursor-pointer ${
+                soundMutedState
+                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-500'
+                  : 'bg-surface-hover hover:bg-surface border-surface-border text-text-main'
+              }`}
+            >
+              {soundMutedState ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-emerald-500" />}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // ============================================================================
   // PHASE 1: TEACHER PRONUNCIATION & FLASHCARD STUDY ("يبدأ بالمعلم اللي هو نطق الكلمة")
   // ============================================================================
@@ -1685,6 +2240,11 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
 
     return (
       <div className="min-h-screen bg-background text-text-main flex flex-col p-4 sm:p-6 font-sans" dir="rtl">
+        <gameEffects.EffectsOverlay />
+
+        {/* Always-Visible Compact HUD */}
+        {renderCompactGamificationHud(true)}
+
         {/* Icon-Only Stage Bar (Zero Side-Scrolling) */}
         <div className="max-w-2xl w-full mx-auto bg-surface border border-surface-border rounded-2xl p-1.5 mb-3 shadow-2xs">
           <div className="flex items-center gap-1 w-full">
@@ -1705,17 +2265,6 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
               </div>
             ))}
           </div>
-        </div>
-
-        {/* Top Bar */}
-        <div className="max-w-2xl w-full mx-auto flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <span className="px-3 py-1 rounded-lg bg-surface border border-surface-border text-primary text-xs font-bold flex items-center gap-1.5 shadow-2xs">
-              <span>📖</span>
-              <span>التعلم والنطق: {studyIndex + 1} / {studyItems.length}</span>
-            </span>
-          </div>
-          <span className="text-xs font-medium text-text-muted">👤 {studentName}</span>
         </div>
 
         {/* Progress Bar */}
@@ -1823,7 +2372,18 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
                     setCompletedStudyPhase(true);
                     setCurrentIdx(0);
                     setPhase('quiz');
-                    syncLiveProgressToFirestore(responses, gold, maxStreak, true);
+                    persistCurrentActiveSession({
+                      phase: 'quiz',
+                      currentIdx: 0,
+                      completedStudyPhase: true
+                    });
+                    syncLiveProgressToFirestore(
+                      latestResponsesRef.current,
+                      gamificationRef.current.points,
+                      gamificationRef.current.maxStreak,
+                      true,
+                      toGamificationSnapshot(gamificationRef.current)
+                    );
                   }}
                   className="flex-1 py-2.5 px-4 rounded-xl bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all"
                 >
@@ -1925,6 +2485,25 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
               )
             )}
 
+            {/* Earned Bonus Cards Summary (when unlocked via 10-answer streak) */}
+            {((finalScore?.gamification?.bonusHistory || gamification.bonusHistory) || []).length > 0 && (
+              <div className="text-right space-y-1.5 pt-1">
+                <h3 className="text-xs font-bold text-text-main">🃏 بطاقات المكافآت المكتسبة:</h3>
+                <div className="flex flex-wrap gap-1.5">
+                  {((finalScore?.gamification?.bonusHistory || gamification.bonusHistory) as any[]).map(
+                    (cardItem: any, idx: number) => (
+                      <span
+                        key={cardItem.roundId || idx}
+                        className="px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/25 text-xs font-bold text-amber-700 dark:text-amber-300"
+                      >
+                        {cardItem.titleAr} ({cardItem.effectSummaryAr})
+                      </span>
+                    )
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Detailed Question Review */}
             <div className="text-right space-y-2 pt-2">
               <h3 className="text-xs font-bold text-text-main">مراجعة الإجابات ({responses.length}):</h3>
@@ -1972,6 +2551,11 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
               <div className="pt-2">
                 <button
                   onClick={() => {
+                    if (advanceTimeoutRef.current) {
+                      clearTimeout(advanceTimeoutRef.current);
+                      advanceTimeoutRef.current = null;
+                    }
+                    clearActiveHomeworkSession(assignmentId);
                     const nextAttempt = Math.max(currentAttemptNumber + 1, studentCompletedAttempts.length + 1);
                     isSubmittingRef.current = false;
                     activeSubmissionIdRef.current = buildDeterministicSubmissionId(
@@ -1981,16 +2565,41 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
                       nextAttempt,
                       audienceMode === 'open' ? resolvedOpenPid : undefined
                     );
+                    const freshGam = createInitialGamificationState(
+                      quizQuestions.length,
+                      assignment?.timeLimitMinutes
+                    );
+                    processedQuestionIdsRef.current = new Set();
+                    pendingPostBonusRef.current = null;
+                    setActiveOverlayRound(null);
+                    latestResponsesRef.current = [];
                     setCurrentAttemptNumber(nextAttempt);
                     setCurrentIdx(0);
                     setStudyIndex(0);
                     setResponses([]);
-                    setGold(0);
-                    setStreak(0);
+                    syncGamificationState(freshGam);
                     setFinalScore(null);
                     const nowIso = new Date().toISOString();
                     setStartTime(nowIso);
-                    setPhase(studyItems.length > 0 ? 'teacher_study' : 'quiz');
+                    const replayPhase = studyItems.length > 0 ? 'teacher_study' : 'quiz';
+                    saveActiveHomeworkSession({
+                      version: 1,
+                      assignmentId,
+                      submissionId: activeSubmissionIdRef.current,
+                      attemptNumber: nextAttempt,
+                      studentName: studentName.trim(),
+                      selectedStudentId: audienceMode === 'group' ? selectedStudentId : '',
+                      openParticipantId: audienceMode === 'open' ? resolvedOpenPid : '',
+                      phase: replayPhase,
+                      studyIndex: 0,
+                      currentIdx: 0,
+                      completedStudyPhase: studyItems.length === 0,
+                      startTime: nowIso,
+                      responses: [],
+                      gamification: freshGam,
+                      updatedAtMs: Date.now()
+                    });
+                    setPhase(replayPhase);
                   }}
                   className="w-full py-2.5 px-4 rounded-xl bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-2xs"
                 >
@@ -2028,8 +2637,23 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
 
   return (
     <div className="min-h-screen bg-background text-text-main flex flex-col p-4 sm:p-6 font-sans" dir="rtl">
+      <gameEffects.EffectsOverlay />
+
+      {activeOverlayRound && (
+        <HomeworkBonusCardOverlay
+          round={activeOverlayRound}
+          animationIntensity={gameEffects.intensity}
+          onPickCard={handlePickBonusCard}
+          onCompleteRound={handleBonusRoundComplete}
+          onTriggerSparkles={gameEffects.triggerSparkles}
+        />
+      )}
+
+      {/* Compact, Always-Visible Top HUD (Timer, Points, Streak/10, Effects & Mute) */}
+      {renderCompactGamificationHud(false)}
+
       {/* Icon-Only Sequential Stage Bar (Zero Horizontal Side-Scrolling) */}
-      <div className="max-w-3xl w-full mx-auto bg-surface border border-surface-border rounded-2xl p-1.5 mb-3 shadow-2xs">
+      <div className="max-w-3xl w-full mx-auto bg-surface border border-surface-border rounded-2xl p-1.5 mb-2.5 shadow-2xs">
         <div className="flex items-center gap-1 w-full">
           {quizStageBarItems.map((stg) => (
             <div
@@ -2050,29 +2674,12 @@ export const HomeworkPlayerPage: React.FC<Props> = ({ assignmentId: propId }) =>
         </div>
       </div>
 
-      {/* Top HUD Bar */}
-      <div className="max-w-3xl w-full mx-auto flex flex-wrap items-center justify-between gap-2 mb-3">
-        <div className="flex items-center gap-2">
-          <span className="px-3 py-1 rounded-lg bg-surface border border-surface-border text-primary text-xs font-bold shadow-2xs">
-            {currentQuestion?.stageBadgeEmoji} {currentQuestion?.stageLabelAr}
-          </span>
-          <span className="px-3 py-1 rounded-lg bg-surface-hover border border-surface-border text-xs font-bold text-text-main tabular-nums">
-            السؤال {currentIdx + 1} / {quizQuestions.length}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {streak > 1 && (
-            <span className="px-2.5 py-1 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-600 dark:text-orange-400 text-xs font-bold flex items-center gap-1">
-              <Flame className="w-3.5 h-3.5" /> x{Math.min(3, streak)}
-            </span>
-          )}
-          <span className="px-3 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-bold flex items-center gap-1.5 tabular-nums">
-            <Coins className="w-3.5 h-3.5" />
-            <span>{gold} نقطة</span>
-          </span>
-          <span className="text-xs font-medium text-text-muted hidden sm:inline">👤 {studentName}</span>
-        </div>
+      {/* Stage Sub-Header & Student Name */}
+      <div className="max-w-3xl w-full mx-auto flex flex-wrap items-center justify-between gap-2 mb-2.5">
+        <span className="px-3 py-1 rounded-lg bg-surface border border-surface-border text-primary text-xs font-bold shadow-2xs">
+          {currentQuestion?.stageBadgeEmoji} {currentQuestion?.stageLabelAr}
+        </span>
+        <span className="text-xs font-medium text-text-muted">👤 {studentName}</span>
       </div>
 
       {/* Progress Bar */}

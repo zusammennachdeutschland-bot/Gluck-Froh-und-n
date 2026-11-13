@@ -74,6 +74,9 @@ export function buildQueueMessageForStudent(
     currentSessionNumber?: number;
     totalCycleSessions?: number;
     targetRecipient?: 'parent' | 'student';
+    onlineHomeworkTitle?: string;
+    onlineHomeworkShareUrl?: string | null;
+    previousOnlineResultLines?: string[];
   }
 ): string {
   const {
@@ -83,7 +86,10 @@ export function buildQueueMessageForStudent(
     group,
     currentSessionNumber = lesson.sessionNumber || 1,
     totalCycleSessions = 4,
-    targetRecipient = 'parent'
+    targetRecipient = 'parent',
+    onlineHomeworkTitle = '',
+    onlineHomeworkShareUrl = null,
+    previousOnlineResultLines = []
   } = options;
 
   const isMorning = getCairoHour() < 12;
@@ -111,7 +117,11 @@ export function buildQueueMessageForStudent(
   const taughtTodayInfo = resolveTaughtTodayTopic(lesson, lesson.report);
   const taughtToday = taughtTodayInfo.text || rawReport?.topicCovered || rawReport?.topicsExplained || (lesson as any)?.topicCovered || '';
   const homeworkInfo = resolveReportHomework(lesson.report, lesson.report, language === 'en' || language === 'de' ? language : 'ar');
-  const nextHomework = homeworkInfo.text || rawReport?.homeworkRequired || rawReport?.homeworkDescription || rawReport?.homeworkTitle || '';
+  const baseNextHomework = homeworkInfo.text || rawReport?.homeworkRequired || rawReport?.homeworkDescription || rawReport?.homeworkTitle || '';
+  const onlineHwPart = onlineHomeworkShareUrl
+    ? `🎯 واجب أونلاين${onlineHomeworkTitle ? `: ${onlineHomeworkTitle}` : ''}\n🔗 رابط الواجب: ${onlineHomeworkShareUrl}`
+    : '';
+  const nextHomework = [baseNextHomework.trim(), onlineHwPart].filter(Boolean).join('\n');
 
   // Attendance & grades
   const attStatus = resolveStudentReportAttendance(student.id, lesson, lesson.report?.studentAttendance || {}, lesson.report || {}, true);
@@ -193,6 +203,7 @@ export function buildQueueMessageForStudent(
     } else {
       if (isLate) body += `\n⚠️ ملاحظة: حضور متأخر.`;
       if (hwDone) body += `\n📝 الواجب السابق: ${resolvePreviousHomeworkStatusText(hwDone, 'ar')}`;
+      if (previousOnlineResultLines.length > 0) body += `\n${previousOnlineResultLines.join('\n')}`;
       if (dictationGrade !== undefined && dictationGrade !== null && dictationGrade !== -1) body += `\n✍️ درجة التسميع / الكويز: ${dictationGrade}/10`;
       if (examGrade !== undefined && examGrade !== null && examGrade !== -1) body += `\n🏆 درجة الامتحان: ${examGrade}/10`;
     }
@@ -223,6 +234,9 @@ export function buildQueueMessageForStudent(
     if (hwDone) {
       const hwText = resolvePreviousHomeworkStatusText(hwDone, 'ar');
       body += `\n📝 الهومورك السابق: ${hwText}`;
+    }
+    if (previousOnlineResultLines.length > 0) {
+      body += `\n${previousOnlineResultLines.join('\n')}`;
     }
     if (dictationGrade !== undefined && dictationGrade !== null && dictationGrade !== -1) {
       body += `\n✍️ تسميع الكلمات: ${dictationGrade} من 10`;
