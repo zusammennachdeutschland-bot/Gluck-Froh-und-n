@@ -8,28 +8,34 @@ import {
   detectCurrentScheduledGroup,
   getStudentsForGroup
 } from '../../utils/groupScheduleUtils';
+import { isArticleGameSupported } from '../lernstudioQuestionAdapter';
+import { BUILTIN_VERB_GROUPS, isItemVerb } from '../verbEngine';
+import { isVerbGroupSet } from '../verbGroupSync';
 import {
   ArrowLeft,
   Play,
-  Settings,
   Users,
   Clock,
   HelpCircle,
   Volume2,
-  VolumeX,
-  Sparkles,
   Zap,
   Check,
   Shield,
   Layers,
-  Award,
-  Flame,
-  User
+  User,
+  Sparkles
 } from 'lucide-react';
 
 export interface GameSetupConfig {
   questionCount: number; // e.g. 5, 10, 15, 20, or set.items.length
-  questionType: 'de_to_ar' | 'ar_to_de' | 'article' | 'audio' | 'mixed';
+  questionType:
+    | 'de_to_ar'
+    | 'ar_to_de'
+    | 'article'
+    | 'audio'
+    | 'mixed'
+    | 'verb_conjugation'
+    | 'verb_sentence';
   gameMode: 'single' | 'pvp_2teams' | 'pvp_3teams' | 'pvp_4teams';
   teamNames: string[];
   timerSeconds: number; // 0 = no timer, 8, 15, 20, 30
@@ -41,6 +47,7 @@ export interface GameSetupConfig {
   selectedStudentObj?: Student;
   rosterMode?: 'split_teams' | 'individual' | 'custom_colors';
   assignedStudents?: { teamIdx: number; students: Student[] }[];
+  extraVerbGroupIds?: string[];
 }
 
 interface Props {
@@ -69,6 +76,13 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
   const displaySetTitle = getLocalizedSetTitle(set, language);
   const totalItemsCount = set.items?.length || 0;
 
+  const isArticleSupported = useMemo(() => isArticleGameSupported(set), [set]);
+  const isPureVerbSet = useMemo(() => {
+    if (isVerbGroupSet(set)) return true;
+    const items = set.items || [];
+    return items.length > 0 && items.every((it) => isItemVerb(it));
+  }, [set]);
+
   // Retrieve game metadata from manifest if available
   const gameArtSpec = NANO_BANANA_GAME_ART_MANIFEST[gameModeId];
   const gameTitle = gameArtSpec?.titleAr || gameModeId;
@@ -95,7 +109,25 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
   const [questionCount, setQuestionCount] = useState<number>(() =>
     totalItemsCount > 0 ? Math.min(10, totalItemsCount) : 10
   );
-  const [questionType, setQuestionType] = useState<'de_to_ar' | 'ar_to_de' | 'article' | 'audio' | 'mixed'>('mixed');
+  const [questionType, setQuestionType] = useState<GameSetupConfig['questionType']>('mixed');
+  const [extraVerbGroupIds, setExtraVerbGroupIds] = useState<string[]>([]);
+  const [showMixedVerbPicker, setShowMixedVerbPicker] = useState(false);
+
+  const hasVerbContent = useMemo(
+    () =>
+      isPureVerbSet ||
+      extraVerbGroupIds.length > 0 ||
+      (set.items || []).some((it) => isItemVerb(it)),
+    [isPureVerbSet, extraVerbGroupIds.length, set.items]
+  );
+
+  // If set has no articles and teacher previously landed on 'article', fall back safely
+  useEffect(() => {
+    if (questionType === 'article' && !isArticleSupported) {
+      setQuestionType('mixed');
+    }
+  }, [questionType, isArticleSupported]);
+
   const [gameMode, setGameMode] = useState<'single' | 'pvp_2teams' | 'pvp_3teams' | 'pvp_4teams'>(
     isSoloGame ? 'single' : 'pvp_2teams'
   );
@@ -204,6 +236,12 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
     setTimeout(() => setIsCurrentClassNotice(null), 4500);
   };
 
+  const toggleExtraVerbGroup = (groupId: string) => {
+    setExtraVerbGroupIds((prev) =>
+      prev.includes(groupId) ? prev.filter((id) => id !== groupId) : [...prev, groupId]
+    );
+  };
+
   const handleStartGame = () => {
     onStart({
       questionCount,
@@ -218,7 +256,8 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
       selectedStudentId,
       selectedStudentObj,
       rosterMode: isSoloGame ? undefined : rosterMode,
-      assignedStudents
+      assignedStudents,
+      ...(extraVerbGroupIds.length > 0 ? { extraVerbGroupIds } : {})
     });
   };
 
@@ -229,6 +268,66 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
       return next;
     });
   };
+
+  const questionStyleOptions: Array<{
+    id: GameSetupConfig['questionType'];
+    labelAr: string;
+    labelEn: string;
+    descAr: string;
+    disabled?: boolean;
+  }> = [
+    {
+      id: 'mixed',
+      labelAr: '🔀 أسئلة عشوائية ومختلطة (شامل)',
+      labelEn: '🔀 Mixed & Random Questions',
+      descAr: hasVerbContent
+        ? 'ترجمة، تصريف الأفعال، أفعال في جمل، واستماع متنوع'
+        : 'ترجمة، أدوات der/die/das، واستماع بشكل متنوع'
+    },
+    ...(hasVerbContent
+      ? [
+          {
+            id: 'verb_conjugation' as const,
+            labelAr: '🔤 تصريف الأفعال (Präsens)',
+            labelEn: '🔤 Verb Conjugation (Präsens)',
+            descAr: 'تصريف مع الضمائر (ich / du / sie هي / sie هم / Sie حضرتك والأسماء)'
+          },
+          {
+            id: 'verb_sentence' as const,
+            labelAr: '✍️ الفعل داخل الجملة (Verb im Satz)',
+            labelEn: '✍️ Verb in Sentence Gap',
+            descAr: 'جملة بفراغ مع المصدر بين قوسين ودعم الأفعال المنفصلة'
+          }
+        ]
+      : []),
+    {
+      id: 'de_to_ar',
+      labelAr: '🇩🇪 ⬅️ 🇪🇬 ألماني ⬅️ عربي',
+      labelEn: '🇩🇪 ⬅️ 🇪🇬 German to Arabic',
+      descAr: 'عرض الكلمة أو الفعل بالألمانية وتخمين المعنى العربي'
+    },
+    {
+      id: 'ar_to_de',
+      labelAr: '🇪🇬 ⬅️ 🇩🇪 عربي ⬅️ ألماني',
+      labelEn: '🇪🇬 ⬅️ 🇩🇪 Arabic to German',
+      descAr: 'عرض المعنى العربي واختيار الكلمة الألمانية الصحيحة'
+    },
+    {
+      id: 'article',
+      labelAr: '🏷️ أدوات المعرفة (der / die / das)',
+      labelEn: '🏷️ Articles (der / die / das)',
+      descAr: isArticleSupported
+        ? 'التركيز على حصر وتحديد أداة الاسم الصحيحة'
+        : 'غير متاح لمجموعات الأفعال فقط (يتطلب أسماء بأدوات)',
+      disabled: !isArticleSupported
+    },
+    {
+      id: 'audio',
+      labelAr: '🎧 استماع ونطق بصوت ألماني',
+      labelEn: '🎧 Listening & Pronunciation',
+      descAr: 'الاستماع للصوت الألماني النقي وتخمين المفهوم'
+    }
+  ];
 
   return (
     <div
@@ -247,12 +346,12 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
             <ArrowLeft className={`w-4 h-4 ${isRtl ? '' : 'rotate-180'}`} />
           </button>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-bold text-primary">
                 ⚙️ {isRtl ? 'إعدادات اللعبة' : 'Game Setup'}
               </span>
               <span className="text-xs text-text-muted">
-                · {displaySetTitle} ({totalItemsCount} {isRtl ? 'كلمة' : 'words'})
+                · {displaySetTitle} ({totalItemsCount} {isPureVerbSet ? (isRtl ? 'فعل' : 'verbs') : (isRtl ? 'كلمة' : 'words')})
               </span>
             </div>
             <h1 className="text-base sm:text-lg font-bold text-text-main flex items-center gap-2 mt-0.5">
@@ -298,19 +397,90 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
 
         {/* SECTION 1: QUESTION COUNT & TYPES */}
         <div className="bg-surface border border-surface-border rounded-3xl p-5 sm:p-6 space-y-4 shadow-2xs">
-          <div className="flex items-center gap-2.5 border-b border-surface-border pb-3">
-            <div className="p-2 rounded-xl bg-amber-500/10 text-amber-600 font-bold">
-              <Layers className="w-5 h-5" />
+          <div className="flex items-center justify-between gap-2.5 border-b border-surface-border pb-3 flex-wrap">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-amber-500/10 text-amber-600 font-bold">
+                <Layers className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm sm:text-base font-black text-text-main">
+                  {isRtl ? '1. عدد ونوع الأسئلة' : '1. Question Count & Types'}
+                </h3>
+                <p className="text-[11px] text-text-muted">
+                  {isRtl ? 'تحديد كمية العناصر ونوعية الأسئلة المعروضة في اللعبة' : 'Set question subset & style'}
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-sm sm:text-base font-black text-text-main">
-                {isRtl ? '1. عدد ونوع الأسئلة' : '1. Question Count & Types'}
-              </h3>
-              <p className="text-[11px] text-text-muted">
-                {isRtl ? 'تحديد كمية الكلمات ونوعية الأسئلة المعروضة في اللعبة' : 'Set question subset & style'}
-              </p>
-            </div>
+
+            {!isPureVerbSet && (
+              <button
+                type="button"
+                onClick={() => setShowMixedVerbPicker((p) => !p)}
+                className={`px-3 py-1.5 rounded-xl text-[11px] font-black border transition-all cursor-pointer inline-flex items-center gap-1.5 ${
+                  extraVerbGroupIds.length > 0 || showMixedVerbPicker
+                    ? 'bg-primary text-white border-primary'
+                    : 'bg-surface-hover text-primary border-primary/30 hover:bg-primary/10'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>
+                  {extraVerbGroupIds.length > 0
+                    ? isRtl
+                      ? `وضع مختلط (+${extraVerbGroupIds.length} مجموعة أفعال)`
+                      : `Mixed (+${extraVerbGroupIds.length} verb groups)`
+                    : isRtl
+                    ? '+ دمج أفعال (وضع مختلط)'
+                    : '+ Mix Verb Groups'}
+                </span>
+              </button>
+            )}
           </div>
+
+          {/* Optional Mixed Verb Group Merger for Vocabulary Sets */}
+          {showMixedVerbPicker && !isPureVerbSet && (
+            <div className="p-3.5 rounded-2xl bg-primary/5 border border-primary/20 space-y-2.5 animate-scale-up">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-black text-primary">
+                  {isRtl
+                    ? 'اختر مجموعات من مكتبة الأفعال لدمجها مع المفردات في هذه اللعبة:'
+                    : 'Select Verb Library groups to mix with this vocabulary set:'}
+                </span>
+                {extraVerbGroupIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setExtraVerbGroupIds([])}
+                    className="text-[11px] font-bold text-rose-500 hover:underline cursor-pointer"
+                  >
+                    {isRtl ? 'مسح' : 'Clear'}
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-44 overflow-y-auto pr-1">
+                {BUILTIN_VERB_GROUPS.map((vg) => {
+                  const selected = extraVerbGroupIds.includes(vg.id);
+                  return (
+                    <button
+                      key={vg.id}
+                      type="button"
+                      onClick={() => toggleExtraVerbGroup(vg.id)}
+                      className={`p-2 rounded-xl border text-start text-[11px] font-bold transition-all cursor-pointer flex items-center justify-between gap-2 ${
+                        selected
+                          ? 'bg-primary text-white border-primary'
+                          : 'bg-surface hover:bg-surface-hover border-surface-border text-text-main'
+                      }`}
+                    >
+                      <span className="truncate">
+                        {isRtl ? vg.titleAr : vg.titleDe} ({vg.titleDe})
+                      </span>
+                      <span className={`text-[10px] tabular-nums shrink-0 ${selected ? 'text-white/90' : 'text-text-muted'}`}>
+                        {vg.verbIds.length}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Question Count Selector */}
           <div className="space-y-2">
@@ -318,19 +488,26 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
               {isRtl ? 'عدد الأسئلة المراد لعبها:' : 'Number of Questions:'}
             </label>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-              {[5, 10, 15, 20, totalItemsCount].map((cnt, idx) => {
+              {[5, 10, 15, 20, Math.min(40, totalItemsCount)].map((cnt, idx) => {
                 if (idx === 4 && (totalItemsCount <= 20 || cnt === 0)) return null;
                 const isAll = idx === 4;
+                const targetCount = isAll ? Math.min(40, totalItemsCount) : cnt;
                 const displayLabel = isAll
-                  ? isRtl ? `كل المجموعة (${totalItemsCount})` : `All (${totalItemsCount})`
-                  : isRtl ? `${cnt} أسئلة` : `${cnt} Items`;
-                const isSelected = questionCount === (isAll ? totalItemsCount : cnt);
+                  ? isRtl
+                    ? totalItemsCount > 40
+                      ? `مجموعة كبيرة (40 من ${totalItemsCount})`
+                      : `كل المجموعة (${totalItemsCount})`
+                    : `All (${targetCount})`
+                  : isRtl
+                  ? `${cnt} أسئلة`
+                  : `${cnt} Items`;
+                const isSelected = questionCount === targetCount;
 
                 return (
                   <button
-                    key={cnt}
+                    key={`${idx}_${cnt}`}
                     type="button"
-                    onClick={() => setQuestionCount(isAll ? totalItemsCount : cnt)}
+                    onClick={() => setQuestionCount(targetCount)}
                     className={`py-2.5 px-3 rounded-2xl text-xs font-black border transition-all cursor-pointer text-center ${
                       isSelected
                         ? 'bg-primary text-white border-primary shadow-sm scale-105'
@@ -350,48 +527,23 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
               {isRtl ? 'نمط ونوع الأسئلة:' : 'Question Quiz Style:'}
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {[
-                {
-                  id: 'mixed',
-                  labelAr: '🔀 أسئلة عشوائية ومختلطة (شامل)',
-                  labelEn: '🔀 Mixed & Random Questions',
-                  descAr: 'ترجمة، أدوات der/die/das، واستماع بشكل متنوع'
-                },
-                {
-                  id: 'de_to_ar',
-                  labelAr: '🇩🇪 ⬅️ 🇪🇬 ألماني ⬅️ عربي',
-                  labelEn: '🇩🇪 ⬅️ 🇪🇬 German to Arabic',
-                  descAr: 'عرض الكلمة بالألمانية وتخمين المعنى العربي'
-                },
-                {
-                  id: 'ar_to_de',
-                  labelAr: '🇪🇬 ⬅️ 🇩🇪 عربي ⬅️ ألماني',
-                  labelEn: '🇪🇬 ⬅️ 🇩🇪 Arabic to German',
-                  descAr: 'عرض المعنى العربي واختيار الكلمة الألمانية الصحيحة'
-                },
-                {
-                  id: 'article',
-                  labelAr: '🏷️ أدوات المعرفة (der / die / das)',
-                  labelEn: '🏷️ Articles (der / die / das)',
-                  descAr: 'التركيز على حصر وتحديد أداة الاسم الصحيحة'
-                },
-                {
-                  id: 'audio',
-                  labelAr: '🎧 استماع ونطق بصوت ألماني',
-                  labelEn: '🎧 Listening & Pronunciation',
-                  descAr: 'الاستماع للصوت الألماني النقي وتخمين المفهوم'
-                }
-              ].map((item) => {
+              {questionStyleOptions.map((item) => {
                 const isSelected = questionType === item.id;
+                const isDisabled = Boolean(item.disabled);
                 return (
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => setQuestionType(item.id as any)}
-                    className={`p-3 rounded-2xl text-start border transition-all cursor-pointer flex items-start gap-3 ${
-                      isSelected
-                        ? 'bg-primary/10 border-primary text-primary shadow-2xs font-black'
-                        : 'bg-surface-hover border-surface-border text-text-main hover:bg-surface'
+                    disabled={isDisabled}
+                    onClick={() => {
+                      if (!isDisabled) setQuestionType(item.id);
+                    }}
+                    className={`p-3 rounded-2xl text-start border transition-all flex items-start gap-3 ${
+                      isDisabled
+                        ? 'bg-surface/40 border-surface-border/50 text-text-muted opacity-55 cursor-not-allowed'
+                        : isSelected
+                        ? 'bg-primary/10 border-primary text-primary shadow-2xs font-black cursor-pointer'
+                        : 'bg-surface-hover border-surface-border text-text-main hover:bg-surface cursor-pointer'
                     }`}
                   >
                     <div className={`p-1.5 rounded-xl text-xs ${isSelected ? 'bg-primary text-white' : 'bg-surface text-text-muted'}`}>

@@ -20,6 +20,7 @@ export interface PromptGenConfig {
   level: LernstudioLevel;
   difficulty: LernstudioDifficulty;
   itemCount: number | 'auto';
+  teacherName?: string;
   includeSentences?: boolean;
   includeExercises?: boolean;
   includeVerbConjugation?: boolean;
@@ -131,6 +132,7 @@ JSON-STRUKTUR:
   "grade": "${config.grade || ''}",
   "level": "${config.level}",
   "difficulty": "${config.difficulty}",
+  "createdByTeacherName": "${(config.teacherName || '').replace(/"/g, '')}",
   "hasArticles": true,
   "sentenceBuilderSupported": true,
   "description": "Lern-Set zum Thema ${config.topic} (${config.level})",
@@ -288,7 +290,7 @@ export function validateAndParseLernstudioJson(
         wordType = String(it.wordType).toLowerCase() as LernstudioWordType;
       }
 
-      // Conjugation validation
+      // Conjugation validation (auto-fill from shared verb library if omitted for a verb)
       let conjugation: VerbConjugationForms | undefined = undefined;
       if (it.conjugation && typeof it.conjugation === 'object') {
         const c = it.conjugation;
@@ -302,6 +304,9 @@ export function validateAndParseLernstudioJson(
             sie_Sie: String(c.sie_Sie).trim()
           };
         }
+      }
+      if (!conjugation && wordType === 'verb') {
+        conjugation = conjugateGermanVerb(german) || undefined;
       }
 
       // 4-element sentence structure
@@ -351,7 +356,7 @@ export function validateAndParseLernstudioJson(
       }
 
       sanitizedItems.push({
-        id: `item_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`,
+        id: it.id ? String(it.id).trim() : `item_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`,
         german,
         article,
         arabic,
@@ -359,13 +364,18 @@ export function validateAndParseLernstudioJson(
         plural: it.plural ? String(it.plural).trim() : undefined,
         exampleSentenceGerman: exGerman,
         exampleSentenceArabic: it.exampleSentenceArabic ? String(it.exampleSentenceArabic).trim() : undefined,
-        emoji: it.emoji ? String(it.emoji).trim() : '📚',
+        emoji: it.emoji ? String(it.emoji).trim() : (wordType === 'verb' ? '🔤' : '📚'),
         missingLetterWord,
         sentence4Elements: sentence4,
         wordType,
         conjugation,
         category: it.category ? String(it.category).trim() : undefined,
-        syllables
+        syllables,
+        ...(it.verbId ? { verbId: String(it.verbId).trim() } : {}),
+        ...(Array.isArray(it.classifications) ? { classifications: it.classifications } : {}),
+        ...(it.separablePrefix ? { separablePrefix: String(it.separablePrefix).trim() } : {}),
+        ...(it.preposition ? { preposition: String(it.preposition).trim() } : {}),
+        ...(it.prepositionCase ? { prepositionCase: String(it.prepositionCase).trim() } : {})
       });
     }
 
@@ -409,17 +419,30 @@ export function validateAndParseLernstudioJson(
       ? Boolean(parsed.hasArticles) && itemsWithRealArticles.length >= 1
       : itemsWithRealArticles.length >= 2;
 
+    const rawTeacherName =
+      parsed.createdByTeacherName || parsed.teacherName || parsed.creatorName || parsed.author;
+    const cleanedTeacherName =
+      typeof rawTeacherName === 'string' && rawTeacherName.trim()
+        ? rawTeacherName.trim()
+        : undefined;
+
     const newSet: Partial<LernstudioSet> = {
       title,
       topic,
       grade: parsed.grade ? String(parsed.grade).trim() : undefined,
       level,
       difficulty,
+      ...(cleanedTeacherName ? { createdByTeacherName: cleanedTeacherName } : {}),
       hasArticles,
       sentenceBuilderSupported: true,
       description: parsed.description ? String(parsed.description).trim() : `مجموعة ${topic} (${level})`,
       items: sanitizedItems,
-      customExercises: sanitizedExercises.length > 0 ? sanitizedExercises : undefined
+      customExercises: sanitizedExercises.length > 0 ? sanitizedExercises : undefined,
+      ...(parsed.setKind ? { setKind: parsed.setKind } : {}),
+      ...(Array.isArray(parsed.verbIds) ? { verbIds: parsed.verbIds } : {}),
+      ...(parsed.basedOnBuiltinGroupId
+        ? { basedOnBuiltinGroupId: String(parsed.basedOnBuiltinGroupId).trim() }
+        : {})
     };
 
     return { success: true, data: newSet };

@@ -323,6 +323,13 @@ export function sanitizePublicSetSnapshot(rawSnapshot: any): any {
       cleanItem.conjugation = item.conjugation;
     }
     if (item.category) cleanItem.category = String(item.category);
+    if (item.verbId) cleanItem.verbId = String(item.verbId);
+    if (Array.isArray(item.classifications)) {
+      cleanItem.classifications = item.classifications.map(String);
+    }
+    if (item.separablePrefix) cleanItem.separablePrefix = String(item.separablePrefix);
+    if (item.preposition) cleanItem.preposition = String(item.preposition);
+    if (item.prepositionCase) cleanItem.prepositionCase = String(item.prepositionCase);
     if (Array.isArray(item.syllables)) {
       cleanItem.syllables = item.syllables.map(String);
     }
@@ -358,6 +365,10 @@ export function sanitizePublicSetSnapshot(rawSnapshot: any): any {
   };
 
   if (rawSnapshot.category) sanitizedSnapshot.category = String(rawSnapshot.category);
+  if (rawSnapshot.setKind) sanitizedSnapshot.setKind = String(rawSnapshot.setKind);
+  if (Array.isArray(rawSnapshot.verbIds)) {
+    sanitizedSnapshot.verbIds = rawSnapshot.verbIds.map(String);
+  }
   if (rawSnapshot.hasArticles !== undefined) sanitizedSnapshot.hasArticles = Boolean(rawSnapshot.hasArticles);
   if (rawSnapshot.sentenceBuilderSupported !== undefined) {
     sanitizedSnapshot.sentenceBuilderSupported = Boolean(rawSnapshot.sentenceBuilderSupported);
@@ -392,6 +403,19 @@ export function toPublicAssignmentDto(hw: any): any {
       ? { questionTypeCounts: normalized.questionTypeCounts }
       : {}),
     ...(Array.isArray(normalized.selectedItemIds) ? { selectedItemIds: normalized.selectedItemIds } : {}),
+    ...(normalized.contentSource ? { contentSource: String(normalized.contentSource) } : {}),
+    ...(Array.isArray(normalized.selectedVerbGroupIds)
+      ? { selectedVerbGroupIds: normalized.selectedVerbGroupIds }
+      : {}),
+    ...(Array.isArray(normalized.selectedVerbIds)
+      ? { selectedVerbIds: normalized.selectedVerbIds }
+      : {}),
+    ...(Array.isArray(normalized.verbSnapshot)
+      ? { verbSnapshot: JSON.parse(JSON.stringify(normalized.verbSnapshot)) }
+      : {}),
+    ...(normalized.verbSubjectPoolMode
+      ? { verbSubjectPoolMode: String(normalized.verbSubjectPoolMode) }
+      : {}),
     ...(normalized.flowMode ? { flowMode: String(normalized.flowMode) } : {}),
     ...(normalized.blooketMode ? { blooketMode: String(normalized.blooketMode) } : {}),
     maxAttempts: typeof normalized.maxAttempts === 'number' ? normalized.maxAttempts : undefined,
@@ -943,6 +967,19 @@ app.post('/api/homework/submit', async (req, res) => {
           isCorrect: isActuallyCorrect
         };
       }
+    }
+
+    // 1.5 Preserve/grade unified verb questions cleanly (never overwrite verb answers with base infinitive match)
+    const qType = String(r.questionType || r.type || '');
+    if (r.isVerbQuestion || qType === 'verb_conjugation' || qType === 'verb_sentence') {
+      return {
+        ...r,
+        isVerbQuestion: true,
+        ...(r.verbId ? { verbId: String(r.verbId) } : {}),
+        ...(r.infinitive ? { infinitive: String(r.infinitive) } : {}),
+        ...(r.subject ? { subject: String(r.subject) } : {}),
+        ...(r.sentence ? { sentence: String(r.sentence) } : {})
+      };
     }
 
     // 2. Check setSnapshot items (only when itemId/expectedField is explicitly targeted or isCorrect is omitted)

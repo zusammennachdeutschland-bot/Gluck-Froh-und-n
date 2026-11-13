@@ -9,6 +9,7 @@ import {
   isGermanNumberWord,
   isGreetingOrPoliteTerm
 } from './lernstudioDistractors';
+import { getVerbByInfinitive } from './verbEngine';
 
 // ==========================================
 // 0. BUILD STAMP & PAGE CONSTANTS
@@ -202,6 +203,12 @@ export function conjugateGermanVerb(infinitiveRaw: string): VerbConjugationForms
   if (!inf || inf.length < 3) return null;
   if (isGermanNumberWord(inf)) return null;
 
+  // Consult Unified German Verb Library (2,200+ validated A1-B1 verbs) first
+  const libraryVerb = getVerbByInfinitive(inf);
+  if (libraryVerb) {
+    return { ...libraryVerb.praesens };
+  }
+
   if (IRREGULAR_VERBS[inf]) {
     return IRREGULAR_VERBS[inf];
   }
@@ -219,7 +226,7 @@ export function conjugateGermanVerb(infinitiveRaw: string): VerbConjugationForms
 
   if (!stem) return null;
 
-  const needsE = /[td]$|ffn$|chn$/.test(stem);
+  const needsE = /[td]$|ffn$|(?:chn|[^aeiouäöüyhlrmn][mn])$/.test(stem);
   const isSStem = /[sßxz]$/.test(stem);
 
   const ich = inf.endsWith('eln') ? stem.slice(0, -2) + 'le' : stem + 'e';

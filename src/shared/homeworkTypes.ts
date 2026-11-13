@@ -1,3 +1,7 @@
+import type { VerbEntry } from './verbLibrary/verbTypes';
+
+export type HomeworkContentSource = 'vocab' | 'verb' | 'mixed';
+
 export type HomeworkQuestionType =
   | 'true_false'          // صح أم خطأ (Richtig / Falsch)
   | 'choice_2'            // الاختيار من 2 (Zwei Optionen)
@@ -6,6 +10,8 @@ export type HomeworkQuestionType =
   | 'missing_letter'      // الحرف الناقص (Fehlender Buchstabe)
   | 'missing_two_letters' // الحرفين المتتاليين (Buchstabenfolge)
   | 'full_word'           // الكلمة كلها (Wort vervollständigen)
+  | 'verb_conjugation'    // تصريف الأفعال في المضارع (Verb Konjugieren)
+  | 'verb_sentence'       // إكمال الجملة بالفعل المناسب (Verb im Satz)
   // Legacy question types kept for backward compatibility with older assignments
   | 'mc_de_ar'            // اختيار من متعدد (ألماني ← عربي)
   | 'listen_choose'       // استمع للنطق واختر الكلمة (صوتي)
@@ -20,6 +26,11 @@ export const DEFAULT_HOMEWORK_QUESTION_TYPES: HomeworkQuestionType[] = [
   'missing_letter',
   'missing_two_letters',
   'full_word'
+];
+
+export const VERB_HOMEWORK_QUESTION_TYPES: HomeworkQuestionType[] = [
+  'verb_conjugation',
+  'verb_sentence'
 ];
 
 export type HomeworkFlowMode =
@@ -51,6 +62,11 @@ export interface HomeworkQuestionResponse {
   correctAnswer: string;
   isCorrect: boolean;
   timeSpentSeconds: number;
+  verbId?: string;
+  infinitive?: string;
+  subject?: string;
+  sentence?: string;
+  isVerbQuestion?: boolean;
 }
 
 export type HomeworkBonusCardType =
@@ -130,6 +146,11 @@ export interface HomeworkAssignment {
   title: string;
   setSnapshot: any; // LernstudioSet snapshot
   selectedItemIds?: string[]; // Specific word IDs selected by teacher
+  contentSource?: HomeworkContentSource; // 'vocab' | 'verb' | 'mixed'
+  selectedVerbGroupIds?: string[]; // Ready-made or custom verb group IDs selected
+  selectedVerbIds?: string[]; // Specific verb IDs selected by teacher
+  verbSnapshot?: VerbEntry[]; // Immutable verb library records captured when assignment was created
+  verbSubjectPoolMode?: 'pronouns_and_names' | 'pronouns_only';
   flowMode?: HomeworkFlowMode; // 'teacher_then_quiz' | 'quiz_only'
   questionTypes?: HomeworkQuestionType[]; // Ordered question types selected by teacher
   questionTypeCounts?: Partial<Record<HomeworkQuestionType, number>>; // Custom question count per selected question type/stage

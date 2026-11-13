@@ -1,3 +1,5 @@
+import type { VerbClassification, VerbEntry } from '../shared/verbLibrary/verbTypes';
+
 export type LernstudioLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
 
 export type LernstudioDifficulty = 'easy' | 'medium' | 'hard';
@@ -24,6 +26,7 @@ export interface LernstudioItem {
   plural?: string;               // Plural form e.g. "die Katzen"
   exampleSentenceGerman?: string;// Example sentence in German
   exampleSentenceArabic?: string;// Example sentence translation
+  example?: string;
   imageUrl?: string;             // Optional image URL or Base64
   emoji?: string;                // Emoji e.g. "🐱"
   missingLetterWord?: string;    // Word with missing letter e.g. "K_tze"
@@ -32,6 +35,12 @@ export interface LernstudioItem {
   conjugation?: VerbConjugationForms;
   category?: string;
   syllables?: string[];           // Syllables / word parts e.g. ["Flei", "sch"] or ["Schu", "le"]
+  verbId?: string;
+  verbEntry?: VerbEntry;
+  classifications?: VerbClassification[];
+  separablePrefix?: string;
+  preposition?: string;
+  prepositionCase?: string;
 }
 
 export type LernstudioExerciseType = 
@@ -101,6 +110,7 @@ export interface LernstudioSet {
   grade?: string;                // e.g. "الصف الأول", "Grade 1", etc.
   level: LernstudioLevel;
   topic: string;
+  category?: string;
   topicTranslations?: { ar?: string; de?: string; en?: string };
   difficulty: LernstudioDifficulty;
   hasArticles?: boolean;         // Whether this set contains German nouns with der/die/das articles
@@ -110,7 +120,12 @@ export interface LernstudioSet {
   assignedGroupId?: string;
   createdByTeacherName?: string;
   createdByUid?: string;
+  setKind?: 'vocab' | 'verb_group' | 'mixed';
+  verbIds?: string[];
+  verbEntriesSnapshot?: VerbEntry[];
+  basedOnBuiltinGroupId?: string;
   isArchived?: boolean;
+  deleted?: boolean;
   createdAt: string;
   updatedAt: number;
 }

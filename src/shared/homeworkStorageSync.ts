@@ -7,6 +7,7 @@ import {
   AssignedStudentSnapshot,
   DEFAULT_HOMEWORK_QUESTION_TYPES
 } from './homeworkTypes';
+import { calculateUnifiedHomeworkQuestionCount } from './verbEngine';
 import {
   getVercelPublicDomain,
   setVercelPublicDomain,
@@ -174,9 +175,27 @@ export const LEGACY_QUESTION_TYPE_META: QuestionTypeMetaItem[] = [
   }
 ];
 
+export const VERB_QUESTION_TYPE_META: QuestionTypeMetaItem[] = [
+  {
+    id: 'verb_conjugation',
+    labelAr: 'تصريف الأفعال (Verb Konjugieren)',
+    labelDe: 'Verb Konjugieren',
+    descAr: 'يصرّف الطالب الفعل في المضارع مع الضمائر الستة أو الأسماء (6 أسئلة لكل فعل)',
+    badgeEmoji: '🔤'
+  },
+  {
+    id: 'verb_sentence',
+    labelAr: 'إكمال الجملة بالفعل (Verb im Satz)',
+    labelDe: 'Verb im Satz',
+    descAr: 'يكمل الطالب الجملة الألمانية بالفعل المصرف الصحيح (وموضع المقطع المنفصل)',
+    badgeEmoji: '📝'
+  }
+];
+
 export function getQuestionTypeMeta(id: HomeworkQuestionType): QuestionTypeMetaItem {
   return (
     QUESTION_TYPE_META.find((m) => m.id === id) ||
+    VERB_QUESTION_TYPE_META.find((m) => m.id === id) ||
     LEGACY_QUESTION_TYPE_META.find((m) => m.id === id) || {
       id,
       labelAr: 'سؤال تفاعلي',
@@ -1918,6 +1937,8 @@ const VALID_HOMEWORK_QUESTION_TYPES = new Set<HomeworkQuestionType>([
   'missing_letter',
   'missing_two_letters',
   'full_word',
+  'verb_conjugation',
+  'verb_sentence',
   'mc_de_ar',
   'listen_choose',
   'mc_ar_de',
@@ -1926,42 +1947,77 @@ const VALID_HOMEWORK_QUESTION_TYPES = new Set<HomeworkQuestionType>([
 
 /**
  * Resolves how many questions should be asked for a specific stage (`qType`),
- * clamped between 1 and `maxWordsCount` (or 0 when `maxWordsCount <= 0`).
- * Defaults to `maxWordsCount` (all selected words) when no custom count is set.
+ * scaling `verb_conjugation` by 6 slots per verb and `verb_sentence` by 1 per verb.
  */
 export function resolveStageQuestionCount(
   qType: HomeworkQuestionType,
   maxWordsCount: number,
-  questionTypeCounts?: Partial<Record<HomeworkQuestionType, number>>
+  questionTypeCounts?: Partial<Record<HomeworkQuestionType, number>>,
+  maxVerbCount?: number
 ): number {
-  const safeMax = Math.max(0, Math.floor(Number(maxWordsCount) || 0));
-  if (safeMax <= 0) return 0;
+  const safeWords = Math.max(0, Math.floor(Number(maxWordsCount) || 0));
+  const safeVerbs =
+    typeof maxVerbCount === 'number' && Number.isFinite(maxVerbCount)
+      ? Math.max(0, Math.floor(maxVerbCount))
+      : safeWords;
+  const stageMax =
+    qType === 'verb_conjugation'
+      ? safeVerbs * 6
+      : qType === 'verb_sentence'
+      ? safeVerbs
+      : safeWords;
+
+  if (stageMax <= 0) return 0;
   const raw = questionTypeCounts?.[qType];
   if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 1) {
-    return Math.min(safeMax, Math.max(1, Math.round(raw)));
+    return Math.min(stageMax, Math.max(1, Math.round(raw)));
   }
-  return safeMax;
+  return stageMax;
 }
 
 /**
  * Calculates the total number of questions across all active homework stages
- * taking into account any per-stage custom question counts (`questionTypeCounts`).
+ * taking into account any per-stage custom question counts (`questionTypeCounts`)
+ * and unified verb stages (`verb_conjugation` = 6 × verbs, `verb_sentence` = 1 × verbs).
  */
 export function calculateTotalHomeworkQuestions(
   wordsCount: number,
   questionTypes?: HomeworkQuestionType[],
-  questionTypeCounts?: Partial<Record<HomeworkQuestionType, number>>
+  questionTypeCounts?: Partial<Record<HomeworkQuestionType, number>>,
+  verbCount?: number
 ): number {
   const safeWords = Math.max(0, Math.floor(Number(wordsCount) || 0));
-  if (safeWords <= 0) return 0;
+  const safeVerbs =
+    typeof verbCount === 'number' && Number.isFinite(verbCount)
+      ? Math.max(0, Math.floor(verbCount))
+      : safeWords;
+  if (safeWords <= 0 && safeVerbs <= 0) return 0;
   const activeTypes =
     Array.isArray(questionTypes) && questionTypes.length > 0
       ? questionTypes
       : DEFAULT_HOMEWORK_QUESTION_TYPES;
-  return activeTypes.reduce(
-    (sum, qt) => sum + resolveStageQuestionCount(qt, safeWords, questionTypeCounts),
-    0
-  );
+
+  // Clamp any custom counts by stage ceiling before passing to shared engine
+  const clampedCounts: Partial<Record<HomeworkQuestionType, number>> = {};
+  for (const qt of activeTypes) {
+    const raw = questionTypeCounts?.[qt];
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 1) {
+      const cap =
+        qt === 'verb_conjugation'
+          ? Math.max(1, safeVerbs * 6)
+          : qt === 'verb_sentence'
+          ? Math.max(1, safeVerbs)
+          : Math.max(1, safeWords);
+      clampedCounts[qt] = Math.min(cap, Math.round(raw));
+    }
+  }
+
+  return calculateUnifiedHomeworkQuestionCount({
+    questionTypes: activeTypes,
+    questionTypeCounts: clampedCounts,
+    vocabItemsCount: safeWords,
+    verbCount: safeVerbs
+  });
 }
 
 /**
@@ -2178,18 +2234,26 @@ export function buildLegacyHomeworkShareUrl(hw: HomeworkAssignment, overrideDoma
   if (hw.questionTypes && hw.questionTypes.length > 0) {
     params.set('qt', hw.questionTypes.join(','));
   }
+  const verbCeiling = (hw.selectedVerbIds?.length || hw.verbSnapshot?.length || 0) * 6;
+  const wordCeiling = hw.selectedItemIds?.length || hw.setSnapshot?.items?.length || 0;
   const encodedQtc = encodeQuestionTypeCountsParam(
     hw.questionTypes,
     hw.questionTypeCounts,
-    hw.selectedItemIds?.length || hw.setSnapshot?.items?.length
+    Math.max(wordCeiling, verbCeiling) || undefined
   );
   if (encodedQtc) {
     params.set('qtc', encodedQtc);
   }
   if (hw.blooketMode) params.set('bm', hw.blooketMode);
+  if (hw.contentSource) params.set('cs', hw.contentSource);
+  if (hw.verbSubjectPoolMode) params.set('vsp', hw.verbSubjectPoolMode);
   if (hw.title) params.set('t', hw.title);
   if (hw.selectedItemIds && hw.selectedItemIds.length > 0) {
     params.set('ids', hw.selectedItemIds.join(','));
+  }
+  if (hw.selectedVerbIds && hw.selectedVerbIds.length > 0) {
+    const joinedVerbs = hw.selectedVerbIds.slice(0, 60).join(',');
+    if (joinedVerbs.length <= 1200) params.set('vids', joinedVerbs);
   }
   if (Array.isArray(hw.setSnapshot?.items) && hw.setSnapshot.items.length > 0) {
     const selectedSet =

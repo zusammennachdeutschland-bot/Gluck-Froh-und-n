@@ -5,19 +5,40 @@ import { playLernstudioSound, playGermanVoiceFeedback } from '../../utils/lernst
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../utils/lernstudioTranslations';
 import { GameStageBanner, SharedVictoryTrophyArt } from './GameArtAssets';
 import { useGameEffects } from './effects/GameEffectsOverlay';
+import { GameSetupConfig } from './LernstudioGameSetupScreen';
+import {
+  ALL_VERBS,
+  SUBJECT_PROMPTS,
+  buildVerbConjugationExercise,
+  buildVerbSentenceGapExercise,
+  isItemVerb,
+  resolveVerbFromLernstudioItem
+} from '../verbEngine';
+
+type GameRunnerMode = LernstudioExerciseType | 'verb_conjugation' | 'verb_sentence';
 
 interface Props {
   set: LernstudioSet;
   activeTheme: LernstudioTheme;
   language: string;
+  gameConfig?: GameSetupConfig;
   onBack: () => void;
 }
 
-export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, language = 'ar', onBack }) => {
+export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, language = 'ar', gameConfig, onBack }) => {
   const t = getLernstudioTranslations(language);
   const { triggerSparkles, triggerFloatingText, triggerConfetti } = useGameEffects();
 
-  const [selectedGameType, setSelectedGameType] = useState<LernstudioExerciseType>('multiple_choice');
+  const hasVerbsInSet = useMemo(
+    () => set.setKind === 'verb_group' || (set.items || []).some((it) => isItemVerb(it)),
+    [set]
+  );
+
+  const [selectedGameType, setSelectedGameType] = useState<GameRunnerMode>(() => {
+    if (gameConfig?.questionType === 'verb_conjugation') return 'verb_conjugation';
+    if (gameConfig?.questionType === 'verb_sentence') return 'verb_sentence';
+    return 'multiple_choice';
+  });
   const [currentIndex, setCurrentIndex] = useState(0);
   const [score, setScore] = useState(0);
   const [streak, setStreak] = useState(0);
@@ -36,7 +57,11 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
 
   // Prepare Multiple Choice Options (German Target Words)
   const mcOptions = useMemo(() => {
-    if (!currentItem || selectedGameType !== 'multiple_choice') return [];
+    const isMcLike =
+      selectedGameType === 'multiple_choice' ||
+      selectedGameType === 'verb_conjugation' ||
+      selectedGameType === 'verb_sentence';
+    if (!currentItem || !isMcLike) return [];
     const correct = currentItem.german;
     const distractors = items
       .filter((it) => it.id !== currentItem.id)
@@ -75,6 +100,23 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
     }
     return [currentItem.german, 'ist', 'sehr', 'schön'].sort(() => 0.5 - Math.random());
   }, [currentItem, currentIndex]);
+
+  const currentVerbEntry = useMemo(() => {
+    if (!currentItem) return null;
+    if (!isItemVerb(currentItem) && set.setKind !== 'verb_group') return null;
+    return resolveVerbFromLernstudioItem(currentItem);
+  }, [currentItem, set.setKind]);
+
+  const verbConjugationExercise = useMemo(() => {
+    if (selectedGameType !== 'verb_conjugation' || !currentVerbEntry) return null;
+    const promptObj = SUBJECT_PROMPTS[(currentIndex * 5) % SUBJECT_PROMPTS.length];
+    return buildVerbConjugationExercise(currentVerbEntry, promptObj, 4);
+  }, [selectedGameType, currentVerbEntry, currentIndex]);
+
+  const verbSentenceExercise = useMemo(() => {
+    if (selectedGameType !== 'verb_sentence' || !currentVerbEntry) return null;
+    return buildVerbSentenceGapExercise(currentVerbEntry, ALL_VERBS);
+  }, [selectedGameType, currentVerbEntry]);
 
   const resetQuestionState = () => {
     setUserAnswerText('');
@@ -331,11 +373,34 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
       </div>
 
       {/* Game Type Switcher Tabs */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-1 bg-surface-hover p-1 rounded-lg border border-surface-border text-xs font-bold">
+      <div className="flex flex-wrap gap-1 bg-surface-hover p-1 rounded-lg border border-surface-border text-xs font-bold">
+        {hasVerbsInSet && (
+          <>
+            <button
+              type="button"
+              onClick={() => { setSelectedGameType('verb_conjugation'); resetQuestionState(); }}
+              className={`flex-1 min-w-[120px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
+                selectedGameType === 'verb_conjugation' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
+              }`}
+            >
+              🔤 {language === 'ar' ? 'تصريف الأفعال' : 'Conjugation'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setSelectedGameType('verb_sentence'); resetQuestionState(); }}
+              className={`flex-1 min-w-[120px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
+                selectedGameType === 'verb_sentence' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
+              }`}
+            >
+              ✍️ {language === 'ar' ? 'الفعل في جملة' : 'Verb in Sentence'}
+            </button>
+          </>
+        )}
+
         <button
           type="button"
           onClick={() => { setSelectedGameType('multiple_choice'); resetQuestionState(); }}
-          className={`py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
+          className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
             selectedGameType === 'multiple_choice' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
           }`}
         >
@@ -345,7 +410,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
         <button
           type="button"
           onClick={() => { setSelectedGameType('missing_letter'); resetQuestionState(); }}
-          className={`py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
+          className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
             selectedGameType === 'missing_letter' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
           }`}
         >
@@ -355,7 +420,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
         <button
           type="button"
           onClick={() => { setSelectedGameType('sentence_builder'); resetQuestionState(); }}
-          className={`py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
+          className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
             selectedGameType === 'sentence_builder' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
           }`}
         >
@@ -365,7 +430,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
         <button
           type="button"
           onClick={() => { setSelectedGameType('emoji_vocab'); resetQuestionState(); }}
-          className={`py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
+          className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
             selectedGameType === 'emoji_vocab' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
           }`}
         >
@@ -375,7 +440,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
         <button
           type="button"
           onClick={() => { setSelectedGameType('scrambled_letters'); resetQuestionState(); }}
-          className={`py-1.5 px-2.5 rounded-md transition-all cursor-pointer col-span-2 sm:col-span-1 ${
+          className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
             selectedGameType === 'scrambled_letters' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
           }`}
         >
@@ -430,8 +495,89 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
               </div>
             </div>
 
-            {/* GAME 1: MULTIPLE CHOICE */}
-            {selectedGameType === 'multiple_choice' && (
+            {/* VERB CONJUGATION & VERB IN SENTENCE MODES */}
+            {(selectedGameType === 'verb_conjugation' || selectedGameType === 'verb_sentence') &&
+              (verbConjugationExercise || verbSentenceExercise) && (() => {
+                const activeEx =
+                  selectedGameType === 'verb_conjugation' ? verbConjugationExercise : verbSentenceExercise;
+                if (!activeEx) return null;
+                const promptTitle =
+                  selectedGameType === 'verb_conjugation' && verbConjugationExercise
+                    ? verbConjugationExercise.promptAr
+                    : verbSentenceExercise!.sentenceWithBlank;
+                const promptSub =
+                  selectedGameType === 'verb_conjugation' && verbConjugationExercise
+                    ? verbConjugationExercise.promptDe
+                    : verbSentenceExercise!.sentenceArabic;
+
+                return (
+                  <div className="space-y-5">
+                    <div className="p-4 bg-primary-soft/50 border border-primary-border/40 rounded-2xl text-center space-y-1.5">
+                      <span className="text-2xl block">{selectedGameType === 'verb_conjugation' ? '🔤' : '✍️'}</span>
+                      <h3 className="text-lg sm:text-2xl font-black text-text-main" dir="auto">
+                        {promptTitle}
+                      </h3>
+                      {promptSub && (
+                        <p className="text-xs sm:text-sm font-bold text-primary" dir="auto">
+                          {promptSub}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" dir="ltr">
+                      {activeEx.options.map((opt, idx) => {
+                        const isRight = opt.trim().toLowerCase() === activeEx.correctAnswer.trim().toLowerCase();
+                        return (
+                          <button
+                            key={idx}
+                            type="button"
+                            disabled={feedback !== null}
+                            onClick={() => {
+                              setSelectedOptionIndex(idx);
+                              if (isRight) {
+                                setScore((s) => s + 10);
+                                setStreak((st) => st + 1);
+                                setFeedback({ isCorrect: true, message: t.rightAnswerMsg });
+                                playLernstudioSound('correct');
+                                playGermanVoiceFeedback('richtig');
+                                triggerSparkles(50, 50, '#10b981');
+                                triggerFloatingText('+10 ★ Richtig!', 50, 40, '#10b981');
+                                setTimeout(() => handleNextQuestion(), 900);
+                              } else {
+                                setStreak(0);
+                                setFeedback({
+                                  isCorrect: false,
+                                  message: `${t.wrongAnswerMsg} (${activeEx.correctAnswer})`
+                                });
+                                playLernstudioSound('wrong');
+                                playGermanVoiceFeedback('noch_einmal');
+                                setTimeout(() => {
+                                  setFeedback(null);
+                                  setSelectedOptionIndex(null);
+                                }, 1200);
+                              }
+                            }}
+                            className={`p-4 rounded-2xl font-black text-base text-center transition-all border cursor-pointer font-mono ${
+                              selectedOptionIndex === idx
+                                ? feedback?.isCorrect
+                                  ? 'bg-emerald-500 text-white border-emerald-600'
+                                  : 'bg-rose-500 text-white border-rose-600'
+                                : 'bg-surface hover:bg-surface-hover border-surface-border text-text-main'
+                            }`}
+                          >
+                            {opt}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
+            {/* GAME 1: MULTIPLE CHOICE (also serves as fallback on non-verb items in mixed sets) */}
+            {(selectedGameType === 'multiple_choice' ||
+              ((selectedGameType === 'verb_conjugation' || selectedGameType === 'verb_sentence') &&
+                !currentVerbEntry)) && (
               <div className="space-y-5">
                 <div className="p-4 bg-primary-soft/50 border border-primary-border/40 rounded-2xl text-center space-y-1">
                   <span className="text-3xl block mb-1">{currentItem.emoji || '📚'}</span>

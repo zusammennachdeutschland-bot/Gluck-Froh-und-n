@@ -18,10 +18,13 @@ import {
   Play
 } from 'lucide-react';
 
+import { GameSetupConfig } from '../LernstudioGameSetupScreen';
+
 interface Props {
   set: LernstudioSet;
   activeTheme: LernstudioTheme;
   language?: string;
+  gameConfig?: GameSetupConfig;
   onBack: () => void;
 }
 
@@ -33,7 +36,7 @@ import {
   WheelSegment
 } from '../../../utils/lernstudioTranslations';
 
-export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, language = 'ar', onBack }) => {
+export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, language = 'ar', gameConfig, onBack }) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const displaySetTitle = getLocalizedSetTitle(set, language);
@@ -46,7 +49,7 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
     { id: 'team_2', name: getLocalizedTeamName('team_2', language), color: '#EF4444', score: 0 }
   ]);
   const [activeTeamIndex, setActiveTeamIndex] = useState(0);
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(gameConfig?.enableSoundFx ?? true);
 
   // Wheel state
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -55,7 +58,13 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
   const [selectedSegment, setSelectedSegment] = useState<WheelSegment | null>(null);
 
   // Question state
-  const questionsPool = useMemo(() => buildDynamicQuestionPool(set, language), [set, language]);
+  const questionsPool = useMemo(
+    () =>
+      buildDynamicQuestionPool(set, language, {
+        questionModeFilter: gameConfig?.questionType || 'mixed'
+      }),
+    [set, language, gameConfig?.questionType]
+  );
   const [questionIndex, setQuestionIndex] = useState(0);
   const [activeQuestion, setActiveQuestion] = useState<GameQuestion | null>(null);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
@@ -490,9 +499,16 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
             {/* Question Body */}
             <div className="text-center py-2 space-y-3">
               {activeQuestion.emoji && <div className="text-4xl">{activeQuestion.emoji}</div>}
-              <h2 className="text-lg sm:text-xl font-black text-white">{activeQuestion.prompt}</h2>
+              <h2 className="text-lg sm:text-xl font-black text-white" dir="auto">
+                {activeQuestion.prompt}
+              </h2>
               {activeQuestion.subPrompt && (
-                <p className="text-sm text-slate-400 font-bold">{activeQuestion.subPrompt}</p>
+                <p
+                  className="text-sm text-amber-300 font-bold bg-slate-900/70 px-3 py-1.5 rounded-xl inline-block border border-slate-700"
+                  dir="auto"
+                >
+                  {activeQuestion.subPrompt}
+                </p>
               )}
             </div>
 

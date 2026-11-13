@@ -87,6 +87,19 @@ import {
   splitGermanIntoSyllables,
   splitGermanArticleAndWord
 } from '../shared/components/LernstudioTeachModal';
+import {
+  CORE_SIX_SLOT_PROMPTS,
+  SUBJECT_PROMPTS,
+  PRONOUN_ONLY_SUBJECT_PROMPTS,
+  buildVerbConjugationExercise,
+  buildVerbSentenceGapExercise,
+  isItemVerb,
+  resolveVerbFromLernstudioItem,
+  resolveVerbsFromSelection,
+  verbEntryToLernstudioItem,
+  type VerbSubjectPrompt
+} from '../shared/verbEngine';
+import type { VerbEntry, VerbPronounSlot } from '../shared/verbLibrary/verbTypes';
 
 interface Props {
   assignmentId?: string;
@@ -124,6 +137,13 @@ interface GeneratedQuizQuestion {
   expectedChars?: string[];
   expectedSyllables?: string[];
   tileChoices?: HomeworkTileChoice[];
+  // Unified Verb Exercise metadata
+  audioPromptText?: string;
+  verbId?: string;
+  infinitive?: string;
+  subject?: string;
+  sentence?: string;
+  isVerbQuestion?: boolean;
 }
 
 const GERMAN_DISTRACTOR_LETTERS = [
@@ -442,7 +462,13 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
 
         const setId = searchParams.get('s');
         const compactWordsParam = (searchParams.get('w') || '').trim();
-        if (setId || compactWordsParam) {
+        const csParam = (searchParams.get('cs') || '').trim() as any;
+        const vidsParam = (searchParams.get('vids') || '').trim();
+        const vspParam = (searchParams.get('vsp') || '').trim() as any;
+        const urlVerbIds = vidsParam ? vidsParam.split(',').map((s) => s.trim()).filter(Boolean) : [];
+        const resolvedUrlVerbs = urlVerbIds.length > 0 ? resolveVerbsFromSelection({ verbIds: urlVerbIds }) : [];
+
+        if (setId || compactWordsParam || resolvedUrlVerbs.length > 0) {
           const titleParam = searchParams.get('t') || 'واجب منزلي تفاعلي';
           const flowModeParam: HomeworkFlowMode = 'teacher_then_quiz';
           const qtParam = searchParams.get('qt');
@@ -492,16 +518,29 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
               };
             }
           }
+          if (!foundSet && resolvedUrlVerbs.length > 0) {
+            foundSet = {
+              id: setId || 'verb_library_custom',
+              title: titleParam,
+              category: 'Verben',
+              setKind: 'verb_group',
+              verbIds: resolvedUrlVerbs.map((v) => v.id),
+              items: resolvedUrlVerbs.map((v) => verbEntryToLernstudioItem(v))
+            };
+          }
 
           if (foundSet && Array.isArray(foundSet.items) && foundSet.items.length > 0) {
             const items = selectedIds.length > 0
               ? foundSet.items.filter((it: any) => selectedIds.includes(it.id))
               : foundSet.items;
             const resolvedFallbackItems = items.length > 0 ? items : foundSet.items;
+            const fallbackVerbItems = resolvedUrlVerbs.length > 0 ? resolvedUrlVerbs : [];
+            const fallbackVocabCount = csParam === 'verb' ? 0 : resolvedFallbackItems.filter((it: any) => !isItemVerb(it)).length || resolvedFallbackItems.length;
             const resolvedTotalQ = calculateTotalHomeworkQuestions(
-              resolvedFallbackItems.length,
+              fallbackVocabCount,
               questionTypesParam,
-              hasUrlQtc ? urlQtc : undefined
+              hasUrlQtc ? urlQtc : undefined,
+              fallbackVerbItems.length
             );
 
             const fallbackHw: HomeworkAssignment = {
@@ -509,6 +548,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
               title: titleParam,
               ...(shareToken ? { shareToken } : {}),
               ...(urlOwnerUid ? { ownerUid: urlOwnerUid } : {}),
+              ...(csParam ? { contentSource: csParam } : {}),
+              ...(urlVerbIds.length > 0 ? { selectedVerbIds: urlVerbIds } : {}),
+              ...(resolvedUrlVerbs.length > 0 ? { verbSnapshot: resolvedUrlVerbs } : {}),
+              ...(vspParam ? { verbSubjectPoolMode: vspParam } : {}),
               audienceMode: isGroupUrl ? 'group' : 'open',
               ...(isGroupUrl
                 ? {
@@ -553,16 +596,49 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     loadHomework();
   }, [routeAssignmentId, isShortRoute, shortIdFromUrl, reloadNonce]);
 
-  // Active vocabulary items selected by the teacher
-  const studyItems = useMemo(() => {
-    if (!assignment?.setSnapshot?.items) return [];
-    const all: any[] = assignment.setSnapshot.items;
-    if (Array.isArray(assignment.selectedItemIds) && assignment.selectedItemIds.length > 0) {
-      const filtered = all.filter((it) => assignment.selectedItemIds.includes(it.id));
-      if (filtered.length > 0) return filtered;
+  // Resolve immutable verb records captured on assignment first (falls back to shared Verb Library)
+  const assignmentVerbs = useMemo<VerbEntry[]>(() => {
+    if (Array.isArray(assignment?.verbSnapshot) && assignment.verbSnapshot.length > 0) {
+      if (Array.isArray(assignment.selectedVerbIds) && assignment.selectedVerbIds.length > 0) {
+        const snapById = new Map(assignment.verbSnapshot.map((v) => [v.id, v]));
+        const ordered = assignment.selectedVerbIds
+          .map((vid) => snapById.get(vid))
+          .filter((v): v is VerbEntry => Boolean(v));
+        if (ordered.length > 0) return ordered;
+      }
+      return assignment.verbSnapshot;
     }
-    return all;
+    if (Array.isArray(assignment?.selectedVerbIds) && assignment.selectedVerbIds.length > 0) {
+      const fromIds = resolveVerbsFromSelection({ verbIds: assignment.selectedVerbIds });
+      if (fromIds.length > 0) return fromIds;
+    }
+    const items: any[] = assignment?.setSnapshot?.items || [];
+    const seen = new Set<string>();
+    const fromItems: VerbEntry[] = [];
+    for (const it of items) {
+      if (!isItemVerb(it)) continue;
+      const v = resolveVerbFromLernstudioItem(it);
+      if (v && !seen.has(v.id)) {
+        seen.add(v.id);
+        fromItems.push(v);
+      }
+    }
+    return fromItems;
   }, [assignment]);
+
+  // Active vocabulary + verb study items selected by the teacher
+  const studyItems = useMemo(() => {
+    const rawItems: any[] = assignment?.setSnapshot?.items || [];
+    const filtered =
+      Array.isArray(assignment?.selectedItemIds) && assignment.selectedItemIds.length > 0
+        ? rawItems.filter((it) => assignment.selectedItemIds!.includes(it.id))
+        : rawItems;
+    if (filtered.length > 0) return filtered;
+    if (assignmentVerbs.length > 0) {
+      return assignmentVerbs.map((v) => verbEntryToLernstudioItem(v));
+    }
+    return [];
+  }, [assignment, assignmentVerbs]);
 
   // Active question types ordered as stored on the assignment (or all 7 stages by default)
   const activeQuestionTypes = useMemo<HomeworkQuestionType[]>(() => {
@@ -574,8 +650,23 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
 
   // Build progressive multi-stage question list based on teacher's chosen questionTypes
   const quizQuestions = useMemo<GeneratedQuizQuestion[]>(() => {
-    if (studyItems.length === 0) return [];
+    if (studyItems.length === 0 && assignmentVerbs.length === 0) return [];
     const allSetItems: any[] = assignment?.setSnapshot?.items || studyItems;
+    const contentSource = assignment?.contentSource;
+    const pureVocabStudyItems =
+      contentSource === 'mixed' || contentSource === 'verb'
+        ? studyItems.filter((it) => !isItemVerb(it))
+        : studyItems;
+    const vocabPoolForStages =
+      pureVocabStudyItems.length > 0
+        ? pureVocabStudyItems
+        : contentSource === 'verb'
+        ? []
+        : studyItems;
+    const vocabPoolForDistractors =
+      contentSource === 'mixed'
+        ? allSetItems.filter((it) => !isItemVerb(it))
+        : allSetItems;
     const types = activeQuestionTypes;
 
     const list: GeneratedQuizQuestion[] = [];
@@ -585,25 +676,140 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       const stageTitle = `المرحلة ${stageIdx + 1}: ${meta?.labelAr || 'سؤال تفاعلي'}`;
       const stageEmoji = meta?.badgeEmoji || '🎯';
 
+      // Unified Verb Stages: verb_conjugation (6 slots per verb) & verb_sentence
+      if (qType === 'verb_conjugation') {
+        if (assignmentVerbs.length === 0) return;
+        const stageQuestionCount = resolveStageQuestionCount(
+          qType,
+          vocabPoolForStages.length,
+          assignment?.questionTypeCounts,
+          assignmentVerbs.length
+        );
+        const poolMode = assignment?.verbSubjectPoolMode || 'pronouns_and_names';
+        const allowedPrompts =
+          poolMode === 'pronouns_only' ? PRONOUN_ONLY_SUBJECT_PROMPTS : SUBJECT_PROMPTS;
+        const promptsBySlot = new Map<VerbPronounSlot, VerbSubjectPrompt[]>();
+        for (const p of allowedPrompts) {
+          const arr = promptsBySlot.get(p.slot) || [];
+          arr.push(p);
+          promptsBySlot.set(p.slot, arr);
+        }
+
+        const candidatePairs: Array<{ verb: VerbEntry; subjectPrompt: VerbSubjectPrompt }> = [];
+        assignmentVerbs.forEach((verb, vIdx) => {
+          CORE_SIX_SLOT_PROMPTS.forEach((corePrompt, sIdx) => {
+            const slotVariants = promptsBySlot.get(corePrompt.slot) || [corePrompt];
+            // Pick deterministically across pronouns/names while ensuring each verb exercises all 6 slots
+            const chosenPrompt = slotVariants[(vIdx + sIdx) % slotVariants.length] || corePrompt;
+            candidatePairs.push({ verb, subjectPrompt: chosenPrompt });
+          });
+        });
+
+        const selectedPairs =
+          stageQuestionCount >= candidatePairs.length
+            ? candidatePairs
+            : Array.from({ length: stageQuestionCount }, (_, k) => {
+                // Distribute reduced counts across verbs evenly
+                const stepIdx = Math.floor((k * candidatePairs.length) / Math.max(1, stageQuestionCount));
+                return candidatePairs[stepIdx] || candidatePairs[k % candidatePairs.length];
+              });
+
+        selectedPairs.forEach(({ verb, subjectPrompt }, pairIdx) => {
+          const ex = buildVerbConjugationExercise(verb, subjectPrompt, 4);
+          list.push({
+            id: `vconj_${verb.id}_${subjectPrompt.id}_${stageIdx}_${pairIdx}`,
+            itemId: verb.id,
+            type: 'verb_conjugation',
+            stageIndex: stageIdx,
+            stageLabelAr: stageTitle,
+            stageBadgeEmoji: stageEmoji,
+            germanWord: `${subjectPrompt.labelDe} ${ex.correctAnswer}`,
+            audioPromptText: verb.infinitive,
+            arabicMeaning: verb.arabic,
+            emoji: '🔤',
+            promptTitleAr: ex.promptAr,
+            promptMainText: ex.promptDe,
+            promptSubText: `${subjectPrompt.displayLabel} · ${verb.arabic}`,
+            options: ex.options,
+            correctAnswer: ex.correctAnswer,
+            verbId: verb.id,
+            infinitive: verb.infinitive,
+            subject: subjectPrompt.displayLabel,
+            isVerbQuestion: true
+          });
+        });
+        return;
+      }
+
+      if (qType === 'verb_sentence') {
+        if (assignmentVerbs.length === 0) return;
+        const stageQuestionCount = resolveStageQuestionCount(
+          qType,
+          vocabPoolForStages.length,
+          assignment?.questionTypeCounts,
+          assignmentVerbs.length
+        );
+        const stageVerbs =
+          stageQuestionCount >= assignmentVerbs.length
+            ? assignmentVerbs
+            : Array.from({ length: stageQuestionCount }, (_, k) => {
+                const rotatedIdx = (stageIdx * stageQuestionCount + k) % assignmentVerbs.length;
+                return assignmentVerbs[rotatedIdx];
+              });
+
+        stageVerbs.forEach((verb, vIdx) => {
+          const ex = buildVerbSentenceGapExercise(
+            verb,
+            assignmentVerbs.length >= 4 ? assignmentVerbs : undefined
+          );
+          list.push({
+            id: `vsent_${verb.id}_${stageIdx}_${vIdx}`,
+            itemId: verb.id,
+            type: 'verb_sentence',
+            stageIndex: stageIdx,
+            stageLabelAr: stageTitle,
+            stageBadgeEmoji: stageEmoji,
+            germanWord: ex.sentenceOriginal,
+            audioPromptText: verb.infinitive,
+            arabicMeaning: verb.arabic,
+            emoji: '📝',
+            promptTitleAr: `اختر التصريف الصحيح لإكمال الجملة (${verb.infinitive} — ${verb.arabic}):`,
+            promptMainText: ex.sentenceWithBlank,
+            promptSubText: ex.sentenceArabic || verb.arabic,
+            options: ex.options,
+            correctAnswer: ex.correctAnswer,
+            verbId: verb.id,
+            infinitive: verb.infinitive,
+            sentence: ex.sentenceOriginal,
+            isVerbQuestion: true
+          });
+        });
+        return;
+      }
+
+      if (vocabPoolForStages.length === 0) return;
+
       const stageQuestionCount = resolveStageQuestionCount(
         qType,
-        studyItems.length,
+        vocabPoolForStages.length,
         assignment?.questionTypeCounts
       );
 
       // Select `stageQuestionCount` items deterministically, rotating start offset by stageIdx
       // so reduced question counts still test all vocabulary words evenly across stages.
       const stageItems =
-        stageQuestionCount >= studyItems.length
-          ? studyItems
+        stageQuestionCount >= vocabPoolForStages.length
+          ? vocabPoolForStages
           : Array.from({ length: stageQuestionCount }, (_, k) => {
-              const rotatedIdx = (stageIdx * stageQuestionCount + k) % studyItems.length;
-              return studyItems[rotatedIdx];
+              const rotatedIdx = (stageIdx * stageQuestionCount + k) % vocabPoolForStages.length;
+              return vocabPoolForStages[rotatedIdx];
             });
 
       stageItems.forEach((item, itemIdx) => {
         const qId = `${item.id}_${qType}_${itemIdx}`;
-        const otherItems = allSetItems.filter((x) => x.id !== item.id);
+        const otherItems = (vocabPoolForDistractors.length > 1 ? vocabPoolForDistractors : allSetItems).filter(
+          (x) => x.id !== item.id
+        );
         const seed = stageIdx * 97 + itemIdx * 31 + (item.german?.length || 5);
 
         // 1. Stage: true_false (صح أم خطأ — Richtig / Falsch)
@@ -1014,7 +1220,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     });
 
     return list;
-  }, [studyItems, assignment, activeQuestionTypes]);
+  }, [studyItems, assignment, assignmentVerbs, activeQuestionTypes]);
 
   const currentQuestion = quizQuestions[currentIdx];
   const currentStudyItem = studyItems[studyIndex];
@@ -1042,7 +1248,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       if (!gamificationRef.current.pendingBonusRound && !activeOverlayRound) {
         const timer = setTimeout(() => {
           if (!isSoundMuted()) {
-            speakGermanText(currentQuestion.germanWord, 0.9);
+            speakGermanText(currentQuestion.audioPromptText || currentQuestion.germanWord, 0.9);
           }
         }, 250);
         return () => clearTimeout(timer);
@@ -1525,11 +1731,16 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       questionId: currentQuestion.id,
       questionType: currentQuestion.type,
       germanWord: currentQuestion.germanWord,
-      promptText: `${currentQuestion.stageLabelAr} — ${currentQuestion.germanWord}`,
+      promptText: `${currentQuestion.stageLabelAr} — ${currentQuestion.promptMainText || currentQuestion.germanWord}`,
       studentAnswer: studentAnswerStr,
       correctAnswer: currentQuestion.correctAnswer,
       isCorrect,
-      timeSpentSeconds: elapsedSec
+      timeSpentSeconds: elapsedSec,
+      ...(currentQuestion.isVerbQuestion ? { isVerbQuestion: true } : {}),
+      ...(currentQuestion.verbId ? { verbId: currentQuestion.verbId } : {}),
+      ...(currentQuestion.infinitive ? { infinitive: currentQuestion.infinitive } : {}),
+      ...(currentQuestion.subject ? { subject: currentQuestion.subject } : {}),
+      ...(currentQuestion.sentence ? { sentence: currentQuestion.sentence } : {})
     };
 
     const nextResponses = [...latestResponsesRef.current, newResponse];
@@ -2309,7 +2520,65 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
               <p className="text-xl sm:text-2xl font-bold text-primary">{currentStudyItem.arabic}</p>
             </div>
 
-            {(currentStudyItem.exampleSentenceGerman || currentStudyItem.example) && (
+            {(() => {
+              const snapshotMatch = assignmentVerbs.find(
+                (v) => v.id === (currentStudyItem.verbId || currentStudyItem.id)
+              );
+              const studyVerb = snapshotMatch || resolveVerbFromLernstudioItem(currentStudyItem);
+              if (!studyVerb) return null;
+              return (
+                <div className="space-y-2.5 text-right">
+                  <div className="flex flex-wrap items-center justify-center gap-1.5">
+                    <span className="px-2 py-0.5 rounded-md bg-primary/10 border border-primary/20 text-primary text-[11px] font-bold">
+                      {studyVerb.level}
+                    </span>
+                    {studyVerb.classifications.map((cls) => (
+                      <span
+                        key={cls}
+                        className="px-2 py-0.5 rounded-md bg-surface-hover border border-surface-border text-text-main text-[11px] font-semibold"
+                      >
+                        {cls}
+                      </span>
+                    ))}
+                    {studyVerb.preposition && (
+                      <span className="px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/25 text-amber-700 dark:text-amber-300 text-[11px] font-bold" dir="ltr">
+                        +{studyVerb.preposition} ({studyVerb.prepositionCase || 'Akk/Dat'})
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-xs" dir="ltr">
+                    {[
+                      ['ich (أنا)', studyVerb.praesens.ich],
+                      ['du (أنت)', studyVerb.praesens.du],
+                      ['er/sie/es', studyVerb.praesens.er_sie_es],
+                      ['wir (نحن)', studyVerb.praesens.wir],
+                      ['ihr (أنتم)', studyVerb.praesens.ihr],
+                      ['sie/Sie', studyVerb.praesens.sie_Sie]
+                    ].map(([pron, form]) => (
+                      <div
+                        key={pron}
+                        className="px-2.5 py-1.5 rounded-lg bg-surface-hover border border-surface-border flex items-center justify-between gap-2"
+                      >
+                        <span className="text-[11px] text-text-muted font-semibold">{pron}</span>
+                        <span className="font-bold text-text-main">{form}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {studyVerb.exampleGerman && (
+                    <div className="bg-surface-hover/50 border border-surface-border rounded-xl p-3 text-center space-y-1">
+                      <p className="text-xs sm:text-sm font-semibold text-text-main" dir="ltr">
+                        „{studyVerb.exampleGerman}“
+                      </p>
+                      {studyVerb.exampleArabic && (
+                        <p className="text-xs text-text-muted">{studyVerb.exampleArabic}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {!isItemVerb(currentStudyItem) && (currentStudyItem.exampleSentenceGerman || currentStudyItem.example) && (
               <div className="bg-surface-hover/50 border border-surface-border rounded-xl p-3 text-center space-y-1">
                 <p className="text-xs sm:text-sm font-semibold text-text-main" dir="ltr">
                   „{currentStudyItem.exampleSentenceGerman || currentStudyItem.example}“
@@ -2876,7 +3145,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             <div className="flex items-center justify-center gap-2 pt-1">
               <button
                 type="button"
-                onClick={() => speakGermanText(currentQuestion.germanWord, 0.9)}
+                onClick={() => speakGermanText(currentQuestion.audioPromptText || currentQuestion.germanWord, 0.9)}
                 className="px-3 py-1.5 rounded-lg bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-semibold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
               >
                 <Volume2 className="w-3.5 h-3.5 text-primary" />
@@ -2884,7 +3153,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
               </button>
               <button
                 type="button"
-                onClick={() => speakGermanText(currentQuestion.germanWord, 0.55)}
+                onClick={() => speakGermanText(currentQuestion.audioPromptText || currentQuestion.germanWord, 0.55)}
                 className="px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface border border-surface-border text-text-muted hover:text-text-main font-semibold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
               >
                 <Snail className="w-3.5 h-3.5" />

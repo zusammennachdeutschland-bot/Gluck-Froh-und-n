@@ -89,7 +89,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx src/tests/cloudSyncReliability.test.ts && tsx src/tests/homeworkLifecycle.test.ts && tsx src/tests/homeworkAccountIsolation.test.ts && tsx src/tests/lessonCycleNumbering.test.ts && tsx src/tests/tasks1to7.test.ts && tsx src/tests/homeworkSystemRepair.test.ts && tsx src/tests/homeworkShareTokenSecurity.test.ts && tsx src/tests/homeworkShortLinks.test.ts && tsx src/tests/lessonHomeworkIntegration.test.ts && tsx src/tests/homeworkGamification.test.ts && tsx src/tests/androidNativeGoogleAuth.test.ts && tsx src/tests/mergeEngine.test.ts && tsx src/tests/termVisitPlanner.test.ts && tsx src/tests/comprehensiveAuditVerification.test.ts && tsx src/tests/appVersionBuildInfo.test.ts",
+    "test": "tsx src/tests/cloudSyncReliability.test.ts && tsx src/tests/homeworkLifecycle.test.ts && tsx src/tests/homeworkAccountIsolation.test.ts && tsx src/tests/lessonCycleNumbering.test.ts && tsx src/tests/tasks1to7.test.ts && tsx src/tests/homeworkSystemRepair.test.ts && tsx src/tests/homeworkShareTokenSecurity.test.ts && tsx src/tests/homeworkShortLinks.test.ts && tsx src/tests/lessonHomeworkIntegration.test.ts && tsx src/tests/homeworkGamification.test.ts && tsx src/tests/androidNativeGoogleAuth.test.ts && tsx src/tests/mergeEngine.test.ts && tsx src/tests/termVisitPlanner.test.ts && tsx src/tests/comprehensiveAuditVerification.test.ts && tsx src/tests/appVersionBuildInfo.test.ts && tsx src/tests/verbConjugationAi.test.ts && tsx src/tests/lernstudioWorksheet.test.ts && tsx src/tests/unifiedVerbSystem.test.ts",
     "restore-binaries": "node scripts/restore_binaries.cjs"
   },
   "dependencies": {

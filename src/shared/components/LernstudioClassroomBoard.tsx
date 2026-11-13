@@ -13,6 +13,15 @@ import { speakGermanText } from '../../utils/audioSpeechUtils';
 import { SharedVictoryTrophyArt } from './GameArtAssets';
 import { GameSetupConfig } from './LernstudioGameSetupScreen';
 import { useGameEffects } from './effects/GameEffectsOverlay';
+import { isArticleGameSupported } from '../lernstudioQuestionAdapter';
+import {
+  ALL_VERBS,
+  SUBJECT_PROMPTS,
+  buildVerbConjugationExercise,
+  buildVerbSentenceGapExercise,
+  isItemVerb,
+  resolveVerbFromLernstudioItem
+} from '../verbEngine';
 import {
   Trophy,
   Plus,
@@ -84,14 +93,23 @@ export interface MagicChoiceOption {
   isCorrect: boolean;
 }
 
+export type ClassroomPromptMode =
+  | 'de_to_ar'
+  | 'ar_to_de'
+  | 'article'
+  | 'audio'
+  | 'verb_conjugation'
+  | 'verb_sentence';
+
 export interface BaamboozleTile {
   id: number;
   points: number;
   isPowerCard: boolean;
   powerType?: PowerCardType;
   item?: LernstudioItem;
-  promptType: 'de_to_ar' | 'ar_to_de' | 'article' | 'audio';
+  promptType: ClassroomPromptMode;
   question: string;
+  subQuestion?: string;
   answer: string;
   choices: MagicChoiceOption[];
   isAnswered: boolean;
@@ -154,7 +172,7 @@ function extractArticle(germanWord: string): { article: 'der' | 'die' | 'das' | 
 function buildChoicesForItem(
   targetItem: LernstudioItem,
   allItems: LernstudioItem[],
-  promptType: 'de_to_ar' | 'ar_to_de' | 'article' | 'audio',
+  promptType: ClassroomPromptMode,
   activeLanguage: string
 ): MagicChoiceOption[] {
   if (promptType === 'article') {
@@ -258,9 +276,17 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
     }
     return 12;
   });
-  const [questionPromptMode, setQuestionPromptMode] = useState<'de_to_ar' | 'ar_to_de' | 'article' | 'audio' | 'mixed'>(
-    gameConfig?.questionType || 'mixed'
+  const isArticleSupported = useMemo(() => isArticleGameSupported(set), [set]);
+  const hasVerbsInSet = useMemo(
+    () => set.setKind === 'verb_group' || (set.items || []).some((it) => isItemVerb(it)),
+    [set]
   );
+
+  const [questionPromptMode, setQuestionPromptMode] = useState<ClassroomPromptMode | 'mixed'>(() => {
+    const initial = gameConfig?.questionType || 'mixed';
+    if (initial === 'article' && !isArticleGameSupported(set)) return 'mixed';
+    return initial;
+  });
 
   // Day & Time Filter State
   const [filterDay, setFilterDay] = useState<string>('all');
@@ -441,12 +467,19 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
         'skip_turn'
       ];
 
-      const modesCycle: ('de_to_ar' | 'ar_to_de' | 'article' | 'audio')[] = [
+      const vocabModesCycle: ClassroomPromptMode[] = isArticleSupported
+        ? ['ar_to_de', 'de_to_ar', 'audio', 'article']
+        : ['ar_to_de', 'de_to_ar', 'audio'];
+      const verbModesCycle: ClassroomPromptMode[] = [
+        'verb_conjugation',
+        'verb_sentence',
         'ar_to_de',
-        'de_to_ar',
-        'audio',
-        'article'
+        'de_to_ar'
       ];
+
+      const resolvedVerbPool = items
+        .map((it) => (isItemVerb(it) || set.setKind === 'verb_group' ? resolveVerbFromLernstudioItem(it) : null))
+        .filter((v): v is NonNullable<typeof v> => Boolean(v));
 
       return finalItems.map((item, idx) => {
         const isPower =
@@ -454,10 +487,20 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
         const randomPower = powerTypesList[Math.floor(Math.random() * powerTypesList.length)];
         const points = ((idx % 4) + 1) * 10 + 5; // 15, 25, 35, 45
 
-        let resolvedPrompt: 'de_to_ar' | 'ar_to_de' | 'article' | 'audio' =
-          promptModeToUse === 'mixed' ? modesCycle[idx % modesCycle.length] : promptModeToUse;
+        const itemIsVerb = isItemVerb(item) || set.setKind === 'verb_group';
+        const verbEntry = itemIsVerb ? resolveVerbFromLernstudioItem(item) : null;
 
-        if (resolvedPrompt === 'article' && !extractArticle(item.german).article) {
+        let resolvedPrompt: ClassroomPromptMode =
+          promptModeToUse === 'mixed'
+            ? verbEntry
+              ? verbModesCycle[idx % verbModesCycle.length]
+              : vocabModesCycle[idx % vocabModesCycle.length]
+            : promptModeToUse;
+
+        if (resolvedPrompt === 'article' && (verbEntry || !extractArticle(item.german).article)) {
+          resolvedPrompt = verbEntry ? 'verb_conjugation' : 'ar_to_de';
+        }
+        if ((resolvedPrompt === 'verb_conjugation' || resolvedPrompt === 'verb_sentence') && !verbEntry) {
           resolvedPrompt = 'ar_to_de';
         }
 
@@ -467,6 +510,62 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
           item.english ||
           item.exampleSentenceArabic ||
           item.german;
+
+        if (resolvedPrompt === 'verb_conjugation' && verbEntry) {
+          const subjectPrompt = SUBJECT_PROMPTS[(idx * 5 + Math.floor(Math.random() * SUBJECT_PROMPTS.length)) % SUBJECT_PROMPTS.length];
+          const conjEx = buildVerbConjugationExercise(verbEntry, subjectPrompt, 4);
+          const choices: MagicChoiceOption[] = conjEx.options.map((opt, optIdx) => ({
+            id: `vconj_${idx}_${optIdx}`,
+            label: opt,
+            subLabel: `${subjectPrompt.labelDe} ${opt}`,
+            emoji: '🔤',
+            isCorrect: opt.trim().toLowerCase() === conjEx.correctAnswer.trim().toLowerCase()
+          }));
+          return {
+            id: idx + 1,
+            points,
+            isPowerCard: isPower,
+            powerType: isPower ? randomPower : undefined,
+            item,
+            promptType: resolvedPrompt,
+            question:
+              activeLanguage === 'de'
+                ? `Konjugiere "${verbEntry.infinitive}" für: ${subjectPrompt.labelDe}`
+                : activeLanguage === 'en'
+                ? `Conjugate "${verbEntry.infinitive}" (${verbEntry.arabic}) for: ${subjectPrompt.labelDe}`
+                : conjEx.promptAr,
+            subQuestion: conjEx.promptDe,
+            answer: `${subjectPrompt.labelDe} ${conjEx.correctAnswer} (${verbEntry.arabic})`,
+            choices,
+            isAnswered: false
+          };
+        }
+
+        if (resolvedPrompt === 'verb_sentence' && verbEntry) {
+          const gapEx = buildVerbSentenceGapExercise(
+            verbEntry,
+            resolvedVerbPool.length >= 4 ? resolvedVerbPool : ALL_VERBS
+          );
+          const choices: MagicChoiceOption[] = gapEx.options.map((opt, optIdx) => ({
+            id: `vsent_${idx}_${optIdx}`,
+            label: opt,
+            emoji: '✍️',
+            isCorrect: opt.trim().toLowerCase() === gapEx.correctAnswer.trim().toLowerCase()
+          }));
+          return {
+            id: idx + 1,
+            points,
+            isPowerCard: isPower,
+            powerType: isPower ? randomPower : undefined,
+            item,
+            promptType: resolvedPrompt,
+            question: gapEx.sentenceWithBlank,
+            subQuestion: gapEx.sentenceArabic || translationText,
+            answer: `${gapEx.sentenceOriginal} — ${gapEx.sentenceArabic}`,
+            choices,
+            isAnswered: false
+          };
+        }
 
         let questionText = translationText;
         if (resolvedPrompt === 'de_to_ar') {
@@ -502,7 +601,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
         };
       });
     },
-    [set.items, activeLanguage]
+    [set.items, set.setKind, activeLanguage, isArticleSupported]
   );
 
   // Auto-launch into the Magic Stage when arriving from LernstudioGameSetupScreen
@@ -1192,9 +1291,21 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
                 className="w-full px-3 py-2.5 bg-slate-900 border border-white/15 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-400"
               >
                 <option value="mixed">{language === 'ar' ? 'شامل ومتنوع 🌟' : 'Mixed Magic Challenges 🌟'}</option>
+                {hasVerbsInSet && (
+                  <>
+                    <option value="verb_conjugation">
+                      {language === 'ar' ? 'تصريف الأفعال (Präsens) 🔤' : 'Verb Conjugation 🔤'}
+                    </option>
+                    <option value="verb_sentence">
+                      {language === 'ar' ? 'الفعل داخل الجملة (Verb im Satz) ✍️' : 'Verb in Sentence ✍️'}
+                    </option>
+                  </>
+                )}
                 <option value="ar_to_de">{language === 'ar' ? 'اختر الكلمة الألمانية 🇩🇪' : 'Choose German Word 🇩🇪'}</option>
                 <option value="de_to_ar">{language === 'ar' ? 'اختر المعنى الصحيح 🌍' : 'Choose Translation 🌍'}</option>
-                <option value="article">{language === 'ar' ? 'تحدي أداة التعريف (der/die/das)' : 'Article (der/die/das)'}</option>
+                {isArticleSupported && (
+                  <option value="article">{language === 'ar' ? 'تحدي أداة التعريف (der/die/das)' : 'Article (der/die/das)'}</option>
+                )}
                 <option value="audio">{language === 'ar' ? 'تحدي الاستماع الصوتي 🎧' : 'Audio Listening 🎧'}</option>
               </select>
             </div>
@@ -1949,9 +2060,14 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
                       </motion.span>
                     )}
 
-                    <h2 className="text-2xl sm:text-3xl font-black text-white" dir="auto">
+                    <h2 className="text-xl sm:text-3xl font-black text-white" dir="auto">
                       {activeTile.question}
                     </h2>
+                    {activeTile.subQuestion && (
+                      <p className="text-sm sm:text-base font-bold text-amber-300" dir="auto">
+                        {activeTile.subQuestion}
+                      </p>
+                    )}
 
                     {/* Audio Pronunciation Buttons (Always available for listening) */}
                     {activeTile.item?.german && (

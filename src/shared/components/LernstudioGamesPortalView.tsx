@@ -329,6 +329,16 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
         <GameSettingsControls />
       </div>
 
+      {set.setKind === 'verb_group' && (
+        <div className="px-4 py-2.5 rounded-xl bg-primary/10 border border-primary/25 text-xs font-bold text-primary flex items-center justify-between gap-2 flex-wrap">
+          <span>
+            {language === 'ar'
+              ? '🔤 مجموعة أفعال موحدة (Präsens & Verb im Satz): متاحة في جميع الألعاب والتصريف، بينما لعبة فرز الأدوات (der/die/das) مخصصة لمجموعات الأسماء فقط.'
+              : '🔤 Unified Verb Set: Verb conjugation & sentence games are active across classroom and arcade modes. Article sorting is disabled because verbs have no der/die/das articles.'}
+          </span>
+        </div>
+      )}
+
       {/* Main Container */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Section 1: Team & Classroom Contests */}

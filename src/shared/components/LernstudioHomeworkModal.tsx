@@ -4,14 +4,17 @@ import { useApp } from '../../context/AppContext';
 import {
   HomeworkAssignment,
   HomeworkAudienceMode,
+  HomeworkContentSource,
   HomeworkFlowMode,
   HomeworkQuestionType,
   HomeworkBlooketMode,
   HomeworkSubmission,
-  DEFAULT_HOMEWORK_QUESTION_TYPES
+  DEFAULT_HOMEWORK_QUESTION_TYPES,
+  VERB_HOMEWORK_QUESTION_TYPES
 } from '../homeworkTypes';
 import {
   QUESTION_TYPE_META,
+  VERB_QUESTION_TYPE_META,
   buildHomeworkShareUrl,
   getLocalAssignments,
   saveLocalAssignment,
@@ -42,6 +45,20 @@ import {
 } from '../homeworkStorageSync';
 import { auth, signInTeacherWithGoogle } from '../firebaseCloudSync';
 import {
+  ALL_VERBS,
+  BUILTIN_VERB_GROUPS,
+  resolveVerbsFromSelection,
+  filterVerbs,
+  verbEntryToLernstudioItem
+} from '../verbEngine';
+import {
+  isVerbGroupSet,
+  extractVerbGroupsFromLernstudioSets,
+  createCustomVerbGroup,
+  verbGroupToLernstudioSet
+} from '../verbGroupSync';
+import type { VerbEntry, VerbGroupCategory, VerbGroupDefinition, VerbLevel } from '../verbLibrary/verbTypes';
+import {
   Sparkles,
   X,
   Send,
@@ -67,7 +84,10 @@ import {
   Target,
   Activity,
   HelpCircle,
-  Globe
+  Globe,
+  BookOpen,
+  Search,
+  Layers
 } from 'lucide-react';
 
 interface Props {
@@ -135,7 +155,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   autoCloseOnCreate,
   onAssignmentConfirmed
 }) => {
-  const { groups, students = [] } = useApp();
+  const { groups, students = [], profile, saveLernstudioSet } = useApp();
   const [activeTab, setActiveTab] = useState<'create' | 'results'>(initialTab || 'create');
 
   // Keep latest students roster ref for real-time Firestore subscription callbacks
@@ -144,15 +164,49 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     studentsRef.current = students;
   }, [students]);
 
+  const vocabSets = useMemo(() => sets.filter((s) => !isVerbGroupSet(s)), [sets]);
+  const customVerbGroups = useMemo(() => extractVerbGroupsFromLernstudioSets(sets), [sets]);
+  const allVerbGroups = useMemo<VerbGroupDefinition[]>(
+    () => [...BUILTIN_VERB_GROUPS, ...customVerbGroups],
+    [customVerbGroups]
+  );
+
   // Create Homework State
-  const [selectedSetId, setSelectedSetId] = useState(defaultSet?.id || sets[0]?.id || '');
+  const [contentSource, setContentSource] = useState<HomeworkContentSource>(() =>
+    isVerbGroupSet(defaultSet) ? 'verb' : 'vocab'
+  );
+  const [selectedSetId, setSelectedSetId] = useState(() => {
+    if (defaultSet && !isVerbGroupSet(defaultSet)) return defaultSet.id;
+    return vocabSets[0]?.id || sets[0]?.id || '';
+  });
+  const [selectedVerbGroupIds, setSelectedVerbGroupIds] = useState<string[]>(() => {
+    if (isVerbGroupSet(defaultSet) && defaultSet?.id) return [defaultSet.id];
+    return [];
+  });
+  const [selectedVerbIds, setSelectedVerbIds] = useState<string[]>(() => {
+    if (isVerbGroupSet(defaultSet) && Array.isArray(defaultSet?.verbIds)) {
+      return [...defaultSet.verbIds];
+    }
+    return [];
+  });
+  const [verbSubjectPoolMode, setVerbSubjectPoolMode] = useState<'pronouns_and_names' | 'pronouns_only'>(
+    'pronouns_and_names'
+  );
+  const [verbGroupCategoryFilter, setVerbGroupCategoryFilter] = useState<VerbGroupCategory | 'all'>('cefr');
+  const [verbSearchQuery, setVerbSearchQuery] = useState('');
+  const [verbLevelFilter, setVerbLevelFilter] = useState<VerbLevel | 'all'>('all');
+  const [newVerbGroupTitle, setNewVerbGroupTitle] = useState('');
+  const [verbGroupSaveSuccess, setVerbGroupSaveSuccess] = useState<string | null>(null);
+
   const [audienceMode, setAudienceMode] = useState<HomeworkAudienceMode>('open');
   const [selectedGroupId, setSelectedGroupId] = useState<string>(() => groups[0]?.id || '');
   const [createError, setCreateError] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const flowMode: HomeworkFlowMode = 'teacher_then_quiz';
-  const [questionTypes, setQuestionTypes] = useState<HomeworkQuestionType[]>(
-    () => [...DEFAULT_HOMEWORK_QUESTION_TYPES]
+  const [questionTypes, setQuestionTypes] = useState<HomeworkQuestionType[]>(() =>
+    isVerbGroupSet(defaultSet)
+      ? [...VERB_HOMEWORK_QUESTION_TYPES]
+      : [...DEFAULT_HOMEWORK_QUESTION_TYPES]
   );
   const [questionTypeCounts, setQuestionTypeCounts] = useState<
     Partial<Record<HomeworkQuestionType, number>>
@@ -209,8 +263,12 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const activeAuthUid = (firebaseUser?.uid || getCurrentHomeworkOwnerUid() || '').trim() || null;
 
   const currentSet = useMemo(
-    () => sets.find((s) => s.id === selectedSetId) || defaultSet || sets[0],
-    [sets, selectedSetId, defaultSet]
+    () =>
+      vocabSets.find((s) => s.id === selectedSetId) ||
+      (!isVerbGroupSet(defaultSet) ? defaultSet : null) ||
+      vocabSets[0] ||
+      sets[0],
+    [vocabSets, sets, selectedSetId, defaultSet]
   );
 
   // Sync activeTab & contextual defaults when modal opens
@@ -234,10 +292,26 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         setCreatedAssignment(null);
         setCreatedShareLink(null);
       }
-      if ((!selectedSetId || !sets.some((s) => s.id === selectedSetId)) && (defaultSet || sets[0])) {
-        setSelectedSetId(defaultSet?.id || sets[0]?.id || '');
+      if (isVerbGroupSet(defaultSet) && defaultSet) {
+        setContentSource('verb');
+        const groupIdMatch = defaultSet.id;
+        setSelectedVerbGroupIds(groupIdMatch ? [groupIdMatch] : []);
+        const resolvedVerbs = resolveVerbsFromSelection({
+          groupIds: groupIdMatch ? [groupIdMatch] : [],
+          verbIds: defaultSet.verbIds,
+          customGroups: customVerbGroups,
+          fallbackVerbs: defaultSet.verbEntriesSnapshot
+        });
+        setSelectedVerbIds(resolvedVerbs.map((v) => v.id));
+        setQuestionTypes([...VERB_HOMEWORK_QUESTION_TYPES]);
+      } else {
+        setContentSource((prev) => (prev === 'verb' && !defaultSet ? 'verb' : 'vocab'));
+        if ((!selectedSetId || !vocabSets.some((s) => s.id === selectedSetId)) && (defaultSet || vocabSets[0])) {
+          setSelectedSetId((!isVerbGroupSet(defaultSet) ? defaultSet?.id : undefined) || vocabSets[0]?.id || '');
+        }
       }
       setCreateError(null);
+      setVerbGroupSaveSuccess(null);
       setPendingSyncCount(getPendingHomeworkSyncCount());
     }
   }, [isOpen, initialTab, defaultSet, initialAudienceMode, initialGroupId, initialTitle, autoCloseOnCreate, groups, sets]);
@@ -251,7 +325,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   }, [currentSet?.id]);
 
   useEffect(() => {
-    if (defaultSet?.id) {
+    if (defaultSet?.id && !isVerbGroupSet(defaultSet)) {
       setSelectedSetId(defaultSet.id);
     }
   }, [defaultSet?.id]);
@@ -401,14 +475,138 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     }
   };
 
+  const switchContentSource = (nextSource: HomeworkContentSource) => {
+    setContentSource(nextSource);
+    setCreateError(null);
+    setQuestionTypeCounts({});
+    if (nextSource === 'verb') {
+      setQuestionTypes([...VERB_HOMEWORK_QUESTION_TYPES]);
+    } else if (nextSource === 'vocab') {
+      setQuestionTypes([...DEFAULT_HOMEWORK_QUESTION_TYPES]);
+    } else {
+      // Mixed: start with practical vocab stages + both verb stages
+      setQuestionTypes(['true_false', 'choice_2', 'choice_all', 'verb_conjugation', 'verb_sentence']);
+    }
+  };
+
+  const resolvedSelectedVerbs = useMemo<VerbEntry[]>(() => {
+    if (selectedVerbIds.length > 0) {
+      return resolveVerbsFromSelection({
+        verbIds: selectedVerbIds,
+        customGroups: customVerbGroups
+      });
+    }
+    if (selectedVerbGroupIds.length > 0) {
+      return resolveVerbsFromSelection({
+        groupIds: selectedVerbGroupIds,
+        customGroups: customVerbGroups
+      });
+    }
+    return [];
+  }, [selectedVerbIds, selectedVerbGroupIds, customVerbGroups]);
+
+  const filteredBrowseVerbs = useMemo<VerbEntry[]>(() => {
+    if (verbSearchQuery.trim()) {
+      return filterVerbs({
+        levels: verbLevelFilter === 'all' ? undefined : [verbLevelFilter],
+        searchQuery: verbSearchQuery
+      });
+    }
+    if (selectedVerbGroupIds.length > 0) {
+      return filterVerbs({
+        groupIds: selectedVerbGroupIds,
+        customGroups: customVerbGroups,
+        levels: verbLevelFilter === 'all' ? undefined : [verbLevelFilter]
+      });
+    }
+    if (verbLevelFilter !== 'all') {
+      return filterVerbs({ levels: [verbLevelFilter] });
+    }
+    return [...ALL_VERBS];
+  }, [verbSearchQuery, verbLevelFilter, selectedVerbGroupIds, customVerbGroups]);
+
+  const toggleVerbGroupSelection = (group: VerbGroupDefinition) => {
+    setCreateError(null);
+    setSelectedVerbGroupIds((prev) => {
+      const exists = prev.includes(group.id);
+      const nextGroups = exists ? prev.filter((id) => id !== group.id) : [...prev, group.id];
+      if (!exists) {
+        // Add group's verbs into selectedVerbIds
+        setSelectedVerbIds((prevIds) => Array.from(new Set([...prevIds, ...group.verbIds])));
+      } else {
+        // Recompute remaining verbs from remaining selected groups
+        const remainingIds = new Set<string>();
+        for (const gid of nextGroups) {
+          const gObj = allVerbGroups.find((x) => x.id === gid);
+          gObj?.verbIds.forEach((vid) => remainingIds.add(vid));
+        }
+        const removedGroupSet = new Set(group.verbIds);
+        setSelectedVerbIds((prevIds) =>
+          prevIds.filter((vid) => remainingIds.has(vid) || !removedGroupSet.has(vid))
+        );
+      }
+      return nextGroups;
+    });
+  };
+
+  const toggleSingleVerbId = (verbId: string) => {
+    setCreateError(null);
+    setSelectedVerbIds((prev) =>
+      prev.includes(verbId) ? prev.filter((id) => id !== verbId) : [...prev, verbId]
+    );
+  };
+
+  const handleSaveInlineCustomVerbGroup = async () => {
+    const cleanTitle = newVerbGroupTitle.trim();
+    if (!cleanTitle || resolvedSelectedVerbs.length === 0) return;
+    const myName =
+      profile?.nameAr?.trim() ||
+      profile?.nameEn?.trim() ||
+      firebaseUser?.displayName?.trim() ||
+      'المعلم';
+    const baseGroupId = selectedVerbGroupIds.length === 1 ? selectedVerbGroupIds[0] : undefined;
+    const newGroup = createCustomVerbGroup({
+      titleDe: cleanTitle,
+      titleAr: cleanTitle,
+      verbIds: resolvedSelectedVerbs.map((v) => v.id),
+      teacherName: myName,
+      teacherUid: activeAuthUid || undefined,
+      basedOnBuiltinGroupId: baseGroupId?.startsWith('vgrp_builtin_') ? baseGroupId : undefined
+    });
+    const asSet = verbGroupToLernstudioSet(newGroup, resolvedSelectedVerbs);
+    saveLernstudioSet(asSet);
+    await saveLernstudioSetToFirestore(
+      verbGroupToLernstudioSet(newGroup, resolvedSelectedVerbs, { compactForSync: true })
+    ).catch(() => false);
+    setSelectedVerbGroupIds([newGroup.id]);
+    setNewVerbGroupTitle('');
+    setVerbGroupSaveSuccess(`تم حفظ مجموعة "${cleanTitle}" (${resolvedSelectedVerbs.length} فعل) باسم ${myName}`);
+    setTimeout(() => setVerbGroupSaveSuccess(null), 4000);
+  };
+
+  const activeQuestionMetaList = useMemo(() => {
+    if (contentSource === 'verb') return VERB_QUESTION_TYPE_META;
+    if (contentSource === 'mixed') return [...QUESTION_TYPE_META, ...VERB_QUESTION_TYPE_META];
+    return QUESTION_TYPE_META;
+  }, [contentSource]);
+
+  const activeQuestionTypesForSource = useMemo(() => {
+    const allowedIds = new Set(activeQuestionMetaList.map((m) => m.id));
+    const filtered = questionTypes.filter((qt) => allowedIds.has(qt));
+    if (filtered.length > 0) return filtered;
+    return [activeQuestionMetaList[0].id];
+  }, [questionTypes, activeQuestionMetaList]);
+
   const toggleQuestionType = (type: HomeworkQuestionType) => {
     setQuestionTypes((prev) => {
-      if (prev.includes(type)) {
-        if (prev.length === 1) return prev; // Keep at least 1 stage
-        return prev.filter((t) => t !== type);
+      const allowedIds = new Set(activeQuestionMetaList.map((m) => m.id));
+      const activePrev = prev.filter((t) => allowedIds.has(t));
+      if (activePrev.includes(type)) {
+        if (activePrev.length === 1) return activePrev;
+        return activePrev.filter((t) => t !== type);
       }
-      const next = [...prev, type];
-      const canonicalOrder = QUESTION_TYPE_META.map((m) => m.id);
+      const next = [...activePrev, type];
+      const canonicalOrder = activeQuestionMetaList.map((m) => m.id);
       return next.sort((a, b) => canonicalOrder.indexOf(a) - canonicalOrder.indexOf(b));
     });
   };
@@ -424,15 +622,25 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   };
 
   const maxStageWords = Math.max(1, selectedItemIds.length || currentSet?.items?.length || 1);
+  const effectiveVocabCount =
+    contentSource === 'verb' ? 0 : Math.max(0, selectedItemIds.length || currentSet?.items?.length || 0);
+  const effectiveVerbCount = contentSource === 'vocab' ? 0 : resolvedSelectedVerbs.length;
+
+  const getStageMaxCount = (type: HomeworkQuestionType): number => {
+    if (type === 'verb_conjugation') return Math.max(1, effectiveVerbCount * 6);
+    if (type === 'verb_sentence') return Math.max(1, effectiveVerbCount);
+    return maxStageWords;
+  };
 
   const getStageQuestionCount = (type: HomeworkQuestionType): number =>
-    resolveStageQuestionCount(type, maxStageWords, questionTypeCounts);
+    resolveStageQuestionCount(type, effectiveVocabCount, questionTypeCounts, effectiveVerbCount);
 
   const setSingleStageQuestionCount = (type: HomeworkQuestionType, nextCount: number) => {
-    const clamped = Math.min(maxStageWords, Math.max(1, Math.round(nextCount)));
+    const stageMax = getStageMaxCount(type);
+    const clamped = Math.min(stageMax, Math.max(1, Math.round(nextCount)));
     setQuestionTypeCounts((prev) => {
       const next = { ...prev };
-      if (clamped >= maxStageWords) {
+      if (clamped >= stageMax) {
         delete next[type];
       } else {
         next[type] = clamped;
@@ -442,29 +650,51 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   };
 
   const setAllStagesQuestionCount = (nextCount: number | 'all') => {
-    if (nextCount === 'all' || nextCount >= maxStageWords) {
+    if (nextCount === 'all') {
       setQuestionTypeCounts({});
       return;
     }
-    const clamped = Math.min(maxStageWords, Math.max(1, Math.round(nextCount)));
     const next: Partial<Record<HomeworkQuestionType, number>> = {};
-    for (const meta of QUESTION_TYPE_META) {
-      next[meta.id] = clamped;
+    for (const meta of activeQuestionMetaList) {
+      const stageMax = getStageMaxCount(meta.id);
+      const clamped = Math.min(stageMax, Math.max(1, Math.round(nextCount)));
+      if (clamped < stageMax) {
+        next[meta.id] = clamped;
+      }
     }
     setQuestionTypeCounts(next);
   };
 
   const totalConfiguredQuestions = useMemo(
-    () => calculateTotalHomeworkQuestions(selectedItemIds.length, questionTypes, questionTypeCounts),
-    [selectedItemIds.length, questionTypes, questionTypeCounts]
+    () =>
+      calculateTotalHomeworkQuestions(
+        effectiveVocabCount,
+        activeQuestionTypesForSource,
+        questionTypeCounts,
+        effectiveVerbCount
+      ),
+    [effectiveVocabCount, activeQuestionTypesForSource, questionTypeCounts, effectiveVerbCount]
   );
 
-  const fullMaxQuestions = selectedItemIds.length * questionTypes.length;
+  const fullMaxQuestions = useMemo(
+    () =>
+      calculateTotalHomeworkQuestions(
+        effectiveVocabCount,
+        activeQuestionTypesForSource,
+        {},
+        effectiveVerbCount
+      ),
+    [effectiveVocabCount, activeQuestionTypesForSource, effectiveVerbCount]
+  );
   const hasCustomStageCounts = totalConfiguredQuestions < fullMaxQuestions;
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentSet) return;
+    if (contentSource !== 'verb' && !currentSet) return;
+    if (contentSource !== 'vocab' && resolvedSelectedVerbs.length === 0) {
+      setCreateError('يرجى اختيار فعل واحد أو مجموعة أفعال واحدة على الأقل من مكتبة الأفعال.');
+      return;
+    }
     setCreateError(null);
 
     const isGroupMode = audienceMode === 'group';
@@ -485,19 +715,48 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     const resolvedOwnerUid = activeAuthUid || getCurrentHomeworkOwnerUid() || undefined;
     const resolvedOwnerEmail = firebaseUser?.email || getCurrentHomeworkOwnerEmail() || undefined;
     try {
-      const chosenItems = currentSet.items.filter((it) => selectedItemIds.includes(it.id));
-      const finalItems = chosenItems.length > 0 ? chosenItems : currentSet.items;
+      const chosenVocabItems =
+        contentSource === 'verb'
+          ? []
+          : (currentSet?.items || []).filter((it) => selectedItemIds.includes(it.id));
+      const finalVocabItems =
+        contentSource === 'verb'
+          ? []
+          : chosenVocabItems.length > 0
+          ? chosenVocabItems
+          : currentSet?.items || [];
+
+      const finalVerbs = contentSource === 'vocab' ? [] : resolvedSelectedVerbs;
+      const useCompactVerbItems = finalVerbs.length > 180;
+      const finalVerbItems = finalVerbs.map((v) =>
+        verbEntryToLernstudioItem(v, { compact: useCompactVerbItems })
+      );
+
+      const finalItems =
+        contentSource === 'verb'
+          ? finalVerbItems
+          : contentSource === 'mixed'
+          ? [...finalVocabItems, ...finalVerbItems]
+          : finalVocabItems;
+
       const sanitizedCounts: Partial<Record<HomeworkQuestionType, number>> = {};
-      for (const qt of questionTypes) {
-        const c = resolveStageQuestionCount(qt, finalItems.length, questionTypeCounts);
-        if (c > 0 && c < finalItems.length) {
+      for (const qt of activeQuestionTypesForSource) {
+        const cap =
+          qt === 'verb_conjugation'
+            ? finalVerbs.length * 6
+            : qt === 'verb_sentence'
+            ? finalVerbs.length
+            : finalVocabItems.length;
+        const c = resolveStageQuestionCount(qt, finalVocabItems.length, questionTypeCounts, finalVerbs.length);
+        if (c > 0 && c < cap) {
           sanitizedCounts[qt] = c;
         }
       }
       const totalQ = calculateTotalHomeworkQuestions(
-        finalItems.length,
-        questionTypes,
-        sanitizedCounts
+        finalVocabItems.length,
+        activeQuestionTypesForSource,
+        sanitizedCounts,
+        finalVerbs.length
       );
       const generatedId = createHomeworkAssignmentId();
 
@@ -510,22 +769,54 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
           }))
         : undefined;
 
+      const selectedGroupTitles = selectedVerbGroupIds
+        .map((gid) => allVerbGroups.find((g) => g.id === gid)?.titleAr || '')
+        .filter(Boolean)
+        .slice(0, 2)
+        .join(' + ');
+
+      const defaultTitle =
+        contentSource === 'verb'
+          ? `واجب أفعال: ${selectedGroupTitles || `${finalVerbs.length} فعل`}`
+          : contentSource === 'mixed'
+          ? `واجب مختلط: ${currentSet?.title || ''} + أفعال`
+          : `واجب: ${currentSet?.title || ''}`;
+
+      const immutableVerbSnapshot: VerbEntry[] | undefined =
+        finalVerbs.length > 0 ? JSON.parse(JSON.stringify(finalVerbs)) : undefined;
+
       const payload: HomeworkAssignment = {
         id: generatedId,
         shortId: createHomeworkShortId(7),
         shareToken: createHomeworkShareToken(),
         ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
         ...(resolvedOwnerEmail ? { ownerEmail: resolvedOwnerEmail } : {}),
-        title: title.trim() || `واجب: ${currentSet.title}`,
+        title: title.trim() || defaultTitle,
+        contentSource,
+        ...(selectedVerbGroupIds.length > 0 ? { selectedVerbGroupIds: [...selectedVerbGroupIds] } : {}),
+        ...(finalVerbs.length > 0 ? { selectedVerbIds: finalVerbs.map((v) => v.id) } : {}),
+        ...(immutableVerbSnapshot ? { verbSnapshot: immutableVerbSnapshot } : {}),
+        ...(contentSource !== 'vocab' ? { verbSubjectPoolMode } : {}),
         setSnapshot: {
-          id: currentSet.id,
-          title: currentSet.title,
-          category: (currentSet as any).category || currentSet.topic || '',
+          id:
+            contentSource === 'verb'
+              ? selectedVerbGroupIds[0] || 'verb_library_custom'
+              : currentSet?.id || 'vocab_set',
+          title:
+            contentSource === 'verb'
+              ? selectedGroupTitles || `أفعال (${finalVerbs.length})`
+              : currentSet?.title || 'تدريب',
+          category: contentSource === 'verb' ? 'Verben' : (currentSet as any)?.category || currentSet?.topic || '',
+          ...(contentSource === 'verb'
+            ? { setKind: 'verb_group', verbIds: finalVerbs.map((v) => v.id) }
+            : contentSource === 'mixed'
+            ? { setKind: 'mixed', verbIds: finalVerbs.map((v) => v.id) }
+            : {}),
           items: finalItems
         },
         selectedItemIds: finalItems.map((it) => it.id),
         flowMode,
-        questionTypes,
+        questionTypes: activeQuestionTypesForSource,
         ...(Object.keys(sanitizedCounts).length > 0 ? { questionTypeCounts: sanitizedCounts } : {}),
         blooketMode,
         allowedGameModes: [blooketMode],
@@ -544,9 +835,11 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         createdBy: 'Teacher'
       };
 
-      // Ensure both the vocabulary set and the homework assignment are synced to Firestore in parallel
+      // Ensure both the vocabulary set (when used) and the homework assignment are synced to Firestore in parallel
       const [, confirmRes] = await Promise.all([
-        saveLernstudioSetToFirestore(currentSet).catch(() => false),
+        contentSource !== 'verb' && currentSet
+          ? saveLernstudioSetToFirestore(currentSet).catch(() => false)
+          : Promise.resolve(true),
         saveAssignmentWithConfirmation(payload)
       ]);
       const serverAssignment = await persistHomeworkAssignmentToServer(confirmRes.assignment).catch(() => null);
@@ -862,26 +1155,76 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                   </div>
                 )}
 
-                {/* 1. Vocabulary Set & Audience Mode Selection Row */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {/* Select Vocabulary Set */}
-                  <div className="space-y-1">
+                {/* 0. Unified Content Source Switcher (Vocab | Verbs A1–B1 | Mixed) */}
+                <div className="p-2.5 rounded-xl bg-surface-hover/70 border border-surface-border space-y-2">
+                  <div className="flex items-center justify-between gap-2">
                     <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
-                      <span>📚</span>
-                      <span>مجموعة الكلمات المفتاحية:</span>
+                      <Layers className="w-3.5 h-3.5 text-primary" />
+                      <span>مصدر محتوى الواجب:</span>
                     </label>
-                    <select
-                      value={selectedSetId}
-                      onChange={(e) => setSelectedSetId(e.target.value)}
-                      className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-text-main text-xs font-semibold outline-none focus:ring-1 focus:ring-primary"
-                    >
-                      {sets.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.title} ({s.items?.length || 0} كلمة)
-                        </option>
-                      ))}
-                    </select>
+                    <span className="text-[10px] font-bold text-text-muted">
+                      مكتبة الأفعال الموحدة: {ALL_VERBS.length} فعل (A1–B1)
+                    </span>
                   </div>
+                  <div className="grid grid-cols-3 gap-1.5 bg-surface p-1 rounded-xl border border-surface-border">
+                    {[
+                      { id: 'vocab' as HomeworkContentSource, label: '📚 مجموعات الكلمات' },
+                      { id: 'verb' as HomeworkContentSource, label: '🔤 مكتبة الأفعال A1–B1' },
+                      { id: 'mixed' as HomeworkContentSource, label: '🔀 مختلط (كلمات + أفعال)' }
+                    ].map((src) => (
+                      <button
+                        key={src.id}
+                        type="button"
+                        onClick={() => switchContentSource(src.id)}
+                        className={`py-2 px-2 rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
+                          contentSource === src.id
+                            ? 'bg-primary text-white shadow-xs'
+                            : 'text-text-muted hover:text-text-main hover:bg-surface-hover'
+                        }`}
+                      >
+                        {src.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 1. Vocabulary Set (when vocab/mixed) & Audience Mode Selection Row */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {contentSource !== 'verb' ? (
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                        <span>📚</span>
+                        <span>مجموعة الكلمات المفتاحية:</span>
+                      </label>
+                      <select
+                        value={selectedSetId}
+                        onChange={(e) => setSelectedSetId(e.target.value)}
+                        className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-text-main text-xs font-semibold outline-none focus:ring-1 focus:ring-primary"
+                      >
+                        {vocabSets.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.title} ({s.items?.length || 0} كلمة)
+                            {s.createdByTeacherName ? ` — أ. ${s.createdByTeacherName}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                        <BookOpen className="w-3.5 h-3.5 text-primary" />
+                        <span>ضمائر وأسماء التصريف:</span>
+                      </label>
+                      <select
+                        value={verbSubjectPoolMode}
+                        onChange={(e) => setVerbSubjectPoolMode(e.target.value as any)}
+                        className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-text-main text-xs font-semibold outline-none focus:ring-1 focus:ring-primary"
+                      >
+                        <option value="pronouns_and_names">الضمائر بتوضيح عربي + أسماء ومركّبات (Ahmed / Mona / Ahmed und ich)</option>
+                        <option value="pronouns_only">الضمائر الشخصية فقط بتوضيح عربي (ich / du / er / sie / Sie...)</option>
+                      </select>
+                    </div>
+                  )}
 
                   {/* Select Homework Audience Mode */}
                   <div className="space-y-1">
@@ -926,6 +1269,206 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                     </div>
                   </div>
                 </div>
+
+                {/* Subject pool selector for Mixed mode too */}
+                {contentSource === 'mixed' && (
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                      <BookOpen className="w-3.5 h-3.5 text-primary" />
+                      <span>ضمائر وأسماء أسئلة تصريف الأفعال:</span>
+                    </label>
+                    <select
+                      value={verbSubjectPoolMode}
+                      onChange={(e) => setVerbSubjectPoolMode(e.target.value as any)}
+                      className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-text-main text-xs font-semibold outline-none focus:ring-1 focus:ring-primary"
+                    >
+                      <option value="pronouns_and_names">الضمائر بتوضيح عربي + أسماء ومركّبات (Ahmed / Mona / Ahmed und ich)</option>
+                      <option value="pronouns_only">الضمائر الشخصية فقط بتوضيح عربي (ich / du / er / sie / Sie...)</option>
+                    </select>
+                  </div>
+                )}
+
+                {/* Unified Verb Library Group & Verb Picker (shown for 'verb' & 'mixed') */}
+                {contentSource !== 'vocab' && (
+                  <div className="p-3 rounded-xl bg-surface-hover/70 border border-surface-border space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <BookOpen className="w-4 h-4 text-primary" />
+                        <span className="text-xs font-black text-text-main">
+                          مجموعات الأفعال واختيار الأفعال ({resolvedSelectedVerbs.length} فعل محدد)
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1">
+                        {[
+                          { id: 'cefr' as const, label: 'المستويات (3)' },
+                          { id: 'grammar' as const, label: 'القواعد (6)' },
+                          { id: 'topic' as const, label: 'الموضوعات (14)' },
+                          { id: 'custom' as const, label: `مخصصة (${customVerbGroups.length})` },
+                          { id: 'all' as const, label: 'الكل' }
+                        ].map((tab) => (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => setVerbGroupCategoryFilter(tab.id)}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                              verbGroupCategoryFilter === tab.id
+                                ? 'bg-primary text-white'
+                                : 'bg-surface border border-surface-border text-text-muted hover:text-text-main'
+                            }`}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Built-in & Custom Verb Group Chips */}
+                    <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-2 bg-surface rounded-xl border border-surface-border">
+                      {allVerbGroups
+                        .filter((g) => verbGroupCategoryFilter === 'all' || g.category === verbGroupCategoryFilter)
+                        .map((g) => {
+                          const isSelected = selectedVerbGroupIds.includes(g.id);
+                          return (
+                            <button
+                              key={g.id}
+                              type="button"
+                              onClick={() => toggleVerbGroupSelection(g)}
+                              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
+                                isSelected
+                                  ? 'bg-primary text-white border-primary shadow-2xs'
+                                  : 'bg-surface-hover text-text-main border-surface-border hover:border-primary/40'
+                              }`}
+                            >
+                              <span>{g.titleDe}</span>
+                              <span className="text-[10px] opacity-80">({g.verbIds.length})</span>
+                              {g.createdByTeacherName && (
+                                <span className={`text-[9px] px-1.5 py-0.5 rounded ${isSelected ? 'bg-white/20' : 'bg-primary/10 text-primary'}`}>
+                                  أ. {g.createdByTeacherName}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      {verbGroupCategoryFilter === 'custom' && customVerbGroups.length === 0 && (
+                        <span className="text-[11px] text-text-muted p-1">
+                          لا توجد مجموعات مخصصة بعد — اختر مجموعة أو أفعالاً أدناه واحفظها كمجموعة مشتركة للمعلمين.
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Search & Quick Selection Controls */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="relative flex-1 min-w-[180px]">
+                        <Search className="w-3.5 h-3.5 text-text-muted absolute right-2.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={verbSearchQuery}
+                          onChange={(e) => setVerbSearchQuery(e.target.value)}
+                          placeholder="ابحث عن فعل بالألماني أو العربي (مثال: aufstehen، يعمل، mit)..."
+                          className="w-full pr-8 pl-3 py-1.5 bg-surface border border-surface-border rounded-lg text-xs font-semibold outline-none focus:ring-1 focus:ring-primary"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {(['all', 'A1', 'A2', 'B1'] as const).map((lvl) => (
+                          <button
+                            key={lvl}
+                            type="button"
+                            onClick={() => setVerbLevelFilter(lvl)}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer border ${
+                              verbLevelFilter === lvl
+                                ? 'bg-primary text-white border-primary'
+                                : 'bg-surface border-surface-border text-text-muted'
+                            }`}
+                          >
+                            {lvl === 'all' ? 'كل المستويات' : lvl}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedVerbIds(filteredBrowseVerbs.slice(0, 20).map((v) => v.id))}
+                          className="px-2 py-1 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 text-[10px] font-bold cursor-pointer"
+                        >
+                          أول 20 فعل
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedVerbIds(filteredBrowseVerbs.slice(0, 10).map((v) => v.id))}
+                          className="px-2 py-1 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 text-[10px] font-bold cursor-pointer"
+                        >
+                          أول 10
+                        </button>
+                        {resolvedSelectedVerbs.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedVerbGroupIds([]);
+                              setSelectedVerbIds([]);
+                            }}
+                            className="px-2 py-1 rounded-lg bg-rose-500/10 text-rose-600 text-[10px] font-bold cursor-pointer"
+                          >
+                            مسح ({resolvedSelectedVerbs.length})
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Verb Selection Pills (capped display 80 for fast UI) */}
+                    <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-2 bg-surface rounded-xl border border-surface-border">
+                      {filteredBrowseVerbs.slice(0, 80).map((v) => {
+                        const isChecked = resolvedSelectedVerbs.some((sv) => sv.id === v.id);
+                        return (
+                          <button
+                            key={v.id}
+                            type="button"
+                            onClick={() => toggleSingleVerbId(v.id)}
+                            className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                              isChecked
+                                ? 'bg-primary text-white'
+                                : 'bg-surface-hover text-text-main border border-surface-border hover:border-primary/40'
+                            }`}
+                          >
+                            <span dir="ltr">{v.infinitive}</span>
+                            <span className="text-[10px] opacity-80">({v.arabic})</span>
+                            <span className="text-[9px] opacity-70">{v.level}</span>
+                          </button>
+                        );
+                      })}
+                      {filteredBrowseVerbs.length > 80 && (
+                        <span className="text-[10px] text-text-muted self-center px-2">
+                          +{filteredBrowseVerbs.length - 80} فعل آخر (استخدم البحث أو الفلتر)
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Save selection as shared Custom Teacher Verb Group */}
+                    {resolvedSelectedVerbs.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-surface-border">
+                        <input
+                          type="text"
+                          value={newVerbGroupTitle}
+                          onChange={(e) => setNewVerbGroupTitle(e.target.value)}
+                          placeholder="اسم مجموعة مخصصة لحفظ هذه الأفعال لكل المعلمين..."
+                          className="flex-1 min-w-[180px] px-2.5 py-1.5 bg-surface border border-surface-border rounded-lg text-[11px] font-semibold outline-none focus:ring-1 focus:ring-primary"
+                        />
+                        <button
+                          type="button"
+                          disabled={!newVerbGroupTitle.trim()}
+                          onClick={handleSaveInlineCustomVerbGroup}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-[11px] font-bold cursor-pointer shrink-0"
+                        >
+                          + حفظ كمجموعة مشتركة
+                        </button>
+                        {verbGroupSaveSuccess && (
+                          <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                            ✓ {verbGroupSaveSuccess}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Conditional Group Selection when audienceMode === 'group' */}
                 {audienceMode === 'group' ? (
@@ -988,7 +1531,11 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                       type="text"
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
-                      placeholder={`مثال: واجب ${currentSet?.title || 'الألماني'}`}
+                      placeholder={
+                        contentSource === 'verb'
+                          ? 'مثال: واجب تصريف الأفعال A1'
+                          : `مثال: واجب ${currentSet?.title || 'الألماني'}`
+                      }
                       className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-text-main text-xs font-semibold outline-none focus:ring-1 focus:ring-primary"
                     />
                   </div>
@@ -1011,40 +1558,40 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                   </div>
                 </div>
 
-                {/* 3. Progressive Stages Grid (All 7 Active by Default, Preceded by Stage 1: Lernen) */}
+                {/* 3. Progressive Stages Grid */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-text-main">
-                      مراحل التدريب المتدرجة في رابط الواجب ({questionTypes.length} من {QUESTION_TYPE_META.length}):
+                      مراحل التدريب المتدرجة في رابط الواجب ({activeQuestionTypesForSource.length} من {activeQuestionMetaList.length}):
                     </label>
                     <button
                       type="button"
                       onClick={() => {
-                        if (questionTypes.length === QUESTION_TYPE_META.length) {
-                          setQuestionTypes([QUESTION_TYPE_META[0].id]);
+                        if (activeQuestionTypesForSource.length === activeQuestionMetaList.length) {
+                          setQuestionTypes([activeQuestionMetaList[0].id]);
                         } else {
-                          setQuestionTypes(QUESTION_TYPE_META.map((m) => m.id));
+                          setQuestionTypes(activeQuestionMetaList.map((m) => m.id));
                         }
                       }}
                       className="text-[11px] font-bold text-primary hover:underline cursor-pointer"
                     >
-                      {questionTypes.length === QUESTION_TYPE_META.length ? 'مرحلة واحدة فقط' : 'تحديد كل المراحل'}
+                      {activeQuestionTypesForSource.length === activeQuestionMetaList.length ? 'مرحلة واحدة فقط' : 'تحديد كل المراحل'}
                     </button>
                   </div>
 
                   {/* Quick Per-Stage Question Count Preset Bar */}
-                  {maxStageWords > 1 && (
+                  {(maxStageWords > 1 || effectiveVerbCount > 0) && (
                     <div className="p-2.5 rounded-xl bg-surface-hover border border-surface-border flex flex-wrap items-center justify-between gap-2">
                       <div className="text-[11px] font-bold text-text-main flex items-center gap-1.5">
                         <span>🎯 عدد الأسئلة لكل نوع (اختياري للتقليل):</span>
                       </div>
                       <div className="flex flex-wrap items-center gap-1">
-                        {[1, 2, 3, 5, 8, 10]
-                          .filter((n) => n < maxStageWords)
+                        {[3, 5, 10, 20, 30]
+                          .filter((n) => n < Math.max(maxStageWords, effectiveVerbCount * 6))
                           .map((preset) => {
                             const allActiveMatchPreset =
-                              questionTypes.length > 0 &&
-                              questionTypes.every((qt) => getStageQuestionCount(qt) === preset);
+                              activeQuestionTypesForSource.length > 0 &&
+                              activeQuestionTypesForSource.every((qt) => getStageQuestionCount(qt) === Math.min(getStageMaxCount(qt), preset));
                             return (
                               <button
                                 key={preset}
@@ -1069,17 +1616,18 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                               : 'bg-surface border border-surface-border text-text-muted hover:text-text-main'
                           }`}
                         >
-                          الكل ({maxStageWords})
+                          الكل ({fullMaxQuestions})
                         </button>
                       </div>
                     </div>
                   )}
 
                   <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 gap-2">
-                    {QUESTION_TYPE_META.map((meta, idx) => {
-                      const active = questionTypes.includes(meta.id);
+                    {activeQuestionMetaList.map((meta, idx) => {
+                      const active = activeQuestionTypesForSource.includes(meta.id);
+                      const stageMax = getStageMaxCount(meta.id);
                       const stageCount = getStageQuestionCount(meta.id);
-                      const isReduced = active && stageCount < maxStageWords;
+                      const isReduced = active && stageCount < stageMax;
                       return (
                         <div
                           key={meta.id}
@@ -1117,12 +1665,14 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                           </div>
 
                           {/* Per-Type Question Count Selector inside each active card */}
-                          {active && maxStageWords > 1 && (
+                          {active && stageMax > 1 && (
                             <div
                               onClick={(e) => e.stopPropagation()}
                               className="pt-1.5 mt-0.5 border-t border-primary/20 flex flex-wrap items-center justify-between gap-1 min-w-0 w-full overflow-hidden"
                             >
-                              <span className="text-[10px] font-bold text-text-muted shrink-0">الأسئلة:</span>
+                              <span className="text-[10px] font-bold text-text-muted shrink-0">
+                                الأسئلة (حد أقصى {stageMax}):
+                              </span>
                               <div className="flex items-center gap-1 shrink-0">
                                 <button
                                   type="button"
@@ -1136,29 +1686,48 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                                 >
                                   −
                                 </button>
-                                <select
-                                  value={stageCount}
-                                  onChange={(e) => {
-                                    e.stopPropagation();
-                                    setSingleStageQuestionCount(meta.id, Number(e.target.value));
-                                  }}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className={`px-1 py-0.5 rounded-md text-[10px] font-black outline-none cursor-pointer border max-w-[58px] shrink-0 text-center ${
-                                    isReduced
-                                      ? 'bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-300'
-                                      : 'bg-surface border-surface-border text-primary'
-                                  }`}
-                                  title="اختر عدد الأسئلة لهذا النوع"
-                                >
-                                  {Array.from({ length: maxStageWords }, (_, i) => i + 1).map((num) => (
-                                    <option key={num} value={num}>
-                                      {num === maxStageWords ? `${num} (الكل)` : `${num}`}
-                                    </option>
-                                  ))}
-                                </select>
+                                {stageMax <= 40 ? (
+                                  <select
+                                    value={stageCount}
+                                    onChange={(e) => {
+                                      e.stopPropagation();
+                                      setSingleStageQuestionCount(meta.id, Number(e.target.value));
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className={`px-1 py-0.5 rounded-md text-[10px] font-black outline-none cursor-pointer border max-w-[58px] shrink-0 text-center ${
+                                      isReduced
+                                        ? 'bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-300'
+                                        : 'bg-surface border-surface-border text-primary'
+                                    }`}
+                                    title="اختر عدد الأسئلة لهذا النوع"
+                                  >
+                                    {Array.from({ length: stageMax }, (_, i) => i + 1).map((num) => (
+                                      <option key={num} value={num}>
+                                        {num === stageMax ? `${num} (الكل)` : `${num}`}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={stageMax}
+                                    value={stageCount}
+                                    onChange={(e) => {
+                                      e.stopPropagation();
+                                      setSingleStageQuestionCount(meta.id, Number(e.target.value) || 1);
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className={`w-14 px-1 py-0.5 rounded-md text-[10px] font-black outline-none border text-center ${
+                                      isReduced
+                                        ? 'bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-300'
+                                        : 'bg-surface border-surface-border text-primary'
+                                    }`}
+                                  />
+                                )}
                                 <button
                                   type="button"
-                                  disabled={stageCount >= maxStageWords}
+                                  disabled={stageCount >= stageMax}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setSingleStageQuestionCount(meta.id, stageCount + 1);
@@ -1177,8 +1746,8 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                   </div>
                 </div>
 
-                {/* 5. Words Selector Pills */}
-                {currentSet?.items && currentSet.items.length > 0 && (
+                {/* 5. Words Selector Pills (only when vocab or mixed is active) */}
+                {contentSource !== 'verb' && currentSet?.items && currentSet.items.length > 0 && (
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <label className="text-xs font-bold text-text-main">
@@ -1231,11 +1800,19 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                       </span>{' '}
                       {hasCustomStageCounts ? (
                         <span className="text-[11px] text-amber-600 dark:text-amber-400 font-bold">
-                          (مُخفّضة من {fullMaxQuestions} سؤال عبر {questionTypes.length} مراحل)
+                          (مُخفّضة من {fullMaxQuestions} سؤال عبر {activeQuestionTypesForSource.length} مراحل)
+                        </span>
+                      ) : contentSource === 'verb' ? (
+                        <span>
+                          ({effectiveVerbCount} فعل عبر {activeQuestionTypesForSource.length} مراحل)
+                        </span>
+                      ) : contentSource === 'mixed' ? (
+                        <span>
+                          ({selectedItemIds.length} كلمة + {effectiveVerbCount} فعل عبر {activeQuestionTypesForSource.length} مراحل)
                         </span>
                       ) : (
                         <span>
-                          ({selectedItemIds.length} كلمة × {questionTypes.length} مراحل)
+                          ({selectedItemIds.length} كلمة × {activeQuestionTypesForSource.length} مراحل)
                         </span>
                       )}
                     </div>
@@ -1689,19 +2266,26 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                               }`}
                             >
                               <div className="min-w-0">
-                                <div className="font-bold text-text-main flex items-center gap-1.5">
+                                <div className="font-bold text-text-main flex flex-wrap items-center gap-1.5">
                                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface border border-surface-border text-text-muted tabular-nums">
                                     س{idx + 1}
                                   </span>
-                                  <span dir="ltr">{r.germanWord}</span>
+                                  <span dir="ltr">{r.infinitive || r.germanWord}</span>
+                                  {r.subject && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-bold">
+                                      {r.subject}
+                                    </span>
+                                  )}
                                   {r.timeSpentSeconds ? (
                                     <span className="text-[10px] text-text-muted font-normal">
                                       ({r.timeSpentSeconds} ث)
                                     </span>
                                   ) : null}
                                 </div>
-                                {r.promptText && (
-                                  <span className="text-[10px] text-text-muted block mt-0.5">{r.promptText}</span>
+                                {(r.sentence || r.promptText) && (
+                                  <span className="text-[10px] text-text-muted block mt-0.5" dir="auto">
+                                    {r.sentence || r.promptText}
+                                  </span>
                                 )}
                               </div>
                               <div className="text-left font-bold">

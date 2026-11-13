@@ -19,10 +19,13 @@ import {
   Zap
 } from 'lucide-react';
 
+import { GameSetupConfig } from '../LernstudioGameSetupScreen';
+
 interface Props {
   set: LernstudioSet;
   activeTheme: LernstudioTheme;
   language?: string;
+  gameConfig?: GameSetupConfig;
   onBack: () => void;
 }
 
@@ -39,7 +42,7 @@ import {
   getLocalizedTeamName
 } from '../../../utils/lernstudioTranslations';
 
-export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language = 'ar', onBack }) => {
+export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language = 'ar', gameConfig, onBack }) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const displaySetTitle = getLocalizedSetTitle(set, language);
@@ -51,10 +54,16 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
   ]);
   const [activeTeamIndex, setActiveTeamIndex] = useState(0);
   const [winnerTeam, setWinnerTeam] = useState<RaceTeam | null>(null);
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(gameConfig?.enableSoundFx ?? true);
 
   // Questions
-  const questionsPool = useMemo(() => buildDynamicQuestionPool(set, language), [set, language]);
+  const questionsPool = useMemo(
+    () =>
+      buildDynamicQuestionPool(set, language, {
+        questionModeFilter: gameConfig?.questionType || 'mixed'
+      }),
+    [set, language, gameConfig?.questionType]
+  );
   const [qIndex, setQIndex] = useState(0);
   const [selectedOpt, setSelectedOpt] = useState<string | null>(null);
   const [answeredState, setAnsweredState] = useState<'correct' | 'wrong' | null>(null);
@@ -318,9 +327,13 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
             {/* Question Text */}
             <div className="text-center py-1 sm:py-2 space-y-1 sm:space-y-2">
               {currentQuestion.emoji && <div className="text-2xl sm:text-4xl">{currentQuestion.emoji}</div>}
-              <h2 className="text-base sm:text-2xl font-black text-white">{currentQuestion.prompt}</h2>
+              <h2 className="text-base sm:text-2xl font-black text-white" dir="auto">
+                {currentQuestion.prompt}
+              </h2>
               {currentQuestion.subPrompt && (
-                <p className="text-xs sm:text-sm text-slate-400 font-bold">{currentQuestion.subPrompt}</p>
+                <p className="text-xs sm:text-sm text-amber-300 font-bold" dir="auto">
+                  {currentQuestion.subPrompt}
+                </p>
               )}
             </div>
 

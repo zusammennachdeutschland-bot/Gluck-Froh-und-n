@@ -805,6 +805,9 @@ function stripHeavyMediaFromItems(items: any[]): any[] {
     if (typeof copy.image === 'string' && (copy.image.startsWith('data:') || copy.image.length > 500)) {
       delete copy.image;
     }
+    if (copy.verbEntry && copy.verbId) {
+      delete copy.verbEntry;
+    }
     return copy;
   });
 }
@@ -815,13 +818,16 @@ export function serializeSafeFirestorePayload(record: any, maxUtf8Bytes = 440000
     return initialJson;
   }
 
-  // Stage 1: Strip inline base64 data URLs from vocabulary items so JSON stays valid and compact
+  // Stage 1: Strip inline base64 data URLs and redundant verbEntry/verbEntriesSnapshot duplicates
   const clone: any = { ...record };
-  if (clone.setSnapshot && typeof clone.setSnapshot === 'object' && Array.isArray(clone.setSnapshot.items)) {
-    clone.setSnapshot = {
-      ...clone.setSnapshot,
-      items: stripHeavyMediaFromItems(clone.setSnapshot.items)
-    };
+  delete clone.verbEntriesSnapshot;
+  if (clone.setSnapshot && typeof clone.setSnapshot === 'object') {
+    const snapCopy = { ...clone.setSnapshot };
+    delete snapCopy.verbEntriesSnapshot;
+    if (Array.isArray(snapCopy.items)) {
+      snapCopy.items = stripHeavyMediaFromItems(snapCopy.items);
+    }
+    clone.setSnapshot = snapCopy;
   }
   if (Array.isArray(clone.items)) {
     clone.items = stripHeavyMediaFromItems(clone.items);
@@ -831,7 +837,16 @@ export function serializeSafeFirestorePayload(record: any, maxUtf8Bytes = 440000
     return strippedJson;
   }
 
-  // Stage 2: If still oversized (e.g. huge custom items list or responses), keep only selected items or trim responses
+  // Stage 2: If still oversized (e.g. huge custom items list, large verb group, or responses), compact further
+  if (clone.setKind === 'verb_group' && Array.isArray(clone.verbIds) && clone.verbIds.length > 0 && Array.isArray(clone.items)) {
+    clone.items = clone.items.slice(0, 120).map((it: any) => ({
+      id: it.id,
+      verbId: it.verbId || it.id,
+      german: it.german,
+      arabic: it.arabic,
+      wordType: 'verb'
+    }));
+  }
   if (
     clone.setSnapshot &&
     Array.isArray(clone.setSnapshot.items) &&
