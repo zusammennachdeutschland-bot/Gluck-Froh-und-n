@@ -47,7 +47,7 @@ export function useSyncedHomeworkData(): SyncedHomeworkDataState {
     const uid = getCurrentHomeworkOwnerUid();
     setLoading(true);
     try {
-      await syncAndFetchTeacherAssignments();
+      await syncAndFetchTeacherAssignments(undefined, { force: true });
     } catch {
       // Keep local snapshot if offline
     } finally {

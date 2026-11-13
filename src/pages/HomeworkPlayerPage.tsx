@@ -56,7 +56,8 @@ import {
   HomeworkFlowMode,
   HomeworkSubmission,
   HomeworkShortLinkResolutionStatus,
-  DEFAULT_HOMEWORK_QUESTION_TYPES
+  DEFAULT_HOMEWORK_QUESTION_TYPES,
+  VERB_HOMEWORK_QUESTION_TYPES
 } from '../shared/homeworkTypes';
 import { DEFAULT_LERNSTUDIO_SETS } from '../shared/defaultLernstudioSets';
 import {
@@ -82,13 +83,15 @@ import {
   calculateTotalHomeworkQuestions,
   parseQuestionTypeCountsParam,
   extractShortIdFromPathname,
-  resolveHomeworkShortLink
+  resolveHomeworkShortLink,
+  clearFirestoreReadQuotaFlag
 } from '../shared/homeworkStorageSync';
 import {
   splitGermanIntoSyllables,
   splitGermanArticleAndWord
 } from '../shared/components/LernstudioTeachModal';
 import {
+  ALL_VERBS,
   CORE_SIX_SLOT_PROMPTS,
   SUBJECT_PROMPTS,
   PRONOUN_ONLY_SUBJECT_PROMPTS,
@@ -138,6 +141,7 @@ interface GeneratedQuizQuestion {
   missingIndices?: number[];
   expectedChars?: string[];
   expectedSyllables?: string[];
+  spaceBeforeIndices?: number[];
   tileChoices?: HomeworkTileChoice[];
   // Unified Verb Exercise metadata
   audioPromptText?: string;
@@ -352,6 +356,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
         const hasUrlQtc = Object.keys(urlQtc).length > 0;
         const shareToken = (searchParams.get('token') || '').trim();
         const urlOwnerUid = (searchParams.get('ou') || '').trim();
+        const urlHideBranding =
+          searchParams.get('htb') === '1' || searchParams.get('hideTeacherBranding') === 'true';
 
         const infoParams = new URLSearchParams({ id: routeAssignmentId });
         if (shareToken) infoParams.set('token', shareToken);
@@ -381,6 +387,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             const mergedApi = {
               ...data,
               ...(!data.questionTypeCounts && hasUrlQtc ? { questionTypeCounts: urlQtc } : {}),
+              ...(data.hideTeacherBranding === undefined && urlHideBranding
+                ? { hideTeacherBranding: true }
+                : {}),
               ...(resolvedOwner ? { ownerUid: resolvedOwner } : {})
             };
             const normalized = normalizeHomeworkAssignment(mergedApi);
@@ -477,6 +486,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
           const qtParam = searchParams.get('qt');
           const questionTypesParam = qtParam
             ? (qtParam.split(',') as HomeworkQuestionType[])
+            : csParam === 'verb'
+            ? [...VERB_HOMEWORK_QUESTION_TYPES]
             : [...DEFAULT_HOMEWORK_QUESTION_TYPES];
           const idsParam = searchParams.get('ids');
           const selectedIds = idsParam ? idsParam.split(',') : [];
@@ -579,6 +590,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
               targetQuestionCount: resolvedTotalQ,
               maxAttempts: 3,
               allowReplay: true,
+              ...(urlHideBranding ? { hideTeacherBranding: true } : {}),
               isActive: true,
               status: 'active',
               createdAt: new Date().toISOString(),
@@ -643,13 +655,16 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     return [];
   }, [assignment, assignmentVerbs]);
 
-  // Active question types ordered as stored on the assignment (or all 7 stages by default)
+  // Active question types ordered as stored on the assignment (or all stages by default)
   const activeQuestionTypes = useMemo<HomeworkQuestionType[]>(() => {
     if (Array.isArray(assignment?.questionTypes) && assignment.questionTypes.length > 0) {
       return assignment.questionTypes;
     }
+    if (assignment?.contentSource === 'verb') {
+      return [...VERB_HOMEWORK_QUESTION_TYPES];
+    }
     return [...DEFAULT_HOMEWORK_QUESTION_TYPES];
-  }, [assignment?.questionTypes]);
+  }, [assignment?.questionTypes, assignment?.contentSource]);
 
   // Build progressive multi-stage question list based on teacher's chosen questionTypes
   const quizQuestions = useMemo<GeneratedQuizQuestion[]>(() => {
@@ -657,14 +672,12 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     const allSetItems: any[] = assignment?.setSnapshot?.items || studyItems;
     const contentSource = assignment?.contentSource;
     const pureVocabStudyItems =
-      contentSource === 'mixed' || contentSource === 'verb'
+      contentSource === 'mixed'
         ? studyItems.filter((it) => !isItemVerb(it))
         : studyItems;
     const vocabPoolForStages =
       pureVocabStudyItems.length > 0
         ? pureVocabStudyItems
-        : contentSource === 'verb'
-        ? []
         : studyItems;
     const vocabPoolForDistractors =
       contentSource === 'mixed'
@@ -810,16 +823,33 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
 
       stageItems.forEach((item, itemIdx) => {
         const qId = `${item.id}_${qType}_${itemIdx}`;
-        const otherItems = (vocabPoolForDistractors.length > 1 ? vocabPoolForDistractors : allSetItems).filter(
-          (x) => x.id !== item.id
+        const isVerbStageItem = isItemVerb(item) || contentSource === 'verb';
+        const rawOtherItems = (vocabPoolForDistractors.length > 1 ? vocabPoolForDistractors : allSetItems).filter(
+          (x) => x.id !== item.id && x.german !== item.german
         );
         const seed = stageIdx * 97 + itemIdx * 31 + (item.german?.length || 5);
+        const otherItems =
+          isVerbStageItem && rawOtherItems.length < 4
+            ? [
+                ...rawOtherItems,
+                ...ALL_VERBS.slice(0, 60)
+                  .filter(
+                    (v) =>
+                      v.infinitive !== item.german &&
+                      !rawOtherItems.some((o) => o.german === v.infinitive)
+                  )
+                  .slice(0, 6)
+                  .map((v) => ({ id: v.id, german: v.infinitive, arabic: v.arabic }))
+              ]
+            : rawOtherItems;
 
         // 1. Stage: true_false (صح أم خطأ — Richtig / Falsch)
         if (qType === 'true_false') {
           const isTrue = (itemIdx + stageIdx) % 2 === 0 || otherItems.length === 0;
           const wrongItem = otherItems[(itemIdx + 1) % Math.max(1, otherItems.length)];
-          const shownArabic = isTrue ? item.arabic : wrongItem?.arabic || 'المدرسة';
+          const shownArabic = isTrue
+            ? item.arabic
+            : wrongItem?.arabic || (isVerbStageItem ? 'يذهب' : 'المدرسة');
           const correctLabel = isTrue ? 'صح ✅ (Richtig)' : 'خطأ ❌ (Falsch)';
 
           list.push({
@@ -832,7 +862,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             germanWord: item.german,
             arabicMeaning: item.arabic,
             emoji: item.emoji,
-            promptTitleAr: 'هل معنى هذه الكلمة الألمانية صحيح أم خطأ؟',
+            promptTitleAr: isVerbStageItem
+              ? 'هل معنى هذا الفعل الألماني صحيح أم خطأ؟'
+              : 'هل معنى هذه الكلمة الألمانية صحيح أم خطأ؟',
             promptMainText: item.german,
             promptSubText: `المعنى المعروض: « ${shownArabic} »`,
             options: ['صح ✅ (Richtig)', 'خطأ ❌ (Falsch)'],
@@ -845,12 +877,17 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
         if (qType === 'choice_2') {
           const correctOpt = item.german;
           const distractorItem = otherItems[(itemIdx + stageIdx) % Math.max(1, otherItems.length)];
+          const fallbackDistractor = isVerbStageItem
+            ? correctOpt === 'machen'
+              ? 'gehen'
+              : 'machen'
+            : correctOpt === 'das Buch'
+            ? 'die Schule'
+            : 'das Buch';
           const distractorOpt =
             distractorItem && distractorItem.german !== correctOpt
               ? distractorItem.german
-              : correctOpt === 'das Buch'
-              ? 'die Schule'
-              : 'das Buch';
+              : fallbackDistractor;
           const options = deterministicShuffle([correctOpt, distractorOpt], seed);
 
           list.push({
@@ -863,7 +900,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             germanWord: item.german,
             arabicMeaning: item.arabic,
             emoji: item.emoji,
-            promptTitleAr: 'اختر الكلمة الألمانية الصحيحة من الاختيارين:',
+            promptTitleAr: isVerbStageItem
+              ? 'اختر الفعل الألماني الصحيح من الاختيارين:'
+              : 'اختر الكلمة الألمانية الصحيحة من الاختيارين:',
             promptMainText: item.arabic,
             hideGermanText: true,
             options,
@@ -884,7 +923,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
           if (!uniqueGermanWords.includes(correctOpt)) {
             uniqueGermanWords.unshift(correctOpt);
           }
-          const fallbacks = ['das Buch', 'der Apfel', 'die Schule', 'das Haus'];
+          const fallbacks = isVerbStageItem
+            ? ['machen', 'gehen', 'kommen', 'lernen']
+            : ['das Buch', 'der Apfel', 'die Schule', 'das Haus'];
           for (const fb of fallbacks) {
             if (uniqueGermanWords.length < 3 && !uniqueGermanWords.includes(fb)) {
               uniqueGermanWords.push(fb);
@@ -902,7 +943,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             germanWord: item.german,
             arabicMeaning: item.arabic,
             emoji: item.emoji,
-            promptTitleAr: 'اختر الكلمة الألمانية الصحيحة من بين جميع كلمات الدرس:',
+            promptTitleAr: isVerbStageItem
+              ? 'اختر الفعل الألماني الصحيح من بين جميع أفعال الدرس:'
+              : 'اختر الكلمة الألمانية الصحيحة من بين جميع كلمات الدرس:',
             promptMainText: item.arabic,
             hideGermanText: true,
             options,
@@ -917,6 +960,13 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
           const expectedSyllables =
             item.syllables && Array.isArray(item.syllables) && item.syllables.length >= 2
               ? item.syllables
+              : /\s+/.test(wordOnly.trim())
+              ? wordOnly
+                  .trim()
+                  .split(/\s+/)
+                  .flatMap((token) =>
+                    token.length <= 4 ? [token] : splitGermanIntoSyllables(token)
+                  )
               : splitGermanIntoSyllables(wordOnly);
 
           const tileChoices: HomeworkTileChoice[] = deterministicShuffle(
@@ -980,7 +1030,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             germanWord: item.german,
             arabicMeaning: item.arabic,
             emoji: item.emoji,
-            promptTitleAr: 'اختر الحرف الناقص لإكمال الكلمة الألمانية:',
+            promptTitleAr: isVerbStageItem
+              ? 'اختر الحرف الناقص لإكمال الفعل الألماني:'
+              : 'اختر الحرف الناقص لإكمال الكلمة الألمانية:',
             promptMainText: item.arabic,
             hideGermanText: true,
             options,
@@ -1001,11 +1053,27 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
           const len = chars.length;
           const seqLen = len >= 6 ? 3 : len <= 2 ? Math.max(1, len) : 2;
           const maxStart = Math.max(0, len - seqLen);
-          const startIdx = maxStart > 0 ? (itemIdx + stageIdx) % (maxStart + 1) : 0;
+          const validStarts: number[] = [];
+          for (let s = 0; s <= maxStart; s++) {
+            let hasSpace = false;
+            for (let k = 0; k < seqLen; k++) {
+              if (!chars[s + k] || /\s/.test(chars[s + k])) {
+                hasSpace = true;
+                break;
+              }
+            }
+            if (!hasSpace) validStarts.push(s);
+          }
+          const startIdx =
+            validStarts.length > 0
+              ? validStarts[(itemIdx + stageIdx) % validStarts.length]
+              : maxStart > 0
+              ? (itemIdx + stageIdx) % (maxStart + 1)
+              : 0;
 
           const missingIndices: number[] = [];
           for (let i = 0; i < seqLen; i++) {
-            if (startIdx + i < len) {
+            if (startIdx + i < len && !/\s/.test(chars[startIdx + i])) {
               missingIndices.push(startIdx + i);
             }
           }
@@ -1053,7 +1121,21 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
         // 7. Stage: full_word (الكلمة كلها — Wort vervollständigen)
         if (qType === 'full_word') {
           const { article, wordOnly } = splitGermanArticleAndWord(item.german);
-          const chars = wordOnly.split('');
+          const rawChars = wordOnly.split('');
+          const chars: string[] = [];
+          const spaceBeforeIndices: number[] = [];
+          let pendingSpace = false;
+          for (const ch of rawChars) {
+            if (/\s/.test(ch)) {
+              if (chars.length > 0) pendingSpace = true;
+            } else {
+              if (pendingSpace) {
+                spaceBeforeIndices.push(chars.length);
+                pendingSpace = false;
+              }
+              chars.push(ch);
+            }
+          }
           const tileChoices: HomeworkTileChoice[] = deterministicShuffle(
             chars.map((ch, idx) => ({
               id: `fw_${qId}_${idx}`,
@@ -1072,7 +1154,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             germanWord: item.german,
             arabicMeaning: item.arabic,
             emoji: item.emoji,
-            promptTitleAr: 'رتب حروف الكلمة الألمانية من البداية للنهاية:',
+            promptTitleAr: isVerbStageItem
+              ? 'رتب حروف الفعل الألماني من البداية للنهاية:'
+              : 'رتب حروف الكلمة الألمانية من البداية للنهاية:',
             promptMainText: item.arabic,
             hideGermanText: true,
             options: chars,
@@ -1081,6 +1165,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             wordOnly,
             chars,
             expectedChars: chars,
+            spaceBeforeIndices,
             tileChoices
           });
           return;
@@ -2098,12 +2183,13 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     }
   };
 
+  const hideTeacherBranding = Boolean(assignment?.hideTeacherBranding);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background text-text-main flex items-center justify-center p-4 font-sans" dir="rtl">
-        <div className="text-center space-y-4">
-          <TeacherCrestLogo size="md" className="mx-auto" />
-          <div className="w-7 h-7 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+        <div className="text-center space-y-3">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
           <p className="text-xs font-bold text-text-muted">جاري تحضير الواجب...</p>
         </div>
       </div>
@@ -2114,22 +2200,24 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     return (
       <div className="min-h-screen bg-background text-text-main flex items-center justify-center p-4 font-sans" dir="rtl">
         <div className="max-w-md w-full bg-surface border border-surface-border rounded-2xl overflow-hidden text-center shadow-xs">
-          <div className="bg-[radial-gradient(circle_at_50%_40%,#242E44_0%,#141A29_68%,#0C101B_100%)] px-6 py-4 flex items-center justify-center gap-3 relative">
-            <TeacherCrestLogo size="sm" />
-            <div className="text-left" dir="ltr">
-              <p className="font-cert-serif text-sm font-bold text-[#F5E1A4] tracking-wide">
-                Herr Abdul-rahman
-              </p>
-              <p className="text-[11px] text-[#CBD5E1]">Deutschunterricht</p>
+          {assignment && !hideTeacherBranding && (
+            <div className="bg-[radial-gradient(circle_at_50%_40%,#242E44_0%,#141A29_68%,#0C101B_100%)] px-6 py-4 flex items-center justify-center gap-3 relative">
+              <TeacherCrestLogo size="sm" />
+              <div className="text-left" dir="ltr">
+                <p className="font-cert-serif text-sm font-bold text-[#F5E1A4] tracking-wide">
+                  Herr Abdul-rahman
+                </p>
+                <p className="text-[11px] text-[#CBD5E1]">Deutschunterricht</p>
+              </div>
             </div>
-          </div>
+          )}
           <div className="grid grid-cols-3 h-[3px] w-full" aria-hidden="true">
             <span className="bg-[#18181B]" />
             <span className="bg-[#DC2626]" />
             <span className="bg-[#EAB308]" />
           </div>
           <div className="p-6 space-y-4">
-            {resolutionStatus === 'network_error' ? (
+            {resolutionStatus === 'network_error' || resolutionStatus === 'quota_exceeded' ? (
               <CloudOff className="w-10 h-10 text-amber-500 mx-auto" />
             ) : (
               <XCircle className="w-10 h-10 text-rose-500 mx-auto" />
@@ -2139,16 +2227,23 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                 ? 'تم إيقاف أو حذف هذا الواجب'
                 : resolutionStatus === 'invalid_id'
                 ? 'رابط الواجب غير صالح'
+                : resolutionStatus === 'quota_exceeded'
+                ? 'ضغط مؤقت على السحابة'
                 : resolutionStatus === 'network_error'
                 ? 'تعذر الاتصال بالسحابة'
                 : 'تنبيه بخصوص الواجب'}
             </h2>
             <p className="text-xs text-text-muted">{error}</p>
             <div className="flex flex-wrap items-center justify-center gap-2">
-              {(resolutionStatus === 'network_error' || resolutionStatus === 'not_found') && (
+              {(resolutionStatus === 'network_error' ||
+                resolutionStatus === 'quota_exceeded' ||
+                resolutionStatus === 'not_found') && (
                 <button
                   type="button"
-                  onClick={() => setReloadNonce((n) => n + 1)}
+                  onClick={() => {
+                    clearFirestoreReadQuotaFlag();
+                    setReloadNonce((n) => n + 1);
+                  }}
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-hover text-white font-bold text-xs transition-colors shadow-2xs cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
@@ -2185,41 +2280,51 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       <div className="min-h-screen bg-background text-text-main flex flex-col justify-between p-4 sm:p-6 font-sans" dir="rtl">
         {/* Main Editorial Welcome Card */}
         <div className="max-w-lg w-full bg-surface border border-surface-border rounded-2xl shadow-sm overflow-hidden mx-auto my-auto">
-          {/* Dark Obsidian Academy Masthead */}
-          <div className="relative bg-[radial-gradient(circle_at_50%_20%,#25324A_0%,#131A29_64%,#0A0E17_100%)] px-6 pt-6 pb-20 text-center overflow-hidden">
-            {/* Subtle Concentric Geometric Seal Hairlines */}
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute left-1/2 bottom-0 -translate-x-1/2 translate-y-1/2 w-64 h-64 rounded-full border border-white/[0.06]"
-            />
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute left-1/2 bottom-0 -translate-x-1/2 translate-y-1/2 w-80 h-80 rounded-full border border-[#D4AF37]/[0.10]"
-            />
+          {!hideTeacherBranding ? (
+            <>
+              {/* Dark Obsidian Academy Masthead */}
+              <div className="relative bg-[radial-gradient(circle_at_50%_20%,#25324A_0%,#131A29_64%,#0A0E17_100%)] px-6 pt-6 pb-20 text-center overflow-hidden">
+                {/* Subtle Concentric Geometric Seal Hairlines */}
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-1/2 bottom-0 -translate-x-1/2 translate-y-1/2 w-64 h-64 rounded-full border border-white/[0.06]"
+                />
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-1/2 bottom-0 -translate-x-1/2 translate-y-1/2 w-80 h-80 rounded-full border border-[#D4AF37]/[0.10]"
+                />
 
-            <div className="relative z-10 flex items-center justify-center gap-3 max-w-xs mx-auto" dir="ltr">
-              <span aria-hidden="true" className="h-px flex-1 bg-gradient-to-r from-transparent to-[#D4AF37]/50" />
-              <span className="font-cert-serif text-xs sm:text-sm font-semibold tracking-wider text-[#F5E1A4] whitespace-nowrap">
-                Deutsch mit Herr Abdul-rahman
-              </span>
-              <span aria-hidden="true" className="h-px flex-1 bg-gradient-to-l from-transparent to-[#D4AF37]/50" />
+                <div className="relative z-10 flex items-center justify-center gap-3 max-w-xs mx-auto" dir="ltr">
+                  <span aria-hidden="true" className="h-px flex-1 bg-gradient-to-r from-transparent to-[#D4AF37]/50" />
+                  <span className="font-cert-serif text-xs sm:text-sm font-semibold tracking-wider text-[#F5E1A4] whitespace-nowrap">
+                    Deutsch mit Herr Abdul-rahman
+                  </span>
+                  <span aria-hidden="true" className="h-px flex-1 bg-gradient-to-l from-transparent to-[#D4AF37]/50" />
+                </div>
+              </div>
+
+              {/* Crisp 3px German Tricolor Architectural Seam */}
+              <div className="grid grid-cols-3 h-[3px] w-full" aria-hidden="true">
+                <span className="bg-[#18181B]" />
+                <span className="bg-[#DC2626]" />
+                <span className="bg-[#EAB308]" />
+              </div>
+
+              {/* Overlapping Signature Crest Medallion Straddling the Seam */}
+              <div className="-mt-16 sm:-mt-[72px] relative z-20 flex justify-center px-4">
+                <TeacherCrestLogo size="lg" className="ring-[5px] ring-surface" />
+              </div>
+            </>
+          ) : (
+            <div className="grid grid-cols-3 h-[3px] w-full" aria-hidden="true">
+              <span className="bg-[#18181B]" />
+              <span className="bg-[#DC2626]" />
+              <span className="bg-[#EAB308]" />
             </div>
-          </div>
-
-          {/* Crisp 3px German Tricolor Architectural Seam */}
-          <div className="grid grid-cols-3 h-[3px] w-full" aria-hidden="true">
-            <span className="bg-[#18181B]" />
-            <span className="bg-[#DC2626]" />
-            <span className="bg-[#EAB308]" />
-          </div>
-
-          {/* Overlapping Signature Crest Medallion Straddling the Seam */}
-          <div className="-mt-16 sm:-mt-[72px] relative z-20 flex justify-center px-4">
-            <TeacherCrestLogo size="lg" className="ring-[5px] ring-surface" />
-          </div>
+          )}
 
           {/* Assignment Body */}
-          <div className="px-5 pt-4 pb-6 sm:px-7 sm:pb-7 space-y-5">
+          <div className={`px-5 ${hideTeacherBranding ? 'pt-6' : 'pt-4'} pb-6 sm:px-7 sm:pb-7 space-y-5`}>
             {/* Assignment Title & Unboxed Inline Metadata */}
             <div className="text-center space-y-1.5">
               <h1 className="text-xl sm:text-2xl font-bold text-text-main text-balance">
@@ -2383,9 +2488,11 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
         </div>
 
         {/* Teacher Signature Footer at the VERY BOTTOM of the page */}
-        <footer className="text-center text-[11px] text-text-muted font-medium py-3 select-none" dir="ltr">
-          von Herr Abdul-rahman · Glück Deutsch
-        </footer>
+        {!hideTeacherBranding && (
+          <footer className="text-center text-[11px] text-text-muted font-medium py-3 select-none" dir="ltr">
+            von Herr Abdul-rahman · Glück Deutsch
+          </footer>
+        )}
       </div>
     );
   }
@@ -2527,14 +2634,16 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
         {/* Slim Brand & Assignment Strip */}
         <div className="max-w-3xl w-full mx-auto flex items-center justify-between gap-2 mb-2.5 px-1">
           <div className="flex items-center gap-2.5 min-w-0">
-            <TeacherCrestLogo size="sm" />
+            {!hideTeacherBranding && <TeacherCrestLogo size="sm" />}
             <div className="min-w-0">
               <p className="text-xs sm:text-sm font-bold text-text-main truncate">
                 {assignment?.title || 'واجب Glück التفاعلي'}
               </p>
-              <p className="text-[11px] text-text-muted truncate" dir="ltr">
-                Herr Abdul-rahman · Lernen
-              </p>
+              {!hideTeacherBranding && (
+                <p className="text-[11px] text-text-muted truncate" dir="ltr">
+                  Herr Abdul-rahman · Lernen
+                </p>
+              )}
             </div>
           </div>
           {studentName && (
@@ -2786,20 +2895,31 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                 aria-hidden="true"
                 className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-56 h-56 rounded-full border border-white/[0.06]"
               />
-              <div className="relative z-10 inline-flex flex-col items-center gap-2.5">
-                <div className="relative">
-                  <TeacherCrestLogo size="md" />
+              {!hideTeacherBranding ? (
+                <div className="relative z-10 inline-flex flex-col items-center gap-2.5">
+                  <div className="relative">
+                    <TeacherCrestLogo size="md" />
+                    <span
+                      aria-hidden="true"
+                      className="w-8 h-8 rounded-full bg-[#121927] text-[#F3D078] border border-[#D4AF37]/70 shadow-md flex items-center justify-center absolute -bottom-1 -left-1"
+                    >
+                      <Trophy className="w-4 h-4" />
+                    </span>
+                  </div>
+                  <p className="font-cert-serif text-xs font-semibold tracking-wider text-[#F5E1A4]" dir="ltr">
+                    Herr Abdul-rahman · Zertifikat
+                  </p>
+                </div>
+              ) : (
+                <div className="relative z-10 inline-flex flex-col items-center">
                   <span
                     aria-hidden="true"
-                    className="w-8 h-8 rounded-full bg-[#121927] text-[#F3D078] border border-[#D4AF37]/70 shadow-md flex items-center justify-center absolute -bottom-1 -left-1"
+                    className="w-12 h-12 rounded-full bg-[#121927] text-[#F3D078] border border-[#D4AF37]/70 shadow-md flex items-center justify-center"
                   >
-                    <Trophy className="w-4 h-4" />
+                    <Trophy className="w-6 h-6" />
                   </span>
                 </div>
-                <p className="font-cert-serif text-xs font-semibold tracking-wider text-[#F5E1A4]" dir="ltr">
-                  Herr Abdul-rahman · Zertifikat
-                </p>
-              </div>
+              )}
             </div>
 
             <div className="grid grid-cols-3 h-[3px] w-full" aria-hidden="true">
@@ -2994,9 +3114,11 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                 </button>
               </div>
             )}
-            <p className="text-[11px] text-text-muted pt-1 select-none" dir="ltr">
-              Herr Abdul-rahman · Glück Deutschunterricht
-            </p>
+            {!hideTeacherBranding && (
+              <p className="text-[11px] text-text-muted pt-1 select-none" dir="ltr">
+                Herr Abdul-rahman · Glück Deutschunterricht
+              </p>
+            )}
             </div>
           </motion.div>
         </div>
@@ -3042,14 +3164,16 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       {/* Slim Brand & Assignment Strip */}
       <div className="max-w-3xl w-full mx-auto flex items-center justify-between gap-2 mb-2.5 px-1">
         <div className="flex items-center gap-2.5 min-w-0">
-          <TeacherCrestLogo size="sm" />
+          {!hideTeacherBranding && <TeacherCrestLogo size="sm" />}
           <div className="min-w-0">
             <p className="text-xs sm:text-sm font-bold text-text-main truncate">
               {assignment?.title || 'واجب Glück التفاعلي'}
             </p>
-            <p className="text-[11px] text-text-muted truncate" dir="ltr">
-              Herr Abdul-rahman · Glück
-            </p>
+            {!hideTeacherBranding && (
+              <p className="text-[11px] text-text-muted truncate" dir="ltr">
+                Herr Abdul-rahman · Glück
+              </p>
+            )}
           </div>
         </div>
         {studentName && (
@@ -3264,10 +3388,15 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                 {currentQuestion.chars.map((_, slotIdx) => {
                   const filledChar = filledSlots[slotIdx];
                   const isCurrentTarget = multiStepIdx === slotIdx && selectedChoice === null;
+                  const hasSpaceBefore = Boolean(
+                    currentQuestion.spaceBeforeIndices?.includes(slotIdx)
+                  );
                   return (
                     <span
                       key={slotIdx}
                       className={`inline-flex items-center justify-center w-9 h-11 sm:w-11 sm:h-13 rounded-xl border-2 font-black transition-all ${
+                        hasSpaceBefore ? 'ml-2.5' : ''
+                      } ${
                         filledChar
                           ? 'bg-emerald-500 text-white border-emerald-500 shadow-xs'
                           : isCurrentTarget

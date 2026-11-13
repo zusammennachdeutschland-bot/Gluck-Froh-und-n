@@ -27,6 +27,10 @@ import {
   getActiveCloudUser,
   isFirestoreWriteQuotaExhaustedToday,
   clearFirestoreWriteQuotaFlag,
+  isFirestoreReadQuotaExhausted,
+  markFirestoreReadQuotaExhausted,
+  clearFirestoreReadQuotaFlag,
+  isQuotaErrorLike,
   executeSafeFirestoreWrite,
   isAndroidNativePlatform,
   getLastAndroidAuthDiagnostic,
@@ -60,6 +64,9 @@ export {
   getActiveCloudUser,
   isFirestoreWriteQuotaExhaustedToday,
   clearFirestoreWriteQuotaFlag,
+  isFirestoreReadQuotaExhausted,
+  clearFirestoreReadQuotaFlag,
+  isQuotaErrorLike,
   DEFAULT_LERNSTUDIO_SETS,
   isAndroidNativePlatform,
   getLastAndroidAuthDiagnostic,
@@ -259,8 +266,12 @@ export async function getCloudSyncControlState(workspaceId: string): Promise<{
   isPaused: boolean;
   syncGeneration: string;
   isError?: boolean;
+  isQuotaExceeded?: boolean;
   rawDoc?: any;
 }> {
+  if (isFirestoreReadQuotaExhausted()) {
+    return { isPaused: true, syncGeneration: '', isError: true, isQuotaExceeded: true };
+  }
   try {
     const docRef = doc(db, 'user_workspaces', workspaceId, 'categories', SYNC_CONTROL_DOC_ID);
     const snap = await getDoc(docRef);
@@ -282,8 +293,12 @@ export async function getCloudSyncControlState(workspaceId: string): Promise<{
       rawDoc: d
     };
   } catch (err) {
+    const isQuota = isQuotaErrorLike(err);
+    if (isQuota) {
+      markFirestoreReadQuotaExhausted();
+    }
     console.warn('Fail-safe: Failed to read cloud sync control state:', err);
-    return { isPaused: true, syncGeneration: '', isError: true };
+    return { isPaused: true, syncGeneration: '', isError: true, isQuotaExceeded: isQuota };
   }
 }
 
@@ -353,30 +368,43 @@ export async function executeGenerationGuardedWrite(
   const targetDocRef = doc(db, 'user_workspaces', workspaceId, 'categories', chunkDocId);
 
   await executeSafeFirestoreWrite(async () => {
-    await runTransaction(db, async (transaction) => {
-      const controlSnap = await transaction.get(controlDocRef);
-      if (controlSnap.exists()) {
-        const d = controlSnap.data();
-        let parsed: any = {};
-        if (d && typeof d.payloadChunk === 'string') {
-          try {
-            parsed = JSON.parse(d.payloadChunk);
-          } catch {
-            parsed = {};
+    if (isFirestoreReadQuotaExhausted()) {
+      await setDoc(targetDocRef, chunkObj);
+      return;
+    }
+    try {
+      await runTransaction(db, async (transaction) => {
+        const controlSnap = await transaction.get(controlDocRef);
+        if (controlSnap.exists()) {
+          const d = controlSnap.data();
+          let parsed: any = {};
+          if (d && typeof d.payloadChunk === 'string') {
+            try {
+              parsed = JSON.parse(d.payloadChunk);
+            } catch {
+              parsed = {};
+            }
+          }
+          if (parsed.isPaused) {
+            throw new Error('SYNC_ABORTED_PAUSED: Cloud synchronization is paused for this workspace.');
+          }
+          const activeCloudGen = parsed.syncGeneration || 'gen_initial';
+          if (expectedGeneration && activeCloudGen !== expectedGeneration) {
+            throw new Error(
+              `SYNC_ABORTED_GENERATION_MISMATCH: Cloud generation changed from ${expectedGeneration} to ${activeCloudGen}`
+            );
           }
         }
-        if (parsed.isPaused) {
-          throw new Error('SYNC_ABORTED_PAUSED: Cloud synchronization is paused for this workspace.');
-        }
-        const activeCloudGen = parsed.syncGeneration || 'gen_initial';
-        if (expectedGeneration && activeCloudGen !== expectedGeneration) {
-          throw new Error(
-            `SYNC_ABORTED_GENERATION_MISMATCH: Cloud generation changed from ${expectedGeneration} to ${activeCloudGen}`
-          );
-        }
+        transaction.set(targetDocRef, chunkObj);
+      });
+    } catch (txErr: any) {
+      if (isQuotaErrorLike(txErr) && !isFirestoreWriteQuotaExhaustedToday()) {
+        markFirestoreReadQuotaExhausted();
+        await setDoc(targetDocRef, chunkObj);
+        return;
       }
-      transaction.set(targetDocRef, chunkObj);
-    });
+      throw txErr;
+    }
   });
 }
 
@@ -530,25 +558,58 @@ export function mergeWithBuiltinLernstudioSets(customSets: any[]): any[] {
  * Lernstudio custom sets are intentionally global across teacher accounts.
  * Only this collection is shared; teacher CRM, homework and finance remain in UID workspaces.
  */
-async function readSharedLernstudioSets(): Promise<any[]> {
-  const snap = await getDocs(collection(db, 'lernstudio_sets'));
-  const byId = new Map<string, any>();
-  snap.forEach((docSnap: any) => {
-    const data = docSnap.data();
-    if (!data || typeof data.payloadJson !== 'string') return;
-    try {
-      const parsed = JSON.parse(data.payloadJson);
-      if (!parsed || typeof parsed !== 'object' || !parsed.id) return;
-      if (data.deleted === true || parsed.deleted === true) {
-        byId.set(String(parsed.id), { ...parsed, deleted: true });
-        return;
+const SHARED_SETS_CACHE_TTL_MS = 5 * 60 * 1000;
+let cachedSharedLernstudioSets: any[] | null = null;
+let cachedSharedLernstudioSetsAtMs = 0;
+let inFlightSharedSetsPromise: Promise<any[]> | null = null;
+
+function invalidateSharedLernstudioSetsCache(): void {
+  cachedSharedLernstudioSets = null;
+  cachedSharedLernstudioSetsAtMs = 0;
+}
+
+async function readSharedLernstudioSets(options?: { forceRefresh?: boolean }): Promise<any[]> {
+  if (
+    !options?.forceRefresh &&
+    cachedSharedLernstudioSets !== null &&
+    Date.now() - cachedSharedLernstudioSetsAtMs < SHARED_SETS_CACHE_TTL_MS
+  ) {
+    return cachedSharedLernstudioSets;
+  }
+  if (isFirestoreReadQuotaExhausted()) {
+    return cachedSharedLernstudioSets || [];
+  }
+  if (inFlightSharedSetsPromise) {
+    return inFlightSharedSetsPromise;
+  }
+
+  inFlightSharedSetsPromise = (async () => {
+    const snap = await getDocs(collection(db, 'lernstudio_sets'));
+    const byId = new Map<string, any>();
+    snap.forEach((docSnap: any) => {
+      const data = docSnap.data();
+      if (!data || typeof data.payloadJson !== 'string') return;
+      try {
+        const parsed = JSON.parse(data.payloadJson);
+        if (!parsed || typeof parsed !== 'object' || !parsed.id) return;
+        if (data.deleted === true || parsed.deleted === true) {
+          byId.set(String(parsed.id), { ...parsed, deleted: true });
+          return;
+        }
+        byId.set(String(parsed.id), parsed);
+      } catch {
+        // Ignore malformed shared set documents without affecting the teacher workspace.
       }
-      byId.set(String(parsed.id), parsed);
-    } catch {
-      // Ignore malformed shared set documents without affecting the teacher workspace.
-    }
+    });
+    const list = Array.from(byId.values());
+    cachedSharedLernstudioSets = list;
+    cachedSharedLernstudioSetsAtMs = Date.now();
+    return list;
+  })().finally(() => {
+    inFlightSharedSetsPromise = null;
   });
-  return Array.from(byId.values());
+
+  return inFlightSharedSetsPromise;
 }
 
 function mergeSharedLernstudioSets(localSets: any[], sharedSets: any[]): any[] {
@@ -638,6 +699,7 @@ async function writeSharedLernstudioSetChanges(changedSets: any[]): Promise<void
       transaction.set(target, docData);
     }));
   }
+  invalidateSharedLernstudioSetsCache();
 }
 
 function sanitizeHeavyInlineMedia(data: any): any {
@@ -1374,6 +1436,31 @@ function partitionBackupPayload(fullData: any, ownerUid?: string): Record<Exclud
 const lastUploadedChunkCache = new Map<string, string>();
 const lastUploadedChunkCount = new Map<string, number>();
 
+function getRelayEndpointUrls(pathAndQuery: string): string[] {
+  const vercelBase = (getVercelPublicDomain() || DEFAULT_VERCEL_DOMAIN).replace(/\/+$/, '');
+  const remoteUrl = `${vercelBase}${pathAndQuery}`;
+  if (typeof window === 'undefined') {
+    return [remoteUrl];
+  }
+  const host = (window.location?.hostname || '').toLowerCase();
+  const proto = (window.location?.protocol || '').toLowerCase();
+  const isNativeOrLocal =
+    isAndroidNativePlatform() ||
+    proto === 'capacitor:' ||
+    proto === 'file:' ||
+    host === 'localhost' ||
+    host === '127.0.0.1';
+
+  if (isNativeOrLocal) {
+    return [remoteUrl, pathAndQuery];
+  }
+  const currentOrigin = (window.location?.origin || '').replace(/\/+$/, '');
+  if (currentOrigin && currentOrigin !== vercelBase) {
+    return [pathAndQuery, remoteUrl];
+  }
+  return [pathAndQuery];
+}
+
 async function postChunksToRelayServer(workspaceId: string, chunks: any[]): Promise<boolean> {
   if (typeof window === 'undefined' || chunks.length === 0) return true;
   try {
@@ -1389,16 +1476,23 @@ async function postChunksToRelayServer(workspaceId: string, chunks: any[]): Prom
         // Ignore token error, relay is disposable cache
       }
     }
-    const res = await fetch('/api/workspace/delta', {
-      method: 'POST',
-      headers: authHeaders,
-      body: JSON.stringify({ workspaceId, chunks })
-    });
-    if (!res.ok) {
-      console.warn(`Relay server returned HTTP ${res.status}`);
-      return false;
+    const bodyStr = JSON.stringify({ workspaceId, chunks });
+    const urls = getRelayEndpointUrls('/api/workspace/delta');
+    for (const url of urls) {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: authHeaders,
+          body: bodyStr
+        });
+        if (res.ok) {
+          return true;
+        }
+      } catch {
+        // Try next candidate URL
+      }
     }
-    return true;
+    return false;
   } catch (err) {
     // Relay is a disposable cache: failure does not affect Firestore truth
     console.warn('Relay server post error:', err);
@@ -1421,12 +1515,22 @@ async function fetchChunksFromRelayServer(workspaceId: string): Promise<any[]> {
         // Ignore
       }
     }
-    const res = await fetch(`/api/workspace/delta?workspaceId=${encodeURIComponent(workspaceId)}`, {
-      headers: authHeaders
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return Array.isArray(data?.docs) ? data.docs : [];
+    const urls = getRelayEndpointUrls(
+      `/api/workspace/delta?workspaceId=${encodeURIComponent(workspaceId)}`
+    );
+    for (const url of urls) {
+      try {
+        const res = await fetch(url, { headers: authHeaders });
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (Array.isArray(data?.docs)) {
+          return data.docs;
+        }
+      } catch {
+        // Try next candidate URL
+      }
+    }
+    return [];
   } catch {
     return [];
   }
@@ -1528,70 +1632,114 @@ export async function executeTransactionalDeltaWrite(
   let committedChunkObj: any = null;
   let committedMergedDelta: any = localDeltaObj;
 
+  const buildDirectDeltaChunk = (deltaToWrite: any) => {
+    const mergedDelta = mergeDeltaPayloads({}, deltaToWrite);
+    const mergedPayloadStr = JSON.stringify(mergedDelta);
+    if (mergedPayloadStr.length > CHUNK_MAX_CHARS) {
+      throw new Error('DELTA_COMPACTION_REQUIRED: Merged delta exceeds single-chunk threshold.');
+    }
+    const nowMs = Number(mergedDelta.updatedAtMs) || Date.now();
+    const nowIso = mergedDelta.updatedAtIso || new Date(nowMs).toISOString();
+    const chunkObj = {
+      id: deltaDocId,
+      categoryKey: 'delta_log',
+      chunkIndex: 0,
+      totalChunks: 1,
+      updatedAtMs: nowMs,
+      updatedAtIso: nowIso,
+      deviceId: String(localDeltaObj.deviceId || mergedDelta.deviceId || 'default_dev'),
+      payloadChunk: mergedPayloadStr,
+      ...ownerFields
+    };
+    return { chunkObj, mergedDelta };
+  };
+
   await executeSafeFirestoreWrite(async () => {
-    await runTransaction(db, async (transaction) => {
-      const controlSnap = await transaction.get(controlDocRef);
-      if (controlSnap.exists()) {
-        const d = controlSnap.data();
-        let parsed: any = {};
-        if (d && typeof d.payloadChunk === 'string') {
-          try {
-            parsed = JSON.parse(d.payloadChunk);
-          } catch {
-            parsed = {};
-          }
-        }
-        if (parsed.isPaused) {
-          throw new Error('SYNC_ABORTED_PAUSED: Cloud synchronization is paused for this workspace.');
-        }
-        const activeCloudGen = parsed.syncGeneration || 'gen_initial';
-        if (expectedGeneration && activeCloudGen !== expectedGeneration) {
-          throw new Error(
-            `SYNC_ABORTED_GENERATION_MISMATCH: Cloud generation changed from ${expectedGeneration} to ${activeCloudGen}`
-          );
-        }
-      }
-
-      const existingSnap = await transaction.get(targetDocRef);
-      let existingDeltaObj: any = null;
-      if (existingSnap.exists()) {
-        const existingData = existingSnap.data();
-        if (existingData && typeof existingData.payloadChunk === 'string') {
-          try {
-            existingDeltaObj = JSON.parse(existingData.payloadChunk);
-          } catch {
-            existingDeltaObj = null;
-          }
-        }
-      }
-
-      const mergedDelta = existingDeltaObj
-        ? mergeDeltaPayloads(existingDeltaObj, localDeltaObj)
-        : mergeDeltaPayloads({}, localDeltaObj);
-
-      const mergedPayloadStr = JSON.stringify(mergedDelta);
-      if (mergedPayloadStr.length > CHUNK_MAX_CHARS) {
-        throw new Error('DELTA_COMPACTION_REQUIRED: Merged delta exceeds single-chunk threshold.');
-      }
-
-      const nowMs = Number(mergedDelta.updatedAtMs) || Date.now();
-      const nowIso = mergedDelta.updatedAtIso || new Date(nowMs).toISOString();
-      const chunkObj = {
-        id: deltaDocId,
-        categoryKey: 'delta_log',
-        chunkIndex: 0,
-        totalChunks: 1,
-        updatedAtMs: nowMs,
-        updatedAtIso: nowIso,
-        deviceId: String(localDeltaObj.deviceId || mergedDelta.deviceId || 'default_dev'),
-        payloadChunk: mergedPayloadStr,
-        ...ownerFields
-      };
-
-      transaction.set(targetDocRef, chunkObj);
+    // Since deltaDocId (`delta_log_<deviceId>_chunk_0`) is already strictly per-device,
+    // if Firestore read quota is on cooldown we can safely commit with a 0-read `setDoc`!
+    if (isFirestoreReadQuotaExhausted()) {
+      const { chunkObj, mergedDelta } = buildDirectDeltaChunk(localDeltaObj);
+      await setDoc(targetDocRef, chunkObj);
       committedChunkObj = chunkObj;
       committedMergedDelta = mergedDelta;
-    });
+      return;
+    }
+
+    try {
+      await runTransaction(db, async (transaction) => {
+        const controlSnap = await transaction.get(controlDocRef);
+        if (controlSnap.exists()) {
+          const d = controlSnap.data();
+          let parsed: any = {};
+          if (d && typeof d.payloadChunk === 'string') {
+            try {
+              parsed = JSON.parse(d.payloadChunk);
+            } catch {
+              parsed = {};
+            }
+          }
+          if (parsed.isPaused) {
+            throw new Error('SYNC_ABORTED_PAUSED: Cloud synchronization is paused for this workspace.');
+          }
+          const activeCloudGen = parsed.syncGeneration || 'gen_initial';
+          if (expectedGeneration && activeCloudGen !== expectedGeneration) {
+            throw new Error(
+              `SYNC_ABORTED_GENERATION_MISMATCH: Cloud generation changed from ${expectedGeneration} to ${activeCloudGen}`
+            );
+          }
+        }
+
+        const existingSnap = await transaction.get(targetDocRef);
+        let existingDeltaObj: any = null;
+        if (existingSnap.exists()) {
+          const existingData = existingSnap.data();
+          if (existingData && typeof existingData.payloadChunk === 'string') {
+            try {
+              existingDeltaObj = JSON.parse(existingData.payloadChunk);
+            } catch {
+              existingDeltaObj = null;
+            }
+          }
+        }
+
+        const mergedDelta = existingDeltaObj
+          ? mergeDeltaPayloads(existingDeltaObj, localDeltaObj)
+          : mergeDeltaPayloads({}, localDeltaObj);
+
+        const mergedPayloadStr = JSON.stringify(mergedDelta);
+        if (mergedPayloadStr.length > CHUNK_MAX_CHARS) {
+          throw new Error('DELTA_COMPACTION_REQUIRED: Merged delta exceeds single-chunk threshold.');
+        }
+
+        const nowMs = Number(mergedDelta.updatedAtMs) || Date.now();
+        const nowIso = mergedDelta.updatedAtIso || new Date(nowMs).toISOString();
+        const chunkObj = {
+          id: deltaDocId,
+          categoryKey: 'delta_log',
+          chunkIndex: 0,
+          totalChunks: 1,
+          updatedAtMs: nowMs,
+          updatedAtIso: nowIso,
+          deviceId: String(localDeltaObj.deviceId || mergedDelta.deviceId || 'default_dev'),
+          payloadChunk: mergedPayloadStr,
+          ...ownerFields
+        };
+
+        transaction.set(targetDocRef, chunkObj);
+        committedChunkObj = chunkObj;
+        committedMergedDelta = mergedDelta;
+      });
+    } catch (txErr: any) {
+      if (isQuotaErrorLike(txErr) && !isFirestoreWriteQuotaExhaustedToday()) {
+        markFirestoreReadQuotaExhausted();
+        const { chunkObj, mergedDelta } = buildDirectDeltaChunk(localDeltaObj);
+        await setDoc(targetDocRef, chunkObj);
+        committedChunkObj = chunkObj;
+        committedMergedDelta = mergedDelta;
+        return;
+      }
+      throw txErr;
+    }
   });
 
   return {
@@ -1630,6 +1778,11 @@ export async function uploadWorkspaceToGoogleCloud(
   try {
     // Check Cloud-side pause and generation marker first (cross-device protection)
     const controlState = await getCloudSyncControlState(uid);
+    if (controlState.isQuotaExceeded) {
+      // Read quota cooldown should not block write-only delta uploads + relay pushes
+      controlState.isPaused = false;
+      controlState.syncGeneration = getLocalActiveGeneration() || 'gen_initial';
+    }
     if (controlState.isPaused) {
       if (options?.isManual && !controlState.isError) {
         const reactRes = await reactivateCloudSync(uid);
@@ -1676,13 +1829,27 @@ export async function uploadWorkspaceToGoogleCloud(
     } = computeWorkspaceDelta(uid, parsed);
 
     // Keep the shared Lernstudio library independent from each teacher's private workspace.
-    // Upload current custom sets to support first-time migration, plus explicit deletion tombstones.
-    const sharedSetChanges = [
-      ...filterCustomOrModifiedLernstudioSets(parsed.lernstudioSets || []),
-      ...(Array.isArray(changedEntities.lernstudioSets) ? changedEntities.lernstudioSets.filter((s: any) => s?.deleted) : [])
-    ];
-    if (sharedSetChanges.length > 0) {
-      await writeSharedLernstudioSetChanges(sharedSetChanges);
+    // Only write when Lernstudio sets actually changed (or on initial baseline seed), and never allow
+    // a shared-collection read/write error to block private lesson/workspace synchronization.
+    const changedLernstudioSets = Array.isArray(changedEntities.lernstudioSets)
+      ? changedEntities.lernstudioSets
+      : [];
+    const sharedSetChanges =
+      !hasBaselineSeeded || options?.forceFullBaseline
+        ? [
+            ...filterCustomOrModifiedLernstudioSets(parsed.lernstudioSets || []),
+            ...changedLernstudioSets.filter((s: any) => s?.deleted)
+          ]
+        : [
+            ...filterCustomOrModifiedLernstudioSets(changedLernstudioSets),
+            ...changedLernstudioSets.filter((s: any) => s?.deleted)
+          ];
+    if (sharedSetChanges.length > 0 && !isFirestoreReadQuotaExhausted()) {
+      try {
+        await writeSharedLernstudioSetChanges(sharedSetChanges);
+      } catch (sharedErr) {
+        console.warn('Non-fatal shared Lernstudio sync warning:', sharedErr);
+      }
     }
 
     // If nothing changed at all since last sync, perform 0 network writes!
@@ -2348,7 +2515,10 @@ export function reassembleWorkspaceSnapshot(
  * Callers must invoke `acknowledgeAppliedRemoteRevisions(uid, docTokens, mergedData)` ONLY after
  * local import and durable storage persistence have succeeded.
  */
-export async function downloadWorkspaceFromGoogleCloud(): Promise<{
+export async function downloadWorkspaceFromGoogleCloud(options?: {
+  prefetchedDocs?: any[];
+  prefetchedWorkspaceId?: string;
+}): Promise<{
   hasRemoteData: boolean;
   backupJsonStr: string | null;
   remoteTimestampMs: number;
@@ -2375,35 +2545,58 @@ export async function downloadWorkspaceFromGoogleCloud(): Promise<{
 
   try {
     const rawDocsMap = new Map<string, any>();
-    let resolvedWorkspaceId = primaryId;
+    let resolvedWorkspaceId = options?.prefetchedWorkspaceId || primaryId;
     let isLegacyPath = false;
 
-    // 1. Try UID path first
-    const uidSnap = await getDocs(collection(db, 'user_workspaces', primaryId, 'categories'));
-    if (!uidSnap.empty) {
-      uidSnap.forEach((docSnap: any) => {
-        const d = docSnap.data();
-        if (d && d.id && !isSyncControlDocument(d) && verifyWorkspaceOwnership(user, d, primaryId)) {
+    if (Array.isArray(options?.prefetchedDocs) && options.prefetchedDocs.length > 0) {
+      for (const d of options.prefetchedDocs) {
+        if (d && d.id && !isSyncControlDocument(d) && verifyWorkspaceOwnership(user, d, resolvedWorkspaceId)) {
           rawDocsMap.set(d.id, d);
         }
-      });
-    } else if (legacyId && legacyId !== primaryId) {
-      // 2. If UID path empty, check legacy email path
-      const legacySnap = await getDocs(collection(db, 'user_workspaces', legacyId, 'categories'));
-      if (!legacySnap.empty) {
-        resolvedWorkspaceId = legacyId;
-        isLegacyPath = true;
-        legacySnap.forEach((docSnap: any) => {
-          const d = docSnap.data();
-          if (d && d.id && !isSyncControlDocument(d) && verifyWorkspaceOwnership(user, d, legacyId)) {
-            rawDocsMap.set(d.id, d);
+      }
+    } else if (!isFirestoreReadQuotaExhausted()) {
+      try {
+        // 1. Try UID path first
+        const uidSnap = await getDocs(collection(db, 'user_workspaces', primaryId, 'categories'));
+        if (!uidSnap.empty) {
+          uidSnap.forEach((docSnap: any) => {
+            const d = docSnap.data();
+            if (d && d.id && !isSyncControlDocument(d) && verifyWorkspaceOwnership(user, d, primaryId)) {
+              rawDocsMap.set(d.id, d);
+            }
+          });
+        } else if (legacyId && legacyId !== primaryId) {
+          // 2. If UID path empty, check legacy email path
+          const legacySnap = await getDocs(collection(db, 'user_workspaces', legacyId, 'categories'));
+          if (!legacySnap.empty) {
+            resolvedWorkspaceId = legacyId;
+            isLegacyPath = true;
+            legacySnap.forEach((docSnap: any) => {
+              const d = docSnap.data();
+              if (d && d.id && !isSyncControlDocument(d) && verifyWorkspaceOwnership(user, d, legacyId)) {
+                rawDocsMap.set(d.id, d);
+              }
+            });
           }
-        });
+        }
+      } catch (readErr: any) {
+        if (isQuotaErrorLike(readErr)) {
+          markFirestoreReadQuotaExhausted();
+        } else {
+          throw readErr;
+        }
       }
     }
 
-    // Read the global Lernstudio library independently of this account's private workspace.
-    const sharedLernstudioSets = await readSharedLernstudioSets();
+    // Read the global Lernstudio library independently of this account's private workspace (cached 5 min TTL).
+    let sharedLernstudioSets: any[] = [];
+    if (!isFirestoreReadQuotaExhausted()) {
+      try {
+        sharedLernstudioSets = await readSharedLernstudioSets();
+      } catch {
+        sharedLernstudioSets = [];
+      }
+    }
 
     // Merge any newer chunks/deltas from fast relay server (excluding control docs)
     const relayDocs = await fetchChunksFromRelayServer(resolvedWorkspaceId);
@@ -2579,6 +2772,8 @@ export function subscribeToRemoteWorkspaceChanges(
   let isDownloadInFlight = false;
   let hasQueuedSnapshotWhileBusy = false;
 
+  let latestRemoteSnapshotDocs: any[] | null = null;
+
   const processPendingRemoteDownload = async () => {
     if (isDisposed || !isAutoCloudSyncEnabled()) return;
     if (isDownloadInFlight) {
@@ -2592,7 +2787,13 @@ export function subscribeToRemoteWorkspaceChanges(
         hasQueuedSnapshotWhileBusy = false;
         if (isDisposed || !isAutoCloudSyncEnabled()) break;
 
-        const res = await downloadWorkspaceFromGoogleCloud();
+        const prefetched = latestRemoteSnapshotDocs;
+        latestRemoteSnapshotDocs = null;
+        const res = await downloadWorkspaceFromGoogleCloud(
+          prefetched
+            ? { prefetchedDocs: prefetched, prefetchedWorkspaceId: targetWorkspaceId }
+            : undefined
+        );
         if (isDisposed) break;
 
         if (res.hasRemoteData && res.backupJsonStr && res.summary) {
@@ -2637,6 +2838,7 @@ export function subscribeToRemoteWorkspaceChanges(
         return;
       }
 
+      latestRemoteSnapshotDocs = snapshotDocs;
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         debounceTimer = null;
@@ -2648,9 +2850,45 @@ export function subscribeToRemoteWorkspaceChanges(
     }
   );
 
+  // Also poll the lightweight Relay cache periodically (0 Firestore reads!) so Android APK and Vercel PWA
+  // stay in real-time sync even if Firestore read quota is on cooldown or WebView throttles WebSockets.
+  const pollRelayChanges = async () => {
+    if (isDisposed || !isAutoCloudSyncEnabled()) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    try {
+      const relayDocs = await fetchChunksFromRelayServer(targetWorkspaceId);
+      if (isDisposed || !Array.isArray(relayDocs) || relayDocs.length === 0) return;
+      const validRelayDocs = relayDocs.filter(
+        (d) => d && !isSyncControlDocument(d) && verifyWorkspaceOwnership(activeUser, d, targetWorkspaceId)
+      );
+      if (validRelayDocs.length === 0) return;
+
+      const appliedTokens = getAppliedDocTokensMap(targetWorkspaceId);
+      const localWrittenTokens = getLocalWrittenDocTokensMap(targetWorkspaceId);
+      const evaluation = evaluateRemoteSnapshotChanges(validRelayDocs, {
+        localDeviceId: deviceId,
+        appliedDocTokens: appliedTokens,
+        localWrittenDocTokens: localWrittenTokens
+      });
+      if (!evaluation.shouldProcess) return;
+
+      latestRemoteSnapshotDocs = validRelayDocs;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        processPendingRemoteDownload();
+      }, 200);
+    } catch {
+      // Ignore relay polling error
+    }
+  };
+
+  const relayPollInterval = setInterval(pollRelayChanges, 12_000);
+
   return () => {
     isDisposed = true;
     if (debounceTimer) clearTimeout(debounceTimer);
+    clearInterval(relayPollInterval);
     unsub();
   };
 }

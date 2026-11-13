@@ -811,6 +811,9 @@ export function calculateUnifiedHomeworkQuestionCount(options: {
   const { questionTypes, questionTypeCounts = {}, vocabItemsCount, verbCount } = options;
   if (!questionTypes || questionTypes.length === 0) return 0;
 
+  const effectiveWordStageCount =
+    vocabItemsCount > 0 ? Math.max(0, vocabItemsCount) : Math.max(0, verbCount);
+
   let total = 0;
   for (const qt of questionTypes) {
     const custom = questionTypeCounts[qt];
@@ -824,7 +827,7 @@ export function calculateUnifiedHomeworkQuestionCount(options: {
     } else if (qt === 'verb_sentence') {
       total += Math.max(0, verbCount);
     } else {
-      total += Math.max(0, vocabItemsCount);
+      total += effectiveWordStageCount;
     }
   }
   return total;

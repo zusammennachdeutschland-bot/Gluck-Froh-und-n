@@ -1,8 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson } from '../types';
 import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
-import { isPendingStatus } from '../utils/lessonUtils';
+import { isPendingStatus, pickAuthoritativeLesson, normalizeTime } from '../utils/lessonUtils';
 import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
 import { Bell, CheckCircle2, Clock, Trash2, Award, History, BarChart2, Settings, Menu, Sparkles, BookOpen, Layers, X, Users, Gamepad2, SlidersHorizontal } from 'lucide-react';
 import { NotificationsModal } from './NotificationsModal';
@@ -12,6 +12,7 @@ import { SyncCenterModal } from './sync/SyncCenterModal';
 import { pairWithPeer } from '../services/sync/syncClient';
 import { getCairoHour } from '../utils/greetingUtils';
 import { TeacherCrestLogo } from '../shared/components/TeacherCrestLogo';
+import { getActiveCloudUser, isAutoCloudSyncEnabled, subscribeTeacherAuth } from '../services/firebaseWorkspaceSync';
 
 export const Header: React.FC = () => {
   const { 
@@ -56,6 +57,49 @@ export const Header: React.FC = () => {
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [activityLogs, setActivityLogs] = useState<{ id: string, message: string, time: string }[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [cloudUserActive, setCloudUserActive] = useState<boolean>(() => Boolean(getActiveCloudUser()));
+  const [cloudAutoEnabled, setCloudAutoEnabled] = useState<boolean>(() => isAutoCloudSyncEnabled());
+  const [cloudSyncState, setCloudSyncState] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
+  const [isBrowserOnline, setIsBrowserOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine !== false : true
+  );
+
+  useEffect(() => {
+    const unsub = subscribeTeacherAuth((u) => {
+      setCloudUserActive(Boolean(u));
+      setCloudAutoEnabled(isAutoCloudSyncEnabled());
+    });
+    const handleCloudStatus = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail?.status) {
+        setCloudSyncState(detail.status);
+      }
+      setCloudUserActive(Boolean(getActiveCloudUser()));
+      setCloudAutoEnabled(isAutoCloudSyncEnabled());
+    };
+    const handleConfigChange = () => {
+      setCloudUserActive(Boolean(getActiveCloudUser()));
+      setCloudAutoEnabled(isAutoCloudSyncEnabled());
+    };
+    const handleOnline = () => setIsBrowserOnline(true);
+    const handleOffline = () => setIsBrowserOnline(false);
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('gluck-cloud-sync-status', handleCloudStatus);
+      window.addEventListener('gluck-cloud-sync-config-changed', handleConfigChange);
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+    }
+    return () => {
+      unsub();
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('gluck-cloud-sync-status', handleCloudStatus);
+        window.removeEventListener('gluck-cloud-sync-config-changed', handleConfigChange);
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+      }
+    };
+  }, []);
 
   const unreadCount = notifications.filter(n => !n.read).length;
   const deletedCount = recentlyDeleted.students.length + recentlyDeleted.groups.length + recentlyDeleted.lessons.length;
@@ -69,7 +113,13 @@ export const Header: React.FC = () => {
     }).length;
   }, [syncState?.pairedPeers, devicePresences]);
 
-  const syncStatus = isSyncing ? 'syncing' : (onlineCount > 0 ? 'online' : 'offline');
+  const isCloudConnected = cloudUserActive && cloudAutoEnabled && isBrowserOnline;
+  const syncStatus: 'online' | 'syncing' | 'offline' =
+    isSyncing || cloudSyncState === 'syncing'
+      ? 'syncing'
+      : onlineCount > 0 || isCloudConnected
+      ? 'online'
+      : 'offline';
 
   const addLog = (msg: string) => {
     setActivityLogs(prev => [{ id: Date.now().toString(), message: msg, time: new Date().toLocaleTimeString() }, ...prev].slice(0, 50));
@@ -261,19 +311,21 @@ export const Header: React.FC = () => {
         return true;
       });
 
-    const seen = new Set<string>();
-    const deduplicated: Lesson[] = [];
+    const slotMap = new Map<string, Lesson>();
     active.forEach(l => {
+      const normTime = normalizeTime(l.time) || l.time;
       const key = l.groupId && l.groupId !== 'quick_group'
-        ? `${l.groupId}_${l.date}_${l.time}`
+        ? `${l.groupId}_${l.date}_${normTime}`
         : l.id;
-      if (!seen.has(key)) {
-        seen.add(key);
-        deduplicated.push(l);
+      const existing = slotMap.get(key);
+      if (!existing) {
+        slotMap.set(key, l);
+      } else {
+        slotMap.set(key, pickAuthoritativeLesson(existing, l).survivor);
       }
     });
 
-    return deduplicated;
+    return Array.from(slotMap.values());
   }, [lessons, groups, dismissedDashboardLessonIds, todayStr]);
 
   // Total lessons count

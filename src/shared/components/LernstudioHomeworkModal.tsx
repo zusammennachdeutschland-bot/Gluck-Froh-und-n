@@ -223,6 +223,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [blooketMode] = useState<HomeworkBlooketMode>('classic_quiz');
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [maxAttempts, setMaxAttempts] = useState(0);
+  const [hideTeacherBranding, setHideTeacherBranding] = useState(false);
   const [hasDeadline] = useState(false);
   const [deadlineDate] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -319,6 +320,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
           setSelectedSetId((!isVerbGroupSet(defaultSet) ? defaultSet?.id : undefined) || vocabSets[0]?.id || '');
         }
       }
+      setHideTeacherBranding(false);
       setVocabSetSearchQuery('');
       setCreateError(null);
       setVerbGroupSaveSuccess(null);
@@ -484,13 +486,10 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     setContentSource(nextSource);
     setCreateError(null);
     setQuestionTypeCounts({});
-    if (nextSource === 'verb') {
+    if (nextSource === 'verb' || nextSource === 'mixed') {
       setQuestionTypes([...VERB_HOMEWORK_QUESTION_TYPES]);
-    } else if (nextSource === 'vocab') {
-      setQuestionTypes([...DEFAULT_HOMEWORK_QUESTION_TYPES]);
     } else {
-      // Mixed: start with practical vocab stages + both verb stages
-      setQuestionTypes(['true_false', 'choice_2', 'choice_all', 'verb_conjugation', 'verb_sentence']);
+      setQuestionTypes([...DEFAULT_HOMEWORK_QUESTION_TYPES]);
     }
   };
 
@@ -593,8 +592,9 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   };
 
   const activeQuestionMetaList = useMemo(() => {
-    if (contentSource === 'verb') return VERB_QUESTION_TYPE_META;
-    if (contentSource === 'mixed') return [...QUESTION_TYPE_META, ...VERB_QUESTION_TYPE_META];
+    if (contentSource === 'verb' || contentSource === 'mixed') {
+      return [...QUESTION_TYPE_META, ...VERB_QUESTION_TYPE_META];
+    }
     return QUESTION_TYPE_META;
   }, [contentSource]);
 
@@ -629,10 +629,12 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     });
   };
 
-  const maxStageWords = Math.max(1, selectedItemIds.length || currentSet?.items?.length || 1);
   const effectiveVocabCount =
     contentSource === 'verb' ? 0 : Math.max(0, selectedItemIds.length || currentSet?.items?.length || 0);
   const effectiveVerbCount = contentSource === 'vocab' ? 0 : resolvedSelectedVerbs.length;
+  const effectiveWordStageCount =
+    contentSource === 'verb' ? effectiveVerbCount : effectiveVocabCount;
+  const maxStageWords = Math.max(1, effectiveWordStageCount || 1);
 
   const getStageMaxCount = (type: HomeworkQuestionType): number => {
     if (type === 'verb_conjugation') return Math.max(1, effectiveVerbCount * 6);
@@ -748,13 +750,14 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
           : finalVocabItems;
 
       const sanitizedCounts: Partial<Record<HomeworkQuestionType, number>> = {};
+      const wordStageCap = contentSource === 'verb' ? finalVerbs.length : finalVocabItems.length;
       for (const qt of activeQuestionTypesForSource) {
         const cap =
           qt === 'verb_conjugation'
             ? finalVerbs.length * 6
             : qt === 'verb_sentence'
             ? finalVerbs.length
-            : finalVocabItems.length;
+            : wordStageCap;
         const c = resolveStageQuestionCount(qt, finalVocabItems.length, questionTypeCounts, finalVerbs.length);
         if (c > 0 && c < cap) {
           sanitizedCounts[qt] = c;
@@ -837,6 +840,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         deadline: hasDeadline && deadlineDate ? new Date(deadlineDate).toISOString() : undefined,
         maxAttempts,
         allowReplay: maxAttempts !== 1,
+        hideTeacherBranding,
         isActive: true,
         status: 'active',
         createdAt: new Date().toISOString(),
@@ -862,6 +866,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
           ? { ownerUid: serverAssignment?.ownerUid || resolvedOwnerUid }
           : {}),
         audienceMode,
+        hideTeacherBranding,
         cloudSynced: isCloudSynced,
         cloudCreatePending: !isCloudSynced
       };
@@ -1618,6 +1623,32 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                   </div>
                 </div>
 
+                {/* Compact Per-Homework Hide Teacher Branding Toggle */}
+                <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-surface-hover/70 border border-surface-border">
+                  <label
+                    htmlFor="hw-hide-teacher-branding-toggle"
+                    className="text-xs font-bold text-text-main cursor-pointer select-none"
+                  >
+                    إخفاء اللوجو واسم المدرس
+                  </label>
+                  <button
+                    id="hw-hide-teacher-branding-toggle"
+                    type="button"
+                    role="switch"
+                    aria-checked={hideTeacherBranding}
+                    onClick={() => setHideTeacherBranding((prev) => !prev)}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      hideTeacherBranding ? 'bg-primary' : 'bg-surface-border'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition duration-200 ease-in-out ${
+                        hideTeacherBranding ? '-translate-x-4' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
                 {/* 3. Progressive Stages Grid */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -1640,14 +1671,14 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                   </div>
 
                   {/* Quick Per-Stage Question Count Preset Bar */}
-                  {(maxStageWords > 1 || effectiveVerbCount > 0) && (
+                  {(effectiveWordStageCount > 1 || effectiveVerbCount > 0) && (
                     <div className="p-2.5 rounded-xl bg-surface-hover border border-surface-border flex flex-wrap items-center justify-between gap-2">
                       <div className="text-[11px] font-bold text-text-main flex items-center gap-1.5">
                         <span>🎯 عدد الأسئلة لكل نوع (اختياري للتقليل):</span>
                       </div>
                       <div className="flex flex-wrap items-center gap-1">
                         {[3, 5, 10, 20, 30]
-                          .filter((n) => n < Math.max(maxStageWords, effectiveVerbCount * 6))
+                          .filter((n) => n < Math.max(effectiveWordStageCount, effectiveVerbCount * 6))
                           .map((preset) => {
                             const allActiveMatchPreset =
                               activeQuestionTypesForSource.length > 0 &&
@@ -2077,6 +2108,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                     onClick={() => {
                       setCreatedShareLink(null);
                       setCreatedAssignment(null);
+                      setHideTeacherBranding(false);
                     }}
                     className="px-3 py-2 text-text-muted hover:text-text-main hover:bg-surface-hover text-xs font-medium rounded-xl cursor-pointer"
                   >

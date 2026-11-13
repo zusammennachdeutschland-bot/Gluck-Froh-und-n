@@ -1,4 +1,4 @@
-import { isPendingStatus, isGroupPerLesson, calculateSequentialSessionNumber, resolveLessonCycleNumber } from "../utils/lessonUtils";
+import { isPendingStatus, isGroupPerLesson, calculateSequentialSessionNumber, resolveLessonCycleNumber, pickAuthoritativeLesson, normalizeTime } from "../utils/lessonUtils";
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson, Group, Student, LessonReport, AttendanceStatus, PaymentStatus } from '../types';
@@ -330,8 +330,23 @@ export const TodaysProgressTimeline: React.FC = () => {
 
   // 1. PAST PENDING LESSONS: Lessons from previous days with NO final status (neither completed nor cancelled), excluding deleted
   const pendingPastLessons = useMemo(() => {
+    const resolvedSlotKeys = new Set<string>();
+    lessons.forEach(l => {
+      if (!l.deleted && !isPendingStatus(l.status) && l.groupId && l.groupId !== 'quick_group' && l.date && l.time) {
+        resolvedSlotKeys.add(`${l.groupId}_${l.date}_${normalizeTime(l.time) || l.time}`);
+      }
+    });
     return lessons
-      .filter(l => !l.deleted && l.date < todayStr && isPendingStatus(l.status) && !dismissedDashboardLessonIds.includes(l.id))
+      .filter(l => {
+        if (l.deleted || l.date >= todayStr || !isPendingStatus(l.status) || dismissedDashboardLessonIds.includes(l.id)) {
+          return false;
+        }
+        if (l.groupId && l.groupId !== 'quick_group' && l.date && l.time) {
+          const slotKey = `${l.groupId}_${l.date}_${normalizeTime(l.time) || l.time}`;
+          if (resolvedSlotKeys.has(slotKey)) return false;
+        }
+        return true;
+      })
       .sort((a, b) => b.date.localeCompare(a.date) || a.time.localeCompare(b.time));
   }, [lessons, todayStr, dismissedDashboardLessonIds]);
 
@@ -369,20 +384,21 @@ export const TodaysProgressTimeline: React.FC = () => {
         return true;
       });
 
-    // Deduplicate: If multiple scheduled entries exist for the same group on this date, keep only the active matching slot
-    const seen = new Set<string>();
-    const deduplicated: Lesson[] = [];
+    // Deduplicate: If multiple entries exist for the same group slot on this date, always keep the authoritative one (completed/cancelled/in_progress > scheduled)
+    const slotMap = new Map<string, Lesson>();
     active.forEach(l => {
       const key = l.groupId && l.groupId !== 'quick_group'
-        ? `${l.groupId}_${l.date}_${l.time}`
+        ? `${l.groupId}_${l.date}_${normalizeTime(l.time) || l.time}`
         : l.id;
-      if (!seen.has(key)) {
-        seen.add(key);
-        deduplicated.push(l);
+      const existing = slotMap.get(key);
+      if (!existing) {
+        slotMap.set(key, l);
+      } else {
+        slotMap.set(key, pickAuthoritativeLesson(existing, l).survivor);
       }
     });
 
-    return deduplicated.sort((a, b) => a.time.localeCompare(b.time));
+    return Array.from(slotMap.values()).sort((a, b) => a.time.localeCompare(b.time));
   }, [lessons, groups, todayStr, dismissedDashboardLessonIds]);
 
   const getLessonState = (lesson: Lesson): 'completed' | 'cancelled' | 'active' | 'upcoming' => {

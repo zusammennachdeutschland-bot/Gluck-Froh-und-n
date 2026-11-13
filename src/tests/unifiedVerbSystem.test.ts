@@ -34,7 +34,11 @@ import {
   buildDynamicQuestionPool,
   isArticleGameSupported
 } from '../shared/lernstudioQuestionAdapter';
-import { calculateTotalHomeworkQuestions } from '../shared/homeworkStorageSync';
+import { calculateTotalHomeworkQuestions, resolveStageQuestionCount } from '../shared/homeworkStorageSync';
+import {
+  DEFAULT_HOMEWORK_QUESTION_TYPES,
+  VERB_HOMEWORK_QUESTION_TYPES
+} from '../shared/homeworkTypes';
 import { conjugateGermanVerb } from '../shared/lernstudioWorksheetBuilder';
 import { validateAndParseLernstudioJson } from '../shared/lernstudioAiUtils';
 
@@ -402,6 +406,33 @@ runTest('filterLernstudioSetsByQuery matches title, teacher name, grade, and voc
   assert.deepEqual(filterLernstudioSetsByQuery(sampleSets, 'zimmer').map((s) => s.id), ['s1']);
   assert.deepEqual(filterLernstudioSetsByQuery(sampleSets, 'الأسد').map((s) => s.id), ['s2']);
   assert.equal(filterLernstudioSetsByQuery(sampleSets, 'nonexistent_xyz').length, 0);
+});
+
+runTest('Verb homework supports all 7 word/meaning/spelling stages plus verb_conjugation and verb_sentence', () => {
+  for (const dt of DEFAULT_HOMEWORK_QUESTION_TYPES) {
+    assert.ok(VERB_HOMEWORK_QUESTION_TYPES.includes(dt), `Missing ${dt} in VERB_HOMEWORK_QUESTION_TYPES`);
+  }
+  assert.ok(VERB_HOMEWORK_QUESTION_TYPES.includes('verb_conjugation'));
+  assert.ok(VERB_HOMEWORK_QUESTION_TYPES.includes('verb_sentence'));
+  assert.equal(VERB_HOMEWORK_QUESTION_TYPES.length, 9);
+
+  // 1 verb across all 9 stages: 7 word/meaning/spelling + 6 conjugation + 1 sentence = 14
+  assert.equal(
+    calculateTotalHomeworkQuestions(0, VERB_HOMEWORK_QUESTION_TYPES, undefined, 1),
+    14
+  );
+
+  // 5 verbs across all 9 stages: (7 * 5) + (6 * 5) + 5 = 70
+  assert.equal(
+    calculateTotalHomeworkQuestions(0, VERB_HOMEWORK_QUESTION_TYPES, undefined, 5),
+    70
+  );
+
+  // Per-stage resolution on verb-only homework (0 vocab items, 5 verbs)
+  assert.equal(resolveStageQuestionCount('true_false', 0, undefined, 5), 5);
+  assert.equal(resolveStageQuestionCount('full_word', 0, { full_word: 3 }, 5), 3);
+  assert.equal(resolveStageQuestionCount('verb_conjugation', 0, undefined, 5), 30);
+  assert.equal(resolveStageQuestionCount('verb_sentence', 0, undefined, 5), 5);
 });
 
 console.log(`\nSummary: ${passed} passed, ${failed} failed`);

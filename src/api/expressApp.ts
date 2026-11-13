@@ -245,8 +245,10 @@ function resolveServerAudienceMode(hw: any): 'open' | 'group' {
 function normalizeServerAssignment(hw: any): any {
   if (!hw || typeof hw !== 'object') return hw;
   const mode = resolveServerAudienceMode(hw);
+  const normalizedHideBranding =
+    hw.hideTeacherBranding !== undefined ? { hideTeacherBranding: Boolean(hw.hideTeacherBranding) } : {};
   if (mode === 'open') {
-    const copy = { ...hw, audienceMode: 'open' };
+    const copy = { ...hw, ...normalizedHideBranding, audienceMode: 'open' };
     delete copy.groupId;
     delete copy.groupName;
     delete copy.assignedStudents;
@@ -273,6 +275,7 @@ function normalizeServerAssignment(hw: any): any {
   }
   return {
     ...hw,
+    ...normalizedHideBranding,
     audienceMode: 'group',
     groupId: targetGroupId && targetGroupId !== 'all' ? targetGroupId : undefined,
     groupName: hw.groupName ? String(hw.groupName).trim() : undefined,
@@ -420,6 +423,7 @@ export function toPublicAssignmentDto(hw: any): any {
     ...(normalized.blooketMode ? { blooketMode: String(normalized.blooketMode) } : {}),
     maxAttempts: typeof normalized.maxAttempts === 'number' ? normalized.maxAttempts : undefined,
     allowReplay: typeof normalized.allowReplay === 'boolean' ? normalized.allowReplay : true,
+    hideTeacherBranding: Boolean(normalized.hideTeacherBranding),
     setSnapshot: sanitizePublicSetSnapshot(normalized.setSnapshot),
     ...(normalized.status ? { status: String(normalized.status) } : {})
   };

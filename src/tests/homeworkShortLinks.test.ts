@@ -19,8 +19,11 @@ import {
   __setHomeworkAuthUserForTests,
   getLocalAssignments,
   getAuthorizedGroupStudentsForAssignment,
-  validateHomeworkSubmissionIdentity
+  validateHomeworkSubmissionIdentity,
+  clearFirestoreReadQuotaFlag,
+  isFirestoreReadQuotaExhausted
 } from '../shared/homeworkStorageSync';
+import { readFirestoreDocStatusViaRest } from '../shared/firebaseCloudSync';
 import { getInMemoryAdminFirestore } from '../server/firebaseAdmin';
 import { HomeworkAssignment } from '../shared/homeworkTypes';
 
@@ -576,8 +579,180 @@ async function runHomeworkShortLinksTests() {
     __setHomeworkSyncTransportForTests(null);
     console.log('✅ [SL-09] Direct navigation and page refresh on /Herr-Abdul-rahman/{SHORT_ID} verified');
 
+    // -------------------------------------------------------------------------
+    // TEST 10: Quota exceeded (HTTP 429) & server/network failures never show false 'not_found'
+    // -------------------------------------------------------------------------
+    console.log('Testing [SL-10] Quota exceeded (429) and network/5xx error isolation...');
+    __setHomeworkSyncTransportForTests({
+      fetchShortLink: async () => ({ status: 'quota_exceeded' })
+    });
+    const transportQuotaRes = await resolveHomeworkShortLink('Ab3x9Kp');
+    assert.equal(transportQuotaRes.status, 'quota_exceeded', 'Transport quota_exceeded must propagate');
+
+    __setHomeworkSyncTransportForTests({
+      fetchShortLink: async () => ({ status: 'network_error' })
+    });
+    const transportNetRes = await resolveHomeworkShortLink('Ab3x9Kp');
+    assert.equal(transportNetRes.status, 'network_error', 'Transport network_error must propagate');
+
+    // Test REST status classification deterministically + resolveHomeworkShortLink error mapping
+    __setHomeworkSyncTransportForTests(null);
+    clearFirestoreReadQuotaFlag();
+    const origFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = (async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 429,
+              status: 'RESOURCE_EXHAUSTED',
+              message: 'Free daily read units per project exceeded.'
+            }
+          }),
+          { status: 429, headers: { 'Content-Type': 'application/json' } }
+        )) as typeof fetch;
+
+      const restQuotaStatus = await readFirestoreDocStatusViaRest('homework_short_links', 'Qr49TxM');
+      assert.equal(
+        restQuotaStatus.status,
+        'quota_exceeded',
+        'HTTP 429 from Firestore REST must classify as quota_exceeded'
+      );
+      assert.equal(
+        isFirestoreReadQuotaExhausted(),
+        true,
+        'HTTP 429 must activate read quota cooldown'
+      );
+
+      // When read quota cooldown is active, resolveHomeworkShortLink must immediately surface quota_exceeded (never not_found)
+      const shortResWhileQuota = await resolveHomeworkShortLink('Qr49TxM');
+      assert.equal(
+        shortResWhileQuota.status,
+        'quota_exceeded',
+        'Short link resolution under active read quota cooldown must return quota_exceeded, NEVER not_found'
+      );
+
+      clearFirestoreReadQuotaFlag();
+      globalThis.fetch = (async () => new Response('Internal error', { status: 503 })) as typeof fetch;
+      const rest5xxStatus = await readFirestoreDocStatusViaRest('homework_short_links', 'Qr49TxM');
+      assert.equal(
+        rest5xxStatus.status,
+        'error',
+        'HTTP 503 from Firestore REST must classify as error, never not_found'
+      );
+
+      clearFirestoreReadQuotaFlag();
+      globalThis.fetch = (async () =>
+        new Response(JSON.stringify({ error: { code: 404, status: 'NOT_FOUND' } }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' }
+        })) as typeof fetch;
+      const rest404Status = await readFirestoreDocStatusViaRest('homework_short_links', 'Qr49TxM');
+      assert.equal(
+        rest404Status.status,
+        'not_found',
+        'Confirmed HTTP 404 from Firestore REST must still classify as not_found'
+      );
+    } finally {
+      globalThis.fetch = origFetch;
+      clearFirestoreReadQuotaFlag();
+    }
+    console.log('✅ [SL-10] Quota exceeded (429) and network/5xx error isolation verified');
+
+    // -------------------------------------------------------------------------
+    // TEST 11: Per-Homework Hide Teacher Branding (ON, OFF, and Legacy Undefined)
+    // -------------------------------------------------------------------------
+    console.log('Testing [SL-11] Per-Homework Hide Teacher Branding across persistence, DTO, short links, and direct URLs...');
+    __setHomeworkAuthUserForTests({ uid: 'teacher_uid_alpha', email: 'alpha@glueck.de' });
+
+    // Case A: hideTeacherBranding = true (ON)
+    const hwBrandingHidden = createSampleAssignment({
+      id: 'hw_branding_hidden_01',
+      shortId: 'HtbOn01',
+      ownerUid: 'teacher_uid_alpha',
+      title: 'واجب بدون لوجو المدرس',
+      hideTeacherBranding: true
+    });
+    const createHiddenRes = await fetch(`${baseUrl}/api/teacher/assignments`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenAlpha}`
+      },
+      body: JSON.stringify(hwBrandingHidden)
+    });
+    assert.equal(createHiddenRes.status, 200);
+    const createdHiddenBody = (await createHiddenRes.json()) as any;
+    assert.equal(createdHiddenBody.assignment.hideTeacherBranding, true, 'Authoritative teacher save must preserve hideTeacherBranding=true');
+
+    // Verify Firestore homework_assignments and homework_short_links payloadJson
+    const hwHiddenSnap = await inMemDb.collection('homework_assignments').doc(hwBrandingHidden.id).get();
+    assert.equal(hwHiddenSnap.exists, true);
+    assert.equal(JSON.parse(hwHiddenSnap.data()!.payloadJson).hideTeacherBranding, true, 'Firestore homework_assignments must persist hideTeacherBranding=true');
+
+    const shortHiddenSnap = await inMemDb.collection('homework_short_links').doc('HtbOn01').get();
+    assert.equal(shortHiddenSnap.exists, true);
+    assert.equal(JSON.parse(shortHiddenSnap.data()!.payloadJson).hideTeacherBranding, true, 'Firestore homework_short_links must persist hideTeacherBranding=true');
+
+    // Verify Public Short-Link DTO (/api/homework/short/:shortId) on another device
+    const publicShortHiddenRes = await fetch(`${baseUrl}/api/homework/short/HtbOn01`);
+    assert.equal(publicShortHiddenRes.status, 200);
+    const publicShortHiddenData = (await publicShortHiddenRes.json()) as any;
+    assert.equal(
+      publicShortHiddenData.assignment.hideTeacherBranding,
+      true,
+      'Public short-link DTO must explicitly expose hideTeacherBranding=true to students'
+    );
+
+    // Verify Direct Homework Info DTO (/api/homework/info)
+    const publicInfoHiddenRes = await fetch(
+      `${baseUrl}/api/homework/info?id=${encodeURIComponent(hwBrandingHidden.id)}&token=${encodeURIComponent(hwBrandingHidden.shareToken!)}`
+    );
+    assert.equal(publicInfoHiddenRes.status, 200);
+    const publicInfoHiddenData = (await publicInfoHiddenRes.json()) as any;
+    assert.equal(
+      publicInfoHiddenData.hideTeacherBranding,
+      true,
+      'Public /api/homework/info DTO must explicitly expose hideTeacherBranding=true to students'
+    );
+
+    // Verify legacy URL query param fallback includes htb=1 when hideTeacherBranding=true
+    const legacyHiddenUrl = buildLegacyHomeworkShareUrl(hwBrandingHidden, 'https://glueck-lernstudio.vercel.app');
+    assert.ok(legacyHiddenUrl.includes('htb=1'), 'Legacy share URL must include htb=1 when hideTeacherBranding=true');
+
+    // Case B: hideTeacherBranding = false (OFF) and Legacy (undefined)
+    const hwBrandingShown = createSampleAssignment({
+      id: 'hw_branding_shown_02',
+      shortId: 'HtbOff2',
+      ownerUid: 'teacher_uid_alpha',
+      title: 'واجب بلوجو المدرس الافتراضي'
+      // hideTeacherBranding intentionally omitted to verify legacy compatibility
+    });
+    const createShownRes = await fetch(`${baseUrl}/api/teacher/assignments`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenAlpha}`
+      },
+      body: JSON.stringify(hwBrandingShown)
+    });
+    assert.equal(createShownRes.status, 200);
+
+    const publicShortShownRes = await fetch(`${baseUrl}/api/homework/short/HtbOff2`);
+    assert.equal(publicShortShownRes.status, 200);
+    const publicShortShownData = (await publicShortShownRes.json()) as any;
+    assert.equal(
+      publicShortShownData.assignment.hideTeacherBranding,
+      false,
+      'Legacy/default assignment without hideTeacherBranding must resolve to hideTeacherBranding=false'
+    );
+
+    const legacyShownUrl = buildLegacyHomeworkShareUrl(hwBrandingShown, 'https://glueck-lernstudio.vercel.app');
+    assert.ok(!legacyShownUrl.includes('htb=1'), 'Legacy share URL must not include htb=1 when hideTeacherBranding is false/undefined');
+    console.log('✅ [SL-11] Per-Homework Hide Teacher Branding (ON, OFF, and legacy undefined) verified');
+
     console.log('================================================================================');
-    console.log('🎉 ALL 9 HOMEWORK SHORT LINK TESTS PASSED!');
+    console.log('🎉 ALL 11 HOMEWORK SHORT LINK TESTS PASSED!');
     console.log('================================================================================');
   } finally {
     __setHomeworkSyncTransportForTests(null);

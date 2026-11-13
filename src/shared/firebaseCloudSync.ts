@@ -96,6 +96,7 @@ googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 const LEGACY_QUOTA_EXHAUSTED_DATE_KEY = 'gluck_firestore_write_quota_date';
 let quotaCooldownUntilMs = 0;
+let readQuotaCooldownUntilMs = 0;
 
 // Clean up any stale 24-hour localStorage lock from earlier versions immediately on load
 if (typeof window !== 'undefined') {
@@ -104,6 +105,20 @@ if (typeof window !== 'undefined') {
   } catch {
     // Ignore
   }
+}
+
+export function isQuotaErrorLike(error: unknown): boolean {
+  if (!error) return false;
+  const code = typeof (error as any)?.code === 'string' ? (error as any).code.toLowerCase() : '';
+  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    code === 'resource-exhausted' ||
+    msg.includes('resource-exhausted') ||
+    msg.includes('resource_exhausted') ||
+    msg.includes('quota exceeded') ||
+    msg.includes('free daily read') ||
+    msg.includes('429')
+  );
 }
 
 export function isFirestoreWriteQuotaExhaustedToday(): boolean {
@@ -126,6 +141,18 @@ export function clearFirestoreWriteQuotaFlag(): void {
   }
 }
 
+export function isFirestoreReadQuotaExhausted(): boolean {
+  return Date.now() < readQuotaCooldownUntilMs;
+}
+
+export function markFirestoreReadQuotaExhausted(durationMs = 120 * 1000): void {
+  readQuotaCooldownUntilMs = Math.max(readQuotaCooldownUntilMs, Date.now() + durationMs);
+}
+
+export function clearFirestoreReadQuotaFlag(): void {
+  readQuotaCooldownUntilMs = 0;
+}
+
 export async function executeSafeFirestoreWrite<T>(
   writePromiseOrFn: Promise<T> | (() => Promise<T>),
   timeoutMs = 20000
@@ -141,8 +168,7 @@ export async function executeSafeFirestoreWrite<T>(
 
     // Prevent unhandled rejection if currentPromise settles after timeout
     Promise.resolve(currentPromise).catch((bgErr) => {
-      const bgMsg = bgErr?.message || String(bgErr);
-      if (bgMsg.includes('resource-exhausted') || bgMsg.includes('Quota')) {
+      if (isQuotaErrorLike(bgErr)) {
         markFirestoreWriteQuotaExhaustedToday();
       }
     });
@@ -162,13 +188,8 @@ export async function executeSafeFirestoreWrite<T>(
     }
     return res as T;
   } catch (err: any) {
-    const code = err?.code || '';
     const msg = err?.message || String(err);
-    if (
-      code === 'resource-exhausted' ||
-      msg.includes('resource-exhausted') ||
-      msg.includes('Quota exceeded')
-    ) {
+    if (isQuotaErrorLike(err)) {
       markFirestoreWriteQuotaExhaustedToday();
       throw new Error('Quota exceeded: ' + msg);
     }
@@ -206,9 +227,14 @@ export interface FirestoreErrorInfo {
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): void {
   const errMsg = error instanceof Error ? error.message : String(error);
-  if (errMsg.includes('resource-exhausted') || errMsg.includes('Quota')) {
-    markFirestoreWriteQuotaExhaustedToday();
-    console.warn('Firestore Free-Tier Daily Write Quota Notice:', path);
+  if (isQuotaErrorLike(error)) {
+    if (operationType === OperationType.GET || operationType === OperationType.LIST) {
+      markFirestoreReadQuotaExhausted();
+      console.warn('Firestore Free-Tier Daily Read Quota Notice:', path);
+    } else {
+      markFirestoreWriteQuotaExhaustedToday();
+      console.warn('Firestore Free-Tier Daily Write Quota Notice:', path);
+    }
     return;
   }
   const errInfo: FirestoreErrorInfo = {
@@ -268,11 +294,18 @@ export async function testFirestoreConnection(): Promise<boolean> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     return false;
   }
+  if (isFirestoreReadQuotaExhausted()) {
+    return false;
+  }
   connectionTested = true;
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
     return true;
   } catch (error) {
+    if (isQuotaErrorLike(error)) {
+      markFirestoreReadQuotaExhausted();
+      return false;
+    }
     const isOfflineErr = error instanceof Error && error.message.includes('the client is offline');
     if (isOfflineErr) {
       // Transient WebChannel/proxy warm-up can surface "client is offline" right on boot;
@@ -666,6 +699,7 @@ export async function createTeacherWithEmailPassword(email: string, pass: string
 
 export async function signOutTeacherFirebase(): Promise<void> {
   try {
+    resetFirestoreSubscriptionMultiplexers();
     if (isAndroidNativePlatform()) {
       try {
         await invokeNativeGoogleCredentialSignOut();
@@ -692,10 +726,29 @@ export interface HomeworkTestAuthUser {
 let testHomeworkAuthUser: HomeworkTestAuthUser | null | undefined = undefined;
 const teacherAuthSubscribers = new Set<(user: User | null) => void>();
 
+export function isHomeworkAuthTestOverrideActive(): boolean {
+  return testHomeworkAuthUser !== undefined;
+}
+
+export async function waitForHomeworkAuthStateReady(timeoutMs = 1200): Promise<void> {
+  if (testHomeworkAuthUser !== undefined || auth.currentUser) return;
+  const authReadyFn = (auth as any)?.authStateReady;
+  if (typeof authReadyFn !== 'function') return;
+  try {
+    await Promise.race([
+      authReadyFn.call(auth),
+      new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))
+    ]);
+  } catch {
+    // Ignore auth readiness timeout
+  }
+}
+
 export function __setHomeworkAuthUserForTests(
   user: HomeworkTestAuthUser | null | undefined
 ): void {
   testHomeworkAuthUser = user;
+  resetFirestoreSubscriptionMultiplexers();
   const effectiveUser =
     user === undefined ? auth.currentUser : (user as unknown as User | null);
   teacherAuthSubscribers.forEach((cb) => {
@@ -947,9 +1000,10 @@ function parseFirestoreRestFields(rawFields: Record<string, any> | undefined | n
 export type RestDocStatusResult =
   | { status: 'found'; data: Record<string, any> }
   | { status: 'not_found' }
+  | { status: 'quota_exceeded' }
   | { status: 'error' };
 
-async function readFirestoreDocStatusViaRest(
+export async function readFirestoreDocStatusViaRest(
   collectionName: string,
   docId: string,
   idToken?: string | null
@@ -974,12 +1028,27 @@ async function readFirestoreDocStatusViaRest(
     if (res.status === 404) {
       return { status: 'not_found' };
     }
-    if (!res.ok) return { status: 'error' };
+    if (res.status === 429) {
+      markFirestoreReadQuotaExhausted();
+      return { status: 'quota_exceeded' };
+    }
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      if (isQuotaErrorLike(errText)) {
+        markFirestoreReadQuotaExhausted();
+        return { status: 'quota_exceeded' };
+      }
+      return { status: 'error' };
+    }
     const raw = await res.json().catch(() => null);
     const parsed = parseFirestoreRestFields(raw?.fields);
     if (!parsed) return { status: 'error' };
     return { status: 'found', data: parsed };
-  } catch {
+  } catch (err) {
+    if (isQuotaErrorLike(err)) {
+      markFirestoreReadQuotaExhausted();
+      return { status: 'quota_exceeded' };
+    }
     return { status: 'error' };
   } finally {
     if (timer) clearTimeout(timer);
@@ -998,7 +1067,7 @@ async function readFirestoreDocViaRest(
 async function queryAssignmentsViaRest(
   ownerUid: string,
   idToken?: string | null
-): Promise<{ ok: boolean; items: HomeworkAssignment[] }> {
+): Promise<{ ok: boolean; items: HomeworkAssignment[]; quotaExceeded?: boolean }> {
   if (typeof fetch !== 'function' || !ownerUid) {
     return { ok: false, items: [] };
   }
@@ -1036,7 +1105,16 @@ async function queryAssignmentsViaRest(
       })
     });
 
+    if (res.status === 429) {
+      markFirestoreReadQuotaExhausted();
+      return { ok: false, items: [], quotaExceeded: true };
+    }
     if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      if (isQuotaErrorLike(errText)) {
+        markFirestoreReadQuotaExhausted();
+        return { ok: false, items: [], quotaExceeded: true };
+      }
       return { ok: false, items: [] };
     }
     const rows = await res.json().catch(() => null);
@@ -1135,24 +1213,29 @@ export async function saveShortLinkToFirestore(
   const shareToken = assignment.shareToken?.trim() ? assignment.shareToken.trim().slice(0, 128) : undefined;
 
   // Collision check: ensure shortId does not already belong to a different assignment
-  try {
-    const existingSnap = await withFirestoreReadTimeout(
-      getDoc(doc(db, 'homework_short_links', cleanShortId)),
-      3500
-    ).catch(() => null);
-    if (existingSnap && existingSnap.exists() && !existingSnap.metadata?.hasPendingWrites) {
-      const existingData = existingSnap.data() || {};
-      const existingHwId = String(existingData.assignmentId || '').trim();
-      const existingOwner = String(existingData.ownerUid || '').trim();
-      if (
-        (existingHwId && existingHwId !== safeAssignmentId && existingHwId !== assignment.id) ||
-        (existingOwner && existingOwner !== ownerUid)
-      ) {
-        return { saved: false, collision: true };
+  if (!isFirestoreReadQuotaExhausted()) {
+    try {
+      const existingSnap = await withFirestoreReadTimeout(
+        getDoc(doc(db, 'homework_short_links', cleanShortId)),
+        3500
+      ).catch((err) => {
+        if (isQuotaErrorLike(err)) markFirestoreReadQuotaExhausted();
+        return null;
+      });
+      if (existingSnap && existingSnap.exists() && !existingSnap.metadata?.hasPendingWrites) {
+        const existingData = existingSnap.data() || {};
+        const existingHwId = String(existingData.assignmentId || '').trim();
+        const existingOwner = String(existingData.ownerUid || '').trim();
+        if (
+          (existingHwId && existingHwId !== safeAssignmentId && existingHwId !== assignment.id) ||
+          (existingOwner && existingOwner !== ownerUid)
+        ) {
+          return { saved: false, collision: true };
+        }
       }
+    } catch {
+      // Ignore read check timeout and let Firestore security rules enforce collision prevention
     }
-  } catch {
-    // Ignore read check timeout and let Firestore security rules enforce collision prevention
   }
 
   const publicSafeSnapshot = sanitizeShortLinkAssignmentSnapshot(
@@ -1280,31 +1363,63 @@ export async function fetchShortLinkFromFirestore(
   let rawData: Record<string, any> | null = null;
   let sdkRespondedNotFound = false;
   let hadNetworkError = false;
+  let hadQuotaError = false;
 
-  try {
-    const snap = await withFirestoreReadTimeout(
-      getDoc(doc(db, 'homework_short_links', cleanShortId)),
-      4500
-    );
-    if (snap.exists() && !snap.metadata?.hasPendingWrites) {
-      rawData = snap.data() || null;
-    } else if (!snap.exists()) {
-      sdkRespondedNotFound = true;
+  if (!isFirestoreReadQuotaExhausted()) {
+    try {
+      const snap = await withFirestoreReadTimeout(
+        getDoc(doc(db, 'homework_short_links', cleanShortId)),
+        4500
+      );
+      const snapFromCache = Boolean(snap.metadata?.fromCache);
+      const snapHasPendingWrites = Boolean(snap.metadata?.hasPendingWrites);
+      if (snap.exists() && !snapHasPendingWrites) {
+        rawData = snap.data() || null;
+      } else if (!snap.exists() && !snapFromCache && !snapHasPendingWrites) {
+        sdkRespondedNotFound = true;
+      } else if (!snap.exists()) {
+        hadNetworkError = true;
+      }
+    } catch (err) {
+      if (isQuotaErrorLike(err)) {
+        markFirestoreReadQuotaExhausted();
+        hadQuotaError = true;
+      } else {
+        hadNetworkError = true;
+      }
     }
-  } catch {
-    hadNetworkError = true;
+  } else {
+    hadQuotaError = true;
   }
 
-  if (!rawData) {
-    const restData = await readFirestoreDocViaRest('homework_short_links', cleanShortId);
-    if (restData) {
-      rawData = restData;
+  if (!rawData && !hadQuotaError) {
+    const restRes = await readFirestoreDocStatusViaRest('homework_short_links', cleanShortId);
+    if (restRes.status === 'found') {
+      rawData = restRes.data;
+      hadNetworkError = false;
+      hadQuotaError = false;
+    } else if (restRes.status === 'quota_exceeded') {
+      hadQuotaError = true;
+      sdkRespondedNotFound = false;
+    } else if (restRes.status === 'error') {
+      hadNetworkError = true;
+      sdkRespondedNotFound = false;
+    } else if (restRes.status === 'not_found') {
+      sdkRespondedNotFound = true;
       hadNetworkError = false;
     }
   }
 
   if (!rawData) {
-    if (hadNetworkError && !sdkRespondedNotFound) {
+    if (hadQuotaError) {
+      return {
+        status: 'quota_exceeded',
+        shortId: cleanShortId,
+        errorMessageAr:
+          'تم الوصول للحد اليومي المجاني لقراءة البيانات في السحابة مؤقتاً. يرجى المحاولة بعد قليل أو فتح الرابط من جهاز المعلم.'
+      };
+    }
+    if (hadNetworkError || !sdkRespondedNotFound) {
       return {
         status: 'network_error',
         shortId: cleanShortId,
@@ -1697,6 +1812,9 @@ export async function fetchAllAssignmentsFromFirestore(
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     throw new Error('Offline: cannot fetch authoritative homework assignments.');
   }
+  if (isFirestoreReadQuotaExhausted()) {
+    throw new Error('Quota exceeded: Firestore daily read quota is temporarily on cooldown.');
+  }
 
   const path = 'homework_assignments';
   const q = query(collection(db, 'homework_assignments'), where('ownerUid', '==', ownerUid));
@@ -1711,7 +1829,11 @@ export async function fetchAllAssignmentsFromFirestore(
     let snap;
     try {
       snap = await withFirestoreReadTimeout(getDocsFromServer(q), 5000);
-    } catch {
+    } catch (serverErr) {
+      if (isQuotaErrorLike(serverErr)) {
+        markFirestoreReadQuotaExhausted();
+        throw serverErr;
+      }
       snap = await withFirestoreReadTimeout(getDocs(q), 5000);
     }
     if (!explicitOwnerUid && getCurrentHomeworkOwnerUid() !== ownerUid) {
@@ -1744,9 +1866,9 @@ export async function fetchAllAssignmentsFromFirestore(
   let apiList: HomeworkAssignment[] = [];
 
   const needsServerCrossCheck =
-    !sdkSucceeded || sdkIsFromCache || sdkHasPendingWrites || sdkList.length === 0;
+    !sdkSucceeded || sdkIsFromCache || sdkHasPendingWrites;
 
-  if (needsServerCrossCheck) {
+  if (needsServerCrossCheck && !isFirestoreReadQuotaExhausted()) {
     const currentUser = auth.currentUser;
     const idToken =
       currentUser && currentUser.uid === ownerUid
@@ -1824,6 +1946,36 @@ export async function fetchAllAssignmentsFromFirestore(
   );
 }
 
+type SharedMultiplexerEntry<T> = {
+  listeners: Set<(items: T[]) => void>;
+  lastValue: T[] | null;
+  unsubFirestore: () => void;
+  idleTimer: any;
+};
+
+const assignmentsMultiplexer = new Map<string, SharedMultiplexerEntry<HomeworkAssignment>>();
+const submissionsMultiplexer = new Map<string, SharedMultiplexerEntry<HomeworkSubmission>>();
+const lernstudioSetsMultiplexer = new Map<string, SharedMultiplexerEntry<LernstudioSet>>();
+
+const MULTIPLEXER_IDLE_TEARDOWN_MS = 5000;
+
+export function resetFirestoreSubscriptionMultiplexers(): void {
+  const clearMap = <T>(m: Map<string, SharedMultiplexerEntry<T>>) => {
+    m.forEach((entry) => {
+      if (entry.idleTimer) clearTimeout(entry.idleTimer);
+      try {
+        entry.unsubFirestore();
+      } catch {
+        // Ignore unsubscribe errors
+      }
+    });
+    m.clear();
+  };
+  clearMap(assignmentsMultiplexer);
+  clearMap(submissionsMultiplexer);
+  clearMap(lernstudioSetsMultiplexer);
+}
+
 export function subscribeAssignmentsFromFirestore(
   onUpdate: (assignments: HomeworkAssignment[]) => void,
   explicitOwnerUid?: string
@@ -1833,45 +1985,104 @@ export function subscribeAssignmentsFromFirestore(
     onUpdate([]);
     return () => {};
   }
-  const q = query(collection(db, 'homework_assignments'), where('ownerUid', '==', ownerUid));
-  return onSnapshot(
-    q,
-    (snap) => {
-      if (!explicitOwnerUid && getCurrentHomeworkOwnerUid() !== ownerUid) {
-        return;
-      }
-      const list: HomeworkAssignment[] = [];
-      snap.forEach((docSnap) => {
-        try {
-          if (docSnap.metadata?.hasPendingWrites) {
-            return;
-          }
-          const data = docSnap.data();
-          if (data?.payloadJson) {
-            const parsed = JSON.parse(data.payloadJson) as HomeworkAssignment;
-            const docOwnerUid = (typeof data.ownerUid === 'string' ? data.ownerUid.trim() : '') || (parsed.ownerUid?.trim() || '');
-            if (docOwnerUid !== ownerUid) {
+
+  const key = ownerUid;
+  let entry = assignmentsMultiplexer.get(key);
+  if (!entry) {
+    const created: SharedMultiplexerEntry<HomeworkAssignment> = {
+      listeners: new Set(),
+      lastValue: null,
+      idleTimer: null,
+      unsubFirestore: () => {}
+    };
+    const q = query(collection(db, 'homework_assignments'), where('ownerUid', '==', ownerUid));
+    created.unsubFirestore = onSnapshot(
+      q,
+      (snap) => {
+        const activeUid = getCurrentHomeworkOwnerUid();
+        if (activeUid && activeUid !== ownerUid && !explicitOwnerUid) {
+          return;
+        }
+        const list: HomeworkAssignment[] = [];
+        snap.forEach((docSnap) => {
+          try {
+            if (docSnap.metadata?.hasPendingWrites) {
               return;
             }
-            list.push({
-              ...parsed,
-              ownerUid,
-              ...(typeof data.ownerEmail === 'string' && data.ownerEmail ? { ownerEmail: data.ownerEmail } : {}),
-              ...(data.deleted === true || parsed.deleted === true ? { deleted: true, isActive: false, status: 'deleted' } : {}),
-              cloudSynced: true
-            });
+            const data = docSnap.data();
+            if (data?.payloadJson) {
+              const parsed = JSON.parse(data.payloadJson) as HomeworkAssignment;
+              const docOwnerUid =
+                (typeof data.ownerUid === 'string' ? data.ownerUid.trim() : '') ||
+                (parsed.ownerUid?.trim() || '');
+              if (docOwnerUid !== ownerUid) {
+                return;
+              }
+              list.push({
+                ...parsed,
+                ownerUid,
+                ...(typeof data.ownerEmail === 'string' && data.ownerEmail
+                  ? { ownerEmail: data.ownerEmail }
+                  : {}),
+                ...(data.deleted === true || parsed.deleted === true
+                  ? { deleted: true, isActive: false, status: 'deleted' }
+                  : {}),
+                cloudSynced: true
+              });
+            }
+          } catch {
+            // Ignore
           }
-        } catch {
-          // Ignore
-        }
-      });
-      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      onUpdate(list);
-    },
-    (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'homework_assignments');
+        });
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        created.lastValue = list;
+        created.listeners.forEach((cb) => {
+          try {
+            cb(list);
+          } catch {
+            // Ignore subscriber errors
+          }
+        });
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'homework_assignments');
+      }
+    );
+    entry = created;
+    assignmentsMultiplexer.set(key, entry);
+  }
+
+  if (entry.idleTimer) {
+    clearTimeout(entry.idleTimer);
+    entry.idleTimer = null;
+  }
+  entry.listeners.add(onUpdate);
+  if (entry.lastValue !== null) {
+    try {
+      onUpdate(entry.lastValue);
+    } catch {
+      // Ignore immediate delivery error
     }
-  );
+  }
+
+  return () => {
+    const currentEntry = assignmentsMultiplexer.get(key);
+    if (!currentEntry) return;
+    currentEntry.listeners.delete(onUpdate);
+    if (currentEntry.listeners.size === 0 && !currentEntry.idleTimer) {
+      currentEntry.idleTimer = setTimeout(() => {
+        const stale = assignmentsMultiplexer.get(key);
+        if (stale && stale.listeners.size === 0) {
+          try {
+            stale.unsubFirestore();
+          } catch {
+            // Ignore
+          }
+          assignmentsMultiplexer.delete(key);
+        }
+      }, MULTIPLEXER_IDLE_TEARDOWN_MS);
+    }
+  };
 }
 
 export async function deleteAssignmentFromFirestore(
@@ -2278,6 +2489,11 @@ export async function fetchAllSubmissionsFromFirestore(
     }
   }
 
+  if (isFirestoreReadQuotaExhausted()) {
+    if (apiList.length > 0) return apiList;
+    throw new Error('Quota exceeded: Firestore daily read quota is temporarily on cooldown.');
+  }
+
   try {
     const q = query(collection(db, 'homework_submissions'), where('ownerUid', '==', ownerUid));
     const snap = await withFirestoreReadTimeout(getDocs(q), 5000);
@@ -2325,51 +2541,106 @@ export function subscribeSubmissionsFromFirestore(
     return () => {};
   }
 
-  const q = assignmentId
-    ? query(
-        collection(db, 'homework_submissions'),
-        where('assignmentId', '==', sanitizeDocId(assignmentId)),
-        where('ownerUid', '==', ownerUid)
-      )
-    : query(collection(db, 'homework_submissions'), where('ownerUid', '==', ownerUid));
+  const safeAssignmentId = assignmentId ? sanitizeDocId(assignmentId) : null;
+  const key = `${ownerUid}::${safeAssignmentId || '__all__'}`;
+  let entry = submissionsMultiplexer.get(key);
+  if (!entry) {
+    const created: SharedMultiplexerEntry<HomeworkSubmission> = {
+      listeners: new Set(),
+      lastValue: null,
+      idleTimer: null,
+      unsubFirestore: () => {}
+    };
+    const q = safeAssignmentId
+      ? query(
+          collection(db, 'homework_submissions'),
+          where('assignmentId', '==', safeAssignmentId),
+          where('ownerUid', '==', ownerUid)
+        )
+      : query(collection(db, 'homework_submissions'), where('ownerUid', '==', ownerUid));
 
-  return onSnapshot(
-    q,
-    (snap) => {
-      if (!explicitOwnerUid && ownerUid && getCurrentHomeworkOwnerUid() !== ownerUid) {
-        return;
-      }
-      const list: HomeworkSubmission[] = [];
-      snap.forEach((docSnap) => {
-        try {
-          const data = docSnap.data();
-          if (data?.payloadJson) {
-            const parsed = JSON.parse(data.payloadJson) as HomeworkSubmission;
-            const docOwnerUid = (typeof data.ownerUid === 'string' ? data.ownerUid.trim() : '') || (parsed.ownerUid?.trim() || '');
-            if (ownerUid && docOwnerUid !== ownerUid) {
-              return;
-            }
-            list.push({
-              ...parsed,
-              ...(docOwnerUid ? { ownerUid: docOwnerUid } : {}),
-              cloudSynced: true
-            });
-          }
-        } catch {
-          // Ignore
+    created.unsubFirestore = onSnapshot(
+      q,
+      (snap) => {
+        const activeUid = getCurrentHomeworkOwnerUid();
+        if (!explicitOwnerUid && activeUid && activeUid !== ownerUid) {
+          return;
         }
-      });
-      list.sort(
-        (a, b) =>
-          new Date(b.updatedAt || b.completedAt || b.startedAt || 0).getTime() -
-          new Date(a.updatedAt || a.completedAt || a.startedAt || 0).getTime()
-      );
-      onUpdate(list);
-    },
-    (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'homework_submissions');
+        const list: HomeworkSubmission[] = [];
+        snap.forEach((docSnap) => {
+          try {
+            const data = docSnap.data();
+            if (data?.payloadJson) {
+              const parsed = JSON.parse(data.payloadJson) as HomeworkSubmission;
+              const docOwnerUid =
+                (typeof data.ownerUid === 'string' ? data.ownerUid.trim() : '') ||
+                (parsed.ownerUid?.trim() || '');
+              if (ownerUid && docOwnerUid !== ownerUid) {
+                return;
+              }
+              list.push({
+                ...parsed,
+                ...(docOwnerUid ? { ownerUid: docOwnerUid } : {}),
+                cloudSynced: true
+              });
+            }
+          } catch {
+            // Ignore
+          }
+        });
+        list.sort(
+          (a, b) =>
+            new Date(b.updatedAt || b.completedAt || b.startedAt || 0).getTime() -
+            new Date(a.updatedAt || a.completedAt || a.startedAt || 0).getTime()
+        );
+        created.lastValue = list;
+        created.listeners.forEach((cb) => {
+          try {
+            cb(list);
+          } catch {
+            // Ignore subscriber errors
+          }
+        });
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'homework_submissions');
+      }
+    );
+    entry = created;
+    submissionsMultiplexer.set(key, entry);
+  }
+
+  if (entry.idleTimer) {
+    clearTimeout(entry.idleTimer);
+    entry.idleTimer = null;
+  }
+  entry.listeners.add(onUpdate);
+  if (entry.lastValue !== null) {
+    try {
+      onUpdate(entry.lastValue);
+    } catch {
+      // Ignore immediate delivery error
     }
-  );
+  }
+
+  return () => {
+    const currentEntry = submissionsMultiplexer.get(key);
+    if (!currentEntry) return;
+    currentEntry.listeners.delete(onUpdate);
+    if (currentEntry.listeners.size === 0 && !currentEntry.idleTimer) {
+      currentEntry.idleTimer = setTimeout(() => {
+        const stale = submissionsMultiplexer.get(key);
+        if (stale && stale.listeners.size === 0) {
+          try {
+            stale.unsubFirestore();
+          } catch {
+            // Ignore
+          }
+          submissionsMultiplexer.delete(key);
+        }
+      }, MULTIPLEXER_IDLE_TEARDOWN_MS);
+    }
+  };
 }
 
 // ============================================================================
@@ -2471,30 +2742,81 @@ export function subscribeLernstudioSetsFromFirestore(
     onUpdate([]);
     return () => {};
   }
-  const q = collection(db, 'lernstudio_sets');
-  return onSnapshot(
-    q,
-    (snap) => {
-      const list: LernstudioSet[] = [];
-      snap.forEach((docSnap) => {
-        try {
-          const data = docSnap.data();
-          if (data?.deleted === true) return;
-          if (data?.payloadJson) {
-            const parsed = JSON.parse(data.payloadJson);
-            if (parsed && !parsed.deleted) {
-              list.push(parsed);
+  const key = 'shared_lernstudio_sets';
+  let entry = lernstudioSetsMultiplexer.get(key);
+  if (!entry) {
+    const created: SharedMultiplexerEntry<LernstudioSet> = {
+      listeners: new Set(),
+      lastValue: null,
+      idleTimer: null,
+      unsubFirestore: () => {}
+    };
+    const q = collection(db, 'lernstudio_sets');
+    created.unsubFirestore = onSnapshot(
+      q,
+      (snap) => {
+        const list: LernstudioSet[] = [];
+        snap.forEach((docSnap) => {
+          try {
+            const data = docSnap.data();
+            if (data?.deleted === true) return;
+            if (data?.payloadJson) {
+              const parsed = JSON.parse(data.payloadJson);
+              if (parsed && !parsed.deleted) {
+                list.push(parsed);
+              }
             }
+          } catch {
+            // Ignore
           }
-        } catch {
-          // Ignore
-        }
-      });
-      onUpdate(list);
-    },
-    (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'lernstudio_sets');
+        });
+        created.lastValue = list;
+        created.listeners.forEach((cb) => {
+          try {
+            cb(list);
+          } catch {
+            // Ignore subscriber errors
+          }
+        });
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'lernstudio_sets');
+      }
+    );
+    entry = created;
+    lernstudioSetsMultiplexer.set(key, entry);
+  }
+
+  if (entry.idleTimer) {
+    clearTimeout(entry.idleTimer);
+    entry.idleTimer = null;
+  }
+  entry.listeners.add(onUpdate);
+  if (entry.lastValue !== null) {
+    try {
+      onUpdate(entry.lastValue);
+    } catch {
+      // Ignore immediate delivery error
     }
-  );
+  }
+
+  return () => {
+    const currentEntry = lernstudioSetsMultiplexer.get(key);
+    if (!currentEntry) return;
+    currentEntry.listeners.delete(onUpdate);
+    if (currentEntry.listeners.size === 0 && !currentEntry.idleTimer) {
+      currentEntry.idleTimer = setTimeout(() => {
+        const stale = lernstudioSetsMultiplexer.get(key);
+        if (stale && stale.listeners.size === 0) {
+          try {
+            stale.unsubFirestore();
+          } catch {
+            // Ignore
+          }
+          lernstudioSetsMultiplexer.delete(key);
+        }
+      }, MULTIPLEXER_IDLE_TEARDOWN_MS);
+    }
+  };
 }
 

@@ -29,6 +29,7 @@ export const DEFAULT_HOMEWORK_QUESTION_TYPES: HomeworkQuestionType[] = [
 ];
 
 export const VERB_HOMEWORK_QUESTION_TYPES: HomeworkQuestionType[] = [
+  ...DEFAULT_HOMEWORK_QUESTION_TYPES,
   'verb_conjugation',
   'verb_sentence'
 ];
@@ -174,6 +175,7 @@ export interface HomeworkAssignment {
   createdBy: string;
   cloudSynced?: boolean;
   cloudCreatePending?: boolean; // Only true for a new assignment created offline and safe to retry under its owner account.
+  hideTeacherBranding?: boolean; // Per-homework option to hide teacher logo, name, and signatures across student screens.
 }
 
 export interface HomeworkShortLinkRecord {
@@ -193,7 +195,8 @@ export type HomeworkShortLinkResolutionStatus =
   | 'revoked'
   | 'not_found'
   | 'invalid_id'
-  | 'network_error';
+  | 'network_error'
+  | 'quota_exceeded';
 
 export interface HomeworkShortLinkResolutionResult {
   status: HomeworkShortLinkResolutionStatus;

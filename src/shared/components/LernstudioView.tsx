@@ -267,9 +267,14 @@ export const LernstudioView: React.FC<Props> = ({
   const [selectedSetForHomework, setSelectedSetForHomework] = useState<LernstudioSet | null>(null);
   const [homeworkModalInitialTab, setHomeworkModalInitialTab] = useState<'create' | 'results'>('create');
   const studentsRef = React.useRef(students);
+  const groupsRef = React.useRef(groups);
+  const backfilledUidsRef = React.useRef<Set<string>>(new Set());
   React.useEffect(() => {
     studentsRef.current = students;
   }, [students]);
+  React.useEffect(() => {
+    groupsRef.current = groups;
+  }, [groups]);
 
   const [homeworkStats, setHomeworkStats] = useState<{ assignmentsCount: number; submissionsCount: number; inProgressCount: number }>(() =>
     getHomeworkSummaryStats(students)
@@ -278,22 +283,40 @@ export const LernstudioView: React.FC<Props> = ({
   React.useEffect(() => {
     const unsubAuth = subscribeTeacherAuth((user) => {
       const nextUid = user?.uid?.trim() || null;
-      if (nextUid && user) {
+      if (nextUid && user && !backfilledUidsRef.current.has(nextUid)) {
+        const storageDoneKey = `gluck_hw_cloud_backfilled_uid_${nextUid}`;
+        let alreadyBackfilled = false;
+        try {
+          alreadyBackfilled = localStorage.getItem(storageDoneKey) === '1';
+        } catch {
+          alreadyBackfilled = false;
+        }
         const migOpts = {
           uid: nextUid,
           email: user.email,
-          ownedGroupIds: groups.map((g) => g.id),
-          ownedSetIds: sets.map((s) => s.id),
+          ownedGroupIds: (groupsRef.current || []).map((g) => g.id),
+          ownedSetIds: (setsRef.current || []).map((s) => s.id),
           ownedStudentIds: (studentsRef.current || []).map((st) => st.id)
         };
         migrateLegacyHomeworkForAccount(migOpts);
-        backfillLegacyCloudHomeworkForAccount(migOpts).catch(() => {});
+        backfilledUidsRef.current.add(nextUid);
+        if (!alreadyBackfilled) {
+          backfillLegacyCloudHomeworkForAccount(migOpts)
+            .then(() => {
+              try {
+                localStorage.setItem(storageDoneKey, '1');
+              } catch {
+                // Ignore storage errors
+              }
+            })
+            .catch(() => {});
+        }
       }
       setActiveAuthUid(nextUid);
       setHomeworkStats(getHomeworkSummaryStats(studentsRef.current));
     });
     return () => unsubAuth();
-  }, [groups.length, sets.length]);
+  }, []);
 
   // Real-time Firestore subscriptions & local event listeners for Homework Monitoring inside Lernstudio (strictly scoped by activeAuthUid)
   React.useEffect(() => {

@@ -7,6 +7,8 @@ import {
   downloadWorkspaceFromGoogleCloud,
   subscribeToRemoteWorkspaceChanges,
   isFirestoreWriteQuotaExhaustedToday,
+  isFirestoreReadQuotaExhausted,
+  isQuotaErrorLike,
   BUILTIN_LERNSTUDIO_MAP,
   getCloudSyncControlState,
   acknowledgeAppliedRemoteRevisions,
@@ -1017,7 +1019,7 @@ export function useGoogleCloudWorkspaceSync(): void {
 
         // Check Cloud-side pause and generation marker FIRST
         const controlState = await getCloudSyncControlState(uid);
-        if (controlState.isPaused) {
+        if (controlState.isPaused && !controlState.isQuotaExceeded) {
           if (typeof window !== 'undefined') {
             window.dispatchEvent(
               new CustomEvent('gluck-cloud-sync-status', {
@@ -1038,6 +1040,10 @@ export function useGoogleCloudWorkspaceSync(): void {
                 detail: { status: 'error', error: cloudRes.error }
               })
             );
+          }
+
+          if (isQuotaErrorLike(cloudRes.error) || isFirestoreReadQuotaExhausted()) {
+            return;
           }
 
           // Retry with exponential backoff if not cancelled
@@ -1087,8 +1093,11 @@ export function useGoogleCloudWorkspaceSync(): void {
             }
           }
         } else if (!remoteHasActualData && localHasData && !isFirestoreWriteQuotaExhaustedToday()) {
-          // Cloud is genuinely verified as completely empty and local has data: seed cloud once
-          const res = await uploadWorkspaceToGoogleCloud(localSnapStr, { forceFullBaseline: true });
+          // If Firestore read quota is not exhausted, cloud is genuinely empty -> seed full baseline;
+          // if read quota is on cooldown, only push incremental delta so we don't blindly overwrite unseen categories.
+          const res = await uploadWorkspaceToGoogleCloud(localSnapStr, {
+            forceFullBaseline: !isFirestoreReadQuotaExhausted()
+          });
           if (res.success) {
             lastUploadedSnapshotRef.current = stripSnapshotTimestamp(localSnapStr);
             clearPendingLocalPushFlag(uid);
@@ -1161,7 +1170,7 @@ export function useGoogleCloudWorkspaceSync(): void {
             })
           );
         }
-        if (!isCancelled && attempt <= 5) {
+        if (!isCancelled && attempt <= 5 && !isQuotaErrorLike(err) && !isFirestoreReadQuotaExhausted()) {
           const delay = Math.min(30000, 1000 * Math.pow(2, attempt - 1));
           retryTimeoutId = setTimeout(() => {
             if (!isCancelled && !hasCompletedInitialCheckRef.current) {
@@ -1211,8 +1220,10 @@ export function useGoogleCloudWorkspaceSync(): void {
       );
     });
 
+    let lastResumeDownloadMs = 0;
+
     // Android WebView / Vercel lifecycle & network recovery handlers
-    const handleResumeOrOnline = async () => {
+    const handleResumeOrOnline = async (evt?: Event) => {
       const uid = currentUserUidRef.current;
       if (!uid || isCancelled || !isAutoCloudSyncEnabled()) return;
 
@@ -1224,17 +1235,24 @@ export function useGoogleCloudWorkspaceSync(): void {
         return;
       }
 
-      // On network reconnect or foreground resume, check for any missed remote updates and flush pending local edits
-      try {
-        const remoteRes = await downloadWorkspaceFromGoogleCloud();
-        if (!isCancelled && remoteRes.hasRemoteData && remoteRes.backupJsonStr) {
-          await coordinator.enqueueRemoteSnapshot(
-            remoteRes.backupJsonStr,
-            remoteRes.docTokens
-          );
+      const isExplicitOnline = evt?.type === 'online';
+      const nowMs = Date.now();
+      const shouldFetchRemote = isExplicitOnline || nowMs - lastResumeDownloadMs >= 30_000;
+
+      if (shouldFetchRemote) {
+        lastResumeDownloadMs = nowMs;
+        // On network reconnect or foreground resume, check for any missed remote updates and flush pending local edits
+        try {
+          const remoteRes = await downloadWorkspaceFromGoogleCloud();
+          if (!isCancelled && remoteRes.hasRemoteData && remoteRes.backupJsonStr) {
+            await coordinator.enqueueRemoteSnapshot(
+              remoteRes.backupJsonStr,
+              remoteRes.docTokens
+            );
+          }
+        } catch {
+          // Ignore transient offline read error
         }
-      } catch {
-        // Ignore transient offline read error
       }
 
       if (!isCancelled && hasPendingLocalPushFlag(uid)) {

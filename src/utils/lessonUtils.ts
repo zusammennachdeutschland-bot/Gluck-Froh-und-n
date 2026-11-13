@@ -448,11 +448,20 @@ export const resequenceScheduledLessonsAfterChange = (
 };
 
 export const normalizeTime = (t?: string): string => {
-  if (!t) return '';
+  if (!t || typeof t !== 'string') return '';
   const clean = t.trim();
+  const ampmMatch = clean.match(/^(\d{1,2}):(\d{2})\s*(am|pm|ص|م)$/i);
+  if (ampmMatch) {
+    let h = parseInt(ampmMatch[1], 10);
+    const m = ampmMatch[2].padStart(2, '0');
+    const period = ampmMatch[3].toLowerCase();
+    if ((period === 'pm' || period === 'م') && h < 12) h += 12;
+    if ((period === 'am' || period === 'ص') && h === 12) h = 0;
+    return `${String(h).padStart(2, '0')}:${m}`;
+  }
   const parts = clean.split(':');
-  if (parts.length === 2) {
-    return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+  if (parts.length === 2 && /^\d{1,2}$/.test(parts[0].trim()) && /^\d{1,2}$/.test(parts[1].trim())) {
+    return `${parts[0].trim().padStart(2, '0')}:${parts[1].trim().padStart(2, '0')}`;
   }
   return clean;
 };
@@ -631,6 +640,23 @@ export const pickAuthoritativeLesson = (l1: any, l2: any): { survivor: any; dupl
   }
   if (duplicate.status === 'completed' && survivor.status !== 'completed') {
     survivor.status = 'completed';
+  } else if (
+    (duplicate.status === 'cancelled' || duplicate.status === 'in_progress' || duplicate.status === 'pending_action') &&
+    (!survivor.status || survivor.status === 'scheduled')
+  ) {
+    survivor.status = duplicate.status;
+  }
+
+  if (Math.max(t1, t2) > 0) {
+    survivor.updatedAt = Math.max(t1, t2);
+  }
+  const maxVer = Math.max(Number(l1.version) || 0, Number(l2.version) || 0);
+  if (maxVer > 0) {
+    survivor.version = maxVer;
+  }
+  const maxRev = Math.max(Number(l1.originRevision) || 0, Number(l2.originRevision) || 0);
+  if (maxRev > 0) {
+    survivor.originRevision = maxRev;
   }
 
   return { survivor, duplicate };
@@ -972,12 +998,12 @@ export const shouldRetainLessonInActiveWindow = (
  * O(1) slot key builder for 365-day lesson generation loops (#27)
  */
 export const makeLessonSlotKey = (groupId: string, date: string, time: string): string =>
-  `${groupId}_${date}_${time}`;
+  `${groupId}_${date}_${normalizeTime(time) || time}`;
 
 export const buildLessonSlotSet = (lessons: Lesson[]): Set<string> => {
   const slotSet = new Set<string>();
   for (const l of lessons) {
-    if (!l || l.deleted || l.status === 'cancelled' || !l.groupId || !l.date || !l.time) continue;
+    if (!l || l.deleted || !l.groupId || !l.date || !l.time) continue;
     slotSet.add(makeLessonSlotKey(l.groupId, l.date, l.time));
   }
   return slotSet;
