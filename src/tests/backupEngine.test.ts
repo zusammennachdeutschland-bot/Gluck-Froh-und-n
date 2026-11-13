@@ -233,6 +233,47 @@ export async function runBackupEngineTests(): Promise<{ passed: boolean; log: st
   assert.equal(findAuthenticatedPeer(peers, undefined), undefined);
   log.push('[PASS] Fix #7 & #16: Biweekly recurrence filter and strict sync pairingToken authentication verified');
 
+  // 10. Preserve all valid LessonStatus values (in_progress, pending_action, completed, cancelled, scheduled) & activeLessonSessionState
+  const sessionStatusPayload = {
+    version: '2.0.0',
+    data: {
+      groups: [{ id: 'g_sync', name: 'A2 Abend', pricePerSession: 200 }],
+      lessons: [
+        { id: 'les_ip', groupId: 'g_sync', date: '2026-11-13', status: 'in_progress' },
+        { id: 'les_pa', groupId: 'g_sync', date: '2026-11-14', status: 'pending_action' },
+        { id: 'les_co', groupId: 'g_sync', date: '2026-11-12', status: 'completed' },
+        { id: 'les_ca', groupId: 'g_sync', date: '2026-11-11', status: 'cancelled' },
+        { id: 'les_sc', groupId: 'g_sync', date: '2026-11-15', status: 'scheduled' },
+        { id: 'les_bad', groupId: 'g_sync', date: '2026-11-16', status: 'unknown_legacy' },
+      ],
+      activeLessonSessionState: {
+        updatedAt: 999999,
+        session: {
+          lessonId: 'les_ip',
+          lessonTitle: 'A2 Abend Lektion',
+          groupName: 'A2 Abend',
+          startedAt: 999000,
+          accumulatedSeconds: 120,
+          durationMinutes: 60,
+          isRunning: true,
+          startTimeStr: '18:00',
+          updatedAt: 999999,
+        },
+      },
+    },
+  };
+  const sanitizedSessions = validateAndSanitizeBackupPayload(sessionStatusPayload);
+  assert.equal(sanitizedSessions.isValid, true);
+  assert.equal(sanitizedSessions.data.lessons.find((l: any) => l.id === 'les_ip')?.status, 'in_progress');
+  assert.equal(sanitizedSessions.data.lessons.find((l: any) => l.id === 'les_pa')?.status, 'pending_action');
+  assert.equal(sanitizedSessions.data.lessons.find((l: any) => l.id === 'les_co')?.status, 'completed');
+  assert.equal(sanitizedSessions.data.lessons.find((l: any) => l.id === 'les_ca')?.status, 'cancelled');
+  assert.equal(sanitizedSessions.data.lessons.find((l: any) => l.id === 'les_sc')?.status, 'scheduled');
+  assert.equal(sanitizedSessions.data.lessons.find((l: any) => l.id === 'les_bad')?.status, 'scheduled');
+  assert.equal(sanitizedSessions.data.activeLessonSessionState?.session?.lessonId, 'les_ip');
+  assert.equal(sanitizedSessions.data.activeLessonSessionState?.updatedAt, 999999);
+  log.push('[PASS] validateAndSanitizeBackupPayload preserves in_progress, pending_action, completed, cancelled, scheduled & activeLessonSessionState');
+
   return { passed: true, log };
 }
 

@@ -20,7 +20,7 @@ import { resolveLinkedOnlineHomeworkForLesson } from '../utils/lessonHomeworkLin
 import { getPendingHomeworkFollowUps } from '../utils/homeworkFollowUpUtils';
 import { buildWhatsAppUrl, formatWhatsAppPhone, resolveStudentWhatsAppContact } from '../utils/phoneUtils';
 import { getTeacherArabicName, getTeacherEnglishName } from '../utils/teacherUtils';
-import { calculateSequentialSessionNumber, resolveLessonCycleNumber, computeStartingSessionNumberForTargetLesson, isGroupPerLesson } from '../utils/lessonUtils';
+import { calculateSequentialSessionNumber, resolveLessonCycleNumber, computeStartingSessionNumberForTargetLesson, isGroupPerLesson, shouldShowLessonPaymentCollection } from '../utils/lessonUtils';
 import { getStudentCyclePricing } from '../utils/paymentUtils';
 import { isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
 
@@ -332,7 +332,7 @@ export const LessonControlModal: React.FC = () => {
         // Individual lesson - initialize for single student
         const targetSt = students.find(s => 
           (selectedLesson.studentId && s.id === selectedLesson.studentId) || 
-          (selectedLesson.studentName && s.name.trim().toLowerCase() === selectedLesson.studentName.trim().toLowerCase())
+          (selectedLesson.studentName && typeof s.name === 'string' && s.name.trim().toLowerCase() === selectedLesson.studentName.trim().toLowerCase())
         );
         if (targetSt) {
           setStudentAttendance({ [targetSt.id]: 'present' });
@@ -471,7 +471,7 @@ export const LessonControlModal: React.FC = () => {
 
   const targetStudent = students.find(s => 
     (selectedLesson.studentId && s.id === selectedLesson.studentId) || 
-    (selectedLesson.studentName && s.name.trim().toLowerCase() === selectedLesson.studentName.trim().toLowerCase())
+    (selectedLesson.studentName && typeof s.name === 'string' && s.name.trim().toLowerCase() === selectedLesson.studentName.trim().toLowerCase())
   ) || (!isQuick && selectedLesson.groupId ? students.find(s => s.groupId === selectedLesson.groupId) : undefined);
   
   const quickStudentSynthetic: Student = {
@@ -493,15 +493,18 @@ export const LessonControlModal: React.FC = () => {
         ? students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === selectedLesson.groupId && (!selectedLesson.date || isStudentMatchingLessonWeek(s.scheduleRecurrence, selectedLesson.date) || selectedLesson.report?.studentAttendance?.[s.id] !== undefined))
         : (targetStudent && !targetStudent.deleted && targetStudent.status !== 'archived' ? [targetStudent] : []));
   
+  const safeLessonTitle = typeof selectedLesson.title === 'string' ? selectedLesson.title : '';
+  const safeLessonTitleLower = safeLessonTitle.toLowerCase();
+  const safeCleanLessonTitleLower = safeLessonTitle.replace(/Lektion|حصة|درس/gi, '').trim().toLowerCase();
   const targetGroup = groups.find(g => g.id === selectedLesson.groupId)
     || (targetStudent?.groupId ? groups.find(g => g.id === targetStudent.groupId) : undefined)
-    || (selectedLesson.groupName ? groups.find(g => g.name.trim().toLowerCase() === selectedLesson.groupName.trim().toLowerCase()) : undefined)
-    || groups.find(g => g.name && selectedLesson.title.toLowerCase().includes(g.name.toLowerCase()))
-    || groups.find(g => g.name && g.name.toLowerCase().includes(selectedLesson.title.replace(/Lektion|حصة|درس/gi, '').trim().toLowerCase()));
+    || (selectedLesson.groupName ? groups.find(g => typeof g.name === 'string' && g.name.trim().toLowerCase() === selectedLesson.groupName.trim().toLowerCase()) : undefined)
+    || (safeLessonTitleLower ? groups.find(g => typeof g.name === 'string' && g.name.trim() && safeLessonTitleLower.includes(g.name.toLowerCase())) : undefined)
+    || (safeCleanLessonTitleLower ? groups.find(g => typeof g.name === 'string' && g.name.trim() && g.name.toLowerCase().includes(safeCleanLessonTitleLower)) : undefined);
   const isPerLessonGroup = Boolean(
     isGroupPerLesson(targetGroup) ||
-    (targetStudent && (targetStudent.paymentPlan === 'per_lesson' || targetStudent.bundleSize === 1)) ||
-    selectedLesson.totalSessionsInPackage === 1
+    (!targetGroup && targetStudent && (targetStudent.paymentPlan === 'per_lesson' || targetStudent.bundleSize === 1)) ||
+    (!targetGroup && !targetStudent && selectedLesson.totalSessionsInPackage === 1)
   );
   // Each group already has its cycle session count recorded in its settings!
   const cycleTotalSessions = isPerLessonGroup
@@ -527,6 +530,22 @@ export const LessonControlModal: React.FC = () => {
   const currentSessionNumber = rawSessionNumber > cycleTotalSessions
     ? (((rawSessionNumber - 1) % cycleTotalSessions) + 1)
     : Math.max(1, rawSessionNumber);
+
+  const shouldShowPaymentCollection = shouldShowLessonPaymentCollection({
+    isQuick,
+    isPerLessonGroup,
+    currentSessionNumber,
+    cycleTotalSessions
+  });
+
+  const getCollectionFeeForStudent = (st?: Student): number => {
+    if (!st) return selectedLesson.amountDue || 200;
+    const stPricing = getStudentCyclePricing(st, targetGroup);
+    if (isPerLessonGroup || stPricing.cycleLength <= 1) {
+      return stPricing.pricePerSession || 200;
+    }
+    return stPricing.amountDue || (stPricing.pricePerSession ? stPricing.pricePerSession * cycleTotalSessions : 200);
+  };
 
   const handleUpdateSessionNumber = (newNumber: number) => {
     if (!selectedLesson || newNumber < 1) return;
@@ -588,8 +607,7 @@ export const LessonControlModal: React.FC = () => {
   const handleTogglePaymentPaid = (markPaid: boolean, stId?: string) => {
     if (stId) {
       const targetSt = students.find(s => s.id === stId);
-      const pricing = targetSt ? getStudentCyclePricing(targetSt, targetGroup) : null;
-      const fee = pricing?.pricePerSession || 200;
+      const fee = getCollectionFeeForStudent(targetSt);
       setStudentPayments(prev => ({
         ...prev,
         [stId]: {
@@ -620,8 +638,7 @@ export const LessonControlModal: React.FC = () => {
     if (isGroup) {
       const newMap: Record<string, { status: PaymentStatus; amount: number }> = {};
       activeLessonStudents.forEach(st => {
-        const pricing = getStudentCyclePricing(st, targetGroup);
-        const fee = pricing?.pricePerSession || 200;
+        const fee = getCollectionFeeForStudent(st);
         newMap[st.id] = {
           status: markPaid ? 'paid' : 'pending',
           amount: markPaid ? fee : 0
@@ -856,34 +873,39 @@ export const LessonControlModal: React.FC = () => {
       studentExamGrade: isSingleStudentAbsent ? {} : finalStudentExamGrade,
       studentNotes: isQuick ? (Object.keys(studentNotes).length > 0 ? studentNotes : { [qId]: selectedLesson.quickNotes || '' }) : finalStudentNotes,
       studentPerformance,
-      paymentStatus: (activeLessonStudents.length > 1)
-        ? (activeLessonStudents.every(st => studentPayments[st.id]?.status === 'paid') ? 'paid' : (activeLessonStudents.some(st => studentPayments[st.id]?.status === 'paid') ? 'partial' : 'pending'))
-        : (isLessonPaid ? 'paid' : (selectedLesson.paymentStatus || 'pending')),
-      amountPaid: (activeLessonStudents.length > 1)
-        ? Object.values(studentPayments).reduce((sum, sp: any) => sum + (sp?.status === 'paid' ? (sp.amount || 0) : 0), 0)
-        : (isLessonPaid ? paymentAmountInput : (selectedLesson.amountPaid || 0)),
-      studentPayments: (activeLessonStudents.length > 1)
-        ? (() => {
-            const finalMap: Record<string, { status: PaymentStatus; amount: number }> = {};
-            activeLessonStudents.forEach(st => {
-              const p = studentPayments[st.id];
-              const pricing = getStudentCyclePricing(st, targetGroup);
-              const fee = pricing?.pricePerSession || 200;
-              finalMap[st.id] = {
-                status: p?.status || 'pending',
-                amount: p?.status === 'paid' ? (p.amount || fee) : 0
-              };
-            });
-            return finalMap;
-          })()
-        : (Object.keys(studentPayments).length > 0 
-            ? studentPayments
-            : (isLessonPaid && selectedLesson.studentId ? {
-                [selectedLesson.studentId]: {
-                  status: 'paid' as PaymentStatus,
-                  amount: paymentAmountInput
-                }
-              } : undefined)),
+      paymentStatus: !shouldShowPaymentCollection
+        ? (selectedLesson.paymentStatus || 'pending')
+        : (activeLessonStudents.length > 1)
+          ? (activeLessonStudents.every(st => studentPayments[st.id]?.status === 'paid') ? 'paid' : (activeLessonStudents.some(st => studentPayments[st.id]?.status === 'paid') ? 'partial' : 'pending'))
+          : (isLessonPaid ? 'paid' : (selectedLesson.paymentStatus || 'pending')),
+      amountPaid: !shouldShowPaymentCollection
+        ? (selectedLesson.amountPaid || 0)
+        : (activeLessonStudents.length > 1)
+          ? Object.values(studentPayments).reduce((sum, sp: any) => sum + (sp?.status === 'paid' ? (sp.amount || 0) : 0), 0)
+          : (isLessonPaid ? paymentAmountInput : (selectedLesson.amountPaid || 0)),
+      studentPayments: !shouldShowPaymentCollection
+        ? undefined
+        : (activeLessonStudents.length > 1)
+          ? (() => {
+              const finalMap: Record<string, { status: PaymentStatus; amount: number }> = {};
+              activeLessonStudents.forEach(st => {
+                const p = studentPayments[st.id];
+                const fee = getCollectionFeeForStudent(st);
+                finalMap[st.id] = {
+                  status: p?.status || 'pending',
+                  amount: p?.status === 'paid' ? (p.amount || fee) : 0
+                };
+              });
+              return finalMap;
+            })()
+          : (Object.keys(studentPayments).length > 0 
+              ? studentPayments
+              : (isLessonPaid && selectedLesson.studentId ? {
+                  [selectedLesson.studentId]: {
+                    status: 'paid' as PaymentStatus,
+                    amount: paymentAmountInput
+                  }
+                } : undefined)),
       savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
@@ -894,26 +916,28 @@ export const LessonControlModal: React.FC = () => {
       totalSessionsInPackage: cycleTotalSessions,
       paymentStatus: reportData.paymentStatus,
       amountPaid: reportData.amountPaid,
-      studentPayments: reportData.studentPayments as any,
+      ...(reportData.studentPayments ? { studentPayments: reportData.studentPayments as any } : {}),
       recordingLink: lessonRecordingLink.trim() || undefined,
       recordingLink2: lessonRecordingLink2.trim() || undefined,
       report: reportData
     });
 
-    const targetAcc = selectedReceivingAccountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
-    if (activeLessonStudents.length > 1) {
-      // In group lesson, update individual student payments safely
-      activeLessonStudents.forEach(st => {
-        const sp = reportData.studentPayments?.[st.id];
-        if (sp?.status === 'paid' && sp.amount > 0) {
-          updateLessonPaymentStatus(selectedLesson.id, 'paid', sp.amount, targetAcc, st.id);
+    if (shouldShowPaymentCollection) {
+      const targetAcc = selectedReceivingAccountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
+      if (activeLessonStudents.length > 1) {
+        // In group lesson, update individual student payments safely
+        activeLessonStudents.forEach(st => {
+          const sp = reportData.studentPayments?.[st.id];
+          if (sp?.status === 'paid' && sp.amount > 0) {
+            updateLessonPaymentStatus(selectedLesson.id, 'paid', sp.amount, targetAcc, st.id);
+          }
+        });
+      } else {
+        if (isLessonPaid && paymentAmountInput > 0) {
+          updateLessonPaymentStatus(selectedLesson.id, 'paid', paymentAmountInput, targetAcc, selectedLesson.studentId || targetStudent?.id);
+        } else if (!isLessonPaid && selectedLesson.paymentStatus === 'paid') {
+          updateLessonPaymentStatus(selectedLesson.id, 'pending', 0, undefined, selectedLesson.studentId || targetStudent?.id);
         }
-      });
-    } else {
-      if (isLessonPaid && paymentAmountInput > 0) {
-        updateLessonPaymentStatus(selectedLesson.id, 'paid', paymentAmountInput, targetAcc, selectedLesson.studentId || targetStudent?.id);
-      } else if (!isLessonPaid && selectedLesson.paymentStatus === 'paid') {
-        updateLessonPaymentStatus(selectedLesson.id, 'pending', 0, undefined, selectedLesson.studentId || targetStudent?.id);
       }
     }
     endActiveLessonTimer();
@@ -2006,7 +2030,7 @@ export const LessonControlModal: React.FC = () => {
                           const lastSessionHwStatus = (() => {
                             const studentLessons = lessons.filter(l => 
                               l.status === 'completed' && l.report && 
-                              (l.groupId === st.groupId || l.studentId === st.id || l.studentName?.trim().toLowerCase() === st.name.trim().toLowerCase())
+                              (l.groupId === st.groupId || l.studentId === st.id || (typeof st.name === 'string' && l.studentName?.trim().toLowerCase() === st.name.trim().toLowerCase()))
                             );
                             const completedLessons = [...studentLessons].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
                             const lastLessonWithReport = completedLessons.find(l => l.id !== selectedLesson.id && l.report);
@@ -2318,6 +2342,7 @@ export const LessonControlModal: React.FC = () => {
                     </div>
 
                     {/* PAYMENT COLLECTION & FINANCE RECORDING CARD */}
+                    {shouldShowPaymentCollection && (
                     <div className="p-3 bg-surface-hover/80 dark:bg-slate-800/60 border border-surface-border rounded-xl space-y-2.5">
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
@@ -2374,8 +2399,7 @@ export const LessonControlModal: React.FC = () => {
                       {activeLessonStudents.length > 1 ? (
                         <div className="space-y-1.5 pt-1">
                           {activeLessonStudents.map(st => {
-                            const stPricing = getStudentCyclePricing(st, targetGroup);
-                            const stFee = stPricing?.pricePerSession || 200;
+                            const stFee = getCollectionFeeForStudent(st);
                             const isPaid = studentPayments[st.id]?.status === 'paid';
                             return (
                               <div
@@ -2532,6 +2556,7 @@ export const LessonControlModal: React.FC = () => {
                         </div>
                       )}
                     </div>
+                    )}
 
                     {/* Validation Alerts */}
                     {!isReportFormValid && (

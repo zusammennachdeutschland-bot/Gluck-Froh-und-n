@@ -34,7 +34,8 @@ import {
   mergeRecentlyDeleted,
   mergePurgedTombstones,
   mergeDismissedDashboardLessons,
-  enforcePurgedTombstonesOnWorkspace
+  enforcePurgedTombstonesOnWorkspace,
+  stampFieldTimestamps
 } from '../services/sync/mergeEngine';
 import { runSyncCycle, forceFullSync, SyncDataSource } from '../services/sync/syncOrchestrator';
 import { calculatePendingOutbox } from '../services/sync/deltaBuilder';
@@ -666,7 +667,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [profile, setProfile] = useState<TeacherProfile>(() => {
     const saved = initialData['dl_profile'];
-    const isCompleted = typeof window !== 'undefined' && localStorage.getItem('dl_setup_completed') === 'true';
+    const hasSavedValidProfile = Boolean(
+      saved &&
+      typeof saved.displayName === 'string' &&
+      saved.displayName.trim() !== '' &&
+      saved.displayName.trim() !== 'Teacher' &&
+      saved.displayName.trim() !== 'أ. أحمد محمود'
+    );
+    const isCompleted =
+      (typeof window !== 'undefined' && localStorage.getItem('dl_setup_completed') === 'true') ||
+      hasSavedValidProfile;
+    if (hasSavedValidProfile && typeof window !== 'undefined') {
+      try {
+        if (localStorage.getItem('dl_setup_completed') !== 'true') {
+          localStorage.setItem('dl_setup_completed', 'true');
+        }
+      } catch {
+        // Ignore restricted localStorage
+      }
+    }
     if (!isCompleted) {
       return {
         id: 't1',
@@ -1990,6 +2009,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   // Lesson Control Modal state
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
+  const selectedLessonRef = useRef<Lesson | null>(null);
+  useEffect(() => {
+    selectedLessonRef.current = selectedLesson;
+  }, [selectedLesson]);
   const [isControlModalOpen, setIsControlModalOpen] = useState(false);
 
   // Dashboard Dismissed Lessons state
@@ -2518,11 +2541,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   useEffect(() => {
     if (!groups || groups.length === 0) return;
 
+    const sourceLessons = (fullLessonsRef.current && fullLessonsRef.current.length > 0)
+      ? fullLessonsRef.current
+      : lessons;
     const newAutoLessons: Lesson[] = [];
     const today = new Date();
-    const existingSlotSet = buildLessonSlotSet(lessons);
+    const existingSlotSet = buildLessonSlotSet(sourceLessons);
     const groupLessonCounts = new Map<string, number>();
-    for (const l of lessons) {
+    for (const l of sourceLessons) {
       if (!l.deleted && l.status !== 'cancelled' && l.groupId) {
         groupLessonCounts.set(l.groupId, (groupLessonCounts.get(l.groupId) || 0) + 1);
       }
@@ -2557,16 +2583,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           const slotKey = makeLessonSlotKey(group.id, dateStr, sessionTime);
           const autoLessonId = `l_auto_${group.id}_${dateStr}_${sessionTime.replace(':', '')}`;
 
-          // If this slot was explicitly pruned or already completed on this date, do not auto-generate
+          // If this slot was explicitly pruned or already exists with a non-deleted record, do not auto-generate
           if (prunedIds.has(autoLessonId)) continue;
+          if (sourceLessons.some(l => l && l.id === autoLessonId)) continue;
 
-          // If group already has a completed session on this date, do not auto-generate another scheduled session
-          const existingForGroupOnDate = lessons.filter(l => l.groupId === group.id && l.date === dateStr && !l.deleted);
-          const hasCompletedOnDate = existingForGroupOnDate.some(
-            l => l.status === 'completed' || (l.report && l.report.attendanceStatus)
+          // If group already has a completed, cancelled, or in-progress session on this date, do not auto-generate another scheduled session
+          const existingForGroupOnDate = sourceLessons.filter(l => l.groupId === group.id && l.date === dateStr && !l.deleted);
+          const hasHandledOnDate = existingForGroupOnDate.some(
+            l => l.status === 'completed' || l.status === 'cancelled' || l.status === 'in_progress' || (l.report && l.report.attendanceStatus)
           );
           const daySlotsCount = slots.filter(s => getDayNumber(s.day) === dayNum).length || 1;
-          if (hasCompletedOnDate && existingForGroupOnDate.length >= daySlotsCount) {
+          if (hasHandledOnDate && existingForGroupOnDate.length >= daySlotsCount) {
             continue;
           }
 
@@ -2578,7 +2605,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             groupAddedCount += 1;
 
             newAutoLessons.push(wrapMutation({
-              id: `l_auto_${group.id}_${dateStr}_${sessionTime.replace(':', '')}`,
+              id: autoLessonId,
               groupId: group.id,
               groupName: group.name,
               title: `${group.name} Lektion`,
@@ -2596,7 +2623,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               meetingLink: group.type === 'online' ? (group.zoomLink || profile.defaultZoomLink) : undefined,
               locationAddress: group.type === 'offline' ? (group.address || 'Cairo Center') : undefined,
               scheduleRecurrence: group.scheduleRecurrence || 'weekly',
-              biweeklyWeek: getAlternatingWeek(d)
+              biweeklyWeek: getAlternatingWeek(d),
+              isAutoGenerated: true
             } as Lesson));
           }
         }
@@ -2604,10 +2632,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     });
 
     if (newAutoLessons.length > 0) {
-      setLessons(prev => {
+      updateFullLessonsStorage(prev => {
         const prevSlotSet = buildLessonSlotSet(prev);
+        const prevIdSet = new Set(prev.map(l => l?.id).filter(Boolean));
         const deduplicated = newAutoLessons.filter(
-          nl => !prevSlotSet.has(makeLessonSlotKey(nl.groupId || '', nl.date, nl.time))
+          nl => !prevIdSet.has(nl.id) && !prevSlotSet.has(makeLessonSlotKey(nl.groupId || '', nl.date, nl.time))
         );
         return deduplicated.length > 0 ? [...prev, ...deduplicated] : prev;
       });
@@ -4652,13 +4681,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       let previousStatus: LessonStatus | undefined;
       let previousDate: string | undefined;
       let previousTime: string | undefined;
+      const isExplicitFieldEdit =
+        updates.status !== undefined ||
+        updates.date !== undefined ||
+        updates.time !== undefined ||
+        updates.report !== undefined;
       let updated = allLessons.map(l => {
         if (l.id === id) {
           found = true;
           previousStatus = l.status;
           previousDate = l.date;
           previousTime = l.time;
-          const mutated = wrapMutation({ ...l, ...updates } as Lesson);
+          const nextRaw = {
+            ...l,
+            ...updates,
+            ...(isExplicitFieldEdit ? { isAutoGenerated: false } : {})
+          } as Lesson;
+          const mutated = stampFieldTimestamps(l, wrapMutation(nextRaw));
           targetItem = mutated;
           return mutated;
         }
@@ -4672,7 +4711,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           previousStatus = base.status;
           previousDate = base.date;
           previousTime = base.time;
-          const mutated = wrapMutation({ ...base, ...updates } as Lesson);
+          const nextRaw = {
+            ...base,
+            ...updates,
+            ...(isExplicitFieldEdit ? { isAutoGenerated: false } : {})
+          } as Lesson;
+          const mutated = stampFieldTimestamps(base, wrapMutation(nextRaw));
           targetItem = mutated;
           updated.unshift(mutated);
         }
@@ -4802,7 +4846,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   const saveLessonReport = (lessonId: string, report: LessonReport, packageCount?: number, sessionNumber?: number) => {
-    const targetLesson = (fullLessonsRef.current || []).find(l => l.id === lessonId) || lessons.find(l => l.id === lessonId);
+    const targetLesson =
+      (fullLessonsRef.current || []).find(l => l.id === lessonId) ||
+      lessons.find(l => l.id === lessonId) ||
+      (selectedLesson && selectedLesson.id === lessonId ? selectedLesson : undefined);
     if (!targetLesson) return;
 
     const targetGroup = groups.find(g => g.id === targetLesson.groupId || (g.name && targetLesson.groupId && g.name.trim().toLowerCase() === targetLesson.groupId.trim().toLowerCase()));
@@ -4846,9 +4893,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const updated = allLessons.map(l => {
         if (l.id === lessonId) {
           found = true;
-          return wrapMutation({
+          const mutated = wrapMutation({
             ...l,
             status: 'completed',
+            isAutoGenerated: false,
             sessionNumber: finalSessionNumber,
             totalSessionsInPackage: updatedTotalSessions,
             topic: report.arabicTopicsExplained || report.teacherNotes || (l as any).topic,
@@ -4859,25 +4907,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             studentPayments: Object.keys(updatedStudentPayments).length > 0 ? updatedStudentPayments : l.studentPayments,
             report
           } as Lesson);
+          return stampFieldTimestamps(l, mutated);
         }
         return l;
       });
 
       const withCompleted = !found
         ? [
-            wrapMutation({
-              ...targetLesson,
-              status: 'completed',
-              sessionNumber: finalSessionNumber,
-              totalSessionsInPackage: updatedTotalSessions,
-              topic: report.arabicTopicsExplained || report.teacherNotes || (targetLesson as any).topic,
-              paymentStatus: report.paymentStatus !== undefined ? report.paymentStatus : (targetLesson.paymentStatus || 'pending'),
-              amountPaid: report.amountPaid !== undefined ? report.amountPaid : (targetLesson.amountPaid ?? finalAmountPaid),
-              recordingLink: report.recordingLink !== undefined ? report.recordingLink : targetLesson.recordingLink,
-              recordingLink2: report.recordingLink2 !== undefined ? report.recordingLink2 : targetLesson.recordingLink2,
-              studentPayments: Object.keys(updatedStudentPayments).length > 0 ? updatedStudentPayments : targetLesson.studentPayments,
-              report
-            } as Lesson),
+            stampFieldTimestamps(
+              targetLesson,
+              wrapMutation({
+                ...targetLesson,
+                status: 'completed',
+                isAutoGenerated: false,
+                sessionNumber: finalSessionNumber,
+                totalSessionsInPackage: updatedTotalSessions,
+                topic: report.arabicTopicsExplained || report.teacherNotes || (targetLesson as any).topic,
+                paymentStatus: report.paymentStatus !== undefined ? report.paymentStatus : (targetLesson.paymentStatus || 'pending'),
+                amountPaid: report.amountPaid !== undefined ? report.amountPaid : (targetLesson.amountPaid ?? finalAmountPaid),
+                recordingLink: report.recordingLink !== undefined ? report.recordingLink : targetLesson.recordingLink,
+                recordingLink2: report.recordingLink2 !== undefined ? report.recordingLink2 : targetLesson.recordingLink2,
+                studentPayments: Object.keys(updatedStudentPayments).length > 0 ? updatedStudentPayments : targetLesson.studentPayments,
+                report
+              } as Lesson)
+            ),
             ...updated
           ]
         : updated;
@@ -5214,6 +5267,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
 
     if (activeLessonSession && activeLessonSession.lessonId === lessonId) {
+      const clearedAt = Date.now();
+      activeLessonSessionUpdatedAtRef.current = clearedAt;
+      storage.setItem('dl_active_lesson_session_updated_at', clearedAt);
       setActiveLessonSession(null);
       clearActiveLessonNotification();
       storage.removeItem('dl_active_lesson_session');
@@ -5240,9 +5296,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             ? (existingNotes ? `${existingNotes} | Absage-Notiz: ${notes}` : `Absage-Notiz: ${notes}`) 
             : existingNotes;
 
-          return wrapMutation({
+          const mutated = wrapMutation({
             ...l,
             status: 'cancelled' as LessonStatus,
+            isAutoGenerated: false,
             paymentStatus: 'pending' as PaymentStatus,
             report: l.report ? {
               ...l.report,
@@ -5256,23 +5313,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             }
           } as Lesson);
+          return stampFieldTimestamps(l, mutated);
         }
         return l;
       });
 
       if (!found && target) {
         const combinedNotes = notes ? `Absage-Notiz: ${notes}` : 'Lektion abgesagt';
-        const cancelledBase: Lesson = wrapMutation({
-          ...target,
-          status: 'cancelled' as LessonStatus,
-          paymentStatus: 'pending' as PaymentStatus,
-          report: {
-            homeworkStatus: 'not_completed' as HomeworkStatus,
-            paymentStatus: 'pending',
-            teacherNotes: combinedNotes,
-            savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          }
-        } as Lesson);
+        const cancelledBase: Lesson = stampFieldTimestamps(
+          target,
+          wrapMutation({
+            ...target,
+            status: 'cancelled' as LessonStatus,
+            isAutoGenerated: false,
+            paymentStatus: 'pending' as PaymentStatus,
+            report: {
+              homeworkStatus: 'not_completed' as HomeworkStatus,
+              paymentStatus: 'pending',
+              teacherNotes: combinedNotes,
+              savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            }
+          } as Lesson)
+        );
         updated.unshift(cancelledBase);
       }
 
@@ -5310,6 +5372,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
 
     if (activeLessonSession && activeLessonSession.lessonId === lessonId) {
+      const clearedAt = Date.now();
+      activeLessonSessionUpdatedAtRef.current = clearedAt;
+      storage.setItem('dl_active_lesson_session_updated_at', clearedAt);
       setActiveLessonSession(null);
       clearActiveLessonNotification();
       storage.removeItem('dl_active_lesson_session');
@@ -6506,6 +6571,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       pickerNames,
       recentlyDeleted: recDeleted,
       dismissedDashboardLessons: dismissedLessons,
+      activeLessonSessionState: {
+        session: activeLessonSession || null,
+        updatedAt: activeLessonSessionUpdatedAtRef.current || activeLessonSession?.updatedAt || 0
+      },
       syncQueue: []
     };
 
@@ -6631,6 +6700,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         fullLessonsRef.current = dedupedLessons;
         await writeAndTrack('dl_lessons', dedupedLessons);
         setLessons(filterActiveLessons(dedupedLessons));
+
+        if (selectedLessonRef.current) {
+          const refreshedSelected = dedupedLessons.find((l: any) => l && l.id === selectedLessonRef.current?.id);
+          if (refreshedSelected && !refreshedSelected.deleted) {
+            setSelectedLesson(refreshedSelected);
+          }
+        }
+        if (activeLessonSession) {
+          const activeTarget = dedupedLessons.find((l: any) => l && l.id === activeLessonSession.lessonId);
+          if (!activeTarget || activeTarget.deleted || activeTarget.status === 'completed' || activeTarget.status === 'cancelled') {
+            const clearedAt = Date.now();
+            activeLessonSessionUpdatedAtRef.current = clearedAt;
+            await writeAndTrack('dl_active_lesson_session_updated_at', clearedAt);
+            setActiveLessonSession(null);
+            storage.removeItem('dl_active_lesson_session');
+          }
+        }
       } else if (activePurged.length > 0 && (fullLessonsRef.current?.length || 0) > 0) {
         const allLocalLessons = fullLessonsRef.current || [];
         const sweptLessons = mergeEntities(allLocalLessons, [], { entityTypeName: 'lesson', purgedRecords: activePurged }).merged;
@@ -6639,6 +6725,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           fullLessonsRef.current = sweptLessons;
           await writeAndTrack('dl_lessons', sweptLessons);
           setLessons(filterActiveLessons(sweptLessons));
+        }
+      }
+
+      if (hasBackupSection(parsed, 'activeLessonSessionState') && (data as any).activeLessonSessionState) {
+        const incomingSessionState = (data as any).activeLessonSessionState;
+        const incomingSessionUpdatedAt = typeof incomingSessionState.updatedAt === 'number' ? incomingSessionState.updatedAt : 0;
+        if (incomingSessionUpdatedAt > activeLessonSessionUpdatedAtRef.current) {
+          const nextSession = incomingSessionState.session && typeof incomingSessionState.session.lessonId === 'string'
+            ? incomingSessionState.session
+            : null;
+          const matchingLesson = nextSession
+            ? finalLessonsForTrashReconcile.find((l: any) => l && l.id === nextSession.lessonId)
+            : null;
+          const isTargetActive =
+            nextSession &&
+            (!matchingLesson || (!matchingLesson.deleted && matchingLesson.status !== 'completed' && matchingLesson.status !== 'cancelled'));
+          activeLessonSessionUpdatedAtRef.current = incomingSessionUpdatedAt;
+          await writeAndTrack('dl_active_lesson_session_updated_at', incomingSessionUpdatedAt);
+          if (isTargetActive && nextSession) {
+            setActiveLessonSession(nextSession);
+            await writeAndTrack('dl_active_lesson_session', nextSession);
+          } else {
+            setActiveLessonSession(null);
+            storage.removeItem('dl_active_lesson_session');
+          }
         }
       }
 
@@ -6887,8 +6998,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             .filter(Boolean)
         );
 
+        const activePurgedIdSet = new Set<string>(
+          (activePurged || []).map((p: any) => String(p?.id || '').trim()).filter(Boolean)
+        );
         const incomingHw = (Array.isArray(data.homeworkAssignments) ? data.homeworkAssignments : []).filter((hw: any) => {
           if (!hw || !hw.id) return false;
+          // Ignore synthetic { deleted: true, version: 999 } delta watermark tombstones unless backed by an explicit purge tombstone
+          if (hw.deleted === true && hw.version === 999 && !activePurgedIdSet.has(String(hw.id).trim())) {
+            return false;
+          }
           if (activeUid) {
             const claim = canAccountClaimLegacyHomework(hw, {
               uid: activeUid,
@@ -6901,9 +7019,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           }
           return !hw.ownerUid;
         });
+        const purgedIdsForAssignments = (activePurged || []).filter((p: any) => {
+          const pType = p?.type || p?.entityType;
+          return pType === 'homeworkAssignments' || pType === 'homeworkAssignment';
+        });
         const mergedHw = mergeEntities(localHw, incomingHw, {
           entityTypeName: 'homeworkAssignments',
-          purgedRecords: activePurged
+          purgedRecords: purgedIdsForAssignments
         }).merged
           .filter((hw: any) => hw && hw.id && !hw.deleted && !isAssignmentDeletedLocally(hw.id))
           .map((hw: any) => (activeUid ? { ...hw, ownerUid: activeUid } : hw));
@@ -7035,28 +7157,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       storage.setItem(getAssignmentsStorageKey(), remainingAssignments).catch(() => {});
       storage.setItem(getSubmissionsStorageKey(), remainingSubmissions).catch(() => {});
 
-      const newTombstone: PurgedRecordTombstone = {
-        id: assignmentId,
-        type: 'homeworkAssignments' as any,
-        purgedAt: new Date().toISOString(),
-        updatedAt: Date.now()
-      };
-      setRecentlyDeleted((prev) => {
-        const current = prev || { students: [], groups: [], lessons: [], purgedRecords: [] };
-        const mergedPurged = mergePurgedTombstones(current.purgedRecords || [], [newTombstone]);
-        const next = { ...current, purgedRecords: mergedPurged };
-        recentlyDeletedRef.current = next;
-        storage.setItem('dl_recently_deleted', next).catch(() => {});
-        return next;
-      });
+      if (detail?.userInitiated === true) {
+        const newTombstone: PurgedRecordTombstone = {
+          id: assignmentId,
+          type: 'homeworkAssignments',
+          purgedAt: new Date().toISOString(),
+          updatedAt: Date.now()
+        };
+        setRecentlyDeleted((prev) => {
+          const current = prev || { students: [], groups: [], lessons: [], purgedRecords: [] };
+          const mergedPurged = mergePurgedTombstones(current.purgedRecords || [], [newTombstone]);
+          const next = { ...current, purgedRecords: mergedPurged };
+          recentlyDeletedRef.current = next;
+          storage.setItem('dl_recently_deleted', next).catch(() => {});
+          return next;
+        });
+      }
 
       bumpSyncRevision();
       performBackup().catch(() => {});
     };
 
+    const handleHomeworkRestored = (evt: Event) => {
+      const detail = (evt as CustomEvent)?.detail;
+      const assignmentId = detail?.assignmentId;
+      const safeId = detail?.safeId;
+      if (!assignmentId) return;
+
+      const currentList = getLocalAssignments();
+      storage.setItem(getAssignmentsStorageKey(), currentList).catch(() => {});
+
+      setRecentlyDeleted((prev) => {
+        const current = prev || { students: [], groups: [], lessons: [], purgedRecords: [] };
+        const prevPurged = current.purgedRecords || [];
+        const filteredPurged = prevPurged.filter((p) => {
+          if (!p || !p.id) return true;
+          const matchesId = p.id === assignmentId || (safeId && p.id === safeId);
+          if (!matchesId) return true;
+          const pType = (p as any).type || (p as any).entityType;
+          // Only strip homework assignment tombstones (or legacy coerced tombstones matching an explicit hw_* ID)
+          return !(pType === 'homeworkAssignments' || pType === 'homeworkAssignment' || p.id.startsWith('hw_'));
+        });
+        if (filteredPurged.length === prevPurged.length) {
+          return current;
+        }
+        const next = { ...current, purgedRecords: filteredPurged };
+        recentlyDeletedRef.current = next;
+        storage.setItem('dl_recently_deleted', next).catch(() => {});
+        return next;
+      });
+    };
+
     window.addEventListener('gluck-homework-deleted', handleHomeworkDeleted);
+    window.addEventListener('gluck-homework-restored', handleHomeworkRestored);
     return () => {
       window.removeEventListener('gluck-homework-deleted', handleHomeworkDeleted);
+      window.removeEventListener('gluck-homework-restored', handleHomeworkRestored);
     };
   }, []);
 
@@ -7235,6 +7391,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   }, []);
 
   // Active Running Lesson Timer Engine State
+  const activeLessonSessionUpdatedAtRef = useRef<number>((() => {
+    const storedTs = initialData['dl_active_lesson_session_updated_at'];
+    if (typeof storedTs === 'number' && Number.isFinite(storedTs)) return storedTs;
+    const saved = initialData['dl_active_lesson_session'];
+    if (saved && typeof saved.updatedAt === 'number') return saved.updatedAt;
+    return 0;
+  })());
+
   const [activeLessonSession, setActiveLessonSession] = useState<ActiveLessonSession | null>(() => {
     const saved = initialData['dl_active_lesson_session'];
     if (!saved || typeof saved !== 'object' || !saved.lessonId) return null;
@@ -7273,83 +7437,61 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       accumulatedSeconds: 0,
       durationMinutes: durationMins,
       isRunning: true,
-      startTimeStr
+      startTimeStr,
+      updatedAt: now
     };
+    activeLessonSessionUpdatedAtRef.current = now;
+    storage.setItem('dl_active_lesson_session_updated_at', now);
     setActiveLessonSession(session);
     updateLesson(lesson.id, { status: 'in_progress' });
-
-    const elapsedMins = 0;
-    const remainingMins = durationMins;
-    const percent = 0;
-
-    // Trigger Android Native Foreground Service for Google Maps navigation style notification
-    // LiveTimer.startTimer({
-    //   title: `${lesson.title} (${session.groupName})`,
-    //   startTime: now,
-    //   durationMins,
-    //   elapsedMins,
-    //   remainingMins,
-    //   percent
-    // }).catch(err => console.warn('LiveTimer start error:', err));
   };
 
   const pauseActiveLessonTimer = () => {
     if (!activeLessonSession || !activeLessonSession.isRunning) return;
-    const elapsed = Math.max(0, Math.floor((Date.now() - activeLessonSession.startedAt) / 1000));
+    const now = Date.now();
+    const elapsed = Math.max(0, Math.floor((now - activeLessonSession.startedAt) / 1000));
+    activeLessonSessionUpdatedAtRef.current = now;
+    storage.setItem('dl_active_lesson_session_updated_at', now);
     setActiveLessonSession({
       ...activeLessonSession,
       isRunning: false,
-      accumulatedSeconds: activeLessonSession.accumulatedSeconds + elapsed
+      accumulatedSeconds: activeLessonSession.accumulatedSeconds + elapsed,
+      updatedAt: now
     });
-
-    // Pause native timer notification
-    // LiveTimer.stopTimer().catch(err => console.warn('LiveTimer stop error:', err));
   };
 
   const resumeActiveLessonTimer = () => {
     if (!activeLessonSession || activeLessonSession.isRunning) return;
     const now = Date.now();
+    activeLessonSessionUpdatedAtRef.current = now;
+    storage.setItem('dl_active_lesson_session_updated_at', now);
     setActiveLessonSession({
       ...activeLessonSession,
       isRunning: true,
-      startedAt: now
+      startedAt: now,
+      updatedAt: now
     });
-
-    const rawDuration = activeLessonSession.durationMinutes || 60;
-    const durationMins = rawDuration > 0 ? rawDuration : 60;
-    const totalElapsedSecs = activeLessonSession.accumulatedSeconds;
-    const elapsedMins = Math.floor(totalElapsedSecs / 60);
-    const remainingMins = Math.max(0, durationMins - elapsedMins);
-    const rawPercent = Math.round(((elapsedMins / durationMins) * 100));
-    const percent = Math.min(100, Math.floor(((elapsedMins / durationMins) * 100)));
-
-    // Resume native timer with offset startTime so chronometer reflects total accumulated time
-    const effectiveStartTime = now - (activeLessonSession.accumulatedSeconds * 1000);
-    // LiveTimer.startTimer({
-    //   title: `${activeLessonSession.lessonTitle} (${activeLessonSession.groupName})`,
-    //   startTime: effectiveStartTime,
-    //   durationMins,
-    //   elapsedMins,
-    //   remainingMins,
-    //   percent
-    // }).catch(err => console.warn('LiveTimer resume error:', err));
   };
 
   const endActiveLessonTimer = () => {
+    const now = Date.now();
+    activeLessonSessionUpdatedAtRef.current = now;
+    storage.setItem('dl_active_lesson_session_updated_at', now);
     setActiveLessonSession(null);
     clearActiveLessonNotification();
     storage.removeItem('dl_active_lesson_session');
-    // LiveTimer.stopTimer().catch(err => console.warn('LiveTimer stop error:', err));
   };
 
   const cancelActiveLessonTimer = () => {
     if (activeLessonSession) {
       cancelLesson(activeLessonSession.lessonId, 'Abgebrochen während der laufenden Sitzung');
     }
+    const now = Date.now();
+    activeLessonSessionUpdatedAtRef.current = now;
+    storage.setItem('dl_active_lesson_session_updated_at', now);
     setActiveLessonSession(null);
     clearActiveLessonNotification();
     storage.removeItem('dl_active_lesson_session');
-    // LiveTimer.stopTimer().catch(err => console.warn('LiveTimer stop error:', err));
   };
 
   const enrichedStudents = useMemo(() => {

@@ -46,7 +46,7 @@ self.addEventListener('push', (event) => {
     const options = {
       body: payload.body || '',
       icon: '/icon.png',
-      badge: '/icon.png',
+      badge: '/notification-badge.png',
       tag: payload.tag || 'lesson_alarm',
       requireInteraction: true,
       vibrate: [500, 200, 500, 200, 500],
@@ -64,7 +64,7 @@ self.addEventListener('push', (event) => {
       self.registration.showNotification('⏰ تنبيه الحصة', {
         body: event.data.text(),
         icon: '/icon.png',
-        badge: '/icon.png',
+        badge: '/notification-badge.png',
         requireInteraction: true
       })
     );

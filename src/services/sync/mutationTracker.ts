@@ -5,12 +5,14 @@ export function trackLocalMutation<T extends SyncableRecord>(
   localDeviceId: string,
   newLocalRevision: number
 ): T {
+  const nextVersion = (typeof record.version === 'number' && Number.isFinite(record.version) ? record.version : 0) + 1;
   return {
     ...record,
     updatedAt: Date.now(),
     updatedByDeviceId: localDeviceId,
     originDeviceId: localDeviceId,
     originRevision: newLocalRevision,
+    version: nextVersion,
   };
 }
 
@@ -19,12 +21,14 @@ export function trackLocalDeletion<T extends SyncableRecord>(
   localDeviceId: string,
   newLocalRevision: number
 ): T {
+  const nextVersion = (typeof record.version === 'number' && Number.isFinite(record.version) ? record.version : 0) + 1;
   return {
     ...record,
     updatedAt: Date.now(),
     updatedByDeviceId: localDeviceId,
     originDeviceId: localDeviceId,
     originRevision: newLocalRevision,
+    version: nextVersion,
     deleted: true,
   };
 }

@@ -1382,3 +1382,41 @@ export function matchesGradeFilter(set: Partial<LernstudioSet>, gradeFilterId: s
     fullText.includes(`klasse ${targetGrade.num}`)
   );
 }
+
+/**
+ * Filters Lernstudio vocabulary sets by search query matching title, localized titles,
+ * topic, grade, level, creator teacher name, or included vocabulary words.
+ */
+export function filterLernstudioSetsByQuery<T extends Partial<LernstudioSet>>(
+  sets: readonly T[],
+  query: string
+): T[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [...sets];
+
+  return sets.filter((set) => {
+    if (!set) return false;
+    if ((set.title || '').toLowerCase().includes(q)) return true;
+    if (set.titleTranslations) {
+      if ((set.titleTranslations.ar || '').toLowerCase().includes(q)) return true;
+      if ((set.titleTranslations.en || '').toLowerCase().includes(q)) return true;
+      if ((set.titleTranslations.de || '').toLowerCase().includes(q)) return true;
+    }
+    if ((set.topic || '').toLowerCase().includes(q)) return true;
+    if ((set.grade || '').toLowerCase().includes(q)) return true;
+    if ((set.level || '').toLowerCase().includes(q)) return true;
+    if ((set.createdByTeacherName || '').toLowerCase().includes(q)) return true;
+    if (
+      Array.isArray(set.items) &&
+      set.items.some(
+        (it) =>
+          (it.german || '').toLowerCase().includes(q) ||
+          (it.arabic || '').toLowerCase().includes(q)
+      )
+    ) {
+      return true;
+    }
+    return false;
+  });
+}
+

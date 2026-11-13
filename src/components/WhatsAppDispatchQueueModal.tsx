@@ -102,7 +102,7 @@ export const WhatsAppDispatchQueueModal: React.FC<WhatsAppDispatchQueueModalProp
         (groups || []).find(g => g.name && g.name.trim().toLowerCase() === lesson.groupId!.trim().toLowerCase());
     }
     if (lesson?.groupName) {
-      return (groups || []).find(g => g.name.trim().toLowerCase() === lesson.groupName!.trim().toLowerCase());
+      return (groups || []).find(g => typeof g.name === 'string' && g.name.trim().toLowerCase() === lesson.groupName!.trim().toLowerCase());
     }
     return undefined;
   }, [initialGroup, lesson, groups]);
@@ -243,7 +243,7 @@ export const WhatsAppDispatchQueueModal: React.FC<WhatsAppDispatchQueueModalProp
           const st = (students || []).find(s => s.id === ls.studentId);
           if (st) lessonStudents = [st];
         } else if (ls.studentName) {
-          const st = (students || []).find(s => s.name.trim().toLowerCase() === ls.studentName!.trim().toLowerCase());
+          const st = (students || []).find(s => typeof s.name === 'string' && s.name.trim().toLowerCase() === ls.studentName!.trim().toLowerCase());
           if (st) lessonStudents = [st];
         }
 

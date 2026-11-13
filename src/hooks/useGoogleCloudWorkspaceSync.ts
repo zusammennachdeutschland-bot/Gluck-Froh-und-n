@@ -796,6 +796,7 @@ export function useGoogleCloudWorkspaceSync(): void {
     lernstudioSets,
     recentlyDeleted,
     dismissedDashboardLessonIds,
+    activeLessonSession,
     performBackup,
     importBackupFile
   } = useApp();
@@ -1384,6 +1385,7 @@ export function useGoogleCloudWorkspaceSync(): void {
     lernstudioSets,
     recentlyDeleted,
     dismissedDashboardLessonIds,
+    activeLessonSession,
     localMutationTick
   ]);
 }

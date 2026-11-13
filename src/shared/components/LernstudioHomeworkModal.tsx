@@ -18,6 +18,7 @@ import {
   buildHomeworkShareUrl,
   getLocalAssignments,
   saveLocalAssignment,
+  applyCloudAssignmentsSnapshot,
   saveAssignmentWithConfirmation,
   deleteLocalAssignment,
   saveLocalSubmission,
@@ -57,6 +58,7 @@ import {
   createCustomVerbGroup,
   verbGroupToLernstudioSet
 } from '../verbGroupSync';
+import { filterLernstudioSetsByQuery } from '../lernstudioTranslations';
 import type { VerbEntry, VerbGroupCategory, VerbGroupDefinition, VerbLevel } from '../verbLibrary/verbTypes';
 import {
   Sparkles,
@@ -189,6 +191,12 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     }
     return [];
   });
+  const [vocabSetSearchQuery, setVocabSetSearchQuery] = useState('');
+  const filteredVocabSets = useMemo(
+    () => filterLernstudioSetsByQuery(vocabSets, vocabSetSearchQuery),
+    [vocabSets, vocabSetSearchQuery]
+  );
+
   const [verbSubjectPoolMode, setVerbSubjectPoolMode] = useState<'pronouns_and_names' | 'pronouns_only'>(
     'pronouns_and_names'
   );
@@ -196,6 +204,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [verbSearchQuery, setVerbSearchQuery] = useState('');
   const [verbLevelFilter, setVerbLevelFilter] = useState<VerbLevel | 'all'>('all');
   const [newVerbGroupTitle, setNewVerbGroupTitle] = useState('');
+  const [newVerbGroupTeacherName, setNewVerbGroupTeacherName] = useState('');
   const [verbGroupSaveSuccess, setVerbGroupSaveSuccess] = useState<string | null>(null);
 
   const [audienceMode, setAudienceMode] = useState<HomeworkAudienceMode>('open');
@@ -310,6 +319,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
           setSelectedSetId((!isVerbGroupSet(defaultSet) ? defaultSet?.id : undefined) || vocabSets[0]?.id || '');
         }
       }
+      setVocabSetSearchQuery('');
       setCreateError(null);
       setVerbGroupSaveSuccess(null);
       setPendingSyncCount(getPendingHomeworkSyncCount());
@@ -422,12 +432,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     }
 
     const unsubAssignments = subscribeAssignmentsFromFirestore((cloudHwList) => {
-      cloudHwList.forEach((hw) => {
-        if (hw.ownerUid && hw.ownerUid !== activeAuthUid) return;
-        if (!isAssignmentDeletedLocally(hw.id, activeAuthUid)) {
-          saveLocalAssignment({ ...hw, ownerUid: activeAuthUid, cloudSynced: true }, false);
-        }
-      });
+      applyCloudAssignmentsSnapshot(cloudHwList, activeAuthUid, activeAuthUid);
       refreshCurrentState();
     }, activeAuthUid);
 
@@ -559,11 +564,14 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const handleSaveInlineCustomVerbGroup = async () => {
     const cleanTitle = newVerbGroupTitle.trim();
     if (!cleanTitle || resolvedSelectedVerbs.length === 0) return;
-    const myName =
+    const defaultProfileName =
+      profile?.displayNameAr?.trim() ||
       profile?.nameAr?.trim() ||
+      profile?.displayName?.trim() ||
       profile?.nameEn?.trim() ||
       firebaseUser?.displayName?.trim() ||
       'المعلم';
+    const myName = newVerbGroupTeacherName.trim() || defaultProfileName;
     const baseGroupId = selectedVerbGroupIds.length === 1 ? selectedVerbGroupIds[0] : undefined;
     const newGroup = createCustomVerbGroup({
       titleDe: cleanTitle,
@@ -1191,22 +1199,67 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                 {/* 1. Vocabulary Set (when vocab/mixed) & Audience Mode Selection Row */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {contentSource !== 'verb' ? (
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
-                        <span>📚</span>
-                        <span>مجموعة الكلمات المفتاحية:</span>
-                      </label>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                          <span>📚</span>
+                          <span>مجموعة الكلمات المفتاحية:</span>
+                        </label>
+                        {vocabSetSearchQuery.trim() && (
+                          <span className="text-[10.5px] font-bold text-primary tabular-nums">
+                            {filteredVocabSets.length > 0
+                              ? `${filteredVocabSets.length} نتيجة من ${vocabSets.length}`
+                              : 'لا توجد نتائج مطابقة'}
+                          </span>
+                        )}
+                      </div>
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-text-muted absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="text"
+                          value={vocabSetSearchQuery}
+                          onChange={(e) => {
+                            const nextQuery = e.target.value;
+                            setVocabSetSearchQuery(nextQuery);
+                            const nextFiltered = filterLernstudioSetsByQuery(vocabSets, nextQuery);
+                            if (
+                              nextFiltered.length > 0 &&
+                              !nextFiltered.some((s) => s.id === selectedSetId)
+                            ) {
+                              setSelectedSetId(nextFiltered[0].id);
+                            }
+                          }}
+                          placeholder="ابحث عن مجموعة كلمات (بالاسم، الصف، المعلم، أو كلمة)..."
+                          className="w-full pr-8 pl-7 py-1.5 bg-surface border border-surface-border rounded-xl text-text-main text-xs font-semibold outline-none focus:ring-1 focus:ring-primary"
+                        />
+                        {vocabSetSearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setVocabSetSearchQuery('')}
+                            className="absolute left-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-main p-0.5 cursor-pointer"
+                            title="مسح البحث"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                       <select
                         value={selectedSetId}
                         onChange={(e) => setSelectedSetId(e.target.value)}
                         className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-text-main text-xs font-semibold outline-none focus:ring-1 focus:ring-primary"
                       >
-                        {vocabSets.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.title} ({s.items?.length || 0} كلمة)
-                            {s.createdByTeacherName ? ` — أ. ${s.createdByTeacherName}` : ''}
+                        {filteredVocabSets.length === 0 ? (
+                          <option value="" disabled>
+                            -- لا توجد مجموعات تطابق البحث --
                           </option>
-                        ))}
+                        ) : (
+                          filteredVocabSets.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.title} ({s.items?.length || 0} كلمة)
+                              {s.createdByTeacherName ? ` — أ. ${s.createdByTeacherName}` : ''}
+                            </option>
+                          ))
+                        )}
                       </select>
                     </div>
                   ) : (
@@ -1450,7 +1503,14 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                           value={newVerbGroupTitle}
                           onChange={(e) => setNewVerbGroupTitle(e.target.value)}
                           placeholder="اسم مجموعة مخصصة لحفظ هذه الأفعال لكل المعلمين..."
-                          className="flex-1 min-w-[180px] px-2.5 py-1.5 bg-surface border border-surface-border rounded-lg text-[11px] font-semibold outline-none focus:ring-1 focus:ring-primary"
+                          className="flex-1 min-w-[160px] px-2.5 py-1.5 bg-surface border border-surface-border rounded-lg text-[11px] font-semibold outline-none focus:ring-1 focus:ring-primary"
+                        />
+                        <input
+                          type="text"
+                          value={newVerbGroupTeacherName}
+                          onChange={(e) => setNewVerbGroupTeacherName(e.target.value)}
+                          placeholder="اسم المعلم (اختياري)"
+                          className="w-36 px-2.5 py-1.5 bg-surface border border-surface-border rounded-lg text-[11px] font-semibold outline-none focus:ring-1 focus:ring-primary"
                         />
                         <button
                           type="button"

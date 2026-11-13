@@ -23,6 +23,7 @@ import { isBackupFileSizeValid } from '../utils/backupEngine';
 import { AndroidKeystoreSection } from './AndroidKeystoreSection';
 import { getActiveCloudUser, getLastCloudSyncTime } from '../services/firebaseWorkspaceSync';
 import { APP_VERSION, APP_BUILD_NUMBER, formatAppBuildTimestamp, getRuntimeAppInfo } from '../shared/appVersion';
+import { TeacherCrestLogo } from '../shared/components/TeacherCrestLogo';
 
 type SettingsCategory = 
   | 'downloaded_files'
@@ -1591,14 +1592,7 @@ export const SettingsView: React.FC = () => {
           {/* 1. APP BRAND & IDENTITY CARD */}
           <div className="bg-surface border border-surface-border/90 dark:border-surface-border rounded-xl p-3.5 sm:p-4 shadow-2xs space-y-3 text-center sm:text-start">
             <div className="flex flex-col sm:flex-row items-center gap-3.5 pb-3 border-b border-surface-border/80 dark:border-surface-border">
-              <div className="w-14 h-14 rounded-xl bg-surface-hover border border-surface-border p-2 shrink-0 flex items-center justify-center shadow-2xs">
-                <img
-                  src="/logo.svg"
-                  alt="GLÜCK Logo"
-                  className="w-full h-full object-contain"
-                  referrerPolicy="no-referrer"
-                />
-              </div>
+              <TeacherCrestLogo size="card" />
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center justify-center sm:justify-start gap-1.5">
                   <h1 className="text-base sm:text-lg font-black text-text-main">

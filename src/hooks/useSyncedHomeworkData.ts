@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { HomeworkAssignment, HomeworkSubmission } from '../shared/homeworkTypes';
 import {
+  applyCloudAssignmentsSnapshot,
   getCurrentHomeworkOwnerUid,
   getLocalAssignments,
   getLocalSubmissions,
+  isAssignmentDeletedLocally,
+  sanitizeDocId,
+  saveLocalSubmission,
   subscribeAssignmentsFromFirestore,
   subscribeSubmissionsFromFirestore,
   subscribeTeacherAuth,
@@ -72,6 +76,7 @@ export function useSyncedHomeworkData(): SyncedHomeworkDataState {
 
     window.addEventListener('glueck-homework-sync-updated', handleLocalMutation);
     window.addEventListener('gluck-homework-deleted', handleLocalMutation);
+    window.addEventListener('gluck-homework-restored', handleLocalMutation);
     window.addEventListener('storage', handleLocalMutation);
 
     let unsubAssignments = () => {};
@@ -82,13 +87,26 @@ export function useSyncedHomeworkData(): SyncedHomeworkDataState {
         .then(() => reloadLocalSnapshot(ownerUid))
         .catch(() => {});
 
-      unsubAssignments = subscribeAssignmentsFromFirestore(() => {
+      unsubAssignments = subscribeAssignmentsFromFirestore((cloudHwList) => {
+        applyCloudAssignmentsSnapshot(cloudHwList, ownerUid, ownerUid);
         reloadLocalSnapshot(ownerUid);
       }, ownerUid);
 
       unsubSubmissions = subscribeSubmissionsFromFirestore(
         null,
-        () => {
+        (cloudSubs) => {
+          const activeIds = new Set(
+            getLocalAssignments(ownerUid).flatMap((a) => [a.id, sanitizeDocId(a.id)])
+          );
+          cloudSubs.forEach((sub) => {
+            if (sub.ownerUid && sub.ownerUid !== ownerUid) return;
+            if (
+              !isAssignmentDeletedLocally(sub.assignmentId, ownerUid) &&
+              (activeIds.has(sub.assignmentId) || activeIds.has(sanitizeDocId(sub.assignmentId)))
+            ) {
+              saveLocalSubmission({ ...sub, ownerUid, cloudSynced: true }, false);
+            }
+          });
           reloadLocalSnapshot(ownerUid);
         },
         ownerUid
@@ -98,6 +116,7 @@ export function useSyncedHomeworkData(): SyncedHomeworkDataState {
     return () => {
       window.removeEventListener('glueck-homework-sync-updated', handleLocalMutation);
       window.removeEventListener('gluck-homework-deleted', handleLocalMutation);
+      window.removeEventListener('gluck-homework-restored', handleLocalMutation);
       window.removeEventListener('storage', handleLocalMutation);
       unsubAssignments();
       unsubSubmissions();

@@ -12,6 +12,7 @@ import { SyncCenterModal } from '../sync/SyncCenterModal';
 import { pairWithPeer } from '../../services/sync/syncClient';
 import { calculateDuePaymentCycles } from '../../utils/paymentUtils';
 import { formatLocalDate } from '../../utils/timeUtils';
+import { TeacherCrestLogo } from '../../shared/components/TeacherCrestLogo';
 
 interface DesktopSidebarProps {
   onOpenSyncModal?: () => void;
@@ -263,9 +264,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
         <div className={`p-4 border-b border-surface-border/60 ${isMinimized ? 'flex flex-col items-center gap-3' : ''}`}>
           <div className={`flex items-center ${isMinimized ? 'flex-col gap-2 w-full justify-center' : 'justify-between gap-3'}`}>
             <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-primary via-primary-hover to-primary text-white flex items-center justify-center font-black text-lg shadow-md shadow-primary/20 shrink-0">
-                G
-              </div>
+              <TeacherCrestLogo size="sm" />
               {!isMinimized && (
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">

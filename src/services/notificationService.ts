@@ -381,6 +381,9 @@ export const sendSystemNotification = async (
             title,
             body,
             channelId,
+            smallIcon: 'ic_stat_glueck',
+            largeIcon: 'ic_notif_large',
+            iconColor: '#D4AF37',
             schedule: { at: new Date(Date.now() + 100) },
             actionTypeId: actionTypeId || (tag.startsWith('upcoming-') || tag === 'lesson_alarm' ? 'LESSON_ALARM_ACTIONS' : undefined),
             extra: extra || {},
@@ -414,7 +417,7 @@ export const sendSystemNotification = async (
               body,
               tag: uniqueTag,
               icon: '/icon.png',
-              badge: '/icon.png',
+              badge: '/notification-badge.png',
               requireInteraction: true, // Crucial: forces notification to stay on screen outside browser
               silent: false,
               renotify: true,
@@ -440,7 +443,7 @@ export const sendSystemNotification = async (
             body,
             tag: uniqueTag,
             icon: '/icon.png',
-            badge: '/icon.png',
+            badge: '/notification-badge.png',
             requireInteraction: true
           });
 
@@ -490,7 +493,8 @@ const updateMediaSessionLockscreen = (
       artist: body,
       album: 'Glück fröhlich und froh',
       artwork: [
-        { src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' }
+        { src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
+        { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png' }
       ]
     });
 
@@ -752,6 +756,9 @@ const rebuildAllNotificationSchedulesInternal = async (
       title,
       body,
       channelId,
+      smallIcon: 'ic_stat_glueck',
+      largeIcon: 'ic_notif_large',
+      iconColor: '#D4AF37',
       schedule: { at: scheduleDate },
       actionTypeId,
       extra: { ...extraData, category, atEpoch }

@@ -31,6 +31,7 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, teacherName, langua
   // Importer Config
   const [pastedJson, setPastedJson] = useState('');
   const [creatorTeacherName, setCreatorTeacherName] = useState(defaultCreatorName);
+  const [hasManualTeacherNameEdit, setHasManualTeacherNameEdit] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [parsedPreview, setParsedPreview] = useState<Partial<LernstudioSet> | null>(null);
 
@@ -72,9 +73,9 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, teacherName, langua
     if (result.success && result.data) {
       const valRes = validateLernstudioSetForWorksheet(result.data);
       setParsedPreview(valRes.repairedSet);
-      if (valRes.repairedSet.createdByTeacherName?.trim()) {
+      if (!hasManualTeacherNameEdit && valRes.repairedSet.createdByTeacherName?.trim()) {
         setCreatorTeacherName(valRes.repairedSet.createdByTeacherName.trim());
-      } else if (!creatorTeacherName.trim() && defaultCreatorName) {
+      } else if (!hasManualTeacherNameEdit && !creatorTeacherName.trim() && defaultCreatorName) {
         setCreatorTeacherName(defaultCreatorName);
       }
       setValidationInfo({
@@ -258,6 +259,22 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, teacherName, langua
                     <option value="26">26 {language === 'ar' ? 'كلمة (الأبجدية كاملة)' : 'words (full alphabet)'}</option>
                   </select>
                 </div>
+
+                <div className="sm:col-span-2">
+                  <label className="text-xs font-bold text-text-muted block mb-1">
+                    {language === 'ar' ? 'اسم المدرس مُنشئ المجموعة (يُدرج في الـ Set):' : 'Creator Teacher Name:'}
+                  </label>
+                  <input
+                    type="text"
+                    value={creatorTeacherName}
+                    onChange={(e) => {
+                      setCreatorTeacherName(e.target.value);
+                      setHasManualTeacherNameEdit(true);
+                    }}
+                    placeholder={language === 'ar' ? 'مثال: أ. محمد / Herr Ahmed' : 'Lehrername'}
+                    className="w-full px-3 py-2 rounded-lg border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
+                  />
+                </div>
               </div>
 
               {/* Verb Conjugation Focus Toggle */}
@@ -329,7 +346,10 @@ export const LernstudioAiModal: React.FC<Props> = ({ isOpen, teacherName, langua
                 <input
                   type="text"
                   value={creatorTeacherName}
-                  onChange={(e) => setCreatorTeacherName(e.target.value)}
+                  onChange={(e) => {
+                    setCreatorTeacherName(e.target.value);
+                    setHasManualTeacherNameEdit(true);
+                  }}
                   placeholder={language === 'ar' ? 'مثال: أ. محمد / Herr Ahmed' : 'Lehrername'}
                   className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
                 />

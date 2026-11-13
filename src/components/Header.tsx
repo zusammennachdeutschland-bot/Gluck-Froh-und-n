@@ -11,6 +11,7 @@ import { SyncHeaderButton } from './sync/SyncHeaderButton';
 import { SyncCenterModal } from './sync/SyncCenterModal';
 import { pairWithPeer } from '../services/sync/syncClient';
 import { getCairoHour } from '../utils/greetingUtils';
+import { TeacherCrestLogo } from '../shared/components/TeacherCrestLogo';
 
 export const Header: React.FC = () => {
   const { 
@@ -455,9 +456,7 @@ export const Header: React.FC = () => {
                 {/* Header */}
                 <div className="flex items-center justify-between gap-3 pb-3 border-b border-surface-border">
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-primary via-primary-hover to-primary text-white flex items-center justify-center font-black text-lg shadow-md shadow-primary/20 shrink-0">
-                      G
-                    </div>
+                    <TeacherCrestLogo size="sm" />
                     <div className="min-w-0 flex-1">
                       <h2 className="font-black text-base tracking-tight text-text-main">Glück OS</h2>
                       <p className="text-xs text-text-muted truncate">{profile.displayName || 'Deutschlehrer'}</p>

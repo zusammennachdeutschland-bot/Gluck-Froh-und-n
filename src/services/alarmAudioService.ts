@@ -137,8 +137,8 @@ class AlarmAudioService {
           artist: 'تطبيق المعلم الذكي',
           album: 'تنبيهات الحصص',
           artwork: [
-            { src: '/icon.png', sizes: '192x192', type: 'image/png' },
-            { src: '/icon.png', sizes: '512x512', type: 'image/png' }
+            { src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
+            { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png' }
           ]
         });
         navigator.mediaSession.setActionHandler('stop', () => {

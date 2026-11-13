@@ -558,7 +558,9 @@ export const areDuplicateLessons = (l1: any, l2: any, students?: any[]): boolean
 export const pickAuthoritativeLesson = (l1: any, l2: any): { survivor: any; duplicate: any } => {
   const statusScore = (s: string) => {
     if (s === 'completed') return 100;
-    if (s === 'in_progress') return 50;
+    if (s === 'cancelled') return 80;
+    if (s === 'in_progress') return 60;
+    if (s === 'pending_action') return 40;
     if (s === 'scheduled') return 20;
     return 0;
   };
@@ -574,8 +576,12 @@ export const pickAuthoritativeLesson = (l1: any, l2: any): { survivor: any; dupl
   const score1 = statusScore(l1.status) + (l1.report ? 50 : 0) + ((l1.amountPaid || 0) > 0 ? 30 : 0) + (isL1Paid ? 80 : 0);
   const score2 = statusScore(l2.status) + (l2.report ? 50 : 0) + ((l2.amountPaid || 0) > 0 ? 30 : 0) + (isL2Paid ? 80 : 0);
 
-  let survivor = score1 >= score2 ? { ...l1 } : { ...l2 };
-  let duplicate = score1 >= score2 ? { ...l2 } : { ...l1 };
+  const t1 = typeof l1.updatedAt === 'number' ? l1.updatedAt : 0;
+  const t2 = typeof l2.updatedAt === 'number' ? l2.updatedAt : 0;
+  const l1Wins = score1 > score2 || (score1 === score2 && t1 >= t2);
+
+  let survivor = l1Wins ? { ...l1 } : { ...l2 };
+  let duplicate = l1Wins ? { ...l2 } : { ...l1 };
 
   // Merge valuable report data if survivor is missing it
   if (!survivor.report && duplicate.report) {
@@ -1222,4 +1228,23 @@ export const resolvePreviousHomeworkStatusText = (
   }
   return '';
 };
+
+/**
+ * Payment collection UI inside LessonControlModal should only be shown when:
+ * 1. The lesson is a quick/trial single lesson, OR
+ * 2. The group/student is billed per individual session (per_lesson / cycleTotalSessions <= 1), OR
+ * 3. The billing cycle has completed on this session (e.g., Session 4 of 4 or Session 8 of 8).
+ */
+export function shouldShowLessonPaymentCollection(params: {
+  isQuick?: boolean;
+  isPerLessonGroup?: boolean;
+  currentSessionNumber?: number;
+  cycleTotalSessions?: number;
+}): boolean {
+  if (params.isQuick) return true;
+  if (params.isPerLessonGroup) return true;
+  const total = params.cycleTotalSessions || 0;
+  const current = params.currentSessionNumber || 0;
+  return total <= 1 || current >= total;
+}
 

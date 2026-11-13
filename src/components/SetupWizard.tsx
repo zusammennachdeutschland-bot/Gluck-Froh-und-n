@@ -12,6 +12,7 @@ import { AvatarImage } from './AvatarImage';
 import { motion, AnimatePresence } from 'motion/react';
 import { getSchoolSettings, DEFAULT_SCHOOL_SETTINGS } from '../utils/schoolUtils';
 import { isBackupFileSizeValid } from '../utils/backupEngine';
+import { TeacherCrestLogo } from '../shared/components/TeacherCrestLogo';
 import {
   signInTeacherWithGoogle,
   signInTeacherWithEmailPassword,
@@ -392,8 +393,13 @@ export const SetupWizard: React.FC = () => {
       return;
     }
 
-    const isCompleted = localStorage.getItem('dl_setup_completed') === 'true';
-    if (!isCompleted || !profile.displayName || profile.displayName.trim() === '' || profile.displayName === 'Teacher' || profile.displayName === 'أ. أحمد محمود') {
+    const hasValidProfile = Boolean(
+      profile.displayName &&
+      profile.displayName.trim() !== '' &&
+      profile.displayName.trim() !== 'Teacher' &&
+      profile.displayName.trim() !== 'أ. أحمد محمود'
+    );
+    if (!hasValidProfile) {
       setIsOpen(true);
     }
 
@@ -665,9 +671,7 @@ export const SetupWizard: React.FC = () => {
         <div className="px-3 sm:px-6 pt-2.5 sm:pt-4 pb-2 sm:pb-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-950/90">
           <div className="flex items-center justify-between gap-2 mb-1.5 sm:mb-2.5">
             <div className="flex items-center gap-2 min-w-0">
-              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-primary text-white flex items-center justify-center text-sm shadow-xs font-bold shrink-0">
-                🇩🇪
-              </div>
+              <TeacherCrestLogo size="xs" />
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5">
                   <h1 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white tracking-tight truncate">

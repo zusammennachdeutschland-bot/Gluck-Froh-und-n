@@ -829,3 +829,42 @@ export function calculateUnifiedHomeworkQuestionCount(options: {
   }
   return total;
 }
+
+/**
+ * Builds the German pronunciation string for Teacher Study & Teacher Mode flashcards.
+ * For verbs, reads the infinitive followed by all 6 Präsens conjugations cleanly;
+ * for non-verb items, returns the German word/phrase.
+ */
+export function buildTeacherStudySpeechText(
+  item?: Partial<LernstudioItem> | null,
+  explicitVerb?: VerbEntry | null
+): string {
+  if (!item) return '';
+  const verb = explicitVerb || resolveVerbFromLernstudioItem(item);
+  const conj = verb?.praesens || item.conjugation;
+  const infinitive = (verb?.infinitive || item.german || '').trim();
+
+  if (conj && infinitive) {
+    const parts: string[] = [infinitive];
+    const ich = conj.ich?.trim();
+    const du = conj.du?.trim();
+    const er = conj.er_sie_es?.trim();
+    const wir = conj.wir?.trim();
+    const ihr = conj.ihr?.trim();
+    const sie = conj.sie_Sie?.trim();
+
+    if (ich) parts.push(`ich ${ich}`);
+    if (du) parts.push(`du ${du}`);
+    if (er) parts.push(`er, sie, es ${er}`);
+    if (wir) parts.push(`wir ${wir}`);
+    if (ihr) parts.push(`ihr ${ihr}`);
+    if (sie) parts.push(`sie ${sie}`);
+
+    if (parts.length > 1) {
+      return `${parts.join('. ')}.`;
+    }
+  }
+
+  return (item.german || '').trim();
+}
+

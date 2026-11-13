@@ -8,6 +8,7 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.graphics.BitmapFactory;
 import android.os.Build;
 import android.os.IBinder;
 import androidx.annotation.Nullable;
@@ -146,7 +147,9 @@ public class LiveTimerService extends Service {
         }
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(R.mipmap.ic_launcher)
+                .setSmallIcon(R.drawable.ic_stat_glueck)
+                .setLargeIcon(BitmapFactory.decodeResource(getResources(), R.drawable.ic_notif_large))
+                .setColor(0xFFD4AF37)
                 .setContentTitle(title)
                 .setContentText(statusText)
                 .setSubText(progressText)
@@ -188,7 +191,9 @@ public class LiveTimerService extends Service {
             NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager != null) {
                 Notification celebrationNotification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                        .setSmallIcon(R.mipmap.ic_launcher)
+                        .setSmallIcon(R.drawable.ic_stat_glueck)
+                        .setLargeIcon(BitmapFactory.decodeResource(getResources(), R.drawable.ic_notif_large))
+                        .setColor(0xFFD4AF37)
                         .setContentTitle("Lesson Completed Successfully ✓")
                         .setContentText("Great job! Session saved successfully.")
                         .setAutoCancel(true)

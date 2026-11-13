@@ -31,6 +31,7 @@ import {
 } from '../shared/lernstudioAudioUtils';
 import { useGameEffects } from '../shared/components/effects/useGameEffects';
 import { HomeworkBonusCardOverlay } from '../shared/components/HomeworkBonusCardOverlay';
+import { TeacherCrestLogo } from '../shared/components/TeacherCrestLogo';
 import {
   HomeworkGamificationState,
   PendingBonusRound,
@@ -91,6 +92,7 @@ import {
   CORE_SIX_SLOT_PROMPTS,
   SUBJECT_PROMPTS,
   PRONOUN_ONLY_SUBJECT_PROMPTS,
+  buildTeacherStudySpeechText,
   buildVerbConjugationExercise,
   buildVerbSentenceGapExercise,
   isItemVerb,
@@ -172,6 +174,7 @@ function deterministicShuffle<T>(arr: T[], seedOffset: number): T[] {
   }
   return copy;
 }
+
 
 export const HomeworkPlayerPage: React.FC<Props> = ({
   assignmentId: propId,
@@ -1224,18 +1227,29 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
 
   const currentQuestion = quizQuestions[currentIdx];
   const currentStudyItem = studyItems[studyIndex];
+  const currentStudyVerb = useMemo(() => {
+    if (!currentStudyItem) return null;
+    const snapshotMatch = assignmentVerbs.find(
+      (v) => v.id === (currentStudyItem.verbId || currentStudyItem.id)
+    );
+    return snapshotMatch || resolveVerbFromLernstudioItem(currentStudyItem);
+  }, [currentStudyItem, assignmentVerbs]);
+  const currentStudySpeechText = useMemo(
+    () => buildTeacherStudySpeechText(currentStudyItem, currentStudyVerb),
+    [currentStudyItem, currentStudyVerb]
+  );
 
-  // Auto-pronounce word when entering Teacher Study card or Question (paused when muted or Bonus Round active)
+  // Auto-pronounce word (or verb + all conjugations) when entering Teacher Study card
   useEffect(() => {
-    if (phase === 'teacher_study' && currentStudyItem?.german) {
+    if (phase === 'teacher_study' && currentStudySpeechText) {
       const timer = setTimeout(() => {
         if (!isSoundMuted()) {
-          speakGermanText(currentStudyItem.german, 0.9);
+          speakGermanText(currentStudySpeechText, 0.9);
         }
       }, 250);
       return () => clearTimeout(timer);
     }
-  }, [phase, studyIndex, currentStudyItem]);
+  }, [phase, studyIndex, currentStudySpeechText]);
 
   useEffect(() => {
     if (phase === 'quiz' && currentQuestion) {
@@ -1706,7 +1720,6 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
 
     if (isCorrect) {
       playLernstudioSound(transition.doubledApplied ? 'combo_ding' : 'correct');
-      playGermanVoiceFeedback(transition.doubledApplied ? 'fantastisch' : 'richtig');
       gameEffects.triggerScorePopup(
         transition.doubledApplied ? `+${transition.pointsDelta} (×2!)` : `+${transition.pointsDelta}`,
         50,
@@ -1720,10 +1733,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       playLernstudioSound('wrong');
       playGermanVoiceFeedback('noch_einmal');
       gameEffects.triggerScorePopup(`${transition.pointsDelta || -5}`, 50, 28, false);
-    }
-
-    if (!isSoundMuted()) {
-      speakGermanText(currentQuestion.germanWord, 0.9);
+      if (!isSoundMuted()) {
+        speakGermanText(currentQuestion.germanWord, 0.9);
+      }
     }
 
     const elapsedSec = Math.max(1, Math.round((Date.now() - questionStartMs) / 1000));
@@ -2089,8 +2101,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
   if (loading) {
     return (
       <div className="min-h-screen bg-background text-text-main flex items-center justify-center p-4 font-sans" dir="rtl">
-        <div className="text-center space-y-3">
-          <div className="w-10 h-10 border-3 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+        <div className="text-center space-y-4">
+          <TeacherCrestLogo size="md" className="mx-auto" />
+          <div className="w-7 h-7 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
           <p className="text-xs font-bold text-text-muted">جاري تحضير الواجب...</p>
         </div>
       </div>
@@ -2100,77 +2113,134 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
   if (error && phase === 'lobby') {
     return (
       <div className="min-h-screen bg-background text-text-main flex items-center justify-center p-4 font-sans" dir="rtl">
-        <div className="max-w-md w-full bg-surface border border-surface-border p-6 rounded-2xl text-center space-y-4 shadow-xs">
-          {resolutionStatus === 'network_error' ? (
-            <CloudOff className="w-10 h-10 text-amber-500 mx-auto" />
-          ) : (
-            <XCircle className="w-10 h-10 text-rose-500 mx-auto" />
-          )}
-          <h2 className="text-base font-bold text-text-main">
-            {resolutionStatus === 'revoked'
-              ? 'تم إيقاف أو حذف هذا الواجب'
-              : resolutionStatus === 'invalid_id'
-              ? 'رابط الواجب غير صالح'
-              : resolutionStatus === 'network_error'
-              ? 'تعذر الاتصال بالسحابة'
-              : 'تنبيه بخصوص الواجب'}
-          </h2>
-          <p className="text-xs text-text-muted">{error}</p>
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            {(resolutionStatus === 'network_error' || resolutionStatus === 'not_found') && (
+        <div className="max-w-md w-full bg-surface border border-surface-border rounded-2xl overflow-hidden text-center shadow-xs">
+          <div className="bg-[radial-gradient(circle_at_50%_40%,#242E44_0%,#141A29_68%,#0C101B_100%)] px-6 py-4 flex items-center justify-center gap-3 relative">
+            <TeacherCrestLogo size="sm" />
+            <div className="text-left" dir="ltr">
+              <p className="font-cert-serif text-sm font-bold text-[#F5E1A4] tracking-wide">
+                Herr Abdul-rahman
+              </p>
+              <p className="text-[11px] text-[#CBD5E1]">Deutschunterricht</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 h-[3px] w-full" aria-hidden="true">
+            <span className="bg-[#18181B]" />
+            <span className="bg-[#DC2626]" />
+            <span className="bg-[#EAB308]" />
+          </div>
+          <div className="p-6 space-y-4">
+            {resolutionStatus === 'network_error' ? (
+              <CloudOff className="w-10 h-10 text-amber-500 mx-auto" />
+            ) : (
+              <XCircle className="w-10 h-10 text-rose-500 mx-auto" />
+            )}
+            <h2 className="text-base font-bold text-text-main text-balance">
+              {resolutionStatus === 'revoked'
+                ? 'تم إيقاف أو حذف هذا الواجب'
+                : resolutionStatus === 'invalid_id'
+                ? 'رابط الواجب غير صالح'
+                : resolutionStatus === 'network_error'
+                ? 'تعذر الاتصال بالسحابة'
+                : 'تنبيه بخصوص الواجب'}
+            </h2>
+            <p className="text-xs text-text-muted">{error}</p>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {(resolutionStatus === 'network_error' || resolutionStatus === 'not_found') && (
+                <button
+                  type="button"
+                  onClick={() => setReloadNonce((n) => n + 1)}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-hover text-white font-bold text-xs transition-colors shadow-2xs cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>إعادة المحاولة</span>
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => setReloadNonce((n) => n + 1)}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-hover text-white font-bold text-xs transition-colors shadow-2xs cursor-pointer"
+                onClick={() => {
+                  try { window.close(); } catch {}
+                  if (typeof window !== 'undefined') {
+                    window.history.pushState({}, '', '/');
+                    window.dispatchEvent(new Event('glueck-route-change'));
+                  }
+                }}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-text-main font-bold text-xs transition-colors shadow-2xs cursor-pointer whitespace-nowrap shrink-0"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>إعادة المحاولة</span>
+                <span>إغلاق الصفحة</span>
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                try { window.close(); } catch {}
-                if (typeof window !== 'undefined') {
-                  window.history.pushState({}, '', '/');
-                  window.dispatchEvent(new Event('glueck-route-change'));
-                }
-              }}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-text-main font-bold text-xs transition-colors shadow-2xs cursor-pointer"
-            >
-              <span>إغلاق الصفحة</span>
-            </button>
+            </div>
           </div>
-          <p className="text-[11px] text-text-muted pt-2 select-none">
-            von Herr Abdul-rahman
-          </p>
         </div>
       </div>
     );
   }
 
   // ============================================================================
-  // PHASE 0: LOBBY & STUDENT NAME ENTRY (Glück Design System)
-  // ============================================================================
-  // ============================================================================
-  // PHASE 0: LOBBY & STUDENT NAME ENTRY (Glück Minimal Student Landing Page)
+  // PHASE 0: LOBBY & STUDENT NAME ENTRY (Signature Overlapping Seal Masthead)
   // ============================================================================
   if (phase === 'lobby') {
     const flowMode: HomeworkFlowMode = 'teacher_then_quiz';
 
     return (
       <div className="min-h-screen bg-background text-text-main flex flex-col justify-between p-4 sm:p-6 font-sans" dir="rtl">
-        {/* Main Card */}
-        <div className="max-w-md w-full bg-surface border border-surface-border p-5 sm:p-7 rounded-2xl space-y-6 shadow-xs mx-auto my-auto">
-          {/* Glück Heading */}
-          <div className="text-center space-y-1">
-            <h1 className="text-xl sm:text-2xl font-bold text-text-main">
-              {assignment?.title || 'واجب Glück التفاعلي'}
-            </h1>
-            {audienceMode === 'group' && assignment?.groupName && (
-              <p className="text-xs text-primary font-bold">🏫 {assignment.groupName}</p>
-            )}
+        {/* Main Editorial Welcome Card */}
+        <div className="max-w-lg w-full bg-surface border border-surface-border rounded-2xl shadow-sm overflow-hidden mx-auto my-auto">
+          {/* Dark Obsidian Academy Masthead */}
+          <div className="relative bg-[radial-gradient(circle_at_50%_20%,#25324A_0%,#131A29_64%,#0A0E17_100%)] px-6 pt-6 pb-20 text-center overflow-hidden">
+            {/* Subtle Concentric Geometric Seal Hairlines */}
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute left-1/2 bottom-0 -translate-x-1/2 translate-y-1/2 w-64 h-64 rounded-full border border-white/[0.06]"
+            />
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute left-1/2 bottom-0 -translate-x-1/2 translate-y-1/2 w-80 h-80 rounded-full border border-[#D4AF37]/[0.10]"
+            />
+
+            <div className="relative z-10 flex items-center justify-center gap-3 max-w-xs mx-auto" dir="ltr">
+              <span aria-hidden="true" className="h-px flex-1 bg-gradient-to-r from-transparent to-[#D4AF37]/50" />
+              <span className="font-cert-serif text-xs sm:text-sm font-semibold tracking-wider text-[#F5E1A4] whitespace-nowrap">
+                Deutsch mit Herr Abdul-rahman
+              </span>
+              <span aria-hidden="true" className="h-px flex-1 bg-gradient-to-l from-transparent to-[#D4AF37]/50" />
+            </div>
           </div>
+
+          {/* Crisp 3px German Tricolor Architectural Seam */}
+          <div className="grid grid-cols-3 h-[3px] w-full" aria-hidden="true">
+            <span className="bg-[#18181B]" />
+            <span className="bg-[#DC2626]" />
+            <span className="bg-[#EAB308]" />
+          </div>
+
+          {/* Overlapping Signature Crest Medallion Straddling the Seam */}
+          <div className="-mt-16 sm:-mt-[72px] relative z-20 flex justify-center px-4">
+            <TeacherCrestLogo size="lg" className="ring-[5px] ring-surface" />
+          </div>
+
+          {/* Assignment Body */}
+          <div className="px-5 pt-4 pb-6 sm:px-7 sm:pb-7 space-y-5">
+            {/* Assignment Title & Unboxed Inline Metadata */}
+            <div className="text-center space-y-1.5">
+              <h1 className="text-xl sm:text-2xl font-bold text-text-main text-balance">
+                {assignment?.title || 'واجب Glück التفاعلي'}
+              </h1>
+              <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-text-muted tabular-nums">
+                {audienceMode === 'group' && assignment?.groupName && (
+                  <>
+                    <span className="font-bold text-primary">{assignment.groupName}</span>
+                    <span aria-hidden="true">·</span>
+                  </>
+                )}
+                {studyItems.length > 0 && (
+                  <>
+                    <span>{studyItems.length} مفردات للمراجعة</span>
+                    <span aria-hidden="true">·</span>
+                  </>
+                )}
+                <span>{quizQuestions.length} سؤال تفاعلي</span>
+              </div>
+            </div>
 
           {identityError && (
             <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-bold text-center">
@@ -2309,11 +2379,12 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
               </button>
             </form>
           )}
+          </div>
         </div>
 
         {/* Teacher Signature Footer at the VERY BOTTOM of the page */}
-        <footer className="text-center text-xs text-text-muted font-normal py-4 select-none">
-          von Herr Abdul-rahman
+        <footer className="text-center text-[11px] text-text-muted font-medium py-3 select-none" dir="ltr">
+          von Herr Abdul-rahman · Glück Deutsch
         </footer>
       </div>
     );
@@ -2452,6 +2523,26 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     return (
       <div className="min-h-screen bg-background text-text-main flex flex-col p-4 sm:p-6 font-sans" dir="rtl">
         <gameEffects.EffectsOverlay />
+
+        {/* Slim Brand & Assignment Strip */}
+        <div className="max-w-3xl w-full mx-auto flex items-center justify-between gap-2 mb-2.5 px-1">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <TeacherCrestLogo size="sm" />
+            <div className="min-w-0">
+              <p className="text-xs sm:text-sm font-bold text-text-main truncate">
+                {assignment?.title || 'واجب Glück التفاعلي'}
+              </p>
+              <p className="text-[11px] text-text-muted truncate" dir="ltr">
+                Herr Abdul-rahman · Lernen
+              </p>
+            </div>
+          </div>
+          {studentName && (
+            <span className="text-xs font-semibold text-text-muted whitespace-nowrap shrink-0">
+              {studentName}
+            </span>
+          )}
+        </div>
 
         {/* Always-Visible Compact HUD */}
         {renderCompactGamificationHud(true)}
@@ -2593,7 +2684,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
               <button
                 type="button"
-                onClick={() => speakGermanText(currentStudyItem.german, 0.9)}
+                onClick={() => speakGermanText(currentStudySpeechText || currentStudyItem.german, 0.9)}
                 className="px-4 py-2.5 rounded-xl bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-xs cursor-pointer transition-all"
               >
                 <Volume2 className="w-4 h-4" />
@@ -2601,7 +2692,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
               </button>
               <button
                 type="button"
-                onClick={() => speakGermanText(currentStudyItem.german, 0.55)}
+                onClick={() => speakGermanText(currentStudySpeechText || currentStudyItem.german, 0.55)}
                 className="px-4 py-2.5 rounded-xl bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs sm:text-sm flex items-center gap-2 cursor-pointer active:scale-95 transition-all shadow-2xs"
               >
                 <Snail className="w-4 h-4 text-primary" />
@@ -2687,21 +2778,47 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
           <motion.div
             initial={{ scale: 0.98, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="bg-surface border border-surface-border p-5 sm:p-7 rounded-2xl text-center space-y-4 shadow-xs"
+            className="bg-surface border border-surface-border rounded-2xl text-center shadow-xs overflow-hidden"
           >
-            <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center mx-auto">
-              <Trophy className="w-7 h-7" />
+            {/* Official Completion Certificate Masthead */}
+            <div className="relative bg-[radial-gradient(circle_at_50%_35%,#25324A_0%,#131A29_64%,#0A0E17_100%)] px-5 pt-6 pb-5 overflow-hidden">
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-56 h-56 rounded-full border border-white/[0.06]"
+              />
+              <div className="relative z-10 inline-flex flex-col items-center gap-2.5">
+                <div className="relative">
+                  <TeacherCrestLogo size="md" />
+                  <span
+                    aria-hidden="true"
+                    className="w-8 h-8 rounded-full bg-[#121927] text-[#F3D078] border border-[#D4AF37]/70 shadow-md flex items-center justify-center absolute -bottom-1 -left-1"
+                  >
+                    <Trophy className="w-4 h-4" />
+                  </span>
+                </div>
+                <p className="font-cert-serif text-xs font-semibold tracking-wider text-[#F5E1A4]" dir="ltr">
+                  Herr Abdul-rahman · Zertifikat
+                </p>
+              </div>
             </div>
+
+            <div className="grid grid-cols-3 h-[3px] w-full" aria-hidden="true">
+              <span className="bg-[#18181B]" />
+              <span className="bg-[#DC2626]" />
+              <span className="bg-[#EAB308]" />
+            </div>
+
+            <div className="p-5 sm:p-7 space-y-4">
 
             <div className="space-y-1.5">
               {cloudSyncState === 'synced' ? (
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-bold mb-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>تم حفظ نتيجتك ومزامنتها سحابياً مع المعلم ✓</span>
+                <div className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 text-xs font-bold mb-1">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>تم حفظ نتيجتك ومزامنتها سحابياً مع المعلم</span>
                 </div>
               ) : cloudSyncState === 'syncing' ? (
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-bold mb-1">
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <div className="inline-flex items-center gap-1.5 text-primary text-xs font-bold mb-1">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
                   <span>تم الحفظ محلياً · جاري المزامنة السحابية...</span>
                 </div>
               ) : (
@@ -2877,6 +2994,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                 </button>
               </div>
             )}
+            <p className="text-[11px] text-text-muted pt-1 select-none" dir="ltr">
+              Herr Abdul-rahman · Glück Deutschunterricht
+            </p>
+            </div>
           </motion.div>
         </div>
       </div>
@@ -2917,6 +3038,26 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
           onTriggerSparkles={gameEffects.triggerSparkles}
         />
       )}
+
+      {/* Slim Brand & Assignment Strip */}
+      <div className="max-w-3xl w-full mx-auto flex items-center justify-between gap-2 mb-2.5 px-1">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <TeacherCrestLogo size="sm" />
+          <div className="min-w-0">
+            <p className="text-xs sm:text-sm font-bold text-text-main truncate">
+              {assignment?.title || 'واجب Glück التفاعلي'}
+            </p>
+            <p className="text-[11px] text-text-muted truncate" dir="ltr">
+              Herr Abdul-rahman · Glück
+            </p>
+          </div>
+        </div>
+        {studentName && (
+          <span className="text-xs font-semibold text-text-muted whitespace-nowrap shrink-0">
+            {studentName}
+          </span>
+        )}
+      </div>
 
       {/* Compact, Always-Visible Top HUD (Timer, Points, Streak/10, Effects & Mute) */}
       {renderCompactGamificationHud(false)}

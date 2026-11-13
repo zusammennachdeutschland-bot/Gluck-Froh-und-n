@@ -6,6 +6,7 @@ import {
   getGroupCycleInfo,
   computeStartingSessionNumberForTargetLesson,
   compareLessonsChronologically,
+  shouldShowLessonPaymentCollection,
 } from '../utils/lessonUtils';
 import { Group, Lesson, Student } from '../types';
 
@@ -415,6 +416,42 @@ runTest('TEST P: Two lessons on the same date (10:00 and 18:00, plus identical t
   assert.ok(compareLessonsChronologically(sameDayLessons[1], sameDayLessons[0]) < 0);
 });
 
+// TEST Q: LessonControlModal payment collection visibility rules
+runTest('TEST Q: Payment collection is hidden mid-cycle (Sessions 1-3 of 4) and shown only for per-session or completed cycle (Session 4 of 4)', () => {
+  assert.equal(
+    shouldShowLessonPaymentCollection({ isQuick: false, isPerLessonGroup: false, currentSessionNumber: 1, cycleTotalSessions: 4 }),
+    false
+  );
+  assert.equal(
+    shouldShowLessonPaymentCollection({ isQuick: false, isPerLessonGroup: false, currentSessionNumber: 2, cycleTotalSessions: 4 }),
+    false
+  );
+  assert.equal(
+    shouldShowLessonPaymentCollection({ isQuick: false, isPerLessonGroup: false, currentSessionNumber: 3, cycleTotalSessions: 4 }),
+    false
+  );
+  assert.equal(
+    shouldShowLessonPaymentCollection({ isQuick: false, isPerLessonGroup: false, currentSessionNumber: 4, cycleTotalSessions: 4 }),
+    true
+  );
+  assert.equal(
+    shouldShowLessonPaymentCollection({ isQuick: false, isPerLessonGroup: true, currentSessionNumber: 1, cycleTotalSessions: 1 }),
+    true
+  );
+  assert.equal(
+    shouldShowLessonPaymentCollection({ isQuick: false, isPerLessonGroup: false, currentSessionNumber: 4, cycleTotalSessions: 8 }),
+    false
+  );
+  assert.equal(
+    shouldShowLessonPaymentCollection({ isQuick: false, isPerLessonGroup: false, currentSessionNumber: 8, cycleTotalSessions: 8 }),
+    true
+  );
+  assert.equal(
+    shouldShowLessonPaymentCollection({ isQuick: true, isPerLessonGroup: false, currentSessionNumber: 1, cycleTotalSessions: 4 }),
+    true
+  );
+});
+
 console.log('===============================================================');
-console.log(`✅ All ${passedCount}/16 Unified Lesson Cycle Numbering Tests Passed!`);
+console.log(`✅ All ${passedCount}/17 Unified Lesson Cycle Numbering Tests Passed!`);
 console.log('===============================================================');

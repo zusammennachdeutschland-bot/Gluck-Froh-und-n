@@ -2,340 +2,352 @@ const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
 
-// 1. Master Icon SVG (Square / Squircle with gradient background)
-const masterIconSvg = `
+const SOURCE_LOGO_PATH = path.join(
+  __dirname,
+  '../public/assets/aistudio/logo-removebg-preview__1__1a8a6028.png'
+);
+
+// Notification small icon / Web notification monochrome white silhouette (24x24 viewport)
+const notificationBadgeSvg = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="96" height="96">
+  <path fill="none" stroke="#FFFFFF" stroke-width="1.9" stroke-linecap="round"
+    d="M 10.8,2.6 A 9.4,9.4 0 1,0 19.8,7.1" />
+  <path fill="none" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round"
+    d="M 14.5,2.9 A 9.4,9.4 0 0,1 21.1,10.2" />
+  <path fill="#FFFFFF" d="M 15.2,5.3 L 20.4,7.3 L 15.2,9.3 L 10.0,7.3 Z" />
+  <path fill="#FFFFFF" d="M 12.0,8.7 L 15.2,9.9 L 18.4,8.7 L 18.4,10.4 C 18.4,10.9 16.9,11.6 15.2,11.6 C 13.5,11.6 12.0,10.9 12.0,10.4 Z" />
+  <path fill="none" stroke="#FFFFFF" stroke-width="1.1" stroke-linecap="round" d="M 19.6,7.6 L 19.6,10.9" />
+  <path fill="none" stroke="#FFFFFF" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"
+    d="M 6.4,8.6 L 6.4,16.8 M 11.4,8.6 L 11.4,16.8 M 6.4,12.7 L 11.4,12.7" />
+  <path fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round"
+    d="M 8.2,18.2 Q 13.0,16.4 18.0,17.8" />
+</svg>
+`;
+
+// Dark obsidian-slate backdrop templates
+const squircleBackdropSvg = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#064E3B" />
-      <stop offset="30%" stop-color="#047857" />
-      <stop offset="70%" stop-color="#0D9488" />
-      <stop offset="100%" stop-color="#0369A1" />
-    </linearGradient>
-
-    <linearGradient id="goldRibbon" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#FDE047" />
-      <stop offset="100%" stop-color="#D97706" />
-    </linearGradient>
-
-    <linearGradient id="cyanLeaf" x1="0%" y1="100%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#0284C7" />
-      <stop offset="100%" stop-color="#38BDF8" />
-    </linearGradient>
-
-    <linearGradient id="greenLeaf" x1="0%" y1="100%" x2="0%" y2="0%">
-      <stop offset="0%" stop-color="#059669" />
-      <stop offset="100%" stop-color="#34D399" />
-    </linearGradient>
-
-    <filter id="iconShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#022C22" flood-opacity="0.4" />
-    </filter>
+    <radialGradient id="obsidianSquircle" cx="50%" cy="40%" r="65%">
+      <stop offset="0%" stop-color="#2a3952" />
+      <stop offset="66%" stop-color="#151e2e" />
+      <stop offset="100%" stop-color="#0c111c" />
+    </radialGradient>
   </defs>
-
-  <!-- App Container Background (iOS/Android Squircle feel) -->
-  <rect width="512" height="512" rx="120" fill="url(#bgGrad)" />
-  <rect width="504" height="504" x="4" y="4" rx="116" stroke="rgba(255,255,255,0.2)" stroke-width="4" fill="none" />
-
-  <!-- Corner dynamic ribbons -->
-  <path d="M 0 320 C 100 360, 200 440, 240 512 L 0 512 Z" fill="url(#goldRibbon)" opacity="0.8" />
-  <path d="M 512 180 C 420 140, 360 60, 340 0 L 512 0 Z" fill="url(#cyanLeaf)" opacity="0.6" />
-
-  <!-- Lucky Clover Symbol inside App Icon -->
-  <g filter="url(#iconShadow)" transform="translate(256, 256)">
-    <!-- Top Petal -->
-    <path d="M 0 0 C -45 -25, -70 -75, -40 -105 C -10 -135, 0 -115, 0 -80 C 0 -115, 10 -135, 40 -105 C 70 -75, 45 -25, 0 0 Z" fill="url(#cyanLeaf)" />
-    <!-- Right Petal -->
-    <g transform="rotate(90)">
-      <path d="M 0 0 C -45 -25, -70 -75, -40 -105 C -10 -135, 0 -115, 0 -80 C 0 -115, 10 -135, 40 -105 C 70 -75, 45 -25, 0 0 Z" fill="url(#goldRibbon)" />
-    </g>
-    <!-- Bottom Petal -->
-    <g transform="rotate(180)">
-      <path d="M 0 0 C -45 -25, -70 -75, -40 -105 C -10 -135, 0 -115, 0 -80 C 0 -115, 10 -135, 40 -105 C 70 -75, 45 -25, 0 0 Z" fill="#0D9488" />
-    </g>
-    <!-- Left Petal -->
-    <g transform="rotate(270)">
-      <path d="M 0 0 C -45 -25, -70 -75, -40 -105 C -10 -135, 0 -115, 0 -80 C 0 -115, 10 -135, 40 -105 C 70 -75, 45 -25, 0 0 Z" fill="url(#greenLeaf)" />
-    </g>
-
-    <!-- Center White Sparkle Star -->
-    <circle cx="0" cy="0" r="28" fill="#FFFFFF" />
-    <text x="0" y="10" 
-          text-anchor="middle" 
-          font-family="'Montserrat', 'Poppins', sans-serif" 
-          font-size="28px" 
-          font-weight="900" 
-          fill="#065F46">G</text>
-
-    <!-- Joy Smile Arc below clover -->
-    <path d="M -100 60 C -50 120, 50 120, 100 60 C 108 50, 120 58, 112 70 C 60 140, -60 140, -112 70 C -120 58, -108 50, -100 60 Z" fill="url(#goldRibbon)" />
-  </g>
+  <rect x="4" y="4" width="504" height="504" rx="116" fill="url(#obsidianSquircle)" />
+  <rect x="6" y="6" width="500" height="500" rx="114" fill="none" stroke="rgba(212,175,55,0.48)" stroke-width="4" />
+  <rect x="14" y="14" width="484" height="484" rx="106" fill="none" stroke="rgba(255,255,255,0.09)" stroke-width="2" />
 </svg>
 `;
 
-// 2. Round Master Icon SVG
-const roundIconSvg = `
+const roundBackdropSvg = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <linearGradient id="bgGradRound" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#064E3B" />
-      <stop offset="30%" stop-color="#047857" />
-      <stop offset="70%" stop-color="#0D9488" />
-      <stop offset="100%" stop-color="#0369A1" />
-    </linearGradient>
-
-    <linearGradient id="goldRibbonRound" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#FDE047" />
-      <stop offset="100%" stop-color="#D97706" />
-    </linearGradient>
-
-    <linearGradient id="cyanLeafRound" x1="0%" y1="100%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#0284C7" />
-      <stop offset="100%" stop-color="#38BDF8" />
-    </linearGradient>
-
-    <linearGradient id="greenLeafRound" x1="0%" y1="100%" x2="0%" y2="0%">
-      <stop offset="0%" stop-color="#059669" />
-      <stop offset="100%" stop-color="#34D399" />
-    </linearGradient>
-
-    <filter id="iconShadowRound" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#022C22" flood-opacity="0.4" />
-    </filter>
+    <radialGradient id="obsidianRound" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#2a3952" />
+      <stop offset="66%" stop-color="#151e2e" />
+      <stop offset="100%" stop-color="#0c111c" />
+    </radialGradient>
   </defs>
-
-  <circle cx="256" cy="256" r="256" fill="url(#bgGradRound)" />
-  <circle cx="256" cy="256" r="252" stroke="rgba(255,255,255,0.2)" stroke-width="4" fill="none" />
-
-  <!-- Corner dynamic ribbons -->
-  <path d="M 0 320 C 100 360, 200 440, 240 512 L 0 512 Z" fill="url(#goldRibbonRound)" opacity="0.8" />
-  <path d="M 512 180 C 420 140, 360 60, 340 0 L 512 0 Z" fill="url(#cyanLeafRound)" opacity="0.6" />
-
-  <!-- Lucky Clover Symbol inside App Icon -->
-  <g filter="url(#iconShadowRound)" transform="translate(256, 256)">
-    <!-- Top Petal -->
-    <path d="M 0 0 C -45 -25, -70 -75, -40 -105 C -10 -135, 0 -115, 0 -80 C 0 -115, 10 -135, 40 -105 C 70 -75, 45 -25, 0 0 Z" fill="url(#cyanLeafRound)" />
-    <!-- Right Petal -->
-    <g transform="rotate(90)">
-      <path d="M 0 0 C -45 -25, -70 -75, -40 -105 C -10 -135, 0 -115, 0 -80 C 0 -115, 10 -135, 40 -105 C 70 -75, 45 -25, 0 0 Z" fill="url(#goldRibbonRound)" />
-    </g>
-    <!-- Bottom Petal -->
-    <g transform="rotate(180)">
-      <path d="M 0 0 C -45 -25, -70 -75, -40 -105 C -10 -135, 0 -115, 0 -80 C 0 -115, 10 -135, 40 -105 C 70 -75, 45 -25, 0 0 Z" fill="#0D9488" />
-    </g>
-    <!-- Left Petal -->
-    <g transform="rotate(270)">
-      <path d="M 0 0 C -45 -25, -70 -75, -40 -105 C -10 -135, 0 -115, 0 -80 C 0 -115, 10 -135, 40 -105 C 70 -75, 45 -25, 0 0 Z" fill="url(#greenLeafRound)" />
-    </g>
-
-    <!-- Center White Sparkle Star -->
-    <circle cx="0" cy="0" r="28" fill="#FFFFFF" />
-    <text x="0" y="10" 
-          text-anchor="middle" 
-          font-family="'Montserrat', 'Poppins', sans-serif" 
-          font-size="28px" 
-          font-weight="900" 
-          fill="#065F46">G</text>
-
-    <!-- Joy Smile Arc below clover -->
-    <path d="M -100 60 C -50 120, 50 120, 100 60 C 108 50, 120 58, 112 70 C 60 140, -60 140, -112 70 C -120 58, -108 50, -100 60 Z" fill="url(#goldRibbonRound)" />
-  </g>
+  <circle cx="256" cy="256" r="248" fill="url(#obsidianRound)" />
+  <circle cx="256" cy="256" r="245" fill="none" stroke="rgba(212,175,55,0.58)" stroke-width="6" />
+  <circle cx="256" cy="256" r="236" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="2" />
 </svg>
 `;
 
-// 3. Foreground Icon SVG (for Android Adaptive Icons)
-const fgIconSvg = `
+const fullBleedBackdropSvg = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <linearGradient id="fgGoldRibbon" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#FDE047" />
-      <stop offset="100%" stop-color="#D97706" />
-    </linearGradient>
-
-    <linearGradient id="fgCyanLeaf" x1="0%" y1="100%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#0284C7" />
-      <stop offset="100%" stop-color="#38BDF8" />
-    </linearGradient>
-
-    <linearGradient id="fgGreenLeaf" x1="0%" y1="100%" x2="0%" y2="0%">
-      <stop offset="0%" stop-color="#059669" />
-      <stop offset="100%" stop-color="#34D399" />
-    </linearGradient>
-
-    <filter id="fgShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.3" />
-    </filter>
+    <radialGradient id="obsidianFull" cx="50%" cy="42%" r="68%">
+      <stop offset="0%" stop-color="#2a3952" />
+      <stop offset="66%" stop-color="#151e2e" />
+      <stop offset="100%" stop-color="#0c111c" />
+    </radialGradient>
   </defs>
-
-  <!-- Lucky Clover Symbol centered for Android Adaptive Safe Zone (scale ~ 0.72) -->
-  <g filter="url(#fgShadow)" transform="translate(256, 256) scale(0.72)">
-    <!-- Top Petal -->
-    <path d="M 0 0 C -45 -25, -70 -75, -40 -105 C -10 -135, 0 -115, 0 -80 C 0 -115, 10 -135, 40 -105 C 70 -75, 45 -25, 0 0 Z" fill="url(#fgCyanLeaf)" />
-    <!-- Right Petal -->
-    <g transform="rotate(90)">
-      <path d="M 0 0 C -45 -25, -70 -75, -40 -105 C -10 -135, 0 -115, 0 -80 C 0 -115, 10 -135, 40 -105 C 70 -75, 45 -25, 0 0 Z" fill="url(#fgGoldRibbon)" />
-    </g>
-    <!-- Bottom Petal -->
-    <g transform="rotate(180)">
-      <path d="M 0 0 C -45 -25, -70 -75, -40 -105 C -10 -135, 0 -115, 0 -80 C 0 -115, 10 -135, 40 -105 C 70 -75, 45 -25, 0 0 Z" fill="#0D9488" />
-    </g>
-    <!-- Left Petal -->
-    <g transform="rotate(270)">
-      <path d="M 0 0 C -45 -25, -70 -75, -40 -105 C -10 -135, 0 -115, 0 -80 C 0 -115, 10 -135, 40 -105 C 70 -75, 45 -25, 0 0 Z" fill="url(#fgGreenLeaf)" />
-    </g>
-
-    <!-- Center White Sparkle Star -->
-    <circle cx="0" cy="0" r="28" fill="#FFFFFF" />
-    <text x="0" y="10" 
-          text-anchor="middle" 
-          font-family="'Montserrat', 'Poppins', sans-serif" 
-          font-size="28px" 
-          font-weight="900" 
-          fill="#065F46">G</text>
-
-    <!-- Joy Smile Arc below clover -->
-    <path d="M -100 60 C -50 120, 50 120, 100 60 C 108 50, 120 58, 112 70 C 60 140, -60 140, -112 70 C -120 58, -108 50, -100 60 Z" fill="url(#fgGoldRibbon)" />
-  </g>
+  <rect width="512" height="512" fill="url(#obsidianFull)" />
+  <circle cx="256" cy="256" r="204" fill="none" stroke="rgba(212,175,55,0.32)" stroke-width="3" />
 </svg>
 `;
 
-// 4. Background SVG (for Android Adaptive Icons)
-const bgIconSvg = `
+const adaptiveBgSvg = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <linearGradient id="adaptiveBgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#064E3B" />
-      <stop offset="30%" stop-color="#047857" />
-      <stop offset="70%" stop-color="#0D9488" />
-      <stop offset="100%" stop-color="#0369A1" />
-    </linearGradient>
+    <radialGradient id="adaptiveBg" cx="50%" cy="42%" r="70%">
+      <stop offset="0%" stop-color="#2a3952" />
+      <stop offset="65%" stop-color="#151e2e" />
+      <stop offset="100%" stop-color="#0c111c" />
+    </radialGradient>
   </defs>
-  <rect width="512" height="512" fill="url(#adaptiveBgGrad)" />
+  <rect width="512" height="512" fill="url(#adaptiveBg)" />
 </svg>
 `;
 
-// 5. Monochrome Icon SVG (for Android 13+ themed icons)
-const monoIconSvg = `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <g transform="translate(256, 256) scale(0.72)">
-    <!-- Top Petal -->
-    <path d="M 0 0 C -45 -25, -70 -75, -40 -105 C -10 -135, 0 -115, 0 -80 C 0 -115, 10 -135, 40 -105 C 70 -75, 45 -25, 0 0 Z" fill="#000000" />
-    <!-- Right Petal -->
-    <g transform="rotate(90)">
-      <path d="M 0 0 C -45 -25, -70 -75, -40 -105 C -10 -135, 0 -115, 0 -80 C 0 -115, 10 -135, 40 -105 C 70 -75, 45 -25, 0 0 Z" fill="#000000" />
-    </g>
-    <!-- Bottom Petal -->
-    <g transform="rotate(180)">
-      <path d="M 0 0 C -45 -25, -70 -75, -40 -105 C -10 -135, 0 -115, 0 -80 C 0 -115, 10 -135, 40 -105 C 70 -75, 45 -25, 0 0 Z" fill="#000000" />
-    </g>
-    <!-- Left Petal -->
-    <g transform="rotate(270)">
-      <path d="M 0 0 C -45 -25, -70 -75, -40 -105 C -10 -135, 0 -115, 0 -80 C 0 -115, 10 -135, 40 -105 C 70 -75, 45 -25, 0 0 Z" fill="#000000" />
-    </g>
+/**
+ * Builds a valid multi-size ICO binary wrapping PNG images (Windows/Electron).
+ */
+function buildIcoFromPngBuffers(entries) {
+  const count = entries.length;
+  const headerSize = 6;
+  const dirEntrySize = 16;
+  let offset = headerSize + dirEntrySize * count;
 
-    <!-- Center Star cutout -->
-    <circle cx="0" cy="0" r="28" fill="#FFFFFF" />
-    <text x="0" y="10" 
-          text-anchor="middle" 
-          font-family="'Montserrat', 'Poppins', sans-serif" 
-          font-size="28px" 
-          font-weight="900" 
-          fill="#000000">G</text>
+  const header = Buffer.alloc(headerSize);
+  header.writeUInt16LE(0, 0); // Reserved
+  header.writeUInt16LE(1, 2); // Icon type
+  header.writeUInt16LE(count, 4);
 
-    <!-- Joy Smile Arc -->
-    <path d="M -100 60 C -50 120, 50 120, 100 60 C 108 50, 120 58, 112 70 C 60 140, -60 140, -112 70 C -120 58, -108 50, -100 60 Z" fill="#000000" />
-  </g>
-</svg>
-`;
+  const dirBuffers = [];
+  const dataBuffers = [];
+
+  for (const { size, buf } of entries) {
+    const entry = Buffer.alloc(dirEntrySize);
+    entry.writeUInt8(size >= 256 ? 0 : size, 0);
+    entry.writeUInt8(size >= 256 ? 0 : size, 1);
+    entry.writeUInt8(0, 2); // Color palette
+    entry.writeUInt8(0, 3); // Reserved
+    entry.writeUInt16LE(1, 4); // Color planes
+    entry.writeUInt16LE(32, 6); // Bits per pixel
+    entry.writeUInt32LE(buf.length, 8);
+    entry.writeUInt32LE(offset, 12);
+    offset += buf.length;
+    dirBuffers.push(entry);
+    dataBuffers.push(buf);
+  }
+
+  return Buffer.concat([header, ...dirBuffers, ...dataBuffers]);
+}
+
+/**
+ * Builds a clean white-on-transparent monochrome silhouette directly from the
+ * uploaded crest PNG, suppressing soft drop-shadow pixels so letters remain crisp.
+ */
+async function buildMonochromeFromSource(sourceBuffer, targetSize, innerScale = 0.72) {
+  const innerPx = Math.round(targetSize * innerScale);
+  const { data, info } = await sharp(sourceBuffer)
+    .resize(innerPx, innerPx, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const out = Buffer.alloc(data.length);
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const a = data[i + 3];
+    // Keep foreground white/colored ink and solid dark brush strokes; skip soft drop shadows
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    const isInk = a >= 185 || (a >= 110 && lum > 150);
+    if (isInk) {
+      out[i] = 255;
+      out[i + 1] = 255;
+      out[i + 2] = 255;
+      out[i + 3] = a >= 200 ? 255 : Math.min(255, Math.round(a * 1.15));
+    } else {
+      out[i] = 0;
+      out[i + 1] = 0;
+      out[i + 2] = 0;
+      out[i + 3] = 0;
+    }
+  }
+
+  const fgMono = await sharp(out, {
+    raw: { width: info.width, height: info.height, channels: 4 }
+  })
+    .png()
+    .toBuffer();
+
+  return sharp({
+    create: {
+      width: targetSize,
+      height: targetSize,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 }
+    }
+  })
+    .composite([{ input: fgMono, gravity: 'center' }])
+    .png()
+    .toBuffer();
+}
 
 async function main() {
-  console.log('🚀 Starting Full Brand & Android Asset Generation...');
+  if (!fs.existsSync(SOURCE_LOGO_PATH)) {
+    throw new Error(`Missing source logo PNG at ${SOURCE_LOGO_PATH}`);
+  }
 
-  const masterLogoSvgPath = path.join(__dirname, '../public/logo.svg');
-  const masterLogoSvg = fs.readFileSync(masterLogoSvgPath, 'utf8');
+  console.log('🚀 Generating Herr Abdul-rahman brand assets across Web, PWA, Electron, and Android...');
 
-  // 1. Write updated SVGs to all root & resource locations
-  fs.writeFileSync(path.join(__dirname, '../icon.svg'), masterIconSvg, 'utf8');
-  fs.writeFileSync(path.join(__dirname, '../icon_foreground.svg'), fgIconSvg, 'utf8');
-  fs.writeFileSync(path.join(__dirname, '../icon_monochrome.svg'), monoIconSvg, 'utf8');
-  fs.writeFileSync(path.join(__dirname, '../logo.svg'), masterLogoSvg, 'utf8');
+  const sourceBuf = fs.readFileSync(SOURCE_LOGO_PATH);
+  const sourceBase64 = sourceBuf.toString('base64');
+
+  // Create a crisp standalone SVG wrapper embedding the raster crest in a dark obsidian medallion
+  const masterBrandSvg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="crestBg" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#2a3952" />
+      <stop offset="66%" stop-color="#151e2e" />
+      <stop offset="100%" stop-color="#0c111c" />
+    </radialGradient>
+  </defs>
+  <circle cx="256" cy="256" r="248" fill="url(#crestBg)" />
+  <circle cx="256" cy="256" r="245" fill="none" stroke="#D4AF37" stroke-opacity="0.58" stroke-width="6" />
+  <circle cx="256" cy="256" r="236" fill="none" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="2" />
+  <image x="44" y="44" width="424" height="424" preserveAspectRatio="xMidYMid meet" href="data:image/png;base64,${sourceBase64}" />
+</svg>
+`;
+
+  // Master composite buffers (512x512)
+  const logo424 = await sharp(sourceBuf)
+    .resize(424, 424, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .png()
+    .toBuffer();
+
+  // 12-14% safe zone for maskable & iOS icons (380 / 512 = 74.2% -> 12.9% margin on every side)
+  const logo380 = await sharp(sourceBuf)
+    .resize(380, 380, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .png()
+    .toBuffer();
+
+  // Adaptive foreground safe-zone logo (336 / 512 = 65.6%)
+  const logo336 = await sharp(sourceBuf)
+    .resize(336, 336, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .png()
+    .toBuffer();
+
+  const squircleMasterBuf = await sharp(Buffer.from(squircleBackdropSvg))
+    .composite([{ input: logo424, gravity: 'center' }])
+    .png()
+    .toBuffer();
+
+  const roundMasterBuf = await sharp(Buffer.from(roundBackdropSvg))
+    .composite([{ input: logo424, gravity: 'center' }])
+    .png()
+    .toBuffer();
+
+  const maskableMasterBuf = await sharp(Buffer.from(fullBleedBackdropSvg))
+    .composite([{ input: logo380, gravity: 'center' }])
+    .png()
+    .toBuffer();
+
+  const fgMasterBuf = await sharp({
+    create: {
+      width: 512,
+      height: 512,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 }
+    }
+  })
+    .composite([{ input: logo336, gravity: 'center' }])
+    .png()
+    .toBuffer();
+
+  const bgMasterBuf = await sharp(Buffer.from(adaptiveBgSvg)).png().toBuffer();
+  const monoMasterBuf = await buildMonochromeFromSource(sourceBuf, 512, 0.72);
+  const badgeMasterBuf = await sharp(Buffer.from(notificationBadgeSvg)).resize(96, 96).png().toBuffer();
+
+  // 1. Write root & public SVG files (keep public/alsunLogo.svg untouched for school printouts)
+  const publicDir = path.join(__dirname, '../public');
+  fs.writeFileSync(path.join(publicDir, 'logo.svg'), masterBrandSvg, 'utf8');
+  fs.writeFileSync(path.join(__dirname, '../logo.svg'), masterBrandSvg, 'utf8');
+  fs.writeFileSync(path.join(__dirname, '../icon.svg'), masterBrandSvg, 'utf8');
+  fs.writeFileSync(path.join(__dirname, '../icon_monochrome.svg'), notificationBadgeSvg.trim() + '\n', 'utf8');
 
   if (fs.existsSync(path.join(__dirname, '../assets'))) {
-    fs.writeFileSync(path.join(__dirname, '../assets/logo.svg'), masterLogoSvg, 'utf8');
+    fs.writeFileSync(path.join(__dirname, '../assets/logo.svg'), masterBrandSvg, 'utf8');
   }
   if (fs.existsSync(path.join(__dirname, '../resources'))) {
-    fs.writeFileSync(path.join(__dirname, '../resources/icon.svg'), masterIconSvg, 'utf8');
-    fs.writeFileSync(path.join(__dirname, '../resources/fg.svg'), fgIconSvg, 'utf8');
-    fs.writeFileSync(path.join(__dirname, '../resources/bg.svg'), bgIconSvg, 'utf8');
+    fs.writeFileSync(path.join(__dirname, '../resources/icon.svg'), masterBrandSvg, 'utf8');
+    fs.writeFileSync(path.join(__dirname, '../resources/bg.svg'), adaptiveBgSvg.trim() + '\n', 'utf8');
   }
 
-  // 2. Prepare Buffers
-  const masterIconBuf = Buffer.from(masterIconSvg);
-  const roundIconBuf = Buffer.from(roundIconSvg);
-  const fgIconBuf = Buffer.from(fgIconSvg);
-  const bgIconBuf = Buffer.from(bgIconSvg);
-  const monoIconBuf = Buffer.from(monoIconSvg);
-  const logoBuf = Buffer.from(masterLogoSvg);
+  // 2. Web & PWA assets in public/
+  await sharp(roundMasterBuf).resize(512, 512).png().toFile(path.join(publicDir, 'logo.png'));
+  await sharp(squircleMasterBuf).resize(512, 512).png().toFile(path.join(publicDir, 'icon.png'));
+  await sharp(squircleMasterBuf).resize(64, 64).png().toFile(path.join(publicDir, 'favicon.png'));
+  await sharp(maskableMasterBuf).resize(180, 180).png().toFile(path.join(publicDir, 'apple-touch-icon.png'));
+  await sharp(squircleMasterBuf).resize(192, 192).png().toFile(path.join(publicDir, 'pwa-192x192.png'));
+  await sharp(squircleMasterBuf).resize(512, 512).png().toFile(path.join(publicDir, 'pwa-512x512.png'));
+  await sharp(maskableMasterBuf).resize(512, 512).png().toFile(path.join(publicDir, 'pwa-maskable-512x512.png'));
+  await sharp(badgeMasterBuf).resize(96, 96).png().toFile(path.join(publicDir, 'notification-badge.png'));
+  await sharp(fgMasterBuf).resize(512, 512).png().toFile(path.join(publicDir, 'fg.png'));
+  await sharp(bgMasterBuf).resize(512, 512).png().toFile(path.join(publicDir, 'bg.png'));
 
-  // 3. Web & PWA assets (in public/)
-  const publicDir = path.join(__dirname, '../public');
-  await sharp(logoBuf).resize(1024, 1024).png().toFile(path.join(publicDir, 'logo.png'));
-  await sharp(masterIconBuf).resize(512, 512).png().toFile(path.join(publicDir, 'icon.png'));
-  await sharp(masterIconBuf).resize(192, 192).png().toFile(path.join(publicDir, 'favicon.png'));
-  await sharp(masterIconBuf).resize(180, 180).png().toFile(path.join(publicDir, 'apple-touch-icon.png'));
-  await sharp(fgIconBuf).resize(512, 512).png().toFile(path.join(publicDir, 'fg.png'));
-  await sharp(bgIconBuf).resize(512, 512).png().toFile(path.join(publicDir, 'bg.png'));
+  // Multi-size Windows/Browser .ico
+  const icoEntries = [];
+  for (const s of [32, 48, 64, 256]) {
+    const b = await sharp(squircleMasterBuf).resize(s, s).png().toBuffer();
+    icoEntries.push({ size: s, buf: b });
+  }
+  fs.writeFileSync(path.join(publicDir, 'icon.ico'), buildIcoFromPngBuffers(icoEntries));
 
   const iconSizes = [48, 72, 96, 128, 192, 256, 512];
   const pwaIconsDir = path.join(publicDir, 'icons');
   if (!fs.existsSync(pwaIconsDir)) fs.mkdirSync(pwaIconsDir, { recursive: true });
   for (const size of iconSizes) {
-    await sharp(masterIconBuf).resize(size, size).png().toFile(path.join(pwaIconsDir, `icon-${size}.png`));
-    await sharp(masterIconBuf).resize(size, size).webp().toFile(path.join(pwaIconsDir, `icon-${size}.webp`));
+    await sharp(squircleMasterBuf).resize(size, size).png().toFile(path.join(pwaIconsDir, `icon-${size}.png`));
+    await sharp(squircleMasterBuf).resize(size, size).webp({ quality: 92 }).toFile(path.join(pwaIconsDir, `icon-${size}.webp`));
   }
-  console.log('✅ Web / PWA icons updated.');
+  console.log('✅ Web / PWA / Electron icons updated.');
 
-  // 4. Capacitor assets/ folder
+  // 3. Capacitor assets/ folder
   const assetsDir = path.join(__dirname, '../assets');
   if (fs.existsSync(assetsDir)) {
-    await sharp(masterIconBuf).resize(1024, 1024).png().toFile(path.join(assetsDir, 'icon.png'));
-    await sharp(fgIconBuf).resize(1024, 1024).png().toFile(path.join(assetsDir, 'icon-foreground.png'));
-    await sharp(bgIconBuf).resize(1024, 1024).png().toFile(path.join(assetsDir, 'icon-background.png'));
-    await sharp(monoIconBuf).resize(1024, 1024).png().toFile(path.join(assetsDir, 'icon-monochrome.png'));
-    await sharp(logoBuf).resize(2732, 2732, { fit: 'contain', background: '#ffffff' }).png().toFile(path.join(assetsDir, 'splash.png'));
-    await sharp(logoBuf).resize(2732, 2732, { fit: 'contain', background: '#0f172a' }).png().toFile(path.join(assetsDir, 'splash-dark.png'));
+    await sharp(maskableMasterBuf).resize(1024, 1024).png().toFile(path.join(assetsDir, 'icon.png'));
+    await sharp(fgMasterBuf).resize(1024, 1024).png().toFile(path.join(assetsDir, 'icon-foreground.png'));
+    await sharp(bgMasterBuf).resize(1024, 1024).png().toFile(path.join(assetsDir, 'icon-background.png'));
+    await sharp(monoMasterBuf).resize(1024, 1024).png().toFile(path.join(assetsDir, 'icon-monochrome.png'));
+
+    const splashCrest1200 = await sharp(roundMasterBuf).resize(1100, 1100).png().toBuffer();
+    await sharp({ create: { width: 2732, height: 2732, channels: 4, background: '#f8fafc' } })
+      .composite([{ input: splashCrest1200, gravity: 'center' }])
+      .png()
+      .toFile(path.join(assetsDir, 'splash.png'));
+    await sharp({ create: { width: 2732, height: 2732, channels: 4, background: '#0c111c' } })
+      .composite([{ input: splashCrest1200, gravity: 'center' }])
+      .png()
+      .toFile(path.join(assetsDir, 'splash-dark.png'));
   }
 
-  // 5. Android Mipmap Folders
+  // 4. Android Mipmap & Drawable Notification/Splash Assets
   const mipmaps = {
-    'ldpi': { launcher: 36, adaptive: 108 },
-    'mdpi': { launcher: 48, adaptive: 108 },
-    'hdpi': { launcher: 72, adaptive: 162 },
-    'xhdpi': { launcher: 96, adaptive: 216 },
-    'xxhdpi': { launcher: 144, adaptive: 324 },
-    'xxxhdpi': { launcher: 192, adaptive: 432 }
+    ldpi: { launcher: 36, adaptive: 108, notifSmall: 18, notifLarge: 48 },
+    mdpi: { launcher: 48, adaptive: 108, notifSmall: 24, notifLarge: 48 },
+    hdpi: { launcher: 72, adaptive: 162, notifSmall: 36, notifLarge: 72 },
+    xhdpi: { launcher: 96, adaptive: 216, notifSmall: 48, notifLarge: 96 },
+    xxhdpi: { launcher: 144, adaptive: 324, notifSmall: 72, notifLarge: 144 },
+    xxxhdpi: { launcher: 192, adaptive: 432, notifSmall: 96, notifLarge: 192 }
   };
 
   const resDir = path.join(__dirname, '../android/app/src/main/res');
   if (fs.existsSync(resDir)) {
-    for (const [dpi, dimensions] of Object.entries(mipmaps)) {
+    for (const [dpi, dims] of Object.entries(mipmaps)) {
       const mipmapFolder = path.join(resDir, `mipmap-${dpi}`);
       if (!fs.existsSync(mipmapFolder)) fs.mkdirSync(mipmapFolder, { recursive: true });
 
-      // Standard launcher icon
-      await sharp(masterIconBuf).resize(dimensions.launcher, dimensions.launcher).png().toFile(path.join(mipmapFolder, 'ic_launcher.png'));
-      // Round launcher icon
-      await sharp(roundIconBuf).resize(dimensions.launcher, dimensions.launcher).png().toFile(path.join(mipmapFolder, 'ic_launcher_round.png'));
-      // Adaptive foreground
-      await sharp(fgIconBuf).resize(dimensions.adaptive, dimensions.adaptive).png().toFile(path.join(mipmapFolder, 'ic_launcher_foreground.png'));
-      // Adaptive background
-      await sharp(bgIconBuf).resize(dimensions.adaptive, dimensions.adaptive).png().toFile(path.join(mipmapFolder, 'ic_launcher_background.png'));
-      // Monochrome icon
-      await sharp(monoIconBuf).resize(dimensions.launcher, dimensions.launcher).png().toFile(path.join(mipmapFolder, 'ic_launcher_monochrome.png'));
-    }
-    console.log('✅ Android Mipmap launcher icons updated.');
+      await sharp(squircleMasterBuf).resize(dims.launcher, dims.launcher).png().toFile(path.join(mipmapFolder, 'ic_launcher.png'));
+      await sharp(roundMasterBuf).resize(dims.launcher, dims.launcher).png().toFile(path.join(mipmapFolder, 'ic_launcher_round.png'));
+      await sharp(fgMasterBuf).resize(dims.adaptive, dims.adaptive).png().toFile(path.join(mipmapFolder, 'ic_launcher_foreground.png'));
+      await sharp(bgMasterBuf).resize(dims.adaptive, dims.adaptive).png().toFile(path.join(mipmapFolder, 'ic_launcher_background.png'));
+      await sharp(monoMasterBuf).resize(dims.launcher, dims.launcher).png().toFile(path.join(mipmapFolder, 'ic_launcher_monochrome.png'));
 
-    // 6. Android Splash Screens in drawables
+      // Also place DPI-scaled notification drawables (small monochrome & large full-color crest)
+      if (dpi !== 'ldpi') {
+        const drawableDpiFolder = path.join(resDir, `drawable-${dpi}`);
+        if (!fs.existsSync(drawableDpiFolder)) fs.mkdirSync(drawableDpiFolder, { recursive: true });
+        await sharp(roundMasterBuf).resize(dims.notifLarge, dims.notifLarge).png().toFile(path.join(drawableDpiFolder, 'ic_notif_large.png'));
+        await sharp(monoMasterBuf).resize(dims.notifSmall, dims.notifSmall).png().toFile(path.join(drawableDpiFolder, 'ic_launcher_monochrome.png'));
+      }
+    }
+
+    // Base drawable fallback for ic_notif_large & ic_launcher_monochrome
+    const baseDrawableDir = path.join(resDir, 'drawable');
+    if (fs.existsSync(baseDrawableDir)) {
+      await sharp(roundMasterBuf).resize(192, 192).png().toFile(path.join(baseDrawableDir, 'ic_notif_large.png'));
+      await sharp(Buffer.from(notificationBadgeSvg)).resize(96, 96).png().toFile(path.join(baseDrawableDir, 'ic_launcher_monochrome.png'));
+    }
+    console.log('✅ Android launcher & notification drawables updated.');
+
+    // Android Splash Screens in drawables
     const splashConfigs = [
       { folder: 'drawable', w: 480, h: 800, dark: false },
       { folder: 'drawable-night', w: 480, h: 800, dark: true },
@@ -362,17 +374,17 @@ async function main() {
       { folder: 'drawable-land-night-hdpi', w: 800, h: 480, dark: true },
       { folder: 'drawable-land-night-xhdpi', w: 1280, h: 720, dark: true },
       { folder: 'drawable-land-night-xxhdpi', w: 1600, h: 960, dark: true },
-      { folder: 'drawable-land-night-xxxhdpi', w: 1920, h: 1280, dark: true },
+      { folder: 'drawable-land-night-xxxhdpi', w: 1920, h: 1280, dark: true }
     ];
 
     for (const sc of splashConfigs) {
       const dFolder = path.join(resDir, sc.folder);
       if (fs.existsSync(dFolder)) {
-        const bg = sc.dark ? '#0f172a' : '#ffffff';
-        // Render logo centered with padding
-        const logoSize = Math.min(sc.w, sc.h) * 0.45;
-        const logoRendered = await sharp(logoBuf)
-          .resize(Math.round(logoSize), Math.round(logoSize), { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        const bg = sc.dark ? '#0c111c' : '#f8fafc';
+        const crestSize = Math.round(Math.min(sc.w, sc.h) * 0.44);
+        const crestRendered = await sharp(roundMasterBuf)
+          .resize(crestSize, crestSize, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+          .png()
           .toBuffer();
 
         await sharp({
@@ -383,23 +395,36 @@ async function main() {
             background: bg
           }
         })
-        .composite([{ input: logoRendered, gravity: 'center' }])
-        .png()
-        .toFile(path.join(dFolder, 'splash.png'));
+          .composite([{ input: crestRendered, gravity: 'center' }])
+          .png()
+          .toFile(path.join(dFolder, 'splash.png'));
       }
     }
     console.log('✅ Android Splash screens updated.');
   }
 
-  // 7. Synchronize android/app/src/main/assets/public/
+  // 5. Synchronize android/app/src/main/assets/public/
   const androidPublicAssets = path.join(__dirname, '../android/app/src/main/assets/public');
   if (fs.existsSync(androidPublicAssets)) {
-    fs.copyFileSync(masterLogoSvgPath, path.join(androidPublicAssets, 'logo.svg'));
-    fs.copyFileSync(path.join(publicDir, 'logo.png'), path.join(androidPublicAssets, 'logo.png'));
-    fs.copyFileSync(path.join(publicDir, 'icon.png'), path.join(androidPublicAssets, 'icon.png'));
-    fs.copyFileSync(path.join(publicDir, 'favicon.png'), path.join(androidPublicAssets, 'favicon.png'));
-    fs.copyFileSync(path.join(publicDir, 'apple-touch-icon.png'), path.join(androidPublicAssets, 'apple-touch-icon.png'));
-    
+    const syncFiles = [
+      'logo.svg',
+      'logo.png',
+      'icon.png',
+      'favicon.png',
+      'apple-touch-icon.png',
+      'pwa-192x192.png',
+      'pwa-512x512.png',
+      'pwa-maskable-512x512.png',
+      'notification-badge.png',
+      'icon.ico'
+    ];
+    for (const f of syncFiles) {
+      const srcPath = path.join(publicDir, f);
+      if (fs.existsSync(srcPath)) {
+        fs.copyFileSync(srcPath, path.join(androidPublicAssets, f));
+      }
+    }
+
     const androidIconsDir = path.join(androidPublicAssets, 'icons');
     if (!fs.existsSync(androidIconsDir)) fs.mkdirSync(androidIconsDir, { recursive: true });
     for (const size of iconSizes) {
@@ -409,10 +434,10 @@ async function main() {
     console.log('✅ Android assets/public synchronized.');
   }
 
-  console.log('🎉 All assets, Android APK icons, and splash screens successfully generated and updated!');
+  console.log('🎉 All brand, notification, PWA, Electron, and Android icons updated!');
 }
 
-main().catch(err => {
-  console.error('Error generating assets:', err);
+main().catch((err) => {
+  console.error('Error generating brand assets:', err);
   process.exit(1);
 });

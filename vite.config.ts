@@ -31,12 +31,13 @@ export default defineConfig(() => {
         VitePWA({
           selfDestroying: true,
           registerType: 'autoUpdate',
-          includeAssets: ['logo.svg', 'favicon.png', 'icon.png', 'logo.png', 'apple-touch-icon.png'],
+          includeAssets: ['favicon.png', 'icon.png', 'logo.png', 'apple-touch-icon.png', 'notification-badge.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
           manifest: {
-            name: 'AGS Teacher App',
-            short_name: 'AGS',
-            description: 'Teacher management application',
-            theme_color: '#ffffff',
+            name: 'Glück fröhlich und froh',
+            short_name: 'Glück',
+            description: 'German Teacher Manager application',
+            theme_color: '#151e2e',
+            background_color: '#0c111c',
             icons: [
               {
                 src: 'favicon.png',
@@ -44,22 +45,22 @@ export default defineConfig(() => {
                 type: 'image/png'
               },
               {
-                src: 'icon.png',
+                src: 'pwa-192x192.png',
                 sizes: '192x192',
                 type: 'image/png',
                 purpose: 'any'
               },
               {
-                src: 'icon.png',
+                src: 'pwa-512x512.png',
                 sizes: '512x512',
                 type: 'image/png',
                 purpose: 'any'
               },
               {
-                src: 'logo.svg',
-                sizes: '1024x1024',
-                type: 'image/svg+xml',
-                purpose: 'any'
+                src: 'pwa-maskable-512x512.png',
+                sizes: '512x512',
+                type: 'image/png',
+                purpose: 'maskable'
               },
               {
                 src: 'apple-touch-icon.png',

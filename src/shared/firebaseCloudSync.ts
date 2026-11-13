@@ -11,6 +11,7 @@ import {
   signOut,
   onAuthStateChanged,
   setPersistence,
+  indexedDBLocalPersistence,
   browserLocalPersistence,
   browserSessionPersistence,
   inMemoryPersistence,
@@ -44,6 +45,7 @@ import {
   where,
   onSnapshot,
   getDocFromServer,
+  getDocsFromServer,
   setLogLevel
 } from 'firebase/firestore';
 import {
@@ -413,11 +415,20 @@ export function __setFirebaseAuthTestOverrides(overrides: FirebaseAuthTestOverri
   firebaseAuthTestOverrides = overrides;
 }
 
-// Initialize default persistence & handle redirect results on load (Web only)
+// Initialize durable IndexedDB persistence (with localStorage fallback) AFTER initial auth hydration
+// so legacy localStorage sessions migrate cleanly without premature logout
 if (typeof window !== 'undefined') {
-  setPersistence(auth, browserLocalPersistence).catch(() => {
-    setPersistence(auth, browserSessionPersistence).catch(() => {
-      setPersistence(auth, inMemoryPersistence).catch(() => {});
+  const readyPromise =
+    typeof (auth as any).authStateReady === 'function'
+      ? Promise.resolve((auth as any).authStateReady()).catch(() => {})
+      : Promise.resolve();
+  readyPromise.then(() => {
+    setPersistence(auth, indexedDBLocalPersistence).catch(() => {
+      setPersistence(auth, browserLocalPersistence).catch(() => {
+        setPersistence(auth, browserSessionPersistence).catch(() => {
+          setPersistence(auth, inMemoryPersistence).catch(() => {});
+        });
+      });
     });
   });
   if (!isAndroidNativePlatform()) {
@@ -572,11 +583,15 @@ async function executeGoogleSignInInternal(): Promise<User | null> {
     }
   }
 
-  // 2. WEB & ELECTRON DESKTOP: Preserve existing supported popup flow
+  // 2. WEB & ELECTRON DESKTOP: Prefer durable IndexedDB persistence (fallback to localStorage)
   try {
-    await setPersistence(auth, browserLocalPersistence);
+    await setPersistence(auth, indexedDBLocalPersistence);
   } catch {
-    // Ignore persistence fallback errors
+    try {
+      await setPersistence(auth, browserLocalPersistence);
+    } catch {
+      // Ignore persistence fallback errors
+    }
   }
 
   try {
@@ -915,12 +930,33 @@ async function writeFirestoreDocViaRest(
   }
 }
 
-async function readFirestoreDocViaRest(
+function parseFirestoreRestFields(rawFields: Record<string, any> | undefined | null): Record<string, any> | null {
+  if (!rawFields || typeof rawFields !== 'object') return null;
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries<any>(rawFields)) {
+    if (v && typeof v === 'object') {
+      if ('stringValue' in v) out[k] = v.stringValue;
+      else if ('booleanValue' in v) out[k] = Boolean(v.booleanValue);
+      else if ('integerValue' in v) out[k] = Number(v.integerValue);
+      else if ('doubleValue' in v) out[k] = Number(v.doubleValue);
+    }
+  }
+  return out;
+}
+
+export type RestDocStatusResult =
+  | { status: 'found'; data: Record<string, any> }
+  | { status: 'not_found' }
+  | { status: 'error' };
+
+async function readFirestoreDocStatusViaRest(
   collectionName: string,
   docId: string,
   idToken?: string | null
-): Promise<Record<string, any> | null> {
-  if (typeof fetch !== 'function') return null;
+): Promise<RestDocStatusResult> {
+  if (typeof fetch !== 'function') return { status: 'error' };
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 5000) : null;
   try {
     const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
       FIREBASE_CONFIG.projectId
@@ -934,22 +970,111 @@ async function readFirestoreDocViaRest(
     if (idToken) {
       headers.Authorization = `Bearer ${idToken}`;
     }
-    const res = await fetch(url, { method: 'GET', headers });
-    if (!res.ok) return null;
+    const res = await fetch(url, { method: 'GET', headers, signal: controller?.signal });
+    if (res.status === 404) {
+      return { status: 'not_found' };
+    }
+    if (!res.ok) return { status: 'error' };
     const raw = await res.json().catch(() => null);
-    if (!raw || !raw.fields || typeof raw.fields !== 'object') return null;
-    const out: Record<string, any> = {};
-    for (const [k, v] of Object.entries<any>(raw.fields)) {
-      if (v && typeof v === 'object') {
-        if ('stringValue' in v) out[k] = v.stringValue;
-        else if ('booleanValue' in v) out[k] = Boolean(v.booleanValue);
-        else if ('integerValue' in v) out[k] = Number(v.integerValue);
-        else if ('doubleValue' in v) out[k] = Number(v.doubleValue);
+    const parsed = parseFirestoreRestFields(raw?.fields);
+    if (!parsed) return { status: 'error' };
+    return { status: 'found', data: parsed };
+  } catch {
+    return { status: 'error' };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function readFirestoreDocViaRest(
+  collectionName: string,
+  docId: string,
+  idToken?: string | null
+): Promise<Record<string, any> | null> {
+  const res = await readFirestoreDocStatusViaRest(collectionName, docId, idToken);
+  return res.status === 'found' ? res.data : null;
+}
+
+async function queryAssignmentsViaRest(
+  ownerUid: string,
+  idToken?: string | null
+): Promise<{ ok: boolean; items: HomeworkAssignment[] }> {
+  if (typeof fetch !== 'function' || !ownerUid) {
+    return { ok: false, items: [] };
+  }
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 6000) : null;
+  try {
+    const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+      FIREBASE_CONFIG.projectId
+    )}/databases/${encodeURIComponent(
+      FIREBASE_CONFIG.firestoreDatabaseId
+    )}/documents:runQuery?key=${encodeURIComponent(FIREBASE_CONFIG.apiKey)}`;
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    };
+    if (idToken) {
+      headers.Authorization = `Bearer ${idToken}`;
+    }
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      signal: controller?.signal,
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId: 'homework_assignments' }],
+          where: {
+            fieldFilter: {
+              field: { fieldPath: 'ownerUid' },
+              op: 'EQUAL',
+              value: { stringValue: ownerUid }
+            }
+          }
+        }
+      })
+    });
+
+    if (!res.ok) {
+      return { ok: false, items: [] };
+    }
+    const rows = await res.json().catch(() => null);
+    if (!Array.isArray(rows)) {
+      return { ok: false, items: [] };
+    }
+
+    const items: HomeworkAssignment[] = [];
+    for (const row of rows) {
+      const fields = parseFirestoreRestFields(row?.document?.fields);
+      if (!fields?.payloadJson) continue;
+      try {
+        const parsed = JSON.parse(fields.payloadJson) as HomeworkAssignment;
+        const docOwnerUid =
+          (typeof fields.ownerUid === 'string' ? fields.ownerUid.trim() : '') ||
+          (parsed.ownerUid?.trim() || '');
+        if (docOwnerUid !== ownerUid) continue;
+        items.push({
+          ...parsed,
+          ownerUid,
+          ...(typeof fields.ownerEmail === 'string' && fields.ownerEmail
+            ? { ownerEmail: fields.ownerEmail }
+            : {}),
+          ...(typeof fields.isActive === 'boolean' ? { isActive: fields.isActive } : {}),
+          ...(fields.deleted === true || (parsed as any).deleted === true
+            ? { deleted: true, isActive: false, status: 'deleted' }
+            : {}),
+          cloudSynced: true
+        });
+      } catch {
+        // Ignore malformed payloadJson
       }
     }
-    return out;
+    return { ok: true, items };
   } catch {
-    return null;
+    return { ok: false, items: [] };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -1329,8 +1454,8 @@ export async function saveAssignmentToFirestore(
   try {
     await executeConfirmedFirestoreWrite(
       () => setDoc(doc(db, 'homework_assignments', safeId), docPayload),
-      10000,
-      2
+      6000,
+      1
     );
     firestoreSaved = true;
   } catch (error) {
@@ -1407,84 +1532,296 @@ async function withFirestoreReadTimeout<T>(promise: Promise<T>, timeoutMs = 4000
   }
 }
 
+let lastAssignmentsFetchAuthoritative = false;
+
+export function wasLastAssignmentsFetchAuthoritative(): boolean {
+  return lastAssignmentsFetchAuthoritative;
+}
+
+export type CloudAssignmentPresenceStatus =
+  | 'exists_active'
+  | 'deleted_or_revoked'
+  | 'not_found'
+  | 'uncertain';
+
+function parseAssignmentDocData(
+  data: Record<string, any> | null | undefined,
+  requiredOwnerUid?: string
+): HomeworkAssignment | null {
+  if (!data?.payloadJson) return null;
+  try {
+    const parsed = JSON.parse(data.payloadJson) as HomeworkAssignment;
+    const docOwnerUid =
+      (typeof data.ownerUid === 'string' && data.ownerUid.trim()) ||
+      parsed.ownerUid?.trim() ||
+      undefined;
+    const docOwnerEmail =
+      (typeof data.ownerEmail === 'string' && data.ownerEmail.trim()) ||
+      parsed.ownerEmail?.trim() ||
+      undefined;
+    if (requiredOwnerUid && docOwnerUid !== requiredOwnerUid.trim()) {
+      return null;
+    }
+    const isDeleted = data.deleted === true || (parsed as any).deleted === true || parsed.status === 'deleted';
+    return {
+      ...parsed,
+      ...(docOwnerUid ? { ownerUid: docOwnerUid } : {}),
+      ...(docOwnerEmail ? { ownerEmail: docOwnerEmail } : {}),
+      isActive: isDeleted
+        ? false
+        : typeof data.isActive === 'boolean'
+        ? data.isActive
+        : parsed.isActive !== false,
+      ...(isDeleted ? { deleted: true, status: 'deleted' } : {}),
+      cloudSynced: true
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchAssignmentFromFirestore(
   assignmentId: string,
   options?: { requireOwnerUid?: string }
 ): Promise<HomeworkAssignment | null> {
   const safeId = sanitizeDocId(assignmentId);
   const path = `homework_assignments/${safeId}`;
+  const docRef = doc(db, 'homework_assignments', safeId);
+
+  let sdkNeedsRestFallback = false;
   try {
-    const snap = await withFirestoreReadTimeout(getDoc(doc(db, 'homework_assignments', safeId)), 4000);
-    if (!snap.exists()) return null;
-    if (snap.metadata?.hasPendingWrites) return null;
-    const data = snap.data();
-    if (data?.payloadJson) {
-      const parsed = JSON.parse(data.payloadJson) as HomeworkAssignment;
-      const docOwnerUid = (typeof data.ownerUid === 'string' && data.ownerUid.trim()) || parsed.ownerUid?.trim() || undefined;
-      const docOwnerEmail = (typeof data.ownerEmail === 'string' && data.ownerEmail.trim()) || parsed.ownerEmail?.trim() || undefined;
-      if (options?.requireOwnerUid && docOwnerUid !== options.requireOwnerUid.trim()) {
-        return null;
-      }
-      return {
-        ...parsed,
-        ...(docOwnerUid ? { ownerUid: docOwnerUid } : {}),
-        ...(docOwnerEmail ? { ownerEmail: docOwnerEmail } : {}),
-        isActive: typeof data.isActive === 'boolean' ? data.isActive : parsed.isActive !== false,
-        cloudSynced: true
-      };
+    let snap;
+    try {
+      snap = await withFirestoreReadTimeout(getDocFromServer(docRef), 4000);
+    } catch {
+      snap = await withFirestoreReadTimeout(getDoc(docRef), 4000);
     }
-    return null;
+    if (snap.exists() && !snap.metadata?.hasPendingWrites && !snap.metadata?.fromCache) {
+      return parseAssignmentDocData(snap.data(), options?.requireOwnerUid);
+    }
+    if (!snap.exists() && !snap.metadata?.fromCache && !snap.metadata?.hasPendingWrites) {
+      return null;
+    }
+    sdkNeedsRestFallback = true;
   } catch (error) {
+    sdkNeedsRestFallback = true;
     handleFirestoreError(error, OperationType.GET, path);
-    return null;
   }
+
+  if (sdkNeedsRestFallback) {
+    const currentUser = auth.currentUser;
+    const idToken = currentUser ? await currentUser.getIdToken().catch(() => null) : null;
+    const restRes = await readFirestoreDocStatusViaRest('homework_assignments', safeId, idToken);
+    if (restRes.status === 'found') {
+      return parseAssignmentDocData(restRes.data, options?.requireOwnerUid);
+    }
+  }
+  return null;
+}
+
+export async function verifyAssignmentPresenceInCloud(
+  assignmentId: string,
+  explicitOwnerUid?: string,
+  shortIdHint?: string
+): Promise<CloudAssignmentPresenceStatus> {
+  if (!assignmentId) return 'uncertain';
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return 'uncertain';
+  }
+  const safeId = sanitizeDocId(assignmentId);
+  const ownerUid = explicitOwnerUid?.trim() || getCurrentHomeworkOwnerUid() || undefined;
+  const docRef = doc(db, 'homework_assignments', safeId);
+
+  let serverNotFoundConfirmed = false;
+
+  try {
+    const snap = await withFirestoreReadTimeout(getDocFromServer(docRef), 4500);
+    if (!snap.metadata?.fromCache && !snap.metadata?.hasPendingWrites) {
+      if (snap.exists()) {
+        const data = snap.data() || {};
+        const parsed = parseAssignmentDocData(data, ownerUid);
+        if (data.deleted === true || (parsed as any)?.deleted === true) {
+          return 'deleted_or_revoked';
+        }
+        return 'exists_active';
+      } else {
+        serverNotFoundConfirmed = true;
+      }
+    }
+  } catch {
+    // Fall back to direct REST check below
+  }
+
+  const currentUser = auth.currentUser;
+  const idToken =
+    currentUser && (!ownerUid || currentUser.uid === ownerUid)
+      ? await currentUser.getIdToken().catch(() => null)
+      : null;
+
+  const restRes = await readFirestoreDocStatusViaRest('homework_assignments', safeId, idToken);
+  if (restRes.status === 'found') {
+    const parsed = parseAssignmentDocData(restRes.data, ownerUid);
+    if (restRes.data.deleted === true || (parsed as any)?.deleted === true) {
+      return 'deleted_or_revoked';
+    }
+    return 'exists_active';
+  }
+  if (restRes.status === 'not_found') {
+    serverNotFoundConfirmed = true;
+  }
+
+  if (serverNotFoundConfirmed) {
+    const cleanShortId = (shortIdHint || '').trim();
+    if (cleanShortId && /^[A-Za-z0-9]{6,10}$/.test(cleanShortId)) {
+      const shortRes = await readFirestoreDocStatusViaRest('homework_short_links', cleanShortId, idToken);
+      if (shortRes.status === 'found') {
+        if (shortRes.data.deleted === true || shortRes.data.isActive === false) {
+          return 'deleted_or_revoked';
+        }
+      }
+    }
+    return 'not_found';
+  }
+
+  return 'uncertain';
 }
 
 export async function fetchAllAssignmentsFromFirestore(
   explicitOwnerUid?: string
 ): Promise<HomeworkAssignment[]> {
+  lastAssignmentsFetchAuthoritative = false;
   const ownerUid = explicitOwnerUid?.trim() || getCurrentHomeworkOwnerUid();
   if (!ownerUid) {
     return [];
   }
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    throw new Error('Offline: cannot fetch authoritative homework assignments.');
+  }
+
   const path = 'homework_assignments';
+  const q = query(collection(db, 'homework_assignments'), where('ownerUid', '==', ownerUid));
+
+  const sdkList: HomeworkAssignment[] = [];
+  let sdkSucceeded = false;
+  let sdkIsFromCache = false;
+  let sdkHasPendingWrites = false;
+  let sdkError: unknown = null;
+
   try {
-    const q = query(collection(db, 'homework_assignments'), where('ownerUid', '==', ownerUid));
-    const snap = await withFirestoreReadTimeout(getDocs(q), 5000);
-    // Guard against stale async completion after account switch
+    let snap;
+    try {
+      snap = await withFirestoreReadTimeout(getDocsFromServer(q), 5000);
+    } catch {
+      snap = await withFirestoreReadTimeout(getDocs(q), 5000);
+    }
     if (!explicitOwnerUid && getCurrentHomeworkOwnerUid() !== ownerUid) {
       return [];
     }
-    const list: HomeworkAssignment[] = [];
+    sdkSucceeded = true;
+    sdkIsFromCache = Boolean(snap.metadata?.fromCache);
     snap.forEach((docSnap) => {
       try {
         if (docSnap.metadata?.hasPendingWrites) {
+          sdkHasPendingWrites = true;
           return;
         }
-        const data = docSnap.data();
-        if (data?.payloadJson) {
-          const parsed = JSON.parse(data.payloadJson) as HomeworkAssignment;
-          const docOwnerUid = (typeof data.ownerUid === 'string' ? data.ownerUid.trim() : '') || (parsed.ownerUid?.trim() || '');
-          if (docOwnerUid !== ownerUid) {
-            return;
-          }
-          list.push({
-            ...parsed,
-            ownerUid,
-            ...(typeof data.ownerEmail === 'string' && data.ownerEmail ? { ownerEmail: data.ownerEmail } : {}),
-            ...(data.deleted === true || parsed.deleted === true ? { deleted: true, isActive: false, status: 'deleted' } : {}),
-            cloudSynced: true
-          });
+        const parsed = parseAssignmentDocData(docSnap.data(), ownerUid);
+        if (parsed) {
+          sdkList.push(parsed);
         }
       } catch {
         // Ignore malformed doc
       }
     });
-    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   } catch (error) {
+    sdkError = error;
     handleFirestoreError(error, OperationType.LIST, path);
-    throw error;
   }
+
+  let restOk = false;
+  let restList: HomeworkAssignment[] = [];
+  let apiOk = false;
+  let apiList: HomeworkAssignment[] = [];
+
+  const needsServerCrossCheck =
+    !sdkSucceeded || sdkIsFromCache || sdkHasPendingWrites || sdkList.length === 0;
+
+  if (needsServerCrossCheck) {
+    const currentUser = auth.currentUser;
+    const idToken =
+      currentUser && currentUser.uid === ownerUid
+        ? await currentUser.getIdToken().catch(() => null)
+        : null;
+
+    if (idToken) {
+      const restRes = await queryAssignmentsViaRest(ownerUid, idToken);
+      restOk = restRes.ok;
+      restList = restRes.items;
+    }
+
+    if (!restOk && idToken && typeof fetch === 'function' && typeof window !== 'undefined') {
+      try {
+        const res = await fetch('/api/teacher/assignments', {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${idToken}` },
+          credentials: 'include'
+        }).catch(() => null);
+        if (res && res.ok) {
+          const data = await res.json().catch(() => null);
+          if (Array.isArray(data?.assignments)) {
+            apiOk = true;
+            apiList = data.assignments
+              .filter((a: HomeworkAssignment) => !a.ownerUid || a.ownerUid === ownerUid)
+              .map((a: HomeworkAssignment) => ({
+                ...a,
+                ownerUid,
+                cloudSynced: true
+              }));
+          }
+        }
+      } catch {
+        // Ignore server API unavailability (e.g. Capacitor Android APK)
+      }
+    }
+  }
+
+  if (!explicitOwnerUid && getCurrentHomeworkOwnerUid() !== ownerUid) {
+    return [];
+  }
+
+  const sdkAuthoritative = sdkSucceeded && !sdkIsFromCache && !sdkHasPendingWrites;
+  const serverConfirmed = sdkAuthoritative || restOk || apiOk;
+
+  if (!serverConfirmed) {
+    throw (
+      (sdkError instanceof Error ? sdkError : null) ||
+      new Error('Unable to verify authoritative assignment list from Firestore server.')
+    );
+  }
+
+  lastAssignmentsFetchAuthoritative = true;
+
+  // Merge confirmed server results so any doc present in REST, API, or clean SDK snapshot is preserved
+  const mergedById = new Map<string, HomeworkAssignment>();
+  const ingest = (items: HomeworkAssignment[]) => {
+    for (const item of items) {
+      if (!item || !item.id) continue;
+      mergedById.set(sanitizeDocId(item.id), item);
+    }
+  };
+  if (sdkAuthoritative || (!restOk && !apiOk)) {
+    ingest(sdkList);
+  }
+  if (apiOk) {
+    ingest(apiList);
+  }
+  if (restOk) {
+    ingest(restList);
+  }
+
+  return Array.from(mergedById.values()).sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
 }
 
 export function subscribeAssignmentsFromFirestore(

@@ -33,6 +33,8 @@ import {
   subscribeTeacherAuth,
   getCurrentHomeworkOwnerUid,
   getCurrentHomeworkOwnerEmail,
+  verifyAssignmentPresenceInCloud,
+  wasLastAssignmentsFetchAuthoritative,
   __setHomeworkAuthUserForTests
 } from './firebaseCloudSync';
 
@@ -929,6 +931,62 @@ export function markAssignmentDeletedLocally(assignmentId: string, explicitUid?:
   }
 }
 
+export function clearAssignmentDeletedLocally(assignmentId: string, explicitUid?: string | null): void {
+  if (typeof window === 'undefined' || !assignmentId) return;
+  try {
+    const key = getDeletedAssignmentsStorageKey(explicitUid);
+    const deletedSet = getDeletedAssignmentIds(explicitUid);
+    const safeId = sanitizeDocId(assignmentId);
+    const hadAny = deletedSet.delete(assignmentId) || deletedSet.delete(safeId);
+    if (hadAny) {
+      localStorage.setItem(key, JSON.stringify(Array.from(deletedSet).slice(-500)));
+    }
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function getManualDeletedAssignmentsStorageKey(explicitUid?: string | null): string {
+  const scopeUid = getActiveHomeworkScopeUid(explicitUid);
+  return `glueck_hw_manual_deleted_ids_v1_${scopeUid}`;
+}
+
+export function getManualDeletedAssignmentIds(explicitUid?: string | null): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(getManualDeletedAssignmentsStorageKey(explicitUid));
+    const parsed: string[] = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'string' && id.length > 0) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function isAssignmentManuallyDeletedLocally(
+  assignmentId?: string | null,
+  explicitUid?: string | null
+): boolean {
+  if (!assignmentId) return false;
+  const manualSet = getManualDeletedAssignmentIds(explicitUid);
+  return manualSet.has(assignmentId) || manualSet.has(sanitizeDocId(assignmentId));
+}
+
+export function markAssignmentManuallyDeletedLocally(
+  assignmentId: string,
+  explicitUid?: string | null
+): void {
+  if (typeof window === 'undefined' || !assignmentId) return;
+  try {
+    const key = getManualDeletedAssignmentsStorageKey(explicitUid);
+    const manualSet = getManualDeletedAssignmentIds(explicitUid);
+    manualSet.add(assignmentId);
+    manualSet.add(sanitizeDocId(assignmentId));
+    localStorage.setItem(key, JSON.stringify(Array.from(manualSet).slice(-500)));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
 export function getLocalAssignments(explicitUid?: string | null): HomeworkAssignment[] {
   if (typeof window === 'undefined') return [];
   try {
@@ -1089,6 +1147,19 @@ export function markShortIdRevokedLocally(shortId?: string | null): void {
     const set = getRevokedShortIdsLocally();
     set.add(clean);
     localStorage.setItem(REVOKED_SHORT_IDS_STORAGE_KEY, JSON.stringify(Array.from(set).slice(-1000)));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+export function clearShortIdRevokedLocally(shortId?: string | null): void {
+  const clean = (shortId || '').trim();
+  if (typeof window === 'undefined' || !clean) return;
+  try {
+    const set = getRevokedShortIdsLocally();
+    if (set.delete(clean)) {
+      localStorage.setItem(REVOKED_SHORT_IDS_STORAGE_KEY, JSON.stringify(Array.from(set).slice(-1000)));
+    }
   } catch {
     // Ignore storage quota errors
   }
@@ -1306,11 +1377,22 @@ export async function saveAssignmentWithConfirmation(hw: HomeworkAssignment): Pr
   }
 }
 
-export function deleteLocalAssignment(assignmentId: string, syncCloud = true): void {
+export interface DeleteLocalAssignmentOptions {
+  isManualDelete?: boolean;
+  markShortIdRevoked?: boolean;
+}
+
+export function deleteLocalAssignment(
+  assignmentId: string,
+  syncCloud = true,
+  options?: DeleteLocalAssignmentOptions
+): void {
   if (typeof window === 'undefined' || !assignmentId) return;
   const activeUid = getCurrentHomeworkOwnerUid();
   const scopeUid = getActiveHomeworkScopeUid();
   const safeId = sanitizeDocId(assignmentId);
+  const isManual = syncCloud === true || options?.isManualDelete === true;
+  const shouldRevokeShortId = isManual || options?.markShortIdRevoked === true;
 
   const existing = getLocalAssignments(scopeUid).find(
     (a) => a.id === assignmentId || sanitizeDocId(a.id) === safeId
@@ -1320,12 +1402,15 @@ export function deleteLocalAssignment(assignmentId: string, syncCloud = true): v
   }
 
   const existingShortId = existing?.shortId?.trim() || undefined;
-  if (existingShortId) {
+  if (existingShortId && shouldRevokeShortId) {
     markShortIdRevokedLocally(existingShortId);
   }
 
   clearAssignmentRecentlySaved(assignmentId);
   markAssignmentDeletedLocally(assignmentId, scopeUid);
+  if (isManual) {
+    markAssignmentManuallyDeletedLocally(assignmentId, scopeUid);
+  }
   try {
     const remainingAssignments = getLocalAssignments(scopeUid).filter(
       (a) => a.id !== assignmentId && sanitizeDocId(a.id) !== safeId
@@ -1345,7 +1430,8 @@ export function deleteLocalAssignment(assignmentId: string, syncCloud = true): v
           shortId: existingShortId,
           remainingAssignments,
           remainingSubmissions,
-          ownerUid: activeUid
+          ownerUid: activeUid,
+          userInitiated: isManual
         }
       })
     );
@@ -1357,6 +1443,74 @@ export function deleteLocalAssignment(assignmentId: string, syncCloud = true): v
     activeDeleteAssignmentFromCloud(assignmentId, activeUid || undefined, existingShortId).catch(() => {});
     activeDeleteSubmissionsForAssignmentFromCloud(assignmentId, activeUid || undefined).catch(() => {});
   }
+}
+
+export function applyCloudAssignmentsSnapshot(
+  cloudAssignments: HomeworkAssignment[],
+  explicitScopeUid?: string | null,
+  explicitAuthUid?: string | null
+): number {
+  if (!Array.isArray(cloudAssignments) || cloudAssignments.length === 0) return 0;
+  const scopeUid = getActiveHomeworkScopeUid(explicitScopeUid);
+  const authUid = explicitAuthUid !== undefined ? explicitAuthUid : getCurrentHomeworkOwnerUid();
+  let restoredCount = 0;
+
+  cloudAssignments.forEach((hw) => {
+    if (!hw || !hw.id) return;
+    if (authUid && hw.ownerUid && hw.ownerUid !== authUid) {
+      return;
+    }
+    if ((hw as any).deleted) {
+      deleteLocalAssignment(hw.id, false, { isManualDelete: false, markShortIdRevoked: true });
+      return;
+    }
+    // Never resurrect an assignment that the teacher explicitly/manually deleted on this device
+    if (isAssignmentManuallyDeletedLocally(hw.id, scopeUid)) {
+      return;
+    }
+
+    const wasFalseDeleted = isAssignmentDeletedLocally(hw.id, scopeUid);
+    const cleanShortId = hw.shortId?.trim();
+    const shouldRestoreShortId = Boolean(
+      cleanShortId &&
+        hw.isActive !== false &&
+        hw.status !== 'closed' &&
+        isShortIdRevokedLocally(cleanShortId)
+    );
+
+    if (wasFalseDeleted || shouldRestoreShortId) {
+      if (wasFalseDeleted) {
+        clearAssignmentDeletedLocally(hw.id, scopeUid);
+        restoredCount++;
+      }
+      if (shouldRestoreShortId && cleanShortId) {
+        clearShortIdRevokedLocally(cleanShortId);
+      }
+      if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+        try {
+          window.dispatchEvent(
+            new CustomEvent('gluck-homework-restored', {
+              detail: {
+                assignmentId: hw.id,
+                safeId: sanitizeDocId(hw.id),
+                shortId: cleanShortId,
+                ownerUid: authUid
+              }
+            })
+          );
+        } catch {
+          // Ignore CustomEvent error
+        }
+      }
+    }
+
+    saveLocalAssignment({ ...hw, ...(authUid ? { ownerUid: authUid } : {}), cloudSynced: true }, false);
+  });
+
+  if (restoredCount > 0) {
+    notifyHomeworkSyncStateChanged();
+  }
+  return restoredCount;
 }
 
 export function getLocalSubmissions(explicitUid?: string | null): HomeworkSubmission[] {
@@ -2712,14 +2866,7 @@ export async function syncAndFetchTeacherAssignments(
     return [];
   }
 
-  cloudAssignments.forEach((hw) => {
-    if (authUidAtStart && hw.ownerUid && hw.ownerUid !== authUidAtStart) {
-      return;
-    }
-    if ((hw as any).deleted) { deleteLocalAssignment(hw.id, false); return; }
-    if (isAssignmentDeletedLocally(hw.id, scopeAtStart)) return;
-    saveLocalAssignment({ ...hw, ...(authUidAtStart ? { ownerUid: authUidAtStart } : {}), cloudSynced: true }, false);
-  });
+  applyCloudAssignmentsSnapshot(cloudAssignments, scopeAtStart, authUidAtStart);
 
   // Push any local assignments missing from cloud ONLY if they belong to the currently authenticated UID
   const localAssignments = getLocalAssignments(scopeAtStart);
@@ -2751,6 +2898,9 @@ export async function syncAndFetchTeacherAssignments(
 
   if (authUidAtStart) {
     const cloudAssignmentIds = new Set(cloudAssignments.flatMap((a) => [a.id, sanitizeDocId(a.id)]));
+    const isUsingTestTransport = Boolean(testCloudTransport);
+    const isListAuthoritative = isUsingTestTransport ? true : wasLastAssignmentsFetchAuthoritative();
+
     for (const localHw of localAssignments) {
       if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
         return [];
@@ -2770,9 +2920,55 @@ export async function syncAndFetchTeacherAssignments(
         !cloudAssignmentIds.has(localHw.id) && !cloudAssignmentIds.has(sanitizeDocId(localHw.id));
       if (isMissingFromCloud) {
         if (localHw.cloudSynced === true && !(localHw as any).cloudCreatePending) {
-          // Assignment was previously confirmed synced to cloud, but is now absent from cloud -> deleted remotely!
-          deleteLocalAssignment(localHw.id, false);
-          continue;
+          if (!isListAuthoritative) {
+            continue;
+          }
+
+          let verifiedMissing = false;
+          let verifiedRevoked = false;
+          if (isUsingTestTransport) {
+            if (testCloudTransport?.fetchAssignment) {
+              try {
+                const singleDoc = await testCloudTransport.fetchAssignment(localHw.id);
+                if (singleDoc && !(singleDoc as any).deleted) {
+                  applyCloudAssignmentsSnapshot([singleDoc], scopeAtStart, authUidAtStart);
+                  continue;
+                }
+                verifiedMissing = true;
+                verifiedRevoked = Boolean((singleDoc as any)?.deleted);
+              } catch {
+                continue;
+              }
+            } else {
+              verifiedMissing = true;
+              verifiedRevoked = true;
+            }
+          } else {
+            const presence = await verifyAssignmentPresenceInCloud(
+              localHw.id,
+              authUidAtStart,
+              localHw.shortId
+            );
+            if (presence === 'exists_active' || presence === 'uncertain') {
+              if (presence === 'exists_active') {
+                clearAssignmentDeletedLocally(localHw.id, scopeAtStart);
+                if (localHw.shortId && localHw.isActive !== false && localHw.status !== 'closed') {
+                  clearShortIdRevokedLocally(localHw.shortId);
+                }
+              }
+              continue;
+            }
+            verifiedMissing = true;
+            verifiedRevoked = presence === 'deleted_or_revoked' || presence === 'not_found';
+          }
+
+          if (verifiedMissing) {
+            deleteLocalAssignment(localHw.id, false, {
+              isManualDelete: false,
+              markShortIdRevoked: verifiedRevoked
+            });
+            continue;
+          }
         } else if ((localHw as any).cloudCreatePending === true || localHw.cloudSynced === false) {
           const { cloudCreatePending: _pending, ...cleanForCloud } = localHw as any;
           const ok = await activeSaveAssignmentToCloud(cleanForCloud as HomeworkAssignment).catch(() => false);

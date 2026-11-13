@@ -121,10 +121,11 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   const isLessonToday = Boolean(lesson.date && lesson.date === getLocalDateStr());
 
   // Find the associated group robustly (by groupId, student's groupId, groupName, or title match)
+  const safeLessonTitleLower = typeof lesson.title === 'string' ? lesson.title.toLowerCase() : '';
   const associatedGroup = groups.find(g => g.id === lesson.groupId)
     || (student?.groupId ? groups.find(g => g.id === student.groupId) : undefined)
-    || (lesson.groupName ? groups.find(g => g.name.trim().toLowerCase() === lesson.groupName.trim().toLowerCase()) : undefined)
-    || groups.find(g => g.name && lesson.title.toLowerCase().includes(g.name.toLowerCase()));
+    || (lesson.groupName ? groups.find(g => typeof g.name === 'string' && g.name.trim().toLowerCase() === lesson.groupName.trim().toLowerCase()) : undefined)
+    || (safeLessonTitleLower ? groups.find(g => typeof g.name === 'string' && g.name.trim() && safeLessonTitleLower.includes(g.name.toLowerCase())) : undefined);
   const groupWhatsAppLink = associatedGroup?.whatsAppGroupLink || '';
 
   // Check if the lesson/group operates on a cycle package (not per-lesson / single session)

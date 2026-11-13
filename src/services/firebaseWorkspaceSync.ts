@@ -470,7 +470,8 @@ export const SINGLETON_KEYS = [
   'pickerNames',
   'prunedLessonIds',
   'recentlyDeleted',
-  'dismissedDashboardLessons'
+  'dismissedDashboardLessons',
+  'activeLessonSessionState'
 ] as const;
 
 // Pre-compute built-in Lernstudio sets lookup so we NEVER sync or duplicate built-in sets!
@@ -1118,7 +1119,7 @@ export function evaluateRemoteSnapshotChanges(
 /**
  * Computes P2P-style record-level delta between current state and last synced watermarks.
  */
-function computeWorkspaceDelta(
+export function computeWorkspaceDelta(
   uid: string,
   sanitizedData: any
 ): {
@@ -1175,24 +1176,29 @@ function computeWorkspaceDelta(
       }
     }
 
-    // Detect records that existed in prevWatermarks for this collection but were hard-deleted locally
-    const prefix = `e:${colKey}:`;
-    for (const prevKey of Object.keys(prevWatermarks)) {
-      if (prevKey.startsWith(prefix)) {
-        const oldId = prevKey.slice(prefix.length);
-        if (oldId && !currentIds.has(oldId)) {
-          const tombstone = {
-            id: oldId,
-            deleted: true,
-            updatedAt: nowMs,
-            version: 999
-          };
-          const wmKey = `e:${colKey}:${oldId}`;
-          const tombHash = fastHash(JSON.stringify(tombstone));
-          nextWatermarks[wmKey] = tombHash;
-          if (prevWatermarks[wmKey] !== tombHash) {
-            colChanged.push(tombstone);
-            totalChangedCount++;
+    // Detect records that existed in prevWatermarks for this collection but were hard-deleted locally.
+    // Homework assignments & submissions have their own dedicated Firestore collections and explicit
+    // deletion lifecycle — never synthesize { deleted: true, version: 999 } watermark tombstones for them,
+    // since local scope truncation or unhydrated auth state on another device would poison active cloud homework.
+    if (colKey !== 'homeworkAssignments' && colKey !== 'homeworkSubmissions') {
+      const prefix = `e:${colKey}:`;
+      for (const prevKey of Object.keys(prevWatermarks)) {
+        if (prevKey.startsWith(prefix)) {
+          const oldId = prevKey.slice(prefix.length);
+          if (oldId && !currentIds.has(oldId)) {
+            const tombstone = {
+              id: oldId,
+              deleted: true,
+              updatedAt: nowMs,
+              version: 999
+            };
+            const wmKey = `e:${colKey}:${oldId}`;
+            const tombHash = fastHash(JSON.stringify(tombstone));
+            nextWatermarks[wmKey] = tombHash;
+            if (prevWatermarks[wmKey] !== tombHash) {
+              colChanged.push(tombstone);
+              totalChangedCount++;
+            }
           }
         }
       }
@@ -1229,7 +1235,7 @@ function computeWorkspaceDelta(
   };
 }
 
-function seedWatermarksFromData(uid: string, rawData: any): void {
+export function seedWatermarksFromData(uid: string, rawData: any): void {
   const sanitized = sanitizeHeavyInlineMedia(rawData);
   const { nextWatermarks } = computeWorkspaceDelta(uid, sanitized);
   saveWatermarks(uid, nextWatermarks);
@@ -1353,7 +1359,8 @@ function partitionBackupPayload(fullData: any, ownerUid?: string): Record<Exclud
       inspirationMessages: fullData.inspirationMessages || [],
       customAiBackgrounds: fullData.customAiBackgrounds || fullData.profile?.customAiBackgrounds || [],
       recentlyDeleted: fullData.recentlyDeleted || { students: [], groups: [], lessons: [] },
-      dismissedDashboardLessons: fullData.dismissedDashboardLessons || []
+      dismissedDashboardLessons: fullData.dismissedDashboardLessons || [],
+      ...(fullData.activeLessonSessionState !== undefined ? { activeLessonSessionState: fullData.activeLessonSessionState } : {})
     },
     lernstudio_data: {
       lernstudioSets: filterCustomOrModifiedLernstudioSets(fullData.lernstudioSets || []),
@@ -2060,6 +2067,18 @@ export function applyDeltaOnWorkspace(baseObj: any, deltaObj: any): any {
           baseObj.schoolSettings = { ...baseObj.schoolSettings, ...deltaObj.schoolSettings };
           if (baseObj.profile && typeof baseObj.profile === 'object') {
             baseObj.profile = { ...baseObj.profile, schoolSettings: baseObj.schoolSettings };
+          }
+        } else if (
+          sKey === 'activeLessonSessionState' &&
+          baseObj.activeLessonSessionState &&
+          typeof baseObj.activeLessonSessionState === 'object' &&
+          deltaObj.activeLessonSessionState &&
+          typeof deltaObj.activeLessonSessionState === 'object'
+        ) {
+          const baseTs = Number(baseObj.activeLessonSessionState.updatedAt) || 0;
+          const deltaTs = Number(deltaObj.activeLessonSessionState.updatedAt) || 0;
+          if (deltaTs >= baseTs) {
+            baseObj.activeLessonSessionState = deltaObj.activeLessonSessionState;
           }
         } else {
           baseObj[sKey] = deltaObj[sKey];

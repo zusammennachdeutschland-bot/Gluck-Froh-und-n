@@ -3,6 +3,7 @@ import { LernstudioSet, LernstudioItem, LernstudioGameMode } from '../../types/l
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../utils/lernstudioTranslations';
 import { speakGermanText, speakGermanTextAndWait, stopGermanSpeech } from '../../utils/audioSpeechUtils';
 import { playLernstudioSound } from '../../utils/lernstudioAudioUtils';
+import { buildTeacherStudySpeechText, resolveVerbFromLernstudioItem } from '../verbEngine';
 import {
   X,
   Volume2,
@@ -475,7 +476,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
 
     let textToSpeak = '';
     if (currentStage === 1 && items[stageQuestionIndex]) {
-      textToSpeak = items[stageQuestionIndex].german;
+      textToSpeak = buildTeacherStudySpeechText(items[stageQuestionIndex]);
     } else if (currentStage === 2 && stage2Questions[stageQuestionIndex]) {
       textToSpeak = stage2Questions[stageQuestionIndex].displayedItem.german;
     } else if (currentStage === 3 && stage3Questions[stageQuestionIndex]) {
@@ -1094,7 +1095,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                     </h3>
                     <button
                       type="button"
-                      onClick={() => handleSpeakGerman(items[stageQuestionIndex].german)}
+                      onClick={() => handleSpeakGerman(buildTeacherStudySpeechText(items[stageQuestionIndex]))}
                       className="p-2.5 bg-primary hover:bg-primary-hover text-white rounded-2xl shadow-md transition-all cursor-pointer inline-flex items-center justify-center active:scale-95"
                       title={t.listenAudio}
                     >
@@ -1115,6 +1116,55 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                     {getItemTranslation(items[stageQuestionIndex], language)}
                   </span>
                 </div>
+
+                {/* Verb Präsens Conjugation Grid (when item is a verb) */}
+                {(() => {
+                  const stageVerb = resolveVerbFromLernstudioItem(items[stageQuestionIndex]);
+                  const conj = stageVerb?.praesens || items[stageQuestionIndex].conjugation;
+                  if (!conj) return null;
+                  return (
+                    <div className="max-w-lg mx-auto space-y-2 text-right">
+                      {stageVerb && (
+                        <div className="flex flex-wrap items-center justify-center gap-1.5">
+                          <span className="px-2 py-0.5 rounded-md bg-primary/10 border border-primary/20 text-primary text-[11px] font-bold">
+                            {stageVerb.level}
+                          </span>
+                          {stageVerb.classifications.map((cls) => (
+                            <span
+                              key={cls}
+                              className="px-2 py-0.5 rounded-md bg-surface-hover border border-surface-border text-text-main text-[11px] font-semibold"
+                            >
+                              {cls}
+                            </span>
+                          ))}
+                          {stageVerb.preposition && (
+                            <span className="px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/25 text-amber-700 dark:text-amber-300 text-[11px] font-bold" dir="ltr">
+                              +{stageVerb.preposition} ({stageVerb.prepositionCase || 'Akk/Dat'})
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-xs" dir="ltr">
+                        {[
+                          ['ich (أنا)', conj.ich],
+                          ['du (أنت)', conj.du],
+                          ['er/sie/es', conj.er_sie_es],
+                          ['wir (نحن)', conj.wir],
+                          ['ihr (أنتم)', conj.ihr],
+                          ['sie/Sie', conj.sie_Sie]
+                        ].map(([pron, form]) => (
+                          <div
+                            key={pron}
+                            className="px-2.5 py-1.5 rounded-lg bg-surface-hover border border-surface-border flex items-center justify-between gap-2"
+                          >
+                            <span className="text-[11px] text-text-muted font-semibold">{pron}</span>
+                            <span className="font-bold text-text-main">{form}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Example Sentence */}
                 {(items[stageQuestionIndex].exampleSentenceGerman || items[stageQuestionIndex].exampleSentenceArabic) && (

@@ -640,7 +640,7 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
 
     const id = typeof l.id === 'string' && l.id.trim() ? l.id.trim() : `les_imp_${Date.now()}_${i}`;
     const date = typeof l.date === 'string' ? l.date : formatLocalDate();
-    const validStatuses = ['scheduled', 'completed', 'cancelled', 'moved'];
+    const validStatuses = ['scheduled', 'in_progress', 'completed', 'cancelled', 'pending_action', 'moved'];
     const status = validStatuses.includes(l.status) ? l.status : 'scheduled';
 
     // Legacy fallback: if groupId is missing but groupName matches an existing group
@@ -1152,7 +1152,19 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     notificationSettings: data.notificationSettings && typeof data.notificationSettings === 'object' ? data.notificationSettings : undefined,
     inspirationSettings: data.inspirationSettings && typeof data.inspirationSettings === 'object' ? data.inspirationSettings : undefined,
     inspirationMessages: Array.isArray(data.inspirationMessages) ? data.inspirationMessages : undefined,
-    todos: Array.isArray(data.todos) ? data.todos : undefined
+    todos: Array.isArray(data.todos) ? data.todos : undefined,
+    activeLessonSessionState:
+      data.activeLessonSessionState && typeof data.activeLessonSessionState === 'object'
+        ? {
+            session:
+              data.activeLessonSessionState.session &&
+              typeof data.activeLessonSessionState.session === 'object' &&
+              typeof data.activeLessonSessionState.session.lessonId === 'string'
+                ? data.activeLessonSessionState.session
+                : null,
+            updatedAt: sanitizeNumber(data.activeLessonSessionState.updatedAt, 0),
+          }
+        : undefined
   };
 
   return {

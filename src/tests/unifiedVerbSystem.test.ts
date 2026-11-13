@@ -10,6 +10,7 @@ import {
   SUBJECT_PROMPTS,
   buildLernstudioSetFromVerbs,
   buildSafeVerbConjugationOptions,
+  buildTeacherStudySpeechText,
   buildVerbConjugationExercise,
   buildVerbSentenceGapExercise,
   calculateUnifiedHomeworkQuestionCount,
@@ -19,6 +20,7 @@ import {
   resolveVerbFromLernstudioItem,
   resolveVerbsFromSelection
 } from '../shared/verbEngine';
+import { filterLernstudioSetsByQuery } from '../shared/lernstudioTranslations';
 import {
   createCustomVerbGroup,
   extractVerbGroupsFromLernstudioSets,
@@ -354,6 +356,52 @@ runTest('conjugateGermanVerb delegates to Shared Verb Library and AI JSON parser
   assert.equal(parsed.success, true);
   assert.equal(parsed.data?.items?.[0].wordType, 'verb');
   assert.equal(parsed.data?.items?.[0].conjugation?.ich, 'stehe auf');
+});
+
+// 9. Teacher Study Speech & Vocab Set Search Filtering
+runTest('buildTeacherStudySpeechText reads verb infinitive and all 6 conjugations, while leaving vocab single', () => {
+  const gehen = getVerbByInfinitive('gehen');
+  assert.ok(gehen);
+  const verbSpeech = buildTeacherStudySpeechText({ id: 'v1', german: 'gehen', arabic: 'يذهب', verbId: gehen!.id }, gehen);
+  assert.ok(verbSpeech.includes('gehen'));
+  assert.ok(verbSpeech.includes(`ich ${gehen!.praesens.ich}`));
+  assert.ok(verbSpeech.includes(`du ${gehen!.praesens.du}`));
+  assert.ok(verbSpeech.includes(`er, sie, es ${gehen!.praesens.er_sie_es}`));
+  assert.ok(verbSpeech.includes(`wir ${gehen!.praesens.wir}`));
+  assert.ok(verbSpeech.includes(`ihr ${gehen!.praesens.ihr}`));
+  assert.ok(verbSpeech.includes(`sie ${gehen!.praesens.sie_Sie}`));
+
+  const vocabSpeech = buildTeacherStudySpeechText({ id: 'w1', german: 'das Haus', arabic: 'المنزل', wordType: 'noun' });
+  assert.equal(vocabSpeech, 'das Haus');
+});
+
+runTest('filterLernstudioSetsByQuery matches title, teacher name, grade, and vocabulary items', () => {
+  const sampleSets = [
+    {
+      id: 's1',
+      title: 'Häuser und Zimmer',
+      topic: 'Wohnen',
+      grade: 'جريد 4',
+      level: 'A1' as const,
+      createdByTeacherName: 'سارة محمود',
+      items: [{ id: 'i1', german: 'das Sofa', arabic: 'الأريكة' }]
+    },
+    {
+      id: 's2',
+      title: 'Tiere im Zoo',
+      topic: 'Tiere',
+      grade: 'جريد 1',
+      level: 'A1' as const,
+      createdByTeacherName: 'محمد علي',
+      items: [{ id: 'i2', german: 'der Löwe', arabic: 'الأسد' }]
+    }
+  ];
+
+  assert.equal(filterLernstudioSetsByQuery(sampleSets, '').length, 2);
+  assert.deepEqual(filterLernstudioSetsByQuery(sampleSets, 'سارة').map((s) => s.id), ['s1']);
+  assert.deepEqual(filterLernstudioSetsByQuery(sampleSets, 'zimmer').map((s) => s.id), ['s1']);
+  assert.deepEqual(filterLernstudioSetsByQuery(sampleSets, 'الأسد').map((s) => s.id), ['s2']);
+  assert.equal(filterLernstudioSetsByQuery(sampleSets, 'nonexistent_xyz').length, 0);
 });
 
 console.log(`\nSummary: ${passed} passed, ${failed} failed`);

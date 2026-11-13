@@ -72,6 +72,7 @@ import {
   migrateLegacyHomeworkForAccount,
   backfillLegacyCloudHomeworkForAccount,
   saveLocalAssignment,
+  applyCloudAssignmentsSnapshot,
   saveLocalSubmission,
   getLocalAssignments,
   getHomeworkSummaryStats,
@@ -208,11 +209,16 @@ export const LernstudioView: React.FC<Props> = ({
     });
   }, [sets, teacherName, activeAuthUid]);
 
+  const setsRef = React.useRef<LernstudioSet[]>(sets);
+  React.useEffect(() => {
+    setsRef.current = sets;
+  }, [sets]);
+
   React.useEffect(() => {
     if (!activeAuthUid) return;
     const unsub = subscribeLernstudioSetsFromFirestore((cloudSets) => {
       if (cloudSets.length > 0) {
-        const localById = new Map<string, LernstudioSet>(sets.map((s) => [s.id, s]));
+        const localById = new Map<string, LernstudioSet>(setsRef.current.map((s) => [s.id, s]));
         cloudSets.forEach((cs) => {
           if (!cs || !cs.id || (cs as any).deleted) return;
           const existing = localById.get(cs.id);
@@ -230,7 +236,7 @@ export const LernstudioView: React.FC<Props> = ({
       }
     }, activeAuthUid);
     return () => unsub();
-  }, [sets.length, activeAuthUid]);
+  }, [activeAuthUid]);
 
   // Theme State
   const [currentThemeId, setCurrentThemeId] = useState<LernstudioThemeId>('neutral');
@@ -307,12 +313,7 @@ export const LernstudioView: React.FC<Props> = ({
     }
 
     const unsubHw = subscribeAssignmentsFromFirestore((cloudAssignments) => {
-      cloudAssignments.forEach((hw) => {
-        if (hw.ownerUid && hw.ownerUid !== activeAuthUid) return;
-        if (!isAssignmentDeletedLocally(hw.id, activeAuthUid)) {
-          saveLocalAssignment({ ...hw, ownerUid: activeAuthUid, cloudSynced: true }, false);
-        }
-      });
+      applyCloudAssignmentsSnapshot(cloudAssignments, activeAuthUid, activeAuthUid);
       refreshStats();
     }, activeAuthUid);
 
@@ -380,6 +381,7 @@ export const LernstudioView: React.FC<Props> = ({
     titleDe: string;
     titleAr: string;
     descriptionAr: string;
+    creatorTeacherName: string;
     verbIds: string[];
   } | null>(null);
   const [editorVerbSearch, setEditorVerbSearch] = useState('');
@@ -1855,6 +1857,27 @@ export const LernstudioView: React.FC<Props> = ({
                       const chosen = resolveVerbsFromSelection({ verbIds: selectedVerbIds });
                       if (chosen.length === 0) return;
                       const tempSet = buildLernstudioSetFromVerbs({
+                        id: `temp_teach_verbs_${Date.now()}`,
+                        title: `Ausgewählte Verben (${chosen.length})`,
+                        titleAr: `أفعال مختارة (${chosen.length})`,
+                        verbs: chosen,
+                        setKind: 'verb_group'
+                      });
+                      setSelectedSetForTeach(tempSet);
+                      setIsTeachModalOpen(true);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-surface border border-surface-border text-text-main text-xs font-bold cursor-pointer inline-flex items-center gap-1"
+                  >
+                    <BookOpen className="w-3.5 h-3.5 text-primary" />
+                    <span>{t.teachMode}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const chosen = resolveVerbsFromSelection({ verbIds: selectedVerbIds });
+                      if (chosen.length === 0) return;
+                      const tempSet = buildLernstudioSetFromVerbs({
                         id: `temp_hw_verbs_${Date.now()}`,
                         title: `Ausgewählte Verben (${chosen.length})`,
                         titleAr: `أفعال مختارة (${chosen.length})`,
@@ -1881,6 +1904,7 @@ export const LernstudioView: React.FC<Props> = ({
                         titleDe: `Meine Verben (${selectedVerbIds.length})`,
                         titleAr: `مجموعة أفعالي (${selectedVerbIds.length})`,
                         descriptionAr: '',
+                        creatorTeacherName: resolvedCreatorName,
                         verbIds: [...selectedVerbIds]
                       });
                     }}
@@ -2089,6 +2113,7 @@ export const LernstudioView: React.FC<Props> = ({
                       titleDe: '',
                       titleAr: '',
                       descriptionAr: '',
+                      creatorTeacherName: resolvedCreatorName,
                       verbIds: []
                     });
                   }}
@@ -2154,6 +2179,30 @@ export const LernstudioView: React.FC<Props> = ({
                       });
                       if (combined.length === 0) return;
                       const tempSet = buildLernstudioSetFromVerbs({
+                        id: `combined_teach_${Date.now()}`,
+                        title: `Verbgruppen (${selectedVerbGroupIds.length})`,
+                        titleAr: `مجموعات أفعال (${selectedVerbGroupIds.length})`,
+                        verbs: combined,
+                        setKind: 'verb_group'
+                      });
+                      setSelectedSetForTeach(tempSet);
+                      setIsTeachModalOpen(true);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-surface border border-surface-border text-text-main text-xs font-bold cursor-pointer inline-flex items-center gap-1"
+                  >
+                    <BookOpen className="w-3.5 h-3.5 text-primary" />
+                    <span>{t.teachMode}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const combined = resolveVerbsFromSelection({
+                        groupIds: selectedVerbGroupIds,
+                        customGroups: customVerbGroups
+                      });
+                      if (combined.length === 0) return;
+                      const tempSet = buildLernstudioSetFromVerbs({
                         id: `combined_hw_${Date.now()}`,
                         title: `Verbgruppen (${selectedVerbGroupIds.length})`,
                         titleAr: `مجموعات أفعال (${selectedVerbGroupIds.length})`,
@@ -2184,6 +2233,7 @@ export const LernstudioView: React.FC<Props> = ({
                         titleDe: 'Kombinierte Verbgruppe',
                         titleAr: 'مجموعة أفعال مدمجة',
                         descriptionAr: '',
+                        creatorTeacherName: resolvedCreatorName,
                         verbIds: combined.map((v) => v.id)
                       });
                     }}
@@ -2273,13 +2323,25 @@ export const LernstudioView: React.FC<Props> = ({
                         <button
                           type="button"
                           onClick={() => {
+                            setSelectedSetForTeach(launchSet());
+                            setIsTeachModalOpen(true);
+                          }}
+                          className="flex-1 py-1.5 px-2 bg-surface hover:bg-surface-hover border border-surface-border text-text-main rounded-lg text-xs font-semibold cursor-pointer inline-flex items-center justify-center gap-1"
+                        >
+                          <BookOpen className="w-3.5 h-3.5 text-primary shrink-0" />
+                          <span className="truncate">{t.teachMode}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
                             setSelectedSetForHomework(launchSet());
                             setHomeworkModalInitialTab('create');
                             setIsHomeworkModalOpen(true);
                           }}
                           className="flex-1 py-1.5 px-2 bg-surface hover:bg-surface-hover border border-surface-border text-text-main rounded-lg text-xs font-semibold cursor-pointer inline-flex items-center justify-center gap-1"
                         >
-                          <Send className="w-3.5 h-3.5 text-primary" />
+                          <Send className="w-3.5 h-3.5 text-primary shrink-0" />
                           <span>{language === 'ar' ? 'واجب' : 'Homework'}</span>
                         </button>
 
@@ -2295,12 +2357,13 @@ export const LernstudioView: React.FC<Props> = ({
                                 titleDe: `${grp.titleDe} (Custom)`,
                                 titleAr: `${grp.titleAr} (نسخة معدّلة)`,
                                 descriptionAr: grp.descriptionAr || '',
+                                creatorTeacherName: resolvedCreatorName,
                                 verbIds: [...grp.verbIds]
                               });
                             }}
                             className="flex-1 py-1.5 px-2 bg-surface hover:bg-surface-hover border border-surface-border text-text-main rounded-lg text-xs font-semibold cursor-pointer inline-flex items-center justify-center gap-1"
                           >
-                            <Edit3 className="w-3.5 h-3.5 text-amber-500" />
+                            <Edit3 className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                             <span>{language === 'ar' ? 'تخصيص' : 'Customize'}</span>
                           </button>
                         ) : (
@@ -2316,6 +2379,7 @@ export const LernstudioView: React.FC<Props> = ({
                                   titleDe: grp.titleDe,
                                   titleAr: grp.titleAr,
                                   descriptionAr: grp.descriptionAr || '',
+                                  creatorTeacherName: grp.createdByTeacherName || resolvedCreatorName,
                                   verbIds: [...grp.verbIds]
                                 });
                               }}
@@ -2460,7 +2524,9 @@ export const LernstudioView: React.FC<Props> = ({
                       : (language === 'ar' ? 'إنشاء مجموعة أفعال مخصصة (مشتركة للمعلمين)' : 'New Custom Verb Group')}
                   </h3>
                   <p className="text-[11px] text-text-muted">
-                    {language === 'ar' ? `باسم المعلم: أ. ${resolvedCreatorName}` : `Teacher: ${resolvedCreatorName}`}
+                    {language === 'ar'
+                      ? `باسم المعلم: أ. ${verbGroupEditor.creatorTeacherName || resolvedCreatorName}`
+                      : `Teacher: ${verbGroupEditor.creatorTeacherName || resolvedCreatorName}`}
                   </p>
                 </div>
                 <button
@@ -2473,7 +2539,7 @@ export const LernstudioView: React.FC<Props> = ({
               </div>
 
               <div className="p-4 overflow-y-auto space-y-3 flex-1">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="text-xs font-bold text-text-muted block mb-1">
                       {language === 'ar' ? 'الاسم بالعربية:' : 'Arabic Title:'}
@@ -2496,6 +2562,18 @@ export const LernstudioView: React.FC<Props> = ({
                       value={verbGroupEditor.titleDe}
                       onChange={(e) => setVerbGroupEditor((prev) => prev ? { ...prev, titleDe: e.target.value } : null)}
                       placeholder="e.g. Reiseverben A2"
+                      className="w-full px-3 py-2 rounded-xl bg-surface-hover border border-surface-border text-xs font-bold text-text-main"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-text-muted block mb-1">
+                      {language === 'ar' ? 'اسم المعلم مُنشئ المجموعة:' : 'Creator Teacher Name:'}
+                    </label>
+                    <input
+                      type="text"
+                      value={verbGroupEditor.creatorTeacherName}
+                      onChange={(e) => setVerbGroupEditor((prev) => prev ? { ...prev, creatorTeacherName: e.target.value } : null)}
+                      placeholder={resolvedCreatorName}
                       className="w-full px-3 py-2 rounded-xl bg-surface-hover border border-surface-border text-xs font-bold text-text-main"
                     />
                   </div>
@@ -2579,6 +2657,7 @@ export const LernstudioView: React.FC<Props> = ({
                     if (!verbGroupEditor) return;
                     const finalTitleDe = verbGroupEditor.titleDe.trim() || verbGroupEditor.titleAr.trim();
                     const finalTitleAr = verbGroupEditor.titleAr.trim() || verbGroupEditor.titleDe.trim();
+                    const finalTeacherName = verbGroupEditor.creatorTeacherName.trim() || resolvedCreatorName;
                     let nextGroup: VerbGroupDefinition;
                     if (verbGroupEditor.mode === 'fork' && verbGroupEditor.sourceBuiltinId) {
                       nextGroup = forkBuiltinVerbGroup({
@@ -2586,7 +2665,7 @@ export const LernstudioView: React.FC<Props> = ({
                         titleDe: finalTitleDe,
                         titleAr: finalTitleAr,
                         verbIds: verbGroupEditor.verbIds,
-                        teacherName: resolvedCreatorName,
+                        teacherName: finalTeacherName,
                         teacherUid: activeAuthUid || undefined
                       });
                     } else if (verbGroupEditor.mode === 'edit' && verbGroupEditor.existingGroup) {
@@ -2595,7 +2674,7 @@ export const LernstudioView: React.FC<Props> = ({
                         titleAr: finalTitleAr,
                         descriptionAr: verbGroupEditor.descriptionAr,
                         verbIds: verbGroupEditor.verbIds,
-                        editedByTeacherName: resolvedCreatorName
+                        editedByTeacherName: finalTeacherName
                       });
                     } else {
                       nextGroup = createCustomVerbGroup({
@@ -2603,7 +2682,7 @@ export const LernstudioView: React.FC<Props> = ({
                         titleAr: finalTitleAr,
                         descriptionAr: verbGroupEditor.descriptionAr,
                         verbIds: verbGroupEditor.verbIds,
-                        teacherName: resolvedCreatorName,
+                        teacherName: finalTeacherName,
                         teacherUid: activeAuthUid || undefined
                       });
                     }
