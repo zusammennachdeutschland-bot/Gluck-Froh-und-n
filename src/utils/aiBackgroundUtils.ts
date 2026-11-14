@@ -339,15 +339,34 @@ export async function validateCertificateBackgroundFile(file: File): Promise<Bac
 }
 
 /**
- * Retrieves all saved AI Certificate Backgrounds from storage.
+ * Retrieves all AI Certificate Backgrounds including soft-deleted P2P tombstones.
  */
-export async function getSavedAIBackgrounds(): Promise<AICertificateBackground[]> {
+export async function getAllAIBackgroundsIncludingDeleted(): Promise<AICertificateBackground[]> {
   try {
     const list = await storage.getItem<AICertificateBackground[]>(STORAGE_KEY_AI_BACKGROUNDS);
-    return Array.isArray(list) ? list : [];
+    return Array.isArray(list) ? list.filter((b) => b && b.id) : [];
   } catch (err) {
-    console.error('Failed to get saved AI backgrounds:', err);
+    console.error('Failed to get AI backgrounds:', err);
     return [];
+  }
+}
+
+/**
+ * Retrieves all active (non-deleted) AI Certificate Backgrounds from storage.
+ */
+export async function getSavedAIBackgrounds(): Promise<AICertificateBackground[]> {
+  const all = await getAllAIBackgroundsIncludingDeleted();
+  return all.filter((b) => !b.deleted);
+}
+
+function notifyAiBackgroundsMutated(recordId: string): void {
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    try {
+      window.dispatchEvent(new CustomEvent('gluck-ai-backgrounds-mutated', { detail: { id: recordId } }));
+      window.dispatchEvent(new CustomEvent('gluck-local-data-mutated', { detail: { source: 'customAiBackgrounds', id: recordId } }));
+    } catch {
+      // Ignore event dispatch errors
+    }
   }
 }
 
@@ -355,15 +374,19 @@ export async function getSavedAIBackgrounds(): Promise<AICertificateBackground[]
  * Saves a new AI Certificate Background to persistent storage.
  */
 export async function saveAIBackground(bg: Omit<AICertificateBackground, 'id' | 'createdAt'> & { id?: string }): Promise<AICertificateBackground> {
-  const current = await getSavedAIBackgrounds();
+  const current = await getAllAIBackgroundsIncludingDeleted();
+  const now = Date.now();
   const newBg: AICertificateBackground = {
     ...bg,
-    id: bg.id || `ai_bg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-    createdAt: Date.now()
+    id: bg.id || `ai_bg_${now}_${Math.random().toString(36).substring(2, 6)}`,
+    createdAt: (bg as any).createdAt || now,
+    updatedAt: now,
+    deleted: false
   };
 
   const updated = [newBg, ...current.filter(b => b.id !== newBg.id)];
   await storage.setItem(STORAGE_KEY_AI_BACKGROUNDS, updated);
+  notifyAiBackgroundsMutated(newBg.id);
   return newBg;
 }
 
@@ -371,18 +394,25 @@ export async function saveAIBackground(bg: Omit<AICertificateBackground, 'id' | 
  * Updates an existing AI Certificate Background.
  */
 export async function updateAIBackground(id: string, updates: Partial<AICertificateBackground>): Promise<AICertificateBackground[]> {
-  const current = await getSavedAIBackgrounds();
-  const updated = current.map(b => b.id === id ? { ...b, ...updates } : b);
+  const current = await getAllAIBackgroundsIncludingDeleted();
+  const now = Date.now();
+  const updated = current.map(b => b.id === id ? { ...b, ...updates, updatedAt: now } : b);
   await storage.setItem(STORAGE_KEY_AI_BACKGROUNDS, updated);
-  return updated;
+  notifyAiBackgroundsMutated(id);
+  return updated.filter(b => !b.deleted);
 }
 
 /**
- * Deletes an AI Certificate Background by ID.
+ * Soft-deletes an AI Certificate Background by ID so P2P sync propagates the deletion.
  */
 export async function deleteAIBackground(id: string): Promise<AICertificateBackground[]> {
-  const current = await getSavedAIBackgrounds();
-  const updated = current.filter(b => b.id !== id);
+  const current = await getAllAIBackgroundsIncludingDeleted();
+  const now = Date.now();
+  const updated = current.map(b =>
+    b.id === id ? { ...b, deleted: true, updatedAt: now, deletedAt: now } : b
+  );
   await storage.setItem(STORAGE_KEY_AI_BACKGROUNDS, updated);
-  return updated;
+  notifyAiBackgroundsMutated(id);
+  return updated.filter(b => !b.deleted);
 }
+

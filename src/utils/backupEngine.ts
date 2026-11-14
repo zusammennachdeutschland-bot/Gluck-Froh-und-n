@@ -879,12 +879,15 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     const bg = rawCustomBg[i];
     if (!bg || typeof bg !== 'object' || Array.isArray(bg)) continue;
     const id = typeof bg.id === 'string' && bg.id.trim() ? bg.id.trim() : `ai_bg_${Date.now()}_${i}`;
+    const createdAtNum = typeof bg.createdAt === 'number' ? bg.createdAt : Date.now();
     sanitizedCustomBg.push({
       ...bg,
       id,
       name: typeof bg.name === 'string' ? bg.name : 'Custom Background',
       dataUrl: typeof bg.dataUrl === 'string' ? bg.dataUrl : '',
-      createdAt: typeof bg.createdAt === 'number' ? bg.createdAt : Date.now()
+      createdAt: createdAtNum,
+      updatedAt: typeof bg.updatedAt === 'number' ? bg.updatedAt : createdAtNum,
+      deleted: Boolean(bg.deleted)
     });
   }
 
@@ -1088,10 +1091,30 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
   if (rawRec && typeof rawRec === 'object' && !Array.isArray(rawRec)) {
     const rawPurged: any[] = Array.isArray(rawRec.purgedRecords) ? rawRec.purgedRecords : [];
     const sanitizedPurged: PurgedRecordTombstone[] = [];
+    const validTombstoneTypes = new Set<PurgedRecordTombstone['type']>([
+      'student',
+      'group',
+      'lesson',
+      'schoolNotes',
+      'notifications',
+      'homeworkAssignments',
+      'homeworkAssignment',
+      'homeworkSubmissions',
+      'certificates',
+      'certificate',
+      'hodStudents',
+      'hodComplaints',
+      'hodActionPlans',
+      'hodVisits',
+      'goldHoldings',
+      'goldHolding',
+      'customAiBackgrounds'
+    ]);
     for (const p of rawPurged) {
       if (!p || typeof p !== 'object' || typeof p.id !== 'string' || !p.id.trim()) continue;
-      const validType: 'student' | 'group' | 'lesson' =
-        p.type === 'group' || p.type === 'lesson' || p.type === 'student' ? p.type : 'student';
+      const validType: PurgedRecordTombstone['type'] = validTombstoneTypes.has(p.type)
+        ? p.type
+        : 'student';
       const updatedAt = sanitizeNumber(p.updatedAt, Date.now());
       sanitizedPurged.push({
         id: p.id.trim(),
@@ -1152,6 +1175,13 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     notificationSettings: data.notificationSettings && typeof data.notificationSettings === 'object' ? data.notificationSettings : undefined,
     inspirationSettings: data.inspirationSettings && typeof data.inspirationSettings === 'object' ? data.inspirationSettings : undefined,
     inspirationMessages: Array.isArray(data.inspirationMessages) ? data.inspirationMessages : undefined,
+    reportLanguage: data.reportLanguage === 'ar' || data.reportLanguage === 'en' || data.reportLanguage === 'de' ? data.reportLanguage : undefined,
+    mobileBottomNavOrder: Array.isArray(data.mobileBottomNavOrder)
+      ? data.mobileBottomNavOrder.filter((id: any) => typeof id === 'string' && id.trim())
+      : undefined,
+    sidebarNavOrder: Array.isArray(data.sidebarNavOrder)
+      ? data.sidebarNavOrder.filter((id: any) => typeof id === 'string' && id.trim())
+      : undefined,
     todos: Array.isArray(data.todos) ? data.todos : undefined,
     activeLessonSessionState:
       data.activeLessonSessionState && typeof data.activeLessonSessionState === 'object'

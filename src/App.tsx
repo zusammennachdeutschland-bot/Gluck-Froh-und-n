@@ -752,10 +752,11 @@ export default function App() {
 
       const keys = [
         'dl_theme', 'dl_accent_color', 'dl_quick_todos', 'dl_language', 'dl_report_language', 'dl_profile',
-        'dl_groups', 'dl_students', 'dl_lessons', 'dl_payments', 'dl_certificates',
+        'dl_mobile_bottom_nav_order', 'dl_sidebar_nav_order', 'dl_settings_updated_at',
+        'dl_groups', 'dl_students', 'dl_lessons', 'dl_payments', 'dl_certificates', 'dl_custom_ai_backgrounds',
         'dl_notifications', 'dl_notification_settings', 'dl_inspiration_settings', 'dl_inspiration_messages',
         'dl_last_backup_time', 'dl_dismissed_dashboard_lessons', 'dl_recently_deleted',
-        'dl_active_lesson_session', 'dl_notified_lesson_alerts', 'dl_local_backup_data',
+        'dl_active_lesson_session', 'dl_active_lesson_session_updated_at', 'dl_notified_lesson_alerts', 'dl_local_backup_data',
         'hod_german_students', 'hod_complaints', 'hod_student_action_plans', 'hod_visit_records',
         'dl_school_notes', 'dl_finance_accounts', 'dl_finance_categories', 'dl_finance_transactions',
         'dl_finance_recurring', 'dl_finance_installments', 'dl_finance_notifications',

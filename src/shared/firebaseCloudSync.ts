@@ -343,9 +343,8 @@ export async function testFirestoreConnection(): Promise<boolean> {
   }
 }
 
-if (typeof window !== 'undefined') {
-  testFirestoreConnection().catch(() => {});
-}
+// Boot-time Firestore reads are intentionally omitted so normal app startup uses 0 Firestore reads.
+
 
 // ============================================================================
 // VERCEL DOMAIN CONFIGURATION (For sending Parent/Student links from Main App)
@@ -422,6 +421,33 @@ export function setVercelPublicDomain(domainUrl: string): string {
     }
   }
   return clean;
+}
+
+export function resolveHomeworkApiUrl(path: string): string {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  if (typeof window === 'undefined') {
+    return `${DEFAULT_VERCEL_DOMAIN}${cleanPath}`;
+  }
+  const protocol = window.location?.protocol || '';
+  if (
+    isAndroidNativePlatform() ||
+    protocol === 'capacitor:' ||
+    protocol === 'ionic:' ||
+    protocol === 'file:'
+  ) {
+    return `${getVercelPublicDomain()}${cleanPath}`;
+  }
+  return cleanPath;
+}
+
+function isCrossOriginApiUrl(url: string): boolean {
+  if (!/^https?:\/\//i.test(url)) return false;
+  if (typeof window === 'undefined' || !window.location?.origin) return true;
+  try {
+    return new URL(url).origin !== window.location.origin;
+  } catch {
+    return true;
+  }
 }
 
 // ============================================================================
@@ -984,6 +1010,101 @@ async function writeFirestoreDocViaRest(
   }
 }
 
+async function deleteFirestoreDocViaRest(
+  collectionName: string,
+  docId: string,
+  idToken?: string | null
+): Promise<boolean> {
+  if (typeof fetch !== 'function') return false;
+  try {
+    const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+      FIREBASE_CONFIG.projectId
+    )}/databases/${encodeURIComponent(
+      FIREBASE_CONFIG.firestoreDatabaseId
+    )}/documents/${encodeURIComponent(collectionName)}/${encodeURIComponent(
+      docId
+    )}?key=${encodeURIComponent(FIREBASE_CONFIG.apiKey)}`;
+    const headers: Record<string, string> = {};
+    if (idToken) {
+      headers.Authorization = `Bearer ${idToken}`;
+    }
+    const res = await fetch(url, { method: 'DELETE', headers });
+    return res.ok || res.status === 404;
+  } catch {
+    return false;
+  }
+}
+
+async function queryDocIdsByAssignmentViaRest(
+  collectionName: 'homework_short_links' | 'homework_submissions',
+  ownerUid: string,
+  safeAssignmentId: string,
+  idToken?: string | null
+): Promise<{ ok: boolean; docIds: string[] }> {
+  if (typeof fetch !== 'function' || !ownerUid || !safeAssignmentId) {
+    return { ok: false, docIds: [] };
+  }
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 5000) : null;
+  try {
+    const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+      FIREBASE_CONFIG.projectId
+    )}/databases/${encodeURIComponent(
+      FIREBASE_CONFIG.firestoreDatabaseId
+    )}/documents:runQuery?key=${encodeURIComponent(FIREBASE_CONFIG.apiKey)}`;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (idToken) {
+      headers.Authorization = `Bearer ${idToken}`;
+    }
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      signal: controller?.signal,
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId: collectionName }],
+          where: {
+            compositeFilter: {
+              op: 'AND',
+              filters: [
+                {
+                  fieldFilter: {
+                    field: { fieldPath: 'ownerUid' },
+                    op: 'EQUAL',
+                    value: { stringValue: ownerUid }
+                  }
+                },
+                {
+                  fieldFilter: {
+                    field: { fieldPath: 'assignmentId' },
+                    op: 'EQUAL',
+                    value: { stringValue: safeAssignmentId }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      })
+    });
+    if (!res.ok) return { ok: false, docIds: [] };
+    const rows = await res.json().catch(() => null);
+    if (!Array.isArray(rows)) return { ok: false, docIds: [] };
+    const docIds: string[] = [];
+    for (const row of rows) {
+      const name: string = row?.document?.name || '';
+      const parts = name.split('/');
+      const docId = parts[parts.length - 1];
+      if (docId) docIds.push(docId);
+    }
+    return { ok: true, docIds };
+  } catch {
+    return { ok: false, docIds: [] };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function parseFirestoreRestFields(rawFields: Record<string, any> | undefined | null): Record<string, any> | null {
   if (!rawFields || typeof rawFields !== 'object') return null;
   const out: Record<string, any> = {};
@@ -1296,6 +1417,7 @@ export async function saveShortLinkToFirestore(
         }
       }
     }
+    lastSavedShortLinkPayloadHashById.delete(cleanShortId);
     handleFirestoreError(error, OperationType.WRITE, `homework_short_links/${cleanShortId}`);
     return { saved: false };
   }
@@ -1311,6 +1433,10 @@ export async function revokeShortLinkInFirestore(
   const ownerUid = (explicitOwnerUid?.trim() || getCurrentHomeworkOwnerUid() || '').slice(0, 128);
   if (!ownerUid) return false;
   const safeAssignmentId = sanitizeDocId(assignmentId || 'hw_deleted');
+  // Always invalidate dedupe caches for both the short link and assignment so reopen/republish writes cleanly
+  lastSavedShortLinkPayloadHashById.delete(cleanShortId);
+  lastSavedAssignmentPayloadHashById.delete(safeAssignmentId);
+
   const nowIso = new Date().toISOString().slice(0, 60);
   const tombstonePayload: Record<string, any> = {
     shortId: cleanShortId,
@@ -1345,6 +1471,8 @@ export async function revokeShortLinkInFirestore(
       }
     }
   }
+  lastSavedShortLinkPayloadHashById.delete(cleanShortId);
+  lastSavedAssignmentPayloadHashById.delete(safeAssignmentId);
   return revoked;
 }
 
@@ -1434,6 +1562,7 @@ export async function fetchShortLinkFromFirestore(
         errorMessageAr: 'تعذر الاتصال بالسحابة لتحميل الواجب. يرجى التحقق من اتصال الإنترنت وإعادة المحاولة.'
       };
     }
+    lastSavedShortLinkPayloadHashById.delete(cleanShortId);
     return {
       status: 'not_found',
       shortId: cleanShortId,
@@ -1443,6 +1572,7 @@ export async function fetchShortLinkFromFirestore(
 
   const targetAssignmentId = typeof rawData.assignmentId === 'string' ? rawData.assignmentId.trim() : undefined;
   if (rawData.deleted === true || rawData.isActive === false) {
+    lastSavedShortLinkPayloadHashById.delete(cleanShortId);
     return {
       status: 'revoked',
       shortId: cleanShortId,
@@ -1461,6 +1591,7 @@ export async function fetchShortLinkFromFirestore(
         parsed?.status === 'closed' ||
         parsed?.status === 'deleted'
       ) {
+        lastSavedShortLinkPayloadHashById.delete(cleanShortId);
         return {
           status: 'revoked',
           shortId: cleanShortId,
@@ -1602,6 +1733,7 @@ export async function saveAssignmentToFirestore(
         }
       }
       if (!firestoreSaved) {
+        lastSavedAssignmentPayloadHashById.delete(safeId);
         handleFirestoreError(error, OperationType.WRITE, path);
       }
     }
@@ -1618,21 +1750,25 @@ export async function saveAssignmentToFirestore(
     shortLinkSaved = shortRes.saved;
   }
 
-  // Only invoke the HTTP API fallback when direct Firestore writes did not complete (and not on native Android APK)
+  // Only invoke the HTTP API fallback when direct Firestore writes did not complete (works on Web and Android APK via resolveHomeworkApiUrl)
   let apiSaved = false;
   const currentUser = (testHomeworkAuthUser !== undefined ? testHomeworkAuthUser : auth.currentUser) as any;
-  if (!(firestoreSaved && shortLinkSaved) && !isAndroidNativePlatform() && currentUser && currentUser.uid === ownerUid && typeof currentUser.getIdToken === 'function') {
+  if (!(firestoreSaved && shortLinkSaved) && currentUser && currentUser.uid === ownerUid && typeof currentUser.getIdToken === 'function') {
     try {
       const idToken = await currentUser.getIdToken();
-      const response = await fetch('/api/teacher/assignments', {
+      const apiUrl = resolveHomeworkApiUrl('/api/teacher/assignments');
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-        credentials: 'include',
+        ...(isCrossOriginApiUrl(apiUrl) ? {} : { credentials: 'include' as RequestCredentials }),
         body: JSON.stringify({ ...normalized, ownerUid })
       });
       if (response.ok) {
         const data = await response.json().catch(() => null);
         apiSaved = data?.success === true && Boolean(data?.assignment?.id);
+        if (apiSaved) {
+          lastSavedAssignmentPayloadHashById.set(safeId, assignmentDedupeSig);
+        }
       } else if (response.status === 409) {
         const collisionErr: any = new Error('SHORT_ID_COLLISION');
         collisionErr.code = 'SHORT_ID_COLLISION';
@@ -1642,7 +1778,7 @@ export async function saveAssignmentToFirestore(
       if (err?.code === 'SHORT_ID_COLLISION') {
         throw err;
       }
-      // Ignore server API unavailability (e.g. Android APK or unconfigured Admin SDK)
+      // Ignore server API unavailability
     }
   }
 
@@ -1728,9 +1864,14 @@ export async function fetchAssignmentFromFirestore(
       snap = await withFirestoreReadTimeout(getDoc(docRef), 4000);
     }
     if (snap.exists() && !snap.metadata?.hasPendingWrites && !snap.metadata?.fromCache) {
-      return parseAssignmentDocData(snap.data(), options?.requireOwnerUid);
+      const parsed = parseAssignmentDocData(snap.data(), options?.requireOwnerUid);
+      if (!parsed || (parsed as any).deleted) {
+        lastSavedAssignmentPayloadHashById.delete(safeId);
+      }
+      return parsed;
     }
     if (!snap.exists() && !snap.metadata?.fromCache && !snap.metadata?.hasPendingWrites) {
+      lastSavedAssignmentPayloadHashById.delete(safeId);
       return null;
     }
     sdkNeedsRestFallback = true;
@@ -1740,11 +1881,20 @@ export async function fetchAssignmentFromFirestore(
   }
 
   if (sdkNeedsRestFallback) {
-    const currentUser = auth.currentUser;
-    const idToken = currentUser ? await currentUser.getIdToken().catch(() => null) : null;
+    const currentUser = (testHomeworkAuthUser !== undefined ? testHomeworkAuthUser : auth.currentUser) as any;
+    const idToken = currentUser && typeof currentUser.getIdToken === 'function'
+      ? await currentUser.getIdToken().catch(() => null)
+      : null;
     const restRes = await readFirestoreDocStatusViaRest('homework_assignments', safeId, idToken);
     if (restRes.status === 'found') {
-      return parseAssignmentDocData(restRes.data, options?.requireOwnerUid);
+      const parsed = parseAssignmentDocData(restRes.data, options?.requireOwnerUid);
+      if (!parsed || (parsed as any).deleted) {
+        lastSavedAssignmentPayloadHashById.delete(safeId);
+      }
+      return parsed;
+    }
+    if (restRes.status === 'not_found') {
+      lastSavedAssignmentPayloadHashById.delete(safeId);
     }
   }
   return null;
@@ -1885,9 +2035,9 @@ export async function fetchAllAssignmentsFromFirestore(
     !sdkSucceeded || sdkIsFromCache || sdkHasPendingWrites;
 
   if (needsServerCrossCheck && !isFirestoreReadQuotaExhausted()) {
-    const currentUser = auth.currentUser;
+    const currentUser = (testHomeworkAuthUser !== undefined ? testHomeworkAuthUser : auth.currentUser) as any;
     const idToken =
-      currentUser && currentUser.uid === ownerUid
+      currentUser && currentUser.uid === ownerUid && typeof currentUser.getIdToken === 'function'
         ? await currentUser.getIdToken().catch(() => null)
         : null;
 
@@ -1897,12 +2047,13 @@ export async function fetchAllAssignmentsFromFirestore(
       restList = restRes.items;
     }
 
-    if (!restOk && idToken && typeof fetch === 'function' && typeof window !== 'undefined') {
+    if (!restOk && idToken && typeof fetch === 'function') {
       try {
-        const res = await fetch('/api/teacher/assignments', {
+        const apiUrl = resolveHomeworkApiUrl('/api/teacher/assignments');
+        const res = await fetch(apiUrl, {
           method: 'GET',
           headers: { Authorization: `Bearer ${idToken}` },
-          credentials: 'include'
+          ...(isCrossOriginApiUrl(apiUrl) ? {} : { credentials: 'include' as RequestCredentials })
         }).catch(() => null);
         if (res && res.ok) {
           const data = await res.json().catch(() => null);
@@ -1918,7 +2069,7 @@ export async function fetchAllAssignmentsFromFirestore(
           }
         }
       } catch {
-        // Ignore server API unavailability (e.g. Capacitor Android APK)
+        // Ignore server API unavailability
       }
     }
   }
@@ -2118,6 +2269,12 @@ export async function deleteAssignmentFromFirestore(
   const safeId = sanitizeDocId(assignmentId);
   const path = `homework_assignments/${safeId}`;
 
+  const currentUser = (testHomeworkAuthUser !== undefined ? testHomeworkAuthUser : auth.currentUser) as any;
+  const idToken =
+    currentUser && currentUser.uid === ownerUid && typeof currentUser.getIdToken === 'function'
+      ? await currentUser.getIdToken().catch(() => null)
+      : null;
+
   let detectedShortId = shortIdHint?.trim() || '';
   if (!detectedShortId) {
     try {
@@ -2136,15 +2293,23 @@ export async function deleteAssignmentFromFirestore(
     lastSavedShortLinkPayloadHashById.delete(detectedShortId);
   }
   try {
-    await executeConfirmedFirestoreWrite(() => deleteDoc(doc(db, 'homework_assignments', safeId)));
+    await executeConfirmedFirestoreWrite(() => deleteDoc(doc(db, 'homework_assignments', safeId)), 6000, 1);
     firestoreDeleted = true;
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    if (idToken) {
+      firestoreDeleted = await deleteFirestoreDocViaRest('homework_assignments', safeId, idToken);
+    }
+    if (!firestoreDeleted) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
   }
 
+  let shortLinksAllRevoked = true;
   if (detectedShortId && /^[A-Za-z0-9]{6,10}$/.test(detectedShortId)) {
-    await revokeShortLinkInFirestore(detectedShortId, safeId, ownerUid).catch(() => false);
+    const revoked = await revokeShortLinkInFirestore(detectedShortId, safeId, ownerUid).catch(() => false);
+    if (!revoked) shortLinksAllRevoked = false;
   } else {
+    let resolvedShortIds: string[] = [];
     try {
       const shortQuery = query(
         collection(db, 'homework_short_links'),
@@ -2153,28 +2318,39 @@ export async function deleteAssignmentFromFirestore(
       );
       const shortSnap = await withFirestoreReadTimeout(getDocs(shortQuery), 3500).catch(() => null);
       if (shortSnap) {
-        const revokePromises: Promise<any>[] = [];
         shortSnap.forEach((docSnap) => {
-          revokePromises.push(revokeShortLinkInFirestore(docSnap.id, safeId, ownerUid));
+          if (docSnap?.id) resolvedShortIds.push(docSnap.id);
         });
-        if (revokePromises.length > 0) {
-          await Promise.all(revokePromises).catch(() => {});
-        }
       }
     } catch {
-      // Ignore
+      // Fall through to REST lookup
+    }
+    if (resolvedShortIds.length === 0 && idToken) {
+      const restShort = await queryDocIdsByAssignmentViaRest('homework_short_links', ownerUid, safeId, idToken);
+      if (restShort.ok) {
+        resolvedShortIds = restShort.docIds;
+      }
+    }
+    if (resolvedShortIds.length > 0) {
+      const results = await Promise.all(
+        resolvedShortIds.map((sid) => revokeShortLinkInFirestore(sid, safeId, ownerUid).catch(() => false))
+      );
+      if (results.some((ok) => !ok)) {
+        shortLinksAllRevoked = false;
+      }
     }
   }
 
   let apiDeleted = false;
-  const currentUser = auth.currentUser;
-  if (currentUser && currentUser.uid === ownerUid) {
+  if (typeof fetch === 'function' && idToken) {
     try {
-      const idToken = await currentUser.getIdToken();
-      const response = await fetch(`/api/teacher/assignments?id=${encodeURIComponent(assignmentId)}`, {
+      const deleteUrl = resolveHomeworkApiUrl(
+        `/api/teacher/assignments?id=${encodeURIComponent(assignmentId)}`
+      );
+      const response = await fetch(deleteUrl, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${idToken}` },
-        credentials: 'include'
+        ...(isCrossOriginApiUrl(deleteUrl) ? {} : { credentials: 'include' as RequestCredentials })
       });
       if (response.ok) {
         const data = await response.json().catch(() => null);
@@ -2185,7 +2361,7 @@ export async function deleteAssignmentFromFirestore(
     }
   }
 
-  return firestoreDeleted || apiDeleted;
+  return apiDeleted || (firestoreDeleted && shortLinksAllRevoked);
 }
 
 export async function deleteSubmissionsForAssignmentFromFirestore(
@@ -2197,24 +2373,50 @@ export async function deleteSubmissionsForAssignmentFromFirestore(
   if (!ownerUid) return false;
   const safeAssignmentId = sanitizeDocId(assignmentId);
   const path = 'homework_submissions';
+
+  const currentUser = (testHomeworkAuthUser !== undefined ? testHomeworkAuthUser : auth.currentUser) as any;
+  const idToken =
+    currentUser && currentUser.uid === ownerUid && typeof currentUser.getIdToken === 'function'
+      ? await currentUser.getIdToken().catch(() => null)
+      : null;
+
   try {
     const q = query(
       collection(db, 'homework_submissions'),
       where('assignmentId', '==', safeAssignmentId),
       where('ownerUid', '==', ownerUid)
     );
-    const snap = await getDocs(q);
-    const deletePromises: Promise<any>[] = [];
+    const snap = await withFirestoreReadTimeout(getDocs(q), 4000);
+    const deletePromises: Promise<boolean>[] = [];
     snap.forEach((docSnap) => {
       const data = docSnap.data();
       if (data?.ownerUid && data.ownerUid !== ownerUid) return;
-      deletePromises.push(executeConfirmedFirestoreWrite(() => deleteDoc(docSnap.ref)));
+      lastSavedSubmissionPayloadHashById.delete(docSnap.id);
+      deletePromises.push(
+        executeConfirmedFirestoreWrite(() => deleteDoc(docSnap.ref), 6000, 1)
+          .then(() => true)
+          .catch(() => (idToken ? deleteFirestoreDocViaRest('homework_submissions', docSnap.id, idToken) : false))
+      );
     });
     if (deletePromises.length > 0) {
-      await Promise.all(deletePromises);
+      const results = await Promise.all(deletePromises);
+      if (results.some((ok) => !ok)) return false;
     }
     return true;
   } catch (error) {
+    if (idToken) {
+      const restQuery = await queryDocIdsByAssignmentViaRest('homework_submissions', ownerUid, safeAssignmentId, idToken);
+      if (restQuery.ok) {
+        if (restQuery.docIds.length === 0) return true;
+        const restResults = await Promise.all(
+          restQuery.docIds.map((docId) => {
+            lastSavedSubmissionPayloadHashById.delete(docId);
+            return deleteFirestoreDocViaRest('homework_submissions', docId, idToken);
+          })
+        );
+        return restResults.every(Boolean);
+      }
+    }
     handleFirestoreError(error, OperationType.DELETE, path);
     return false;
   }
@@ -2223,6 +2425,48 @@ export async function deleteSubmissionsForAssignmentFromFirestore(
 // ============================================================================
 // FIRESTORE STUDENT SUBMISSIONS (LINKED TO PARENT ASSIGNMENT ownerUid)
 // ============================================================================
+function buildSubmissionDedupeSignature(
+  submission: HomeworkSubmission,
+  safeId: string,
+  ownerUid: string,
+  statusValue: string,
+  completedAtValue: string
+): string {
+  const responsesCanonical = Array.isArray(submission.responses)
+    ? submission.responses.map((r) => ({
+        q: r?.questionId || '',
+        t: r?.questionType || '',
+        w: r?.germanWord || '',
+        s: r?.studentAnswer ?? '',
+        c: r?.correctAnswer ?? '',
+        ok: Boolean(r?.isCorrect),
+        sec: Number(r?.timeSpentSeconds || 0)
+      }))
+    : [];
+  return JSON.stringify({
+    id: safeId,
+    assignmentId: sanitizeDocId(submission.assignmentId),
+    ownerUid: ownerUid.slice(0, 128),
+    status: statusValue,
+    completedAt: completedAtValue,
+    studentId: submission.studentId || '',
+    participantId: submission.participantId || '',
+    studentName: (submission.studentName || '').trim(),
+    attemptNumber: Number(submission.attemptNumber || 1),
+    score: Math.max(0, Math.min(100000, Number(submission.score ?? submission.correctAnswersCount) || 0)),
+    accuracyPercent: Math.max(
+      0,
+      Math.min(100, Number(submission.accuracyPercent ?? submission.scorePercentage ?? submission.accuracy) || 0)
+    ),
+    goldEarned: Number(submission.goldEarned || 0),
+    maxStreak: Number((submission as any).maxStreak || 0),
+    xpEarned: Number((submission as any).xpEarned || 0),
+    timeSpentSeconds: Number(submission.timeSpentSeconds || 0),
+    gamification: (submission as any).gamification || null,
+    responses: responsesCanonical
+  });
+}
+
 export async function saveSubmissionToFirestore(
   submission: HomeworkSubmission,
   explicitOwnerUid?: string
@@ -2247,7 +2491,7 @@ export async function saveSubmissionToFirestore(
     '';
 
   const earlyDedupeSig = resolvedOwnerUid
-    ? `${safeId}::${resolvedOwnerUid.slice(0, 128)}::${statusValue}::${completedAtValue}::${docPayloadScoreKey(submission)}::${Array.isArray(submission.responses) ? submission.responses.length : 0}`
+    ? buildSubmissionDedupeSignature(submission, safeId, resolvedOwnerUid, statusValue, completedAtValue)
     : '';
   if (isCompleted && earlyDedupeSig && lastSavedSubmissionPayloadHashById.get(safeId) === earlyDedupeSig) {
     return true;
@@ -2263,7 +2507,8 @@ export async function saveSubmissionToFirestore(
       if (!resolvedOwnerUid && urlOwnerUid) {
         resolvedOwnerUid = urlOwnerUid;
       }
-      const res = await fetch('/api/homework/submit', {
+      const submitUrl = resolveHomeworkApiUrl('/api/homework/submit');
+      const res = await fetch(submitUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2286,10 +2531,18 @@ export async function saveSubmissionToFirestore(
         if (!resolvedOwnerUid && typeof serverOwnerUid === 'string' && serverOwnerUid.trim()) {
           resolvedOwnerUid = serverOwnerUid.trim();
         }
+        if (isCompleted && resolvedOwnerUid) {
+          lastSavedSubmissionPayloadHashById.set(
+            safeId,
+            buildSubmissionDedupeSignature(submission, safeId, resolvedOwnerUid, statusValue, completedAtValue)
+          );
+        }
+        // Server API authoritatively wrote to Firestore; avoid a duplicate client setDoc write.
+        return true;
       }
     }
   } catch {
-    // Best-effort API sync; continue to Firestore
+    // Best-effort API sync; continue to Firestore fallback
   }
 
   try {
@@ -2315,6 +2568,17 @@ export async function saveSubmissionToFirestore(
     }
 
     const ownerUid = resolvedOwnerUid.slice(0, 128);
+    const submissionDedupeSig = buildSubmissionDedupeSignature(
+      submission,
+      safeId,
+      ownerUid,
+      statusValue,
+      completedAtValue
+    );
+    if (isCompleted && lastSavedSubmissionPayloadHashById.get(safeId) === submissionDedupeSig) {
+      return true;
+    }
+
     const normalized: HomeworkSubmission = {
       ...submission,
       id: safeId,
@@ -2328,10 +2592,6 @@ export async function saveSubmissionToFirestore(
     };
     delete normalized.ownerEmail;
     const payloadJson = serializeSafeFirestorePayload(normalized, 440000);
-    const submissionDedupeSig = `${safeId}::${ownerUid}::${statusValue}::${completedAtValue}::${docPayloadScoreKey(submission)}::${ Array.isArray(submission.responses) ? submission.responses.length : 0 }`;
-    if (isCompleted && lastSavedSubmissionPayloadHashById.get(safeId) === submissionDedupeSig) {
-      return true;
-    }
     const docPayload = {
       id: safeId,
       assignmentId: safeAssignmentId,
@@ -2366,23 +2626,16 @@ export async function saveSubmissionToFirestore(
         }
         return true;
       }
+      lastSavedSubmissionPayloadHashById.delete(safeId);
       throw sdkErr;
     }
   } catch (error) {
     if (!apiOk) {
+      lastSavedSubmissionPayloadHashById.delete(safeId);
       handleFirestoreError(error, OperationType.WRITE, path);
     }
     return apiOk;
   }
-}
-
-function docPayloadScoreKey(submission: HomeworkSubmission): string {
-  const score = Math.max(0, Math.min(100000, Number(submission.score ?? submission.correctAnswersCount) || 0));
-  const acc = Math.max(
-    0,
-    Math.min(100, Number(submission.accuracyPercent ?? submission.scorePercentage ?? submission.accuracy) || 0)
-  );
-  return `${score}:${acc}`;
 }
 
 function mergeSubmissionLists(
@@ -2436,17 +2689,19 @@ export async function fetchSubmissionsForAssignmentFromFirestore(
   const path = 'homework_submissions';
 
   let apiList: HomeworkSubmission[] = [];
-  if (typeof fetch === 'function' && typeof window !== 'undefined' && auth.currentUser) {
+  const currentUser = (testHomeworkAuthUser !== undefined ? testHomeworkAuthUser : auth.currentUser) as any;
+  if (typeof fetch === 'function' && currentUser && typeof currentUser.getIdToken === 'function') {
     try {
-      const idToken = await auth.currentUser.getIdToken();
+      const idToken = await currentUser.getIdToken();
       if (idToken) {
-        const res = await fetch(
-          `/api/homework/submissions?assignmentId=${encodeURIComponent(safeAssignmentId)}`,
-          {
-            method: 'GET',
-            headers: { Authorization: `Bearer ${idToken}` }
-          }
-        ).catch(() => null);
+        const apiUrl = resolveHomeworkApiUrl(
+          `/api/homework/submissions?assignmentId=${encodeURIComponent(safeAssignmentId)}`
+        );
+        const res = await fetch(apiUrl, {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${idToken}` },
+          ...(isCrossOriginApiUrl(apiUrl) ? {} : { credentials: 'include' as RequestCredentials })
+        }).catch(() => null);
         if (res && res.ok) {
           const data = await res.json().catch(() => null);
           if (Array.isArray(data?.submissions)) {
@@ -2515,13 +2770,16 @@ export async function fetchAllSubmissionsFromFirestore(
   const path = 'homework_submissions';
 
   let apiList: HomeworkSubmission[] = [];
-  if (typeof fetch === 'function' && typeof window !== 'undefined' && auth.currentUser) {
+  const currentUser = (testHomeworkAuthUser !== undefined ? testHomeworkAuthUser : auth.currentUser) as any;
+  if (typeof fetch === 'function' && currentUser && typeof currentUser.getIdToken === 'function') {
     try {
-      const idToken = await auth.currentUser.getIdToken();
+      const idToken = await currentUser.getIdToken();
       if (idToken) {
-        const res = await fetch('/api/homework/submissions', {
+        const apiUrl = resolveHomeworkApiUrl('/api/homework/submissions');
+        const res = await fetch(apiUrl, {
           method: 'GET',
-          headers: { Authorization: `Bearer ${idToken}` }
+          headers: { Authorization: `Bearer ${idToken}` },
+          ...(isCrossOriginApiUrl(apiUrl) ? {} : { credentials: 'include' as RequestCredentials })
         }).catch(() => null);
         if (res && res.ok) {
           const data = await res.json().catch(() => null);

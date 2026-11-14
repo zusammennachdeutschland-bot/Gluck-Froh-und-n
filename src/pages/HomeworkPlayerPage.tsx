@@ -67,7 +67,7 @@ import {
   getQuestionTypeMeta,
   fetchAssignmentFromFirestore,
   fetchLernstudioSetFromFirestore,
-  subscribeSubmissionsFromFirestore,
+  fetchSubmissionsForAssignmentFromFirestore,
   buildDeterministicSubmissionId,
   getOrCreateStudentAttemptSecret,
   isHomeworkAssignmentOpenForStudents,
@@ -294,16 +294,17 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     return () => window.removeEventListener('online', handleOnline);
   }, []);
 
-  // Subscribe to live Firestore class leaderboard only when authenticated as the owning teacher
+  // Load class leaderboard on-demand once when authenticated as the owning teacher (no continuous onSnapshot listener)
   useEffect(() => {
     if (!assignmentId) return;
     const activeTeacherUid = getCurrentHomeworkOwnerUid();
     if (!activeTeacherUid || (assignment?.ownerUid && assignment.ownerUid !== activeTeacherUid)) {
       return;
     }
-    const unsub = subscribeSubmissionsFromFirestore(
-      assignmentId,
-      (subs) => {
+    let cancelled = false;
+    fetchSubmissionsForAssignmentFromFirestore(assignmentId, activeTeacherUid)
+      .then((subs) => {
+        if (cancelled) return;
         setAllSubmissions(subs);
         if (subs.length > 0) {
           const sorted = [...subs]
@@ -323,10 +324,11 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             }));
           setLeaderboard(sorted);
         }
-      },
-      activeTeacherUid
-    );
-    return () => unsub();
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [assignmentId, assignment?.ownerUid]);
 
   // Load Assignment (Supports both /Herr-Abdul-rahman/{SHORT_ID} and legacy /homework/{assignmentId})

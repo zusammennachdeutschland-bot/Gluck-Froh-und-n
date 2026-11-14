@@ -69,6 +69,14 @@ export const AIBackgroundDesignerModal: React.FC<AIBackgroundDesignerModalProps>
 
   useEffect(() => {
     refreshLibrary();
+    if (typeof window === 'undefined') return;
+    const handleSynced = () => {
+      refreshLibrary().catch(() => {});
+    };
+    window.addEventListener('gluck-ai-backgrounds-updated', handleSynced);
+    return () => {
+      window.removeEventListener('gluck-ai-backgrounds-updated', handleSynced);
+    };
   }, []);
 
   // Update prompt whenever options change

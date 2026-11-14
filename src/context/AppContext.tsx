@@ -50,6 +50,7 @@ import { applyRestoreSyncSafeguards } from '../services/sync/backupSafetyService
 import {
   isAssignmentDeletedLocally,
   markAssignmentDeletedLocally,
+  markShortIdRevokedLocally,
   getLocalAssignments,
   getLocalSubmissions,
   writeLocalAssignmentsForScope,
@@ -61,6 +62,8 @@ import {
   canAccountClaimLegacyHomework,
   sanitizeDocId
 } from '../shared/homeworkStorageSync';
+import { getAllAIBackgroundsIncludingDeleted } from '../utils/aiBackgroundUtils';
+import { readMergedPickerNames, writeSyncedPickerNames } from '../utils/pickerNamesUtils';
 import { SyncStateMetadata, PairedPeer, DevicePresenceState, SyncConnectionState } from '../types';
 
 import { 
@@ -476,6 +479,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
 
   // Persistence state
+  const settingsUpdatedAtRef = useRef<number>((() => {
+    const rawTs = initialData['dl_settings_updated_at'];
+    if (typeof rawTs === 'number' && Number.isFinite(rawTs)) return rawTs;
+    const profUpdated = initialData['dl_profile']?.updatedAt;
+    return typeof profUpdated === 'number' && Number.isFinite(profUpdated) ? profUpdated : 0;
+  })());
+
+  const bumpSettingsTimestamp = useCallback((explicitTs?: number): number => {
+    const nextTs = typeof explicitTs === 'number' && Number.isFinite(explicitTs) ? explicitTs : Date.now();
+    settingsUpdatedAtRef.current = nextTs;
+    storage.setItem('dl_settings_updated_at', nextTs);
+    return nextTs;
+  }, []);
+
   const [theme, setThemeState] = useState<'light' | 'dark' | 'amoled' | 'tinted'>(() => {
     const saved = initialData['dl_theme'];
     return (saved === 'dark' || saved === 'amoled' || saved === 'light' || saved === 'tinted') ? saved : 'light';
@@ -484,6 +501,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const setTheme = (t: 'light' | 'dark' | 'amoled' | 'tinted') => {
     setThemeState(t);
     storage.setItem('dl_theme', t);
+    bumpSettingsTimestamp();
+    bumpSyncRevision();
   };
 
   const toggleTheme = () => {
@@ -492,6 +511,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       storage.setItem('dl_theme', next);
       return next;
     });
+    bumpSettingsTimestamp();
+    bumpSyncRevision();
   };
 
   const [accentColor, setAccentColorState] = useState<AccentColor>(() => {
@@ -502,7 +523,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const setAccentColor = (color: AccentColor) => {
     setAccentColorState(color);
     storage.setItem('dl_accent_color', color);
+    bumpSettingsTimestamp();
+    bumpSyncRevision();
   };
+
+  const [sidebarNavOrder, setSidebarNavOrderState] = useState<string[]>(() => {
+    try {
+      const rawLs = typeof window !== 'undefined' ? localStorage.getItem('dl_sidebar_nav_order') : null;
+      if (rawLs) {
+        const parsed = JSON.parse(rawLs);
+        if (Array.isArray(parsed)) return parsed.filter((id: any) => typeof id === 'string');
+      }
+      if (Array.isArray(initialData['dl_sidebar_nav_order'])) {
+        return initialData['dl_sidebar_nav_order'].filter((id: any) => typeof id === 'string');
+      }
+    } catch {}
+    return [];
+  });
+
+  const [customAiBackgrounds, setCustomAiBackgrounds] = useState<AICertificateBackground[]>(() => {
+    const fromInit = initialData['dl_custom_ai_backgrounds'];
+    return Array.isArray(fromInit) ? fromInit : [];
+  });
+
+  const [pickerNamesVersion, setPickerNamesVersion] = useState<number>(0);
 
   useEffect(() => {
     applyAccentToDocument(accentColor);
@@ -650,6 +694,76 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     return () => clearTimeout(timer);
   }, []);
 
+  // Reconcile pickerNames storage keys safely on boot & listen for UI pref / AI background mutations
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const { names, needsMirrorSync } = readMergedPickerNames();
+    if (names !== null && needsMirrorSync) {
+      writeSyncedPickerNames(names, false);
+    }
+
+    getAllAIBackgroundsIncludingDeleted()
+      .then((bgs) => {
+        if (Array.isArray(bgs) && bgs.length > 0) {
+          setCustomAiBackgrounds((prev) => (prev.length > 0 ? prev : bgs));
+        }
+      })
+      .catch(() => {});
+
+    const handleSidebarUpdated = (evt: Event) => {
+      const order = (evt as CustomEvent)?.detail?.order;
+      if (Array.isArray(order)) {
+        setSidebarNavOrderState(order.filter((id: any) => typeof id === 'string'));
+        bumpSettingsTimestamp();
+        bumpSyncRevision();
+      }
+    };
+
+    const handleAiBgMutated = () => {
+      getAllAIBackgroundsIncludingDeleted()
+        .then((latest) => {
+          setCustomAiBackgrounds(latest);
+          storage.setItem('dl_custom_ai_backgrounds', latest);
+          bumpSyncRevision();
+        })
+        .catch(() => {});
+    };
+
+    const handleLocalDataMutated = (evt: Event) => {
+      const source = (evt as CustomEvent)?.detail?.source;
+      if (source === 'pickerNames') {
+        setPickerNamesVersion(v => v + 1);
+        bumpSettingsTimestamp();
+        bumpSyncRevision();
+      }
+    };
+
+    const handleRecordPurged = (evt: Event) => {
+      const detail = (evt as CustomEvent)?.detail;
+      if (!detail || !detail.id || !detail.type) return;
+      applyCascadePurgeTombstonesToAppState([
+        {
+          id: String(detail.id),
+          type: detail.type,
+          purgedAt: new Date().toISOString(),
+          updatedAt: Date.now(),
+          originRevision: (syncRevisionRef.current || 1) + 1
+        }
+      ]);
+    };
+
+    window.addEventListener('gluck-sidebar-nav-updated', handleSidebarUpdated);
+    window.addEventListener('gluck-ai-backgrounds-mutated', handleAiBgMutated);
+    window.addEventListener('gluck-local-data-mutated', handleLocalDataMutated);
+    window.addEventListener('gluck-record-purged', handleRecordPurged);
+    return () => {
+      window.removeEventListener('gluck-sidebar-nav-updated', handleSidebarUpdated);
+      window.removeEventListener('gluck-ai-backgrounds-mutated', handleAiBgMutated);
+      window.removeEventListener('gluck-local-data-mutated', handleLocalDataMutated);
+      window.removeEventListener('gluck-record-purged', handleRecordPurged);
+    };
+  }, []);
+
   useEffect(() => {
     if (!isInitializedRef.current) return;
     storage.setItem('dl_quick_todos', todos);
@@ -727,6 +841,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       storage.setItem('dl_profile', updated);
       return updated;
     });
+    bumpSettingsTimestamp();
+    bumpSyncRevision();
   };
 
   useEffect(() => {
@@ -755,6 +871,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const setReportLanguage = (lang: AppLanguage) => {
     setReportLanguageState(lang);
     storage.setItem('dl_report_language', lang);
+    bumpSettingsTimestamp();
+    bumpSyncRevision();
   };
 
   const reportT = useCallback((ar: string, en: string, de?: string): string => {
@@ -1550,16 +1668,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     if (!isInitializedRef.current) return;
     storage.setItem('hod_visit_records', hodVisits);
 
-    // Keep profile.schoolSettings.visitRecords synchronized with hodVisits
+    // Keep profile.schoolSettings.visitRecords synchronized with hodVisits while respecting purge tombstones
+    const purgedVisitIds = new Set<string>(
+      (recentlyDeletedRef.current?.purgedRecords || [])
+        .filter((p) => p && p.id)
+        .map((p) => p.id.trim())
+    );
     setProfile(prev => {
       const existingSettings = (prev?.schoolSettings as any) || {};
-      const existingVisits = existingSettings.visitRecords || [];
+      const existingVisits = (existingSettings.visitRecords || []).filter(
+        (v: any) => v?.id && !purgedVisitIds.has(String(v.id).trim())
+      );
       const map = new Map<string, VisitRecord>();
       existingVisits.forEach((v: any) => v?.id && map.set(v.id, v));
-      (hodVisits || []).forEach(v => v?.id && map.set(v.id, v));
+      (hodVisits || []).forEach(v => {
+        if (v?.id && !purgedVisitIds.has(String(v.id).trim()) && !v.deleted) {
+          map.set(v.id, v);
+        }
+      });
       const merged = Array.from(map.values());
 
-      if (existingVisits.length === merged.length && merged.every((v: any, i: number) => v.id === existingVisits[i]?.id)) {
+      if ((existingSettings.visitRecords || []).length === merged.length && merged.every((v: any, i: number) => v.id === (existingSettings.visitRecords || [])[i]?.id)) {
         return prev;
       }
 
@@ -2117,7 +2246,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [bottomNavOrder, setBottomNavOrderState] = useState<string[]>(() => {
     try {
-      const saved = localStorage.getItem('dl_mobile_bottom_nav_order');
+      const saved =
+        (typeof window !== 'undefined' ? localStorage.getItem('dl_mobile_bottom_nav_order') : null) ??
+        (Array.isArray(initialData['dl_mobile_bottom_nav_order'])
+          ? JSON.stringify(initialData['dl_mobile_bottom_nav_order'])
+          : null);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
@@ -2130,11 +2263,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   });
 
   const setBottomNavOrder = (newOrder: string[]) => {
-    const sanitizedOrder = (newOrder || []).filter(id => DEFAULT_BOTTOM_NAV_ORDER.includes(id));
+    const filtered = (newOrder || []).filter(id => DEFAULT_BOTTOM_NAV_ORDER.includes(id));
+    const missing = DEFAULT_BOTTOM_NAV_ORDER.filter(id => !filtered.includes(id));
+    const sanitizedOrder = [...filtered, ...missing];
     setBottomNavOrderState(sanitizedOrder);
     try {
       localStorage.setItem('dl_mobile_bottom_nav_order', JSON.stringify(sanitizedOrder));
     } catch {}
+    bumpSettingsTimestamp();
+    bumpSyncRevision();
   };
 
   const resetBottomNavOrder = () => {
@@ -2659,13 +2796,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       storage.setItem('dl_profile', updated);
       return updated;
     });
-    const currentState = syncStateRef.current;
-    const nextRev = syncRevisionRef.current + 1;
-    syncRevisionRef.current = nextRev;
-    setSyncState(prev => prev ? { ...prev, localRevisionCounter: nextRev } : prev);
-    if (currentState) {
-      storage.setItem('dl_sync_state', { ...currentState, localRevisionCounter: nextRev });
-    }
+    bumpSettingsTimestamp();
+    bumpSyncRevision();
   };
 
   const registerFinanceActivity = useCallback(() => {
@@ -3807,6 +3939,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const deleteCertificate = (id: string) => {
     setCertificates(prev => (prev || []).map(c => (c.id === id ? wrapDeletion(c) : c)));
+    if (id) {
+      applyCascadePurgeTombstonesToAppState([
+        {
+          id: id.trim(),
+          type: 'certificates',
+          purgedAt: new Date().toISOString(),
+          updatedAt: Date.now(),
+          originRevision: (syncRevisionRef.current || 1) + 1
+        }
+      ]);
+    }
   };
 
   // Quick Todos Methods
@@ -4213,6 +4356,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const deleteGoldHolding = useCallback((id: string) => {
     setGoldHoldings(prev => (prev || []).map(item => item.id === id ? wrapDeletion(item as any) : item).filter(item => !item.deleted));
+    if (id) {
+      applyCascadePurgeTombstonesToAppState([
+        {
+          id: id.trim(),
+          type: 'goldHoldings',
+          purgedAt: new Date().toISOString(),
+          updatedAt: Date.now(),
+          originRevision: (syncRevisionRef.current || 1) + 1
+        }
+      ]);
+    }
     registerFinanceActivity();
   }, [registerFinanceActivity]);
 
@@ -4471,16 +4625,112 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return filtered;
     });
 
-    // Clean dependent homework assignments & submissions in UID-scoped localStorage
+    const purgedAssignmentIds = new Set(
+      mergedPurged
+        .filter(p => p.type === 'homeworkAssignments' || p.type === 'homeworkAssignment')
+        .map(p => p.id.trim())
+    );
+
+    // Sweep certificates, HOD datasets, goldHoldings, and customAiBackgrounds by purged ID
+    setCertificates(prev => {
+      const filtered = (prev || []).filter(c => c && c.id && !allPurgedIds.has(String(c.id).trim()));
+      if (filtered.length !== (prev || []).length) {
+        storage.setItem('dl_certificates', filtered);
+      }
+      return filtered;
+    });
+
+    setHodStudents(prev => {
+      const filtered = (prev || []).filter(s => s && s.id && !allPurgedIds.has(String(s.id).trim()));
+      if (filtered.length !== (prev || []).length) {
+        storage.setItem('hod_german_students', filtered);
+      }
+      return filtered;
+    });
+
+    setHodComplaints(prev => {
+      const filtered = (prev || []).filter(c => c && c.id && !allPurgedIds.has(String(c.id).trim()));
+      if (filtered.length !== (prev || []).length) {
+        storage.setItem('hod_complaints', filtered);
+      }
+      return filtered;
+    });
+
+    setHodActionPlans(prev => {
+      const filtered = (prev || []).filter(p => p && p.id && !allPurgedIds.has(String(p.id).trim()));
+      if (filtered.length !== (prev || []).length) {
+        storage.setItem('hod_student_action_plans', filtered);
+      }
+      return filtered;
+    });
+
+    setHodVisits(prev => {
+      const filtered = (prev || []).filter(v => v && v.id && !allPurgedIds.has(String(v.id).trim()));
+      if (filtered.length !== (prev || []).length) {
+        storage.setItem('hod_visit_records', filtered);
+      }
+      return filtered;
+    });
+
+    setProfile(prev => {
+      const existingVisits = (prev?.schoolSettings as any)?.visitRecords;
+      if (!Array.isArray(existingVisits) || existingVisits.length === 0) return prev;
+      const filteredVisits = existingVisits.filter((v: any) => v && v.id && !allPurgedIds.has(String(v.id).trim()));
+      if (filteredVisits.length === existingVisits.length) return prev;
+      const updated = {
+        ...prev,
+        schoolSettings: {
+          ...(prev.schoolSettings as any),
+          visitRecords: filteredVisits
+        }
+      };
+      storage.setItem('dl_profile', updated);
+      return updated;
+    });
+
+    setGoldHoldings(prev => {
+      const filtered = (prev || []).filter(g => g && g.id && !allPurgedIds.has(String(g.id).trim()));
+      if (filtered.length !== (prev || []).length) {
+        storage.setItem('gluck_gold_holdings', filtered);
+      }
+      return filtered;
+    });
+
+    setCustomAiBackgrounds(prev => {
+      const filtered = (prev || []).filter(b => b && b.id && !allPurgedIds.has(String(b.id).trim()));
+      if (filtered.length !== (prev || []).length) {
+        storage.setItem('dl_custom_ai_backgrounds', filtered);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('gluck-ai-backgrounds-updated'));
+        }
+      }
+      return filtered;
+    });
+
+    // Clean dependent and directly-purged homework assignments & submissions in UID-scoped localStorage
     try {
+      for (const pid of purgedAssignmentIds) {
+        markAssignmentDeletedLocally(pid);
+      }
       const parsedHw = getLocalAssignments();
       if (Array.isArray(parsedHw) && parsedHw.length > 0) {
         const filteredHw = parsedHw.filter((hw: any) => {
           if (!hw || !hw.id) return false;
+          const hwId = String(hw.id).trim();
           const grpId = (hw.groupId || '').trim();
           const stId = (hw.studentId || '').trim();
           const lesId = (hw.lessonId || '').trim();
-          return (!grpId || !purgedGroupIds.has(grpId)) && (!stId || !purgedStudentIds.has(stId)) && (!lesId || !purgedLessonIds.has(lesId));
+          const removed =
+            allPurgedIds.has(hwId) ||
+            purgedAssignmentIds.has(hwId) ||
+            (grpId && purgedGroupIds.has(grpId)) ||
+            (stId && purgedStudentIds.has(stId)) ||
+            (lesId && purgedLessonIds.has(lesId));
+          if (removed) {
+            markAssignmentDeletedLocally(hwId);
+            if (hw.shortId) markShortIdRevokedLocally(hw.shortId);
+          }
+          return !removed;
         });
         if (filteredHw.length !== parsedHw.length) {
           writeLocalAssignmentsForScope(filteredHw);
@@ -4491,10 +4741,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       if (Array.isArray(parsedSub) && parsedSub.length > 0) {
         const filteredSub = parsedSub.filter((sub: any) => {
           if (!sub || !sub.id) return false;
+          const subId = String(sub.id).trim();
+          const assignId = (sub.assignmentId || '').trim();
           const grpId = (sub.groupId || '').trim();
           const stId = (sub.studentId || '').trim();
           const lesId = (sub.lessonId || '').trim();
-          return (!grpId || !purgedGroupIds.has(grpId)) && (!stId || !purgedStudentIds.has(stId)) && (!lesId || !purgedLessonIds.has(lesId));
+          return (
+            !allPurgedIds.has(subId) &&
+            (!assignId || (!allPurgedIds.has(assignId) && !purgedAssignmentIds.has(assignId))) &&
+            (!grpId || !purgedGroupIds.has(grpId)) &&
+            (!stId || !purgedStudentIds.has(stId)) &&
+            (!lesId || !purgedLessonIds.has(lesId))
+          );
         });
         if (filteredSub.length !== parsedSub.length) {
           writeLocalSubmissionsForScope(filteredSub);
@@ -5274,12 +5532,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
 
     if (activeLessonSession && activeLessonSession.lessonId === lessonId) {
-      const clearedAt = Date.now();
+      const clearedAt = bumpSettingsTimestamp();
       activeLessonSessionUpdatedAtRef.current = clearedAt;
       storage.setItem('dl_active_lesson_session_updated_at', clearedAt);
       setActiveLessonSession(null);
       clearActiveLessonNotification();
       storage.removeItem('dl_active_lesson_session');
+      bumpSyncRevision();
     }
 
     /* confetti removed */
@@ -5379,12 +5638,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
 
     if (activeLessonSession && activeLessonSession.lessonId === lessonId) {
-      const clearedAt = Date.now();
+      const clearedAt = bumpSettingsTimestamp();
       activeLessonSessionUpdatedAtRef.current = clearedAt;
       storage.setItem('dl_active_lesson_session_updated_at', clearedAt);
       setActiveLessonSession(null);
       clearActiveLessonNotification();
       storage.removeItem('dl_active_lesson_session');
+      bumpSyncRevision();
     }
 
     storage.removeItem(`dl_draft_report_${lessonId}`);
@@ -6527,14 +6787,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const hwAssignments = getLocalAssignments();
     const hwSubmissions = getLocalSubmissions();
 
-    const pickerNames = (() => {
-      try {
-        const raw = localStorage.getItem('glueck_picker_custom_names');
-        return raw ? JSON.parse(raw) : [];
-      } catch { return []; }
-    })();
+    const pickerNames = readMergedPickerNames().names || [];
 
-    const aiBackgrounds = (await storage.getItem<AICertificateBackground[]>('dl_custom_ai_backgrounds')) || [];
+    const aiBackgroundsFromStorage = await storage.getItem<AICertificateBackground[]>('dl_custom_ai_backgrounds');
+    const aiBackgrounds =
+      Array.isArray(aiBackgroundsFromStorage) && aiBackgroundsFromStorage.length > 0
+        ? aiBackgroundsFromStorage
+        : (customAiBackgrounds.length > 0 ? customAiBackgrounds : await getAllAIBackgroundsIncludingDeleted());
     const prunedIds = (await storage.getItem<string[]>('dl_pruned_lesson_ids')) || [];
     const gold = (await storage.getItem<GoldHolding[]>('gluck_gold_holdings')) || [];
     const financeNotifs = (await storage.getItem<FinanceNotification[]>('dl_finance_notifications')) || [];
@@ -6558,6 +6817,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       todos,
       theme,
       accentColor,
+      reportLanguage,
+      mobileBottomNavOrder: bottomNavOrder,
+      sidebarNavOrder,
       notificationSettings,
       inspirationSettings,
       inspirationMessages,
@@ -6842,12 +7104,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         await writeAndTrack('dl_quick_todos', mergedTodos);
       }
       if (hasBackupSection(parsed, 'theme') && data.theme && isIncomingNewer) {
-        setTheme(data.theme);
+        setThemeState(data.theme);
         await writeAndTrack('dl_theme', data.theme);
       }
       if (hasBackupSection(parsed, 'accentColor') && data.accentColor && isIncomingNewer) {
-        setAccentColor(data.accentColor);
+        setAccentColorState(data.accentColor);
         await writeAndTrack('dl_accent_color', data.accentColor);
+      }
+      if (hasBackupSection(parsed, 'reportLanguage') && data.reportLanguage && isIncomingNewer) {
+        setReportLanguageState(data.reportLanguage);
+        await writeAndTrack('dl_report_language', data.reportLanguage);
+      }
+      if (hasBackupSection(parsed, 'mobileBottomNavOrder') && Array.isArray(data.mobileBottomNavOrder) && isIncomingNewer) {
+        const filtered = data.mobileBottomNavOrder.filter((id: string) => DEFAULT_BOTTOM_NAV_ORDER.includes(id));
+        const missing = DEFAULT_BOTTOM_NAV_ORDER.filter(id => !filtered.includes(id));
+        const nextOrder = [...filtered, ...missing];
+        setBottomNavOrderState(nextOrder);
+        try {
+          localStorage.setItem('dl_mobile_bottom_nav_order', JSON.stringify(nextOrder));
+        } catch {}
+      }
+      if (hasBackupSection(parsed, 'sidebarNavOrder') && Array.isArray(data.sidebarNavOrder) && isIncomingNewer) {
+        setSidebarNavOrderState(data.sidebarNavOrder);
+        try {
+          localStorage.setItem('dl_sidebar_nav_order', JSON.stringify(data.sidebarNavOrder));
+          window.dispatchEvent(new CustomEvent('gluck-sidebar-nav-synced', { detail: { order: data.sidebarNavOrder } }));
+        } catch {}
       }
       if (hasBackupSection(parsed, 'notificationSettings') && data.notificationSettings && isIncomingNewer) {
         setNotificationSettings(data.notificationSettings);
@@ -6933,11 +7215,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         await writeAndTrack('dl_finance_installments', mergedInst);
       }
       if (hasBackupSection(parsed, 'customAiBackgrounds') && data.customAiBackgrounds) {
-        const localAi = (await storage.getItem<AICertificateBackground[]>('dl_custom_ai_backgrounds')) || [];
+        const localAi = customAiBackgrounds.length > 0
+          ? customAiBackgrounds
+          : ((await storage.getItem<AICertificateBackground[]>('dl_custom_ai_backgrounds')) || (await getAllAIBackgroundsIncludingDeleted()));
         const mergedAi = localAi.length > 0
-          ? mergeEntities(localAi, data.customAiBackgrounds, 'customAiBackgrounds').merged
+          ? mergeEntities(localAi, data.customAiBackgrounds, { entityTypeName: 'customAiBackgrounds', purgedRecords: activePurged }).merged
           : data.customAiBackgrounds;
+        setCustomAiBackgrounds(mergedAi);
         await writeAndTrack('dl_custom_ai_backgrounds', mergedAi);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('gluck-ai-backgrounds-updated'));
+        }
       }
       if (hasBackupSection(parsed, 'prunedLessonIds') && Array.isArray((parsed as any).prunedLessonIds)) {
         const incomingIds = (parsed as any).prunedLessonIds as string[];
@@ -7073,15 +7361,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         await writeAndTrack(getSubmissionsStorageKey(), mergedSub);
       }
       if (hasBackupSection(parsed, 'pickerNames') && data.pickerNames) {
-        const localPicker = (() => {
-          try {
-            const raw = localStorage.getItem('glueck_picker_custom_names');
-            return raw ? JSON.parse(raw) : [];
-          } catch { return []; }
-        })();
-        // Unique union merge for pickerNames
+        const localPicker = readMergedPickerNames().names || [];
         const combined = Array.from(new Set([...localPicker, ...data.pickerNames]));
-        await writeAndTrack('glueck_picker_custom_names', combined);
+        writeSyncedPickerNames(combined, true);
+        setPickerNamesVersion(v => v + 1);
       }
 
       // Reconcile and safeguard synchronization metadata
@@ -7434,7 +7717,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const startActiveLessonTimer = (lesson: Lesson) => {
     const startTimeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const now = Date.now();
+    const now = bumpSettingsTimestamp();
     const targetGroup = groups.find(g => g.id === lesson.groupId);
     const resolvedDuration = lesson.durationMinutes || targetGroup?.lessonDurationMinutes || (profile as any).defaultLessonDuration || 60;
     const durationMins = resolvedDuration > 0 ? resolvedDuration : 60;
@@ -7456,11 +7739,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     storage.setItem('dl_active_lesson_session_updated_at', now);
     setActiveLessonSession(session);
     updateLesson(lesson.id, { status: 'in_progress' });
+    bumpSyncRevision();
   };
 
   const pauseActiveLessonTimer = () => {
     if (!activeLessonSession || !activeLessonSession.isRunning) return;
-    const now = Date.now();
+    const now = bumpSettingsTimestamp();
     const elapsed = Math.max(0, Math.floor((now - activeLessonSession.startedAt) / 1000));
     activeLessonSessionUpdatedAtRef.current = now;
     storage.setItem('dl_active_lesson_session_updated_at', now);
@@ -7470,11 +7754,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       accumulatedSeconds: activeLessonSession.accumulatedSeconds + elapsed,
       updatedAt: now
     });
+    bumpSyncRevision();
   };
 
   const resumeActiveLessonTimer = () => {
     if (!activeLessonSession || activeLessonSession.isRunning) return;
-    const now = Date.now();
+    const now = bumpSettingsTimestamp();
     activeLessonSessionUpdatedAtRef.current = now;
     storage.setItem('dl_active_lesson_session_updated_at', now);
     setActiveLessonSession({
@@ -7483,27 +7768,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       startedAt: now,
       updatedAt: now
     });
+    bumpSyncRevision();
   };
 
   const endActiveLessonTimer = () => {
-    const now = Date.now();
+    const now = bumpSettingsTimestamp();
     activeLessonSessionUpdatedAtRef.current = now;
     storage.setItem('dl_active_lesson_session_updated_at', now);
     setActiveLessonSession(null);
     clearActiveLessonNotification();
     storage.removeItem('dl_active_lesson_session');
+    bumpSyncRevision();
   };
 
   const cancelActiveLessonTimer = () => {
     if (activeLessonSession) {
       cancelLesson(activeLessonSession.lessonId, 'Abgebrochen während der laufenden Sitzung');
     }
-    const now = Date.now();
+    const now = bumpSettingsTimestamp();
     activeLessonSessionUpdatedAtRef.current = now;
     storage.setItem('dl_active_lesson_session_updated_at', now);
     setActiveLessonSession(null);
     clearActiveLessonNotification();
     storage.removeItem('dl_active_lesson_session');
+    bumpSyncRevision();
   };
 
   const enrichedStudents = useMemo(() => {
@@ -7574,14 +7862,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   }, [lessons, students, payments, todos, groups, profile, activeLessonSession, financeInstallments, financeRecurring]);
 
   const teacherSettingsRecord: TeacherSettingsRecord = useMemo(() => {
-    let pickerNamesList: string[] | undefined;
-    try {
-      const rawPicker = localStorage.getItem('dl_picker_names');
-      if (rawPicker) {
-        const parsed = JSON.parse(rawPicker);
-        if (Array.isArray(parsed)) pickerNamesList = parsed;
-      }
-    } catch {}
+    const pickerNamesList = readMergedPickerNames().names ?? undefined;
     const prunedIdsSet = getPrunedLessonIds();
     const prunedLessonIds = prunedIdsSet.size > 0 ? Array.from(prunedIdsSet) : undefined;
 
@@ -7599,15 +7880,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       pickerNames: pickerNamesList,
       prunedLessonIds,
       goldPriceSettings,
+      theme,
+      accentColor,
+      reportLanguage,
+      mobileBottomNavOrder: bottomNavOrder,
+      sidebarNavOrder,
+      activeLessonSessionState: {
+        session: activeLessonSession || null,
+        updatedAt: activeLessonSessionUpdatedAtRef.current || activeLessonSession?.updatedAt || 0
+      },
       recentlyDeleted,
       dismissedDashboardLessons: dismissedDashboardLessonIds,
-      updatedAt: Date.now(),
+      updatedAt: settingsUpdatedAtRef.current,
       originDeviceId: syncState?.localDeviceId || 'local',
       originPlatform: detectLocalOriginPlatform(),
       originRevision: syncRevisionRef.current,
       deleted: false
     };
-  }, [profile, notificationSettings, inspirationSettings, inspirationMessages, goldPriceSettings, recentlyDeleted, dismissedDashboardLessonIds, syncState?.localDeviceId]);
+  }, [
+    profile,
+    notificationSettings,
+    inspirationSettings,
+    inspirationMessages,
+    goldPriceSettings,
+    theme,
+    accentColor,
+    reportLanguage,
+    bottomNavOrder,
+    sidebarNavOrder,
+    pickerNamesVersion,
+    activeLessonSession,
+    recentlyDeleted,
+    dismissedDashboardLessonIds,
+    syncState?.localDeviceId
+  ]);
 
   const localDataRef = React.useRef({ 
     groups, 
@@ -7617,6 +7923,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     notifications, 
     todos, 
     certificates, 
+    customAiBackgrounds,
     settings: [teacherSettingsRecord],
     hodStudents,
     hodComplaints,
@@ -7641,6 +7948,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       notifications, 
       todos, 
       certificates, 
+      customAiBackgrounds,
       settings: [teacherSettingsRecord],
       hodStudents,
       hodComplaints,
@@ -7656,19 +7964,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       goldHoldings,
       lernstudioSets
     };
-  }, [groups, students, lessons, payments, notifications, todos, certificates, teacherSettingsRecord, hodStudents, hodComplaints, hodActionPlans, hodVisits, schoolNotes, financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments, financeNotifications, goldHoldings, lernstudioSets]);
+  }, [groups, students, lessons, payments, notifications, todos, certificates, customAiBackgrounds, teacherSettingsRecord, hodStudents, hodComplaints, hodActionPlans, hodVisits, schoolNotes, financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments, financeNotifications, goldHoldings, lernstudioSets]);
 
   // Notify P2P auto-sync engine whenever local homework assignments or submissions mutate
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const handleHomeworkMutated = () => {
-      autoSyncEngine.notifyMutation('homeworkAssignments', 'local_hw_update');
+    const handleHomeworkMutated = (evt: Event) => {
+      const detail = (evt as CustomEvent)?.detail;
+      if (!detail || detail.assignmentsChanged) {
+        autoSyncEngine.notifyMutation('homeworkAssignments', 'local_hw_update');
+      }
+      if (detail?.submissionsChanged) {
+        autoSyncEngine.notifyMutation('homeworkSubmissions', 'local_hw_sub_update');
+      }
+    };
+    const handleHomeworkDeleted = () => {
+      autoSyncEngine.notifyMutation('homeworkAssignments', 'local_hw_delete');
     };
     window.addEventListener('glueck-homework-sync-updated', handleHomeworkMutated);
-    window.addEventListener('gluck-homework-deleted', handleHomeworkMutated);
+    window.addEventListener('gluck-homework-deleted', handleHomeworkDeleted);
     return () => {
       window.removeEventListener('glueck-homework-sync-updated', handleHomeworkMutated);
-      window.removeEventListener('gluck-homework-deleted', handleHomeworkMutated);
+      window.removeEventListener('gluck-homework-deleted', handleHomeworkDeleted);
     };
   }, []);
 
@@ -7751,7 +8068,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         data.homeworkSubmissions = [];
       }
 
-      // Ensure goldHoldings have normalized numeric updatedAt and origin metadata for P2P
+      // Ensure goldHoldings & customAiBackgrounds have normalized numeric updatedAt and origin metadata for P2P
       data.goldHoldings = (Array.isArray(data.goldHoldings) ? data.goldHoldings : []).map((g: any) => {
         const ts = typeof g.updatedAt === 'number'
           ? g.updatedAt
@@ -7762,6 +8079,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           originDeviceId: g.originDeviceId || localDeviceId,
           originPlatform: g.originPlatform || localPlatform,
           originRevision: g.originRevision || 1
+        };
+      });
+
+      const rawAiBgs = Array.isArray(data.customAiBackgrounds)
+        ? data.customAiBackgrounds
+        : [];
+      data.customAiBackgrounds = rawAiBgs.map((b: any) => {
+        const ts = typeof b.updatedAt === 'number'
+          ? b.updatedAt
+          : Date.parse(String(b.updatedAt || b.createdAt || '')) || Date.now();
+        return {
+          ...b,
+          updatedAt: ts,
+          originDeviceId: b.originDeviceId || localDeviceId,
+          originPlatform: b.originPlatform || localPlatform,
+          originRevision: b.originRevision || 1
         };
       });
       
@@ -7896,6 +8229,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           setGoldHoldings(activeGold);
           break;
         }
+        case 'customAiBackgrounds': {
+          const normalizedBgs = (Array.isArray(data) ? data : []).filter((b: any) => b && b.id);
+          await storage.setItem('dl_custom_ai_backgrounds', normalizedBgs);
+          setCustomAiBackgrounds(normalizedBgs);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('gluck-ai-backgrounds-updated'));
+          }
+          break;
+        }
         case 'homeworkAssignments': {
           const activeAssignments = (Array.isArray(data) ? data : []).filter(
             (a: any) => a && a.id && !a.deleted && a.status !== 'deleted' && !isAssignmentDeletedLocally(a.id)
@@ -7903,6 +8245,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           for (const a of Array.isArray(data) ? data : []) {
             if (a && a.id && (a.deleted || a.status === 'deleted')) {
               markAssignmentDeletedLocally(a.id);
+              if (a.shortId) markShortIdRevokedLocally(a.shortId);
             }
           }
           writeLocalAssignmentsForScope(activeAssignments as any);
@@ -7911,7 +8254,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           break;
         }
         case 'homeworkSubmissions': {
-          const activeSubs = (Array.isArray(data) ? data : []).filter((s: any) => s && s.id && !s.deleted);
+          const activeSubs = (Array.isArray(data) ? data : []).filter(
+            (s: any) => s && s.id && !s.deleted && (!s.assignmentId || !isAssignmentDeletedLocally(s.assignmentId))
+          );
           writeLocalSubmissionsForScope(activeSubs as any);
           await storage.setItem(getSubmissionsStorageKey(), activeSubs);
           setExternalDataVersion(v => v + 1);
@@ -7951,6 +8296,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               setProfile(incomingProfile);
               if (incomingProfile.language && ['ar', 'en', 'de'].includes(incomingProfile.language)) {
                 setLanguageState(incomingProfile.language);
+                await storage.setItem('dl_language', incomingProfile.language);
               }
               setExternalDataVersion(v => v + 1);
             }
@@ -7967,10 +8313,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               await storage.setItem('dl_inspiration_messages', incoming.inspirationMessages);
               setInspirationMessages(incoming.inspirationMessages);
             }
-            if (Array.isArray(incoming?.pickerNames)) {
+            if (incoming?.theme && ['light', 'dark', 'amoled', 'tinted'].includes(incoming.theme)) {
+              setThemeState(incoming.theme);
+              await storage.setItem('dl_theme', incoming.theme);
+              settingsKeys.push('dl_theme');
+            }
+            if (incoming?.accentColor) {
+              setAccentColorState(incoming.accentColor);
+              await storage.setItem('dl_accent_color', incoming.accentColor);
+              settingsKeys.push('dl_accent_color');
+            }
+            if (incoming?.reportLanguage && ['ar', 'en', 'de'].includes(incoming.reportLanguage)) {
+              setReportLanguageState(incoming.reportLanguage);
+              await storage.setItem('dl_report_language', incoming.reportLanguage);
+              settingsKeys.push('dl_report_language');
+            }
+            if (Array.isArray(incoming?.mobileBottomNavOrder) && incoming.mobileBottomNavOrder.length > 0) {
+              const filtered = incoming.mobileBottomNavOrder.filter(id => DEFAULT_BOTTOM_NAV_ORDER.includes(id));
+              const missing = DEFAULT_BOTTOM_NAV_ORDER.filter(id => !filtered.includes(id));
+              const nextOrder = [...filtered, ...missing];
+              setBottomNavOrderState(nextOrder);
               try {
-                localStorage.setItem('dl_picker_names', JSON.stringify(incoming.pickerNames));
+                localStorage.setItem('dl_mobile_bottom_nav_order', JSON.stringify(nextOrder));
               } catch {}
+            }
+            if (Array.isArray(incoming?.sidebarNavOrder) && incoming.sidebarNavOrder.length > 0) {
+              setSidebarNavOrderState(incoming.sidebarNavOrder);
+              try {
+                localStorage.setItem('dl_sidebar_nav_order', JSON.stringify(incoming.sidebarNavOrder));
+                window.dispatchEvent(new CustomEvent('gluck-sidebar-nav-synced', { detail: { order: incoming.sidebarNavOrder } }));
+              } catch {}
+            }
+            if (Array.isArray(incoming?.pickerNames)) {
+              writeSyncedPickerNames(incoming.pickerNames, true);
+              setPickerNamesVersion(v => v + 1);
+            }
+            if (incoming?.activeLessonSessionState) {
+              const incomingSessState = incoming.activeLessonSessionState;
+              const incomingSessTs = typeof incomingSessState.updatedAt === 'number' ? incomingSessState.updatedAt : 0;
+              if (incomingSessTs >= activeLessonSessionUpdatedAtRef.current) {
+                const candidate = incomingSessState.session && typeof incomingSessState.session.lessonId === 'string'
+                  ? incomingSessState.session
+                  : null;
+                const currentLessons = (fullLessonsRef.current && fullLessonsRef.current.length > 0) ? fullLessonsRef.current : lessons;
+                const matchingLesson = candidate ? currentLessons.find((l: any) => l && l.id === candidate.lessonId) : null;
+                const isTargetActive = candidate && (!matchingLesson || (!matchingLesson.deleted && matchingLesson.status !== 'completed' && matchingLesson.status !== 'cancelled'));
+                activeLessonSessionUpdatedAtRef.current = incomingSessTs;
+                await storage.setItem('dl_active_lesson_session_updated_at', incomingSessTs);
+                if (isTargetActive && candidate) {
+                  setActiveLessonSession(candidate);
+                  await storage.setItem('dl_active_lesson_session', candidate);
+                } else {
+                  setActiveLessonSession(null);
+                  clearActiveLessonNotification();
+                  storage.removeItem('dl_active_lesson_session');
+                }
+              }
             }
             if (Array.isArray(incoming?.prunedLessonIds) && incoming.prunedLessonIds.length > 0) {
               addPrunedLessonIds(incoming.prunedLessonIds);
@@ -7995,6 +8393,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               await storage.setItem('dl_dismissed_dashboard_lessons', incoming.dismissedDashboardLessons);
               settingsKeys.push('dl_dismissed_dashboard_lessons');
               setDismissedDashboardLessonIds(incoming.dismissedDashboardLessons);
+            }
+            if (typeof incoming?.updatedAt === 'number' && incoming.updatedAt > settingsUpdatedAtRef.current) {
+              settingsUpdatedAtRef.current = incoming.updatedAt;
+              await storage.setItem('dl_settings_updated_at', incoming.updatedAt);
             }
             await storage.setItem('dl_settings', data);
             const verified = await storage.verifyDurableReadBack(settingsKeys);

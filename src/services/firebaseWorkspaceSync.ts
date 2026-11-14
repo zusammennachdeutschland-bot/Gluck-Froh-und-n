@@ -2742,155 +2742,19 @@ export async function downloadWorkspaceFromGoogleCloud(options?: {
 }
 
 /**
- * Subscribes in real time (`onSnapshot`) to the signed-in teacher's Google Cloud workspace.
- * Uses operation-ID and payload-digest evaluation (`evaluateRemoteSnapshotChanges`) rather than
- * unsafe wall-clock timestamp filtering (`lastLocalPushTimestampMs + 1500`), and serializes
- * downloads so rapid or concurrent remote snapshots are never dropped.
+ * P2P-First Migration: Continuous Firestore `user_workspaces` listeners and relay polling are disabled
+ * so Firebase/Firestore is restricted exclusively to Online Homework.
  */
 export function subscribeToRemoteWorkspaceChanges(
-  uid: string,
-  onRemoteWorkspaceReady: (
+  _uid: string,
+  _onRemoteWorkspaceReady: (
     backupJsonStr: string,
     updatedAtIso: string,
     summary: CloudSyncSummary,
     docTokens?: Record<string, string>
   ) => Promise<void> | void
 ): () => void {
-  const activeUser = getActiveCloudUser();
-  if (!activeUser || !verifyWorkspaceOwnership(activeUser)) {
-    return () => {};
-  }
-
-  const targetWorkspaceId = getPrimaryWorkspaceId(activeUser);
-  if (!verifyWorkspaceOwnership(activeUser, null, targetWorkspaceId)) {
-    return () => {};
-  }
-
-  const deviceId = getCloudDeviceId();
-  let debounceTimer: any = null;
-  let isDisposed = false;
-  let isDownloadInFlight = false;
-  let hasQueuedSnapshotWhileBusy = false;
-
-  let latestRemoteSnapshotDocs: any[] | null = null;
-
-  const processPendingRemoteDownload = async () => {
-    if (isDisposed || !isAutoCloudSyncEnabled()) return;
-    if (isDownloadInFlight) {
-      hasQueuedSnapshotWhileBusy = true;
-      return;
-    }
-
-    isDownloadInFlight = true;
-    try {
-      do {
-        hasQueuedSnapshotWhileBusy = false;
-        if (isDisposed || !isAutoCloudSyncEnabled()) break;
-
-        const prefetched = latestRemoteSnapshotDocs;
-        latestRemoteSnapshotDocs = null;
-        const res = await downloadWorkspaceFromGoogleCloud(
-          prefetched
-            ? { prefetchedDocs: prefetched, prefetchedWorkspaceId: targetWorkspaceId }
-            : undefined
-        );
-        if (isDisposed) break;
-
-        if (res.hasRemoteData && res.backupJsonStr && res.summary) {
-          const effectiveIso = res.remoteTimestampIso || new Date().toISOString();
-          await Promise.resolve(
-            onRemoteWorkspaceReady(res.backupJsonStr, effectiveIso, res.summary, res.docTokens)
-          );
-        }
-      } while (hasQueuedSnapshotWhileBusy && !isDisposed);
-    } catch (err) {
-      console.warn('Remote workspace listener download error:', err);
-    } finally {
-      isDownloadInFlight = false;
-    }
-  };
-
-  const colRef = collection(db, 'user_workspaces', targetWorkspaceId, 'categories');
-  const unsub = onSnapshot(
-    colRef,
-    (snap) => {
-      if (isDisposed || snap.empty || !isAutoCloudSyncEnabled()) return;
-
-      const snapshotDocs: any[] = [];
-      snap.forEach((docSnap) => {
-        const d = docSnap.data();
-        if (!d || isSyncControlDocument(d)) return;
-        if (!verifyWorkspaceOwnership(activeUser, d, targetWorkspaceId)) return;
-        snapshotDocs.push(d);
-      });
-
-      if (snapshotDocs.length === 0) return;
-
-      const appliedTokens = getAppliedDocTokensMap(targetWorkspaceId);
-      const localWrittenTokens = getLocalWrittenDocTokensMap(targetWorkspaceId);
-      const evaluation = evaluateRemoteSnapshotChanges(snapshotDocs, {
-        localDeviceId: deviceId,
-        appliedDocTokens: appliedTokens,
-        localWrittenDocTokens: localWrittenTokens
-      });
-
-      if (!evaluation.shouldProcess) {
-        return;
-      }
-
-      latestRemoteSnapshotDocs = snapshotDocs;
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        debounceTimer = null;
-        processPendingRemoteDownload();
-      }, 350);
-    },
-    (err) => {
-      handleFirestoreError(err, OperationType.LIST, `user_workspaces/${targetWorkspaceId}/categories`);
-    }
-  );
-
-  // Also poll the lightweight Relay cache periodically (0 Firestore reads!) so Android APK and Vercel PWA
-  // stay in real-time sync even if Firestore read quota is on cooldown or WebView throttles WebSockets.
-  const pollRelayChanges = async () => {
-    if (isDisposed || !isAutoCloudSyncEnabled()) return;
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-    try {
-      const relayDocs = await fetchChunksFromRelayServer(targetWorkspaceId);
-      if (isDisposed || !Array.isArray(relayDocs) || relayDocs.length === 0) return;
-      const validRelayDocs = relayDocs.filter(
-        (d) => d && !isSyncControlDocument(d) && verifyWorkspaceOwnership(activeUser, d, targetWorkspaceId)
-      );
-      if (validRelayDocs.length === 0) return;
-
-      const appliedTokens = getAppliedDocTokensMap(targetWorkspaceId);
-      const localWrittenTokens = getLocalWrittenDocTokensMap(targetWorkspaceId);
-      const evaluation = evaluateRemoteSnapshotChanges(validRelayDocs, {
-        localDeviceId: deviceId,
-        appliedDocTokens: appliedTokens,
-        localWrittenDocTokens: localWrittenTokens
-      });
-      if (!evaluation.shouldProcess) return;
-
-      latestRemoteSnapshotDocs = validRelayDocs;
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        debounceTimer = null;
-        processPendingRemoteDownload();
-      }, 200);
-    } catch {
-      // Ignore relay polling error
-    }
-  };
-
-  const relayPollInterval = setInterval(pollRelayChanges, 12_000);
-
-  return () => {
-    isDisposed = true;
-    if (debounceTimer) clearTimeout(debounceTimer);
-    clearInterval(relayPollInterval);
-    unsub();
-  };
+  return () => {};
 }
 
 /**

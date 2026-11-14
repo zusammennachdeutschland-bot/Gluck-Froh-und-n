@@ -90,12 +90,26 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
   });
 
   const saveNavOrder = (newOrder: string[]) => {
-    const sanitized = (newOrder || []).filter(id => ALL_NAV_IDS.includes(id));
+    const missing = ALL_NAV_IDS.filter(id => !(newOrder || []).includes(id));
+    const sanitized = [...(newOrder || []).filter(id => ALL_NAV_IDS.includes(id)), ...missing];
     setNavOrder(sanitized);
     try {
       localStorage.setItem('dl_sidebar_nav_order', JSON.stringify(sanitized));
+      window.dispatchEvent(new CustomEvent('gluck-sidebar-nav-updated', { detail: { order: sanitized } }));
     } catch {}
   };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleSyncedOrder = (evt: Event) => {
+      const incomingOrder = (evt as CustomEvent)?.detail?.order;
+      if (!Array.isArray(incomingOrder)) return;
+      const missing = ALL_NAV_IDS.filter(id => !incomingOrder.includes(id));
+      setNavOrder([...incomingOrder.filter((id: string) => ALL_NAV_IDS.includes(id)), ...missing]);
+    };
+    window.addEventListener('gluck-sidebar-nav-synced', handleSyncedOrder);
+    return () => window.removeEventListener('gluck-sidebar-nav-synced', handleSyncedOrder);
+  }, []);
 
   const moveNavItem = (index: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;

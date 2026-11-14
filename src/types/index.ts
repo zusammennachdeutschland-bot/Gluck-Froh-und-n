@@ -100,6 +100,12 @@ export interface TeacherSettingsRecord extends SyncableRecord {
   pickerNames?: string[];
   prunedLessonIds?: string[];
   goldPriceSettings?: Record<string, any>;
+  theme?: 'light' | 'dark' | 'amoled' | 'tinted';
+  accentColor?: AccentColor;
+  reportLanguage?: AppLanguage;
+  mobileBottomNavOrder?: string[];
+  sidebarNavOrder?: string[];
+  activeLessonSessionState?: ActiveLessonSessionState;
   syncedAt?: number;
 }
 
@@ -158,6 +164,7 @@ export interface SyncDeltaPayload {
     financeInstallments?: FinanceInstallment[];
     financeNotifications?: FinanceNotification[];
     goldHoldings?: GoldHolding[];
+    customAiBackgrounds?: AICertificateBackground[];
     lernstudioSets?: LernstudioSet[];
     homeworkAssignments?: any[];
     homeworkSubmissions?: any[];
@@ -910,7 +917,24 @@ export interface DeletedItem<T> {
 
 export interface PurgedRecordTombstone {
   id: string;
-  type: 'student' | 'group' | 'lesson' | 'homeworkAssignments';
+  type:
+    | 'student'
+    | 'group'
+    | 'lesson'
+    | 'schoolNotes'
+    | 'notifications'
+    | 'homeworkAssignments'
+    | 'homeworkAssignment'
+    | 'homeworkSubmissions'
+    | 'certificates'
+    | 'certificate'
+    | 'hodStudents'
+    | 'hodComplaints'
+    | 'hodActionPlans'
+    | 'hodVisits'
+    | 'goldHoldings'
+    | 'goldHolding'
+    | 'customAiBackgrounds';
   purgedAt: string;
   updatedAt: number;
   originRevision?: number;
@@ -1056,6 +1080,9 @@ export interface BackupData {
   todos?: TodoItem[];
   theme?: 'light' | 'dark' | 'amoled' | 'tinted';
   accentColor?: AccentColor;
+  reportLanguage?: AppLanguage;
+  mobileBottomNavOrder?: string[];
+  sidebarNavOrder?: string[];
   hodStudents?: HodGermanStudent[];
   hodComplaints?: Complaint[];
   hodActionPlans?: StudentActionPlan[];
@@ -1349,7 +1376,7 @@ export type CertificateTemplateId =
   | 'custom_ai_bg'
   | `ai_bg_${string}`;
 
-export interface AICertificateBackground {
+export interface AICertificateBackground extends SyncableRecord {
   id: string;
   name: string;
   imageUrl: string;

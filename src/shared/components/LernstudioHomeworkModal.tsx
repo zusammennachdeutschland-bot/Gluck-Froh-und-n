@@ -18,24 +18,18 @@ import {
   buildHomeworkShareUrl,
   getLocalAssignments,
   saveLocalAssignment,
-  applyCloudAssignmentsSnapshot,
   saveAssignmentWithConfirmation,
-  deleteLocalAssignment,
-  saveLocalSubmission,
+  deleteHomeworkAssignmentWithConfirmation,
+  resolveHomeworkApiUrl,
   syncAndFetchTeacherAssignments,
   fetchAssignmentDetailsWithSync,
   getLocalAssignmentDetails,
-  isAssignmentDeletedLocally,
-  sanitizeDocId,
   getVercelPublicDomain,
   createHomeworkShareToken,
   createHomeworkAssignmentId,
   createHomeworkShortId,
   flushPendingHomeworkCloudWrites,
   getPendingHomeworkSyncCount,
-  saveLernstudioSetToFirestore,
-  subscribeAssignmentsFromFirestore,
-  subscribeSubmissionsFromFirestore,
   subscribeTeacherAuth,
   getCurrentHomeworkOwnerUid,
   getCurrentHomeworkOwnerEmail,
@@ -117,13 +111,18 @@ async function persistHomeworkAssignmentToServer(assignment: HomeworkAssignment)
     throw new Error('يجب تسجيل الدخول بحساب المدرس لحفظ الواجب ومشاركة رابطه.');
   }
 
-  const response = await fetch('/api/teacher/assignments', {
+  const apiUrl = resolveHomeworkApiUrl('/api/teacher/assignments');
+  const isCrossOrigin =
+    /^https?:\/\//i.test(apiUrl) &&
+    (typeof window === 'undefined' || !apiUrl.startsWith(window.location?.origin || '___'));
+
+  const response = await fetch(apiUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${idToken}`
     },
-    credentials: 'include',
+    ...(isCrossOrigin ? {} : { credentials: 'include' as RequestCredentials }),
     body: JSON.stringify(assignment)
   });
 
@@ -536,9 +535,6 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     });
     const asSet = verbGroupToLernstudioSet(newGroup, resolvedSelectedVerbs);
     saveLernstudioSet(asSet);
-    await saveLernstudioSetToFirestore(
-      verbGroupToLernstudioSet(newGroup, resolvedSelectedVerbs, { compactForSync: true })
-    ).catch(() => false);
     setSelectedVerbGroupIds([newGroup.id]);
     setNewVerbGroupTitle('');
     setVerbGroupSaveSuccess(`تم حفظ مجموعة "${cleanTitle}" (${resolvedSelectedVerbs.length} فعل) باسم ${myName}`);
@@ -801,13 +797,8 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         createdBy: 'Teacher'
       };
 
-      // Ensure both the vocabulary set (when used) and the homework assignment are synced to Firestore in parallel
-      const [, confirmRes] = await Promise.all([
-        contentSource !== 'verb' && currentSet
-          ? saveLernstudioSetToFirestore(currentSet).catch(() => false)
-          : Promise.resolve(true),
-        saveAssignmentWithConfirmation(payload)
-      ]);
+      // Persist assignment snapshot directly via Homework Cloud (no lernstudio_sets Firestore write)
+      const confirmRes = await saveAssignmentWithConfirmation(payload);
       // Only fall back to HTTP server endpoint if direct Firestore confirmation did not complete
       const serverAssignment = confirmRes.cloudSynced
         ? null
@@ -942,15 +933,11 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     setIsDeleting(true);
     try {
       const targetId = deleteConfirmHw.id;
-      const idToken = await auth?.currentUser?.getIdToken().catch(() => null);
-      if (idToken) {
-        await fetch(`/api/teacher/assignments?id=${encodeURIComponent(targetId)}`, {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${idToken}` },
-          credentials: 'include'
-        }).catch(() => null);
-      }
-      deleteLocalAssignment(targetId, true);
+      const targetShortId = deleteConfirmHw.shortId;
+      await deleteHomeworkAssignmentWithConfirmation(targetId, {
+        shortIdHint: targetShortId,
+        ownerUidHint: deleteConfirmHw.ownerUid
+      });
       setAssignmentsList((prev) => prev.filter((a) => a.id !== targetId));
       if (selectedDetails?.assignment?.id === targetId) {
         setSelectedDetails(null);

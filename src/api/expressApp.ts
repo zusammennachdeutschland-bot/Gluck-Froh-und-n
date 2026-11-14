@@ -16,6 +16,29 @@ const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+app.use((req, res, next) => {
+  const origin = typeof req.headers?.origin === 'string' ? req.headers.origin.trim() : '';
+  const isAllowedOrigin =
+    !origin ||
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin) ||
+    /^capacitor:\/\/localhost$/i.test(origin) ||
+    /^ionic:\/\/localhost$/i.test(origin) ||
+    /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin);
+  if (isAllowedOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    if (origin) {
+      res.setHeader('Vary', 'Origin');
+    }
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Owner-Uid');
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
+
 // Authoritative Firestore helpers (no unbounded in-memory cache)
 export function resetServerMemoryCacheOnly(): void {
   // Maintained for backward compatibility with test runners

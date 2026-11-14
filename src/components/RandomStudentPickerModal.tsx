@@ -8,6 +8,7 @@ import { Student, Group } from '../types';
 import { AvatarImage } from './AvatarImage';
 import { DEFAULT_OFFLINE_AVATAR } from '../data/avatarPresets';
 import { Toast } from '@capacitor/toast';
+import { readMergedPickerNames, writeSyncedPickerNames } from '../utils/pickerNamesUtils';
 
 interface RandomStudentPickerModalProps {
   isOpen: boolean;
@@ -31,24 +32,35 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   const [selectedGroupId, setSelectedGroupId] = useState<string>(initialGroupId);
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
 
-  // Manual custom names
+  // Manual custom names (reads & reconciles both glueck_picker_custom_names and legacy dl_picker_names)
   const [customNames, setCustomNames] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('glueck_picker_custom_names');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
+    const { names } = readMergedPickerNames();
+    return names || [];
   });
   const [customNameInput, setCustomNameInput] = useState<string>('');
   const [showCustomNamesPanel, setShowCustomNamesPanel] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('glueck_picker_custom_names');
-      return Boolean(saved && JSON.parse(saved).length > 0);
-    } catch {
-      return false;
-    }
+    const { names } = readMergedPickerNames();
+    return Boolean(names && names.length > 0);
   });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handlePickerNamesUpdated = (evt: Event) => {
+      const incomingNames = (evt as CustomEvent)?.detail?.names;
+      if (Array.isArray(incomingNames)) {
+        setCustomNames(incomingNames);
+        if (incomingNames.length > 0) setShowCustomNamesPanel(true);
+        return;
+      }
+      const { names } = readMergedPickerNames();
+      if (names) {
+        setCustomNames(names);
+        if (names.length > 0) setShowCustomNamesPanel(true);
+      }
+    };
+    window.addEventListener('glueck-picker-names-updated', handlePickerNamesUpdated);
+    return () => window.removeEventListener('glueck-picker-names-updated', handlePickerNamesUpdated);
+  }, []);
 
   const [excludedStudentIds, setExcludedStudentIds] = useState<string[]>([]);
   const [isSpinning, setIsSpinning] = useState<boolean>(false);
@@ -198,12 +210,11 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
     if (splitNames.length === 0) return;
 
     setCustomNames(prev => {
-      const updated = Array.from(new Set([...prev, ...splitNames]));
+      const updated = writeSyncedPickerNames([...prev, ...splitNames], false);
       try {
-        localStorage.setItem('glueck_picker_custom_names', JSON.stringify(updated));
         window.dispatchEvent(new CustomEvent('gluck-local-data-mutated', { detail: { source: 'pickerNames' } }));
       } catch (err) {
-        console.error('Failed to persist custom picker names to localStorage:', err);
+        console.error('Failed to dispatch custom picker names mutation:', err);
         Toast.show({ text: '⚠️ تعذر حفظ الأسماء في ذاكرة الجهاز (الذاكرة ممتلئة)', duration: 'short' }).catch(() => {});
       }
       return updated;
@@ -214,12 +225,11 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
 
   const handleRemoveCustomName = (nameToRemove: string) => {
     setCustomNames(prev => {
-      const updated = prev.filter(n => n !== nameToRemove);
+      const updated = writeSyncedPickerNames(prev.filter(n => n !== nameToRemove), false);
       try {
-        localStorage.setItem('glueck_picker_custom_names', JSON.stringify(updated));
         window.dispatchEvent(new CustomEvent('gluck-local-data-mutated', { detail: { source: 'pickerNames' } }));
       } catch (err) {
-        console.error('Failed to update custom picker names in localStorage:', err);
+        console.error('Failed to update custom picker names:', err);
         Toast.show({ text: '⚠️ تعذر تحديث الأسماء في ذاكرة الجهاز', duration: 'short' }).catch(() => {});
       }
       return updated;
@@ -230,10 +240,10 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   const handleClearCustomNames = () => {
     setCustomNames([]);
     try {
-      localStorage.removeItem('glueck_picker_custom_names');
+      writeSyncedPickerNames([], false);
       window.dispatchEvent(new CustomEvent('gluck-local-data-mutated', { detail: { source: 'pickerNames' } }));
     } catch (err) {
-      console.error('Failed to clear custom picker names from localStorage:', err);
+      console.error('Failed to clear custom picker names:', err);
       Toast.show({ text: '⚠️ تعذر مسح الأسماء من ذاكرة الجهاز', duration: 'short' }).catch(() => {});
     }
     handleResetRound();

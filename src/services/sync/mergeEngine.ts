@@ -99,14 +99,32 @@ export function mergePurgedTombstones(
   const incomingArr = Array.isArray(incomingPurged) ? incomingPurged : [];
   if (localArr.length === 0 && incomingArr.length === 0) return [];
 
+  const validTombstoneTypes = new Set<PurgedRecordTombstone['type']>([
+    'student',
+    'group',
+    'lesson',
+    'schoolNotes',
+    'notifications',
+    'homeworkAssignments',
+    'homeworkAssignment',
+    'homeworkSubmissions',
+    'certificates',
+    'certificate',
+    'hodStudents',
+    'hodComplaints',
+    'hodActionPlans',
+    'hodVisits',
+    'goldHoldings',
+    'goldHolding',
+    'customAiBackgrounds'
+  ]);
   const map = new Map<string, PurgedRecordTombstone>();
   for (const t of [...localArr, ...incomingArr]) {
     if (!t || !t.id || typeof t.id !== 'string' || !t.id.trim()) continue;
     const id = t.id.trim();
-    const validType: 'student' | 'group' | 'lesson' | 'homeworkAssignments' =
-      t.type === 'group' || t.type === 'lesson' || t.type === 'student' || t.type === 'homeworkAssignments'
-        ? t.type
-        : 'student';
+    const validType: PurgedRecordTombstone['type'] = validTombstoneTypes.has(t.type as PurgedRecordTombstone['type'])
+      ? (t.type as PurgedRecordTombstone['type'])
+      : 'student';
     const rawTime = Math.max(parseTimestampMs(t.updatedAt), parseTimestampMs(t.purgedAt), 1);
     const normalized: PurgedRecordTombstone = {
       id,
@@ -516,7 +534,8 @@ function isEntityCascadePurged(
   entityTypeName: string,
   purgedGroupIds: Set<string>,
   purgedStudentIds: Set<string>,
-  purgedLessonIds: Set<string>
+  purgedLessonIds: Set<string>,
+  purgedAssignmentIds?: Set<string>
 ): boolean {
   if (!item || typeof item !== 'object') return false;
   const normType = (entityTypeName || '').toLowerCase();
@@ -524,6 +543,7 @@ function isEntityCascadePurged(
   const archivedGroupId = typeof item.archivedGroupId === 'string' ? item.archivedGroupId.trim() : '';
   const studentId = typeof item.studentId === 'string' ? item.studentId.trim() : '';
   const lessonId = typeof item.lessonId === 'string' ? item.lessonId.trim() : '';
+  const assignmentId = typeof item.assignmentId === 'string' ? item.assignmentId.trim() : '';
 
   if (normType === 'student' || normType === 'students') {
     if ((groupId && purgedGroupIds.has(groupId)) || (archivedGroupId && purgedGroupIds.has(archivedGroupId))) {
@@ -537,11 +557,17 @@ function isEntityCascadePurged(
     if ((studentId && purgedStudentIds.has(studentId)) || (lessonId && purgedLessonIds.has(lessonId))) {
       return true;
     }
-  } else if (normType === 'homeworkassignments' || normType === 'homeworksubmissions') {
+  } else if (
+    normType === 'homeworkassignments' ||
+    normType === 'homeworkassignment' ||
+    normType === 'homeworksubmissions' ||
+    normType === 'homeworksubmission'
+  ) {
     if (
       (groupId && purgedGroupIds.has(groupId)) ||
       (studentId && purgedStudentIds.has(studentId)) ||
-      (lessonId && purgedLessonIds.has(lessonId))
+      (lessonId && purgedLessonIds.has(lessonId)) ||
+      (assignmentId && purgedAssignmentIds?.has(assignmentId))
     ) {
       return true;
     }
@@ -614,6 +640,7 @@ export function mergeEntities<T extends SyncableRecord>(
   const purgedGroupIds = new Set<string>();
   const purgedStudentIds = new Set<string>();
   const purgedLessonIds = new Set<string>();
+  const purgedAssignmentIds = new Set<string>();
 
   for (const p of purgedList) {
     if (p && p.id && typeof p.id === 'string') {
@@ -627,6 +654,7 @@ export function mergeEntities<T extends SyncableRecord>(
       if (p.type === 'group') purgedGroupIds.add(pid);
       if (p.type === 'student') purgedStudentIds.add(pid);
       if (p.type === 'lesson') purgedLessonIds.add(pid);
+      if (p.type === 'homeworkAssignments' || p.type === 'homeworkAssignment') purgedAssignmentIds.add(pid);
     }
   }
 
@@ -640,7 +668,7 @@ export function mergeEntities<T extends SyncableRecord>(
       const lid = localItem.id.trim();
       if (
         purgedMap.has(lid) ||
-        isEntityCascadePurged(localItem, entityTypeName, purgedGroupIds, purgedStudentIds, purgedLessonIds)
+        isEntityCascadePurged(localItem, entityTypeName, purgedGroupIds, purgedStudentIds, purgedLessonIds, purgedAssignmentIds)
       ) {
         deletedCount++;
         continue;
@@ -674,7 +702,14 @@ export function mergeEntities<T extends SyncableRecord>(
 
     // 1. Authoritative Purge Tombstone & Cascade Suppression Check (Clock-Independent, Terminal)
     const purgedInfo = purgedMap.get(id);
-    const isCascadePurged = isEntityCascadePurged(incomingItem, entityTypeName, purgedGroupIds, purgedStudentIds, purgedLessonIds);
+    const isCascadePurged = isEntityCascadePurged(
+      incomingItem,
+      entityTypeName,
+      purgedGroupIds,
+      purgedStudentIds,
+      purgedLessonIds,
+      purgedAssignmentIds
+    );
     if (purgedInfo || isCascadePurged) {
       const incomingTime = parseTimestampMs(incomingItem.updatedAt);
       const localPurgeTime = purgedInfo?.purgedTime || Date.now();
@@ -1057,6 +1092,21 @@ export function mergeTeacherSettings(
     ? Array.from(new Set([...(baseRecord?.prunedLessonIds || []), ...(fallbackRecord?.prunedLessonIds || [])].filter(Boolean)))
     : undefined;
 
+  const localSessionTs = parseTimestampMs(local?.activeLessonSessionState?.updatedAt);
+  const incomingSessionTs = parseTimestampMs(incoming?.activeLessonSessionState?.updatedAt);
+  const useIncomingSession =
+    incoming?.activeLessonSessionState !== undefined &&
+    (local?.activeLessonSessionState === undefined ||
+      incomingSessionTs > localSessionTs ||
+      (incomingSessionTs === localSessionTs &&
+        (incomingIsAndroid !== localIsAndroid
+          ? incomingIsAndroid
+          : Boolean(incoming.activeLessonSessionState.session) && !local.activeLessonSessionState.session)));
+  const mergedActiveLessonSessionState =
+    useIncomingSession
+      ? incoming?.activeLessonSessionState
+      : local?.activeLessonSessionState;
+
   return {
     id: 'singleton_teacher_settings',
     profile: mergedProfile,
@@ -1087,6 +1137,16 @@ export function mergeTeacherSettings(
           ...baseRecord?.goldPriceSettings
         }
       : undefined,
+    theme: baseRecord?.theme ?? fallbackRecord?.theme,
+    accentColor: baseRecord?.accentColor ?? fallbackRecord?.accentColor,
+    reportLanguage: baseRecord?.reportLanguage ?? fallbackRecord?.reportLanguage,
+    mobileBottomNavOrder: Array.isArray(baseRecord?.mobileBottomNavOrder)
+      ? baseRecord.mobileBottomNavOrder
+      : fallbackRecord?.mobileBottomNavOrder,
+    sidebarNavOrder: Array.isArray(baseRecord?.sidebarNavOrder)
+      ? baseRecord.sidebarNavOrder
+      : fallbackRecord?.sidebarNavOrder,
+    activeLessonSessionState: mergedActiveLessonSessionState,
     recentlyDeleted: mergeRecentlyDeleted(local?.recentlyDeleted, incoming?.recentlyDeleted),
     dismissedDashboardLessons: mergeDismissedDashboardLessons(local?.dismissedDashboardLessons, incoming?.dismissedDashboardLessons, true),
     updatedAt: Math.max(localTime, incomingTime, Date.now()),
@@ -1104,6 +1164,13 @@ export interface WorkspaceMutableState {
   students?: Student[];
   lessons?: Lesson[];
   payments?: any[];
+  certificates?: any[];
+  hodStudents?: any[];
+  hodComplaints?: any[];
+  hodActionPlans?: any[];
+  hodVisits?: any[];
+  goldHoldings?: any[];
+  customAiBackgrounds?: any[];
   financeTransactions?: any[];
   schoolNotes?: SchoolNote[];
   homeworkAssignments?: any[];
@@ -1255,13 +1322,22 @@ export function enforcePurgedTombstonesOnWorkspace<T extends WorkspaceMutableSta
     });
   }
 
+  const purgedAssignmentIds = new Set(
+    finalPurged
+      .filter(p => p && p.id && (p.type === 'homeworkAssignments' || p.type === 'homeworkAssignment'))
+      .map(p => p.id.trim())
+  );
+
   if (Array.isArray(workspace.homeworkAssignments)) {
     workspace.homeworkAssignments = workspace.homeworkAssignments.filter((hw: any) => {
       if (!hw || !hw.id) return false;
+      const hwId = String(hw.id).trim();
       const grpId = (hw.groupId || '').trim();
       const stId = (hw.studentId || '').trim();
       const lesId = (hw.lessonId || '').trim();
       return (
+        !allPurgedIds.has(hwId) &&
+        !purgedAssignmentIds.has(hwId) &&
         (!grpId || !purgedGroupIds.has(grpId)) &&
         (!stId || !purgedStudentIds.has(stId)) &&
         (!lesId || !purgedLessonIds.has(lesId))
@@ -1272,15 +1348,41 @@ export function enforcePurgedTombstonesOnWorkspace<T extends WorkspaceMutableSta
   if (Array.isArray(workspace.homeworkSubmissions)) {
     workspace.homeworkSubmissions = workspace.homeworkSubmissions.filter((sub: any) => {
       if (!sub || !sub.id) return false;
+      const subId = String(sub.id).trim();
+      const assignId = (sub.assignmentId || '').trim();
       const grpId = (sub.groupId || '').trim();
       const stId = (sub.studentId || '').trim();
       const lesId = (sub.lessonId || '').trim();
       return (
+        !allPurgedIds.has(subId) &&
+        (!assignId || (!allPurgedIds.has(assignId) && !purgedAssignmentIds.has(assignId))) &&
         (!grpId || !purgedGroupIds.has(grpId)) &&
         (!stId || !purgedStudentIds.has(stId)) &&
         (!lesId || !purgedLessonIds.has(lesId))
       );
     });
+  }
+
+  if (Array.isArray(workspace.certificates)) {
+    workspace.certificates = workspace.certificates.filter((c: any) => c && c.id && !allPurgedIds.has(String(c.id).trim()));
+  }
+  if (Array.isArray(workspace.hodStudents)) {
+    workspace.hodStudents = workspace.hodStudents.filter((s: any) => s && s.id && !allPurgedIds.has(String(s.id).trim()));
+  }
+  if (Array.isArray(workspace.hodComplaints)) {
+    workspace.hodComplaints = workspace.hodComplaints.filter((c: any) => c && c.id && !allPurgedIds.has(String(c.id).trim()));
+  }
+  if (Array.isArray(workspace.hodActionPlans)) {
+    workspace.hodActionPlans = workspace.hodActionPlans.filter((p: any) => p && p.id && !allPurgedIds.has(String(p.id).trim()));
+  }
+  if (Array.isArray(workspace.hodVisits)) {
+    workspace.hodVisits = workspace.hodVisits.filter((v: any) => v && v.id && !allPurgedIds.has(String(v.id).trim()));
+  }
+  if (Array.isArray(workspace.goldHoldings)) {
+    workspace.goldHoldings = workspace.goldHoldings.filter((g: any) => g && g.id && !allPurgedIds.has(String(g.id).trim()));
+  }
+  if (Array.isArray(workspace.customAiBackgrounds)) {
+    workspace.customAiBackgrounds = workspace.customAiBackgrounds.filter((b: any) => b && b.id && !allPurgedIds.has(String(b.id).trim()));
   }
 
   if (Array.isArray(workspace.notifications)) {

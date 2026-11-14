@@ -154,7 +154,22 @@ async function ingestAndSweepPurgedTombstonesOnDataSource(
 
   // Sweep existing local collections against activePurgedRecords even if inboundDelta omitted those collections
   if (activePurgedRecords.length > 0) {
-    const collectionsToSweep = ['groups', 'students', 'lessons', 'schoolNotes', 'notifications'];
+    const collectionsToSweep = [
+      'groups',
+      'students',
+      'lessons',
+      'schoolNotes',
+      'notifications',
+      'certificates',
+      'hodStudents',
+      'hodComplaints',
+      'hodActionPlans',
+      'hodVisits',
+      'goldHoldings',
+      'customAiBackgrounds',
+      'homeworkAssignments',
+      'homeworkSubmissions'
+    ];
     for (const colKey of collectionsToSweep) {
       const currentLocalRecords = Array.isArray(localData[colKey]) ? localData[colKey] : [];
       if (currentLocalRecords.length === 0) continue;

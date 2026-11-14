@@ -2129,6 +2129,9 @@ export const HodHubView: React.FC = () => {
     const updated = visitRecords.filter(v => v.id !== id);
     setVisitRecords(updated);
     persistHodData({ visitRecords: updated });
+    if (typeof window !== 'undefined' && id) {
+      window.dispatchEvent(new CustomEvent('gluck-record-purged', { detail: { id, type: 'hodVisits' } }));
+    }
   };
 
   // Booklet correction toggle
