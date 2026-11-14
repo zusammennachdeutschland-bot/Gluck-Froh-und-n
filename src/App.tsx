@@ -49,7 +49,6 @@ import { LoadingScreen } from './components/LoadingScreen';
 
 import { useLessonReminders } from './hooks/useLessonReminders';
 import { useAutomatedDailyBackup } from './hooks/useAutomatedDailyBackup';
-import { useGoogleCloudWorkspaceSync } from './hooks/useGoogleCloudWorkspaceSync';
 import { 
   setupNotificationActionListener, 
   initNotificationChannels, 
@@ -63,7 +62,6 @@ import { Toast } from '@capacitor/toast';
 function MainApp() {
   useLessonReminders();
   useAutomatedDailyBackup();
-  useGoogleCloudWorkspaceSync();
   useDesktopShortcuts();
 
   const { 

@@ -42,7 +42,9 @@ import {
   migrateLegacyHomeworkForAccount,
   resolveAssignmentAudienceMode,
   resolveStageQuestionCount,
-  calculateTotalHomeworkQuestions
+  calculateTotalHomeworkQuestions,
+  setHomeworkAssignmentActiveStatus,
+  updateHomeworkAssignmentMetadata
 } from '../homeworkStorageSync';
 import { auth, signInTeacherWithGoogle } from '../firebaseCloudSync';
 import {
@@ -89,7 +91,10 @@ import {
   Globe,
   BookOpen,
   Search,
-  Layers
+  Layers,
+  Lock,
+  Unlock,
+  Edit3
 } from 'lucide-react';
 
 interface Props {
@@ -367,10 +372,17 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     return () => unsubAuth();
   }, [groups.length, sets.length]);
 
-  const loadAllAssignments = async () => {
+  const [editingHw, setEditingHw] = useState<HomeworkAssignment | null>(null);
+  const [editHwTitle, setEditHwTitle] = useState('');
+  const [editHwMaxAttempts, setEditHwMaxAttempts] = useState<number>(0);
+  const [editHwHideBranding, setEditHwHideBranding] = useState<boolean>(false);
+  const [isSavingHwEdit, setIsSavingHwEdit] = useState(false);
+  const [togglingActiveId, setTogglingActiveId] = useState<string | null>(null);
+
+  const loadAllAssignments = async (forceCloud = true) => {
     setLoadingResults(true);
     try {
-      const list = await syncAndFetchTeacherAssignments(studentsRef.current);
+      const list = await syncAndFetchTeacherAssignments(studentsRef.current, { force: forceCloud });
       setAssignmentsList(list);
       setPendingSyncCount(getPendingHomeworkSyncCount());
     } finally {
@@ -378,13 +390,13 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     }
   };
 
-  // Real-time Firestore listener, cross-tab storage listener & periodic live refresh while modal is open
+  // On-demand Homework Cloud fetch when opening the modal + local/P2P event listener (no continuous 4s polling or background onSnapshot)
   useEffect(() => {
     if (!isOpen) return;
-    loadAllAssignments();
+    loadAllAssignments(true);
 
-    const refreshCurrentState = () => {
-      syncAndFetchTeacherAssignments(studentsRef.current)
+    const refreshFromLocalOrP2P = () => {
+      syncAndFetchTeacherAssignments(studentsRef.current, { force: false })
         .then((list) => {
           setAssignmentsList(list);
           setPendingSyncCount(getPendingHomeworkSyncCount(activeAuthUid));
@@ -393,77 +405,19 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
       const currentDetailId = selectedDetailsIdRef.current;
       if (currentDetailId) {
-        fetchAssignmentDetailsWithSync(currentDetailId, studentsRef.current)
-          .then((d) => {
-            if (d) {
-              setSelectedDetails(d);
-              setInspectingSubmission((prevSub) => {
-                if (!prevSub) return null;
-                const updatedMatch = (d.submissions || []).find((s: HomeworkSubmission) => s.id === prevSub.id);
-                return updatedMatch || prevSub;
-              });
-              setInspectingStudentAttempts((prevAttempts) => {
-                if (prevAttempts.length === 0) return prevAttempts;
-                const first = prevAttempts[0];
-                const studentMatch = (d.studentStatusSummary || []).find((st: any) => {
-                  if (first.studentId && st.studentId === first.studentId) return true;
-                  if (first.participantId && st.participantId === first.participantId) return true;
-                  if (!first.studentId && !first.participantId) {
-                    return (st.studentName || '').trim().toLowerCase() === (first.studentName || '').trim().toLowerCase();
-                  }
-                  return false;
-                });
-                return studentMatch?.attempts || prevAttempts;
-              });
-            }
-          })
-          .catch(() => {});
+        const localDet = getLocalAssignmentDetails(currentDetailId, studentsRef.current);
+        if (localDet) {
+          setSelectedDetails(localDet);
+        }
       }
     };
 
-    window.addEventListener('storage', refreshCurrentState);
-    window.addEventListener('glueck-homework-sync-updated', refreshCurrentState);
-    const livePollTimer = window.setInterval(refreshCurrentState, 4000);
-
-    if (!activeAuthUid) {
-      return () => {
-        window.removeEventListener('storage', refreshCurrentState);
-        window.removeEventListener('glueck-homework-sync-updated', refreshCurrentState);
-        window.clearInterval(livePollTimer);
-      };
-    }
-
-    const unsubAssignments = subscribeAssignmentsFromFirestore((cloudHwList) => {
-      applyCloudAssignmentsSnapshot(cloudHwList, activeAuthUid, activeAuthUid);
-      refreshCurrentState();
-    }, activeAuthUid);
-
-    const unsubSubmissions = subscribeSubmissionsFromFirestore(
-      null,
-      (cloudSubs) => {
-        const activeIds = new Set(
-          getLocalAssignments(activeAuthUid).flatMap((a) => [a.id, sanitizeDocId(a.id)])
-        );
-        cloudSubs.forEach((sub) => {
-          if (sub.ownerUid && sub.ownerUid !== activeAuthUid) return;
-          if (
-            !isAssignmentDeletedLocally(sub.assignmentId, activeAuthUid) &&
-            (activeIds.has(sub.assignmentId) || activeIds.has(sanitizeDocId(sub.assignmentId)))
-          ) {
-            saveLocalSubmission({ ...sub, ownerUid: activeAuthUid, cloudSynced: true }, false);
-          }
-        });
-        refreshCurrentState();
-      },
-      activeAuthUid
-    );
+    window.addEventListener('storage', refreshFromLocalOrP2P);
+    window.addEventListener('glueck-homework-sync-updated', refreshFromLocalOrP2P);
 
     return () => {
-      window.removeEventListener('storage', refreshCurrentState);
-      window.removeEventListener('glueck-homework-sync-updated', refreshCurrentState);
-      window.clearInterval(livePollTimer);
-      unsubAssignments();
-      unsubSubmissions();
+      window.removeEventListener('storage', refreshFromLocalOrP2P);
+      window.removeEventListener('glueck-homework-sync-updated', refreshFromLocalOrP2P);
     };
   }, [isOpen, activeAuthUid]);
 
@@ -854,7 +808,10 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
           : Promise.resolve(true),
         saveAssignmentWithConfirmation(payload)
       ]);
-      const serverAssignment = await persistHomeworkAssignmentToServer(confirmRes.assignment).catch(() => null);
+      // Only fall back to HTTP server endpoint if direct Firestore confirmation did not complete
+      const serverAssignment = confirmRes.cloudSynced
+        ? null
+        : await persistHomeworkAssignmentToServer(confirmRes.assignment).catch(() => null);
       const isCloudSynced = Boolean(confirmRes.cloudSynced || serverAssignment?.id);
 
       const finalAssignment: HomeworkAssignment = {
@@ -1007,9 +964,106 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     }
   };
 
+  const handleToggleAssignmentActive = async (hw: HomeworkAssignment) => {
+    if (!hw?.id || togglingActiveId) return;
+    const isCurrentlyClosed = hw.isActive === false || hw.status === 'closed';
+    const nextActive = isCurrentlyClosed;
+    setTogglingActiveId(hw.id);
+    try {
+      const res = await setHomeworkAssignmentActiveStatus(hw.id, nextActive);
+      if (res.assignment) {
+        setAssignmentsList((prev) =>
+          prev.map((item) =>
+            item.id === hw.id
+              ? {
+                  ...item,
+                  ...res.assignment,
+                  isActive: nextActive,
+                  status: nextActive ? 'active' : 'closed',
+                  cloudSynced: res.cloudSynced
+                }
+              : item
+          )
+        );
+        if (selectedDetails?.assignment?.id === hw.id) {
+          setSelectedDetails((prev: any) =>
+            prev
+              ? {
+                  ...prev,
+                  assignment: {
+                    ...prev.assignment,
+                    ...res.assignment,
+                    isActive: nextActive,
+                    status: nextActive ? 'active' : 'closed',
+                    cloudSynced: res.cloudSynced
+                  }
+                }
+              : prev
+          );
+        }
+      }
+      setPendingSyncCount(getPendingHomeworkSyncCount());
+    } finally {
+      setTogglingActiveId(null);
+    }
+  };
+
+  const handleOpenEditAssignment = (hw: HomeworkAssignment) => {
+    if (!hw) return;
+    setEditingHw(hw);
+    setEditHwTitle(hw.title || '');
+    setEditHwMaxAttempts(typeof hw.maxAttempts === 'number' ? hw.maxAttempts : 0);
+    setEditHwHideBranding(Boolean(hw.hideTeacherBranding));
+  };
+
+  const handleSaveEditAssignment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingHw) return;
+    setIsSavingHwEdit(true);
+    try {
+      const res = await updateHomeworkAssignmentMetadata(editingHw.id, {
+        title: editHwTitle.trim() || editingHw.title,
+        maxAttempts: editHwMaxAttempts,
+        allowReplay: editHwMaxAttempts !== 1,
+        hideTeacherBranding: editHwHideBranding
+      });
+      if (res.assignment) {
+        setAssignmentsList((prev) =>
+          prev.map((item) =>
+            item.id === editingHw.id
+              ? {
+                  ...item,
+                  ...res.assignment,
+                  cloudSynced: res.cloudSynced
+                }
+              : item
+          )
+        );
+        if (selectedDetails?.assignment?.id === editingHw.id) {
+          setSelectedDetails((prev: any) =>
+            prev
+              ? {
+                  ...prev,
+                  assignment: {
+                    ...prev.assignment,
+                    ...res.assignment,
+                    cloudSynced: res.cloudSynced
+                  }
+                }
+              : prev
+          );
+        }
+      }
+      setPendingSyncCount(getPendingHomeworkSyncCount());
+      setEditingHw(null);
+    } finally {
+      setIsSavingHwEdit(false);
+    }
+  };
+
   const filteredAssignments = useMemo(() => {
     const visibleAssignments = assignmentsList.filter((a) =>
-      a?.deleted !== true && a?.isActive !== false && a?.status !== 'deleted' && a?.status !== 'closed'
+      a?.deleted !== true && a?.status !== 'deleted'
     );
     if (filterGroup === 'all') return visibleAssignments;
     if (filterGroup === 'open_only') {
@@ -2169,6 +2223,39 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
                       <button
                         type="button"
+                        onClick={() => handleOpenEditAssignment(selectedDetails.assignment)}
+                        className="px-2.5 py-1.5 rounded-lg bg-surface hover:bg-surface-hover border border-surface-border text-text-main text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                        title="تعديل عنوان وإعدادات الواجب"
+                      >
+                        <Edit3 className="w-3.5 h-3.5 text-primary" />
+                        <span>تعديل</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={togglingActiveId === selectedDetails.assignment.id}
+                        onClick={() => handleToggleAssignmentActive(selectedDetails.assignment)}
+                        className={`px-2.5 py-1.5 rounded-lg border text-xs font-bold flex items-center gap-1 cursor-pointer ${
+                          selectedDetails.assignment.isActive === false || selectedDetails.assignment.status === 'closed'
+                            ? 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                            : 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 text-amber-600 dark:text-amber-400'
+                        }`}
+                      >
+                        {selectedDetails.assignment.isActive === false || selectedDetails.assignment.status === 'closed' ? (
+                          <>
+                            <Unlock className="w-3.5 h-3.5" />
+                            <span>إعادة فتح الواجب</span>
+                          </>
+                        ) : (
+                          <>
+                            <Lock className="w-3.5 h-3.5" />
+                            <span>إغلاق الواجب</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
                         onClick={() => setDeleteConfirmHw(selectedDetails.assignment)}
                         className="px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                       >
@@ -2810,7 +2897,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={loadAllAssignments}
+                        onClick={() => loadAllAssignments(true)}
                         className="px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface border border-surface-border text-xs font-bold text-text-main flex items-center gap-1.5 cursor-pointer"
                       >
                         <RefreshCw className={`w-3.5 h-3.5 ${loadingResults ? 'animate-spin' : ''}`} />
@@ -2869,6 +2956,11 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                                   <h4 className="text-sm font-bold text-text-main group-hover:text-primary transition-colors truncate">
                                     {hw.title}
                                   </h4>
+                                  {hw.isActive === false || hw.status === 'closed' ? (
+                                    <span className="text-[10px] font-black text-amber-600 dark:text-amber-400">
+                                      · 🔒 مغلق
+                                    </span>
+                                  ) : null}
                                   {hw.cloudSynced !== false ? (
                                     <span title="متزامن سحابياً مع Firestore" className="text-emerald-500 shrink-0">
                                       <Cloud className="w-3.5 h-3.5" />
@@ -2884,14 +2976,45 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                                 </p>
                               </div>
 
-                              <button
-                                type="button"
-                                onClick={() => setDeleteConfirmHw(hw)}
-                                className="p-1.5 rounded-lg text-text-muted hover:text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer shrink-0"
-                                title="حذف الواجب نهائياً"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditAssignment(hw)}
+                                  className="p-1.5 rounded-lg text-text-muted hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer"
+                                  title="تعديل عنوان وإعدادات الواجب"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={togglingActiveId === hw.id}
+                                  onClick={() => handleToggleAssignmentActive(hw)}
+                                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                                    hw.isActive === false || hw.status === 'closed'
+                                      ? 'text-amber-500 hover:bg-emerald-500/10 hover:text-emerald-500'
+                                      : 'text-text-muted hover:text-amber-500 hover:bg-amber-500/10'
+                                  }`}
+                                  title={
+                                    hw.isActive === false || hw.status === 'closed'
+                                      ? 'إعادة فتح الواجب للطلاب'
+                                      : 'إغلاق الواجب مؤقتاً'
+                                  }
+                                >
+                                  {hw.isActive === false || hw.status === 'closed' ? (
+                                    <Unlock className="w-3.5 h-3.5" />
+                                  ) : (
+                                    <Lock className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeleteConfirmHw(hw)}
+                                  className="p-1.5 rounded-lg text-text-muted hover:text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                                  title="حذف الواجب نهائياً"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
                             </div>
 
                             {/* Unboxed Metadata (Zero-Pill Rule) */}
@@ -2994,6 +3117,96 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         </div>
 
       </div>
+
+      {/* Edit Assignment Metadata Modal */}
+      {editingHw && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <form
+            onSubmit={handleSaveEditAssignment}
+            className="bg-surface border border-surface-border rounded-2xl p-5 max-w-md w-full space-y-4 shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-surface-border pb-2.5">
+              <h3 className="text-sm font-black text-text-main flex items-center gap-1.5">
+                <Edit3 className="w-4 h-4 text-primary" />
+                <span>تعديل إعدادات الواجب</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingHw(null)}
+                className="p-1 rounded-lg text-text-muted hover:text-text-main cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-text-main mb-1">عنوان الواجب:</label>
+                <input
+                  type="text"
+                  value={editHwTitle}
+                  onChange={(e) => setEditHwTitle(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-surface-hover border border-surface-border text-xs font-bold text-text-main outline-none focus:border-primary"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-text-main mb-1">عدد المحاولات للطالب:</label>
+                <select
+                  value={editHwMaxAttempts}
+                  onChange={(e) => setEditHwMaxAttempts(Number(e.target.value))}
+                  className="w-full px-3 py-2 rounded-xl bg-surface-hover border border-surface-border text-xs font-bold text-text-main outline-none focus:border-primary cursor-pointer"
+                >
+                  <option value={0}>♾️ مفتوح (تحسين الدرجة)</option>
+                  <option value={1}>1️⃣ محاولة واحدة فقط (امتحان)</option>
+                  <option value={2}>2️⃣ محاولتان كحد أقصى</option>
+                  <option value={3}>3️⃣ 3 محاولات كحد أقصى</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-surface-hover/70 border border-surface-border">
+                <label className="text-xs font-bold text-text-main select-none">
+                  إخفاء اللوجو واسم المدرس
+                </label>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={editHwHideBranding}
+                  onClick={() => setEditHwHideBranding((prev) => !prev)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                    editHwHideBranding ? 'bg-primary' : 'bg-surface-border'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition duration-200 ease-in-out ${
+                      editHwHideBranding ? '-translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="submit"
+                disabled={isSavingHwEdit}
+                className="flex-1 py-2 rounded-xl bg-primary hover:bg-primary-hover text-white font-bold text-xs cursor-pointer shadow-xs"
+              >
+                {isSavingHwEdit ? 'جاري الحفظ...' : 'حفظ التعديلات'}
+              </button>
+              <button
+                type="button"
+                disabled={isSavingHwEdit}
+                onClick={() => setEditingHw(null)}
+                className="flex-1 py-2 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-text-main font-bold text-xs cursor-pointer"
+              >
+                إلغاء
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Delete Confirmation Modal */}
       {deleteConfirmHw && (

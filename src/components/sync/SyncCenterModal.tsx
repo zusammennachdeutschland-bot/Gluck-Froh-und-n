@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   X, LayoutDashboard, Smartphone, Send, History, 
   Activity, Wrench, RefreshCw, Copy, Shield, Check, 
-  ChevronRight, Terminal, Wifi, WifiOff, AlertCircle, Sparkles
+  ChevronRight, Terminal, Wifi, WifiOff, AlertCircle, Sparkles, Cloud, CloudOff
 } from 'lucide-react';
 import { 
   SyncConnectionState, 
@@ -20,6 +20,12 @@ import { DiagnosticsCenter } from './DiagnosticsCenter';
 import { RecoveryTools } from './RecoveryTools';
 import { CopyableBlock } from './CopyableBlock';
 import { useApp } from '../../context/AppContext';
+import {
+  getPendingHomeworkSyncCount,
+  flushPendingHomeworkSyncQueue,
+  syncAndFetchTeacherAssignments,
+  isFirestoreReadQuotaExhausted
+} from '../../shared/homeworkStorageSync';
 
 export interface SyncCenterModalProps {
   isOpen: boolean;
@@ -84,6 +90,11 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
   });
   const [historyList, setHistoryList] = useState<SyncHistoryEntry[]>([]);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
+  const [hwCloudAvailable, setHwCloudAvailable] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine && !isFirestoreReadQuotaExhausted() : !isFirestoreReadQuotaExhausted()
+  );
+  const [pendingHwCount, setPendingHwCount] = useState<number>(() => getPendingHomeworkSyncCount());
+  const [isSyncingHwCloud, setIsSyncingHwCloud] = useState(false);
 
   // Hidden Developer Diagnostics Panel (5-tap trigger)
   const [devPanelOpen, setDevPanelOpen] = useState(false);
@@ -96,6 +107,10 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
   }, [isOpen, activeTab]);
 
   const refreshData = async () => {
+    setHwCloudAvailable(
+      typeof navigator !== 'undefined' ? navigator.onLine && !isFirestoreReadQuotaExhausted() : !isFirestoreReadQuotaExhausted()
+    );
+    setPendingHwCount(getPendingHomeworkSyncCount());
     if (getPendingOutbox) {
       try {
         setOutbox(getPendingOutbox());
@@ -139,6 +154,17 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
       await refreshData();
     } finally {
       setIsSyncingAll(false);
+    }
+  };
+
+  const handleSyncHomeworkCloudNow = async () => {
+    setIsSyncingHwCloud(true);
+    try {
+      await flushPendingHomeworkSyncQueue();
+      await syncAndFetchTeacherAssignments();
+      setPendingHwCount(getPendingHomeworkSyncCount());
+    } finally {
+      setIsSyncingHwCloud(false);
     }
   };
 
@@ -304,6 +330,80 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
                         <RefreshCw className={`w-4 h-4 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
                         <span>{_t('مزامنة الكل الآن', 'Sync All Now', 'Jetzt alles synchronisieren')}</span>
                       </button>
+                    </div>
+                  </div>
+
+                  {/* Dual Synchronization Architecture Status (P2P vs Homework Cloud) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* System 1: P2P Sync */}
+                    <div className="p-4 rounded-2xl border border-surface-border bg-surface space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <Wifi className={`w-4 h-4 ${onlineCount > 0 || syncStatus === 'connected' ? 'text-emerald-500' : 'text-text-muted'}`} />
+                          <span className="text-xs font-black text-text-main">
+                            {_t('مزامنة الأجهزة P2P (كل بيانات التطبيق)', 'P2P Device Sync (All App Data)', 'P2P Geräte-Sync (Alle App-Daten)')}
+                          </span>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                          syncStatus === 'syncing'
+                            ? 'bg-blue-500/15 text-blue-600'
+                            : onlineCount > 0 || syncStatus === 'connected'
+                            ? 'bg-emerald-500/15 text-emerald-600'
+                            : 'bg-slate-500/15 text-text-muted'
+                        }`}>
+                          {syncStatus === 'syncing'
+                            ? _t('جاري المزامنة', 'Synchronization in progress', 'Synchronisation läuft')
+                            : onlineCount > 0 || syncStatus === 'connected'
+                            ? _t('متصل P2P', 'P2P Connected', 'P2P Verbunden')
+                            : _t('غير متصل P2P', 'P2P Disconnected', 'P2P Getrennt')}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-text-muted">
+                        {outbox.totalCount > 0
+                          ? _t(`يوجد ${outbox.totalCount} تعديل محلي معلق بانتظار المزامنة مع الأجهزة المقترنة.`, `Pending local changes: ${outbox.totalCount} queued for paired devices.`, `${outbox.totalCount} lokale Änderungen ausstehend.`)
+                          : _t('تمت مزامنة جميع بيانات التطبيق (الطلاب، الحصص، الغياب، المالية، الذهب، الواجبات).', 'Synchronization completed across all local datasets.', 'Synchronisation abgeschlossen.')}
+                      </p>
+                    </div>
+
+                    {/* System 2: Homework Cloud */}
+                    <div className="p-4 rounded-2xl border border-surface-border bg-surface space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          {hwCloudAvailable ? (
+                            <Cloud className="w-4 h-4 text-indigo-500" />
+                          ) : (
+                            <CloudOff className="w-4 h-4 text-amber-500" />
+                          )}
+                          <span className="text-xs font-black text-text-main">
+                            {_t('سحابة الواجبات فقط (Online Homework)', 'Homework Cloud Only', 'Nur Hausaufgaben-Cloud')}
+                          </span>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                          hwCloudAvailable
+                            ? 'bg-indigo-500/15 text-indigo-600'
+                            : 'bg-amber-500/15 text-amber-600'
+                        }`}>
+                          {hwCloudAvailable
+                            ? _t('سحابة الواجبات متصلة', 'Homework cloud connected', 'Hausaufgaben-Cloud verbunden')
+                            : _t('سحابة الواجبات غير متاحة', 'Homework cloud unavailable', 'Hausaufgaben-Cloud nicht verfügbar')}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] text-text-muted">
+                          {pendingHwCount > 0
+                            ? _t(`تحديثات واجبات معلقة للرفع: ${pendingHwCount}`, `Pending homework uploads or results: ${pendingHwCount}`, `Ausstehende Hausaufgaben-Uploads: ${pendingHwCount}`)
+                            : _t('مخصصة فقط لنشر روابط الواجبات واستقبال إجابات الطلاب عند الطلب.', 'Dedicated strictly to online homework links & on-demand submissions.', 'Nur für Online-Hausaufgaben & Ergebnisse auf Abruf.')}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleSyncHomeworkCloudNow}
+                          disabled={isSyncingHwCloud || !hwCloudAvailable}
+                          className="px-2.5 py-1 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 text-[10px] font-bold shrink-0 disabled:opacity-40 cursor-pointer flex items-center gap-1"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${isSyncingHwCloud ? 'animate-spin' : ''}`} />
+                          <span>{_t('تحديث الواجبات', 'Refresh', 'Aktualisieren')}</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
 

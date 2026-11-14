@@ -28,7 +28,8 @@ import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicat
 import { translations, TranslationKey } from '../i18n/translations';
 import { syncTodayLessonsToWidget } from '../services/widgetService';
 import { runSyncMigration } from '../services/sync/syncMigration';
-import { trackLocalMutation, trackLocalDeletion, getActiveRecords } from '../services/sync/mutationTracker';
+import { trackLocalMutation, trackLocalDeletion, getActiveRecords, detectLocalOriginPlatform } from '../services/sync/mutationTracker';
+import { hydrateVerbGroupSet } from '../shared/verbGroupSync';
 import {
   mergeEntities,
   mergeRecentlyDeleted,
@@ -4185,14 +4186,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   // Gold Holdings CRUD & Price Refresh
   const addGoldHolding = useCallback((data: Omit<GoldHolding, 'id' | 'createdAt' | 'updatedAt' | 'type' | 'currency'> & { id?: string; currency?: 'EGP' }) => {
     const now = new Date().toISOString();
-    const newHolding: GoldHolding = {
+    const newHolding: GoldHolding = wrapMutation({
       ...data,
       id: data.id || `gold_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       type: 'gold',
       currency: 'EGP',
       createdAt: now,
-      updatedAt: now,
-    };
+      updatedAt: Date.now(),
+    } as GoldHolding);
     setGoldHoldings(prev => [newHolding, ...(prev || [])]);
     registerFinanceActivity();
     return newHolding;
@@ -4201,17 +4202,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const updateGoldHolding = useCallback((id: string, updates: Partial<GoldHolding>) => {
     setGoldHoldings(prev => (prev || []).map(item => {
       if (item.id !== id) return item;
-      return {
+      return wrapMutation({
         ...item,
         ...updates,
-        updatedAt: new Date().toISOString(),
-      };
+        updatedAt: Date.now(),
+      } as GoldHolding);
     }));
     registerFinanceActivity();
   }, [registerFinanceActivity]);
 
   const deleteGoldHolding = useCallback((id: string) => {
-    setGoldHoldings(prev => (prev || []).filter(item => item.id !== id));
+    setGoldHoldings(prev => (prev || []).map(item => item.id === id ? wrapDeletion(item as any) : item).filter(item => !item.deleted));
     registerFinanceActivity();
   }, [registerFinanceActivity]);
 
@@ -7572,21 +7573,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     return () => clearTimeout(timer);
   }, [lessons, students, payments, todos, groups, profile, activeLessonSession, financeInstallments, financeRecurring]);
 
-  const teacherSettingsRecord: TeacherSettingsRecord = useMemo(() => ({
-    id: 'singleton_teacher_settings',
-    profile,
-    schedulingPreferences: {
-      defaultLessonDuration: 60,
-      bufferBetweenLessonsMins: 15,
-      autoAlertMinutes: 30
-    },
-    recentlyDeleted,
-    dismissedDashboardLessons: dismissedDashboardLessonIds,
-    updatedAt: Date.now(),
-    originDeviceId: syncState?.localDeviceId || 'local',
-    originRevision: syncRevisionRef.current,
-    deleted: false
-  }), [profile, recentlyDeleted, dismissedDashboardLessonIds, syncState?.localDeviceId]);
+  const teacherSettingsRecord: TeacherSettingsRecord = useMemo(() => {
+    let pickerNamesList: string[] | undefined;
+    try {
+      const rawPicker = localStorage.getItem('dl_picker_names');
+      if (rawPicker) {
+        const parsed = JSON.parse(rawPicker);
+        if (Array.isArray(parsed)) pickerNamesList = parsed;
+      }
+    } catch {}
+    const prunedIdsSet = getPrunedLessonIds();
+    const prunedLessonIds = prunedIdsSet.size > 0 ? Array.from(prunedIdsSet) : undefined;
+
+    return {
+      id: 'singleton_teacher_settings',
+      profile,
+      schedulingPreferences: {
+        defaultLessonDuration: 60,
+        bufferBetweenLessonsMins: 15,
+        autoAlertMinutes: 30
+      },
+      notificationSettings,
+      inspirationSettings,
+      inspirationMessages,
+      pickerNames: pickerNamesList,
+      prunedLessonIds,
+      goldPriceSettings,
+      recentlyDeleted,
+      dismissedDashboardLessons: dismissedDashboardLessonIds,
+      updatedAt: Date.now(),
+      originDeviceId: syncState?.localDeviceId || 'local',
+      originPlatform: detectLocalOriginPlatform(),
+      originRevision: syncRevisionRef.current,
+      deleted: false
+    };
+  }, [profile, notificationSettings, inspirationSettings, inspirationMessages, goldPriceSettings, recentlyDeleted, dismissedDashboardLessonIds, syncState?.localDeviceId]);
 
   const localDataRef = React.useRef({ 
     groups, 
@@ -7608,6 +7629,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     financeRecurring,
     financeInstallments,
     financeNotifications,
+    goldHoldings,
     lernstudioSets
   });
   useEffect(() => {
@@ -7631,13 +7653,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       financeRecurring,
       financeInstallments,
       financeNotifications,
+      goldHoldings,
       lernstudioSets
     };
-  }, [groups, students, lessons, payments, notifications, todos, certificates, teacherSettingsRecord, hodStudents, hodComplaints, hodActionPlans, hodVisits, schoolNotes, financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments, financeNotifications, lernstudioSets]);
+  }, [groups, students, lessons, payments, notifications, todos, certificates, teacherSettingsRecord, hodStudents, hodComplaints, hodActionPlans, hodVisits, schoolNotes, financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments, financeNotifications, goldHoldings, lernstudioSets]);
+
+  // Notify P2P auto-sync engine whenever local homework assignments or submissions mutate
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleHomeworkMutated = () => {
+      autoSyncEngine.notifyMutation('homeworkAssignments', 'local_hw_update');
+    };
+    window.addEventListener('glueck-homework-sync-updated', handleHomeworkMutated);
+    window.addEventListener('gluck-homework-deleted', handleHomeworkMutated);
+    return () => {
+      window.removeEventListener('glueck-homework-sync-updated', handleHomeworkMutated);
+      window.removeEventListener('gluck-homework-deleted', handleHomeworkMutated);
+    };
+  }, []);
 
   const syncDataSource: SyncDataSource = {
     getLocalData: () => {
-      const data = { ...localDataRef.current };
+      const data: Record<string, any[]> = { ...localDataRef.current };
+      const localDeviceId = syncStateRef.current?.localDeviceId || 'local';
+      const localPlatform = detectLocalOriginPlatform();
       
       if (fullLessonsRef.current && fullLessonsRef.current.length > 0) {
         // Guarantee latest active lessons are merged synchronously regardless of async storage queue
@@ -7674,6 +7713,57 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           return true;
         });
       }
+
+      // Include local homework assignments & submissions in P2P sync so Computer and Android stay 100% consistent via P2P
+      try {
+        const rawHwAssignments = getLocalAssignments();
+        data.homeworkAssignments = (Array.isArray(rawHwAssignments) ? rawHwAssignments : []).map((a: any) => {
+          const ts = typeof a.updatedAt === 'number'
+            ? a.updatedAt
+            : Date.parse(a.updatedAt || a.createdAt || '') || Date.now();
+          return {
+            ...a,
+            updatedAt: ts,
+            originDeviceId: a.originDeviceId || localDeviceId,
+            originPlatform: a.originPlatform || localPlatform,
+            originRevision: a.originRevision || syncRevisionRef.current || 1
+          };
+        });
+      } catch {
+        data.homeworkAssignments = [];
+      }
+
+      try {
+        const rawHwSubmissions = getLocalSubmissions();
+        data.homeworkSubmissions = (Array.isArray(rawHwSubmissions) ? rawHwSubmissions : []).map((s: any) => {
+          const ts = typeof s.updatedAt === 'number'
+            ? s.updatedAt
+            : Date.parse(s.updatedAt || s.completedAt || s.startedAt || '') || Date.now();
+          return {
+            ...s,
+            updatedAt: ts,
+            originDeviceId: s.originDeviceId || localDeviceId,
+            originPlatform: s.originPlatform || localPlatform,
+            originRevision: s.originRevision || syncRevisionRef.current || 1
+          };
+        });
+      } catch {
+        data.homeworkSubmissions = [];
+      }
+
+      // Ensure goldHoldings have normalized numeric updatedAt and origin metadata for P2P
+      data.goldHoldings = (Array.isArray(data.goldHoldings) ? data.goldHoldings : []).map((g: any) => {
+        const ts = typeof g.updatedAt === 'number'
+          ? g.updatedAt
+          : Date.parse(String(g.updatedAt || g.createdAt || '')) || Date.now();
+        return {
+          ...g,
+          updatedAt: ts,
+          originDeviceId: g.originDeviceId || localDeviceId,
+          originPlatform: g.originPlatform || localPlatform,
+          originRevision: g.originRevision || 1
+        };
+      });
       
       return data;
     },
@@ -7800,14 +7890,59 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           setFinanceNotifications(data);
           break;
         }
-        case 'lernstudioSets': {
-          await storage.setItem('dl_lernstudio_sets', data);
-          setLernstudioSets(data);
+        case 'goldHoldings': {
+          const activeGold = (Array.isArray(data) ? data : []).filter((g: any) => g && g.id && !g.deleted);
+          await storage.setItem('gluck_gold_holdings', activeGold);
+          setGoldHoldings(activeGold);
+          break;
+        }
+        case 'homeworkAssignments': {
+          const activeAssignments = (Array.isArray(data) ? data : []).filter(
+            (a: any) => a && a.id && !a.deleted && a.status !== 'deleted' && !isAssignmentDeletedLocally(a.id)
+          );
+          for (const a of Array.isArray(data) ? data : []) {
+            if (a && a.id && (a.deleted || a.status === 'deleted')) {
+              markAssignmentDeletedLocally(a.id);
+            }
+          }
+          writeLocalAssignmentsForScope(activeAssignments as any);
+          await storage.setItem(getAssignmentsStorageKey(), activeAssignments);
+          setExternalDataVersion(v => v + 1);
+          break;
+        }
+        case 'homeworkSubmissions': {
+          const activeSubs = (Array.isArray(data) ? data : []).filter((s: any) => s && s.id && !s.deleted);
+          writeLocalSubmissionsForScope(activeSubs as any);
+          await storage.setItem(getSubmissionsStorageKey(), activeSubs);
+          setExternalDataVersion(v => v + 1);
+          break;
+        }
+        case 'lernstudioSets':
+        case 'customVerbGroups': {
+          const incomingList = Array.isArray(data) ? data : [];
+          const existingMap = new Map<string, LernstudioSet>();
+          for (const ds of DEFAULT_LERNSTUDIO_SETS) {
+            existingMap.set(ds.id, ds);
+          }
+          for (const ls of lernstudioSets) {
+            if (ls && ls.id) existingMap.set(ls.id, ls);
+          }
+          for (const item of incomingList) {
+            if (!item || !item.id) continue;
+            if (item.deleted) {
+              existingMap.delete(item.id);
+            } else {
+              existingMap.set(item.id, hydrateVerbGroupSet(item as LernstudioSet));
+            }
+          }
+          const finalSets = Array.from(existingMap.values());
+          await storage.setItem('dl_lernstudio_sets', finalSets);
+          setLernstudioSets(finalSets);
           break;
         }
         case 'settings': {
           if (Array.isArray(data) && data.length > 0) {
-            const incoming = data[0];
+            const incoming = data[0] as TeacherSettingsRecord;
             const settingsKeys: string[] = ['dl_settings'];
             if (incoming?.profile) {
               const incomingProfile = incoming.profile;
@@ -7818,6 +7953,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
                 setLanguageState(incomingProfile.language);
               }
               setExternalDataVersion(v => v + 1);
+            }
+            if (incoming?.notificationSettings) {
+              const nextNotifSettings = { ...DEFAULT_NOTIFICATION_SETTINGS, ...incoming.notificationSettings };
+              await storage.setItem('dl_notification_settings', nextNotifSettings);
+              setNotificationSettings(nextNotifSettings);
+            }
+            if (incoming?.inspirationSettings) {
+              await storage.setItem('dl_inspiration_settings', incoming.inspirationSettings);
+              setInspirationSettings(incoming.inspirationSettings);
+            }
+            if (Array.isArray(incoming?.inspirationMessages) && incoming.inspirationMessages.length > 0) {
+              await storage.setItem('dl_inspiration_messages', incoming.inspirationMessages);
+              setInspirationMessages(incoming.inspirationMessages);
+            }
+            if (Array.isArray(incoming?.pickerNames)) {
+              try {
+                localStorage.setItem('dl_picker_names', JSON.stringify(incoming.pickerNames));
+              } catch {}
+            }
+            if (Array.isArray(incoming?.prunedLessonIds) && incoming.prunedLessonIds.length > 0) {
+              addPrunedLessonIds(incoming.prunedLessonIds);
+            }
+            if (incoming?.goldPriceSettings) {
+              const nextGoldSettings = { ...DEFAULT_GOLD_PRICE_SETTINGS, ...incoming.goldPriceSettings };
+              await storage.setItem('gluck_gold_settings', nextGoldSettings);
+              setGoldPriceSettings(nextGoldSettings);
             }
             if (incoming?.recentlyDeleted) {
               const mergedRec = mergeRecentlyDeleted(recentlyDeletedRef.current, incoming.recentlyDeleted);
@@ -7898,7 +8059,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     if (!syncState) return { totalCount: 0, byEntity: {}, items: [], oldestPendingTimestamp: null };
     return calculatePendingOutbox(
       syncState.peerWatermarkTable || {},
-      localDataRef.current,
+      syncDataSource.getLocalData(),
       syncState.pairedPeers || []
     );
   };

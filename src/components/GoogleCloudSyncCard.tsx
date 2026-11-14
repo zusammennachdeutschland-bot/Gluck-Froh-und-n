@@ -1,4 +1,20 @@
 import React, { useState, useEffect } from 'react';
+import {
+  Cloud,
+  CloudOff,
+  RefreshCw,
+  LogOut,
+  CheckCircle2,
+  AlertTriangle,
+  Globe,
+  ExternalLink,
+  Edit3,
+  RotateCcw,
+  Trash2,
+  ShieldAlert,
+  LogIn,
+  Upload
+} from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
   signInTeacherWithGoogle,
@@ -6,45 +22,24 @@ import {
   createTeacherWithEmailPassword,
   signOutTeacherFirebase,
   subscribeTeacherAuth,
-  isAutoCloudSyncEnabled,
-  setAutoCloudSyncEnabled,
-  getLastCloudSyncTime,
-  setLastCloudSyncTime,
-  uploadWorkspaceToGoogleCloud,
-  downloadWorkspaceFromGoogleCloud,
-  clearCloudWorkspaceData,
-  reactivateCloudSync,
-  getCloudSyncControlState,
-  CloudSyncSummary,
   getVercelPublicDomain,
   setVercelPublicDomain,
   DEFAULT_VERCEL_DOMAIN,
-  acknowledgeAppliedRemoteRevisions,
+  clearCloudWorkspaceData,
   isAndroidNativePlatform,
   getLastAndroidAuthDiagnostic,
   getAndroidApkSigningInfo,
-  AndroidApkSigningInfo
+  AndroidApkSigningInfo,
+  isFirestoreReadQuotaExhausted,
+  isFirestoreWriteQuotaExhaustedToday
 } from '../services/firebaseWorkspaceSync';
 import {
-  enqueueDurablePendingRemoteItem,
-  removeDurablePendingRemoteItem
-} from '../hooks/useGoogleCloudWorkspaceSync';
-import {
-  Cloud,
-  RefreshCw,
-  Upload,
-  Download,
-  CheckCircle2,
-  AlertTriangle,
-  LogOut,
-  LogIn,
-  Globe,
-  ExternalLink,
-  Edit3,
-  RotateCcw,
-  Trash2,
-  ShieldAlert
-} from 'lucide-react';
+  flushPendingHomeworkCloudWrites,
+  getPendingHomeworkSyncCount,
+  getHomeworkSummaryStats,
+  syncAndFetchTeacherAssignments,
+  migrateLegacyHomeworkForAccount
+} from '../shared/homeworkStorageSync';
 
 interface GoogleCloudSyncCardProps {
   compact?: boolean;
@@ -52,218 +47,180 @@ interface GoogleCloudSyncCardProps {
 
 export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compact = false }) => {
   const {
-    profile,
-    updateProfile,
     students,
     groups,
-    lessons,
-    payments,
-    financeTransactions,
     lernstudioSets,
-    hodStudents,
-    schoolNotes,
-    performBackup,
-    importBackupFile,
+    profile,
+    updateProfile,
     triggerToast,
     _t
   } = useApp();
 
   const [firebaseUser, setFirebaseUser] = useState<any | null>(null);
-  const [autoSync, setAutoSync] = useState<boolean>(() => isAutoCloudSyncEnabled());
-  const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => getLastCloudSyncTime());
+  const [isOnline, setIsOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine !== false : true
+  );
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
-  const [actionLoading, setActionLoading] = useState<'sync' | 'push' | 'pull' | 'login' | 'clear' | 'email_login' | null>(null);
-  const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [showClearConfirmModal, setShowClearConfirmModal] = useState<boolean>(false);
-  const [cloudSummary, setCloudSummary] = useState<CloudSyncSummary | null>(null);
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<
+    'sync_hw' | 'flush_hw' | 'login' | 'email_login' | 'clear' | null
+  >(null);
+  const [feedbackMsg, setFeedbackMsg] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
   const [showUnauthorizedDomainHelper, setShowUnauthorizedDomainHelper] = useState(false);
   const [domainCopied, setDomainCopied] = useState(false);
   const [showAndroidShaHelper, setShowAndroidShaHelper] = useState(false);
   const [androidSigningInfo, setAndroidSigningInfo] = useState<AndroidApkSigningInfo | null>(null);
   const [shaCopiedField, setShaCopiedField] = useState<'sha1' | 'sha256' | 'pkg' | null>(null);
-  const [cloudEmailInput, setCloudEmailInput] = useState<string>(() => profile?.email || 'zusammennachdeutschland@gmail.com');
+  const [showEmailLoginFallback, setShowEmailLoginFallback] = useState(false);
+  const [cloudEmailInput, setCloudEmailInput] = useState<string>(
+    () => profile.email || 'zusammennachdeutschland@gmail.com'
+  );
   const [cloudPasswordInput, setCloudPasswordInput] = useState<string>('');
-  const [showEmailLoginFallback, setShowEmailLoginFallback] = useState<boolean>(false);
+  const [showClearConfirmModal, setShowClearConfirmModal] = useState(false);
 
-  // Vercel Student Platform Domain State
+  const [hwStats, setHwStats] = useState(() => getHomeworkSummaryStats(students));
+  const [pendingHwCount, setPendingHwCount] = useState<number>(() => getPendingHomeworkSyncCount());
+
+  // Vercel Public Domain state (for parent/student homework links)
   const [vercelDomain, setVercelDomainState] = useState<string>(() => getVercelPublicDomain());
-  const [customVercelDomain, setCustomVercelDomain] = useState<string>(() => getVercelPublicDomain());
   const [isEditingDomain, setIsEditingDomain] = useState(false);
+  const [customVercelDomain, setCustomVercelDomain] = useState<string>(vercelDomain);
 
-
-  const handleSaveVercelDomain = () => {
-    const cleaned = setVercelPublicDomain(customVercelDomain);
-    setVercelDomainState(cleaned);
-    setCustomVercelDomain(cleaned);
-    setIsEditingDomain(false);
-    setFeedbackMsg({
-      type: 'success',
-      text: _t(
-        `تم حفظ دومين منصة الطلاب بنجاح: ${cleaned}`,
-        `Student platform domain saved: ${cleaned}`,
-        `Vercel-Domain gespeichert: ${cleaned}`
-      )
-    });
-  };
-
-  const handleResetVercelDomain = () => {
-    const cleaned = setVercelPublicDomain(DEFAULT_VERCEL_DOMAIN);
-    setVercelDomainState(cleaned);
-    setCustomVercelDomain(cleaned);
-    setIsEditingDomain(false);
-    setFeedbackMsg({
-      type: 'success',
-      text: _t(
-        `تمت استعادة الدومين الافتراضي: ${cleaned}`,
-        `Reset to default domain: ${cleaned}`,
-        `Standard-Domain wiederhergestellt: ${cleaned}`
-      )
-    });
+  const refreshLocalHomeworkCounters = (uidOverride?: string | null) => {
+    setHwStats(getHomeworkSummaryStats(students));
+    setPendingHwCount(getPendingHomeworkSyncCount(uidOverride));
   };
 
   useEffect(() => {
-    const unsubAuth = subscribeTeacherAuth((u) => {
+    refreshLocalHomeworkCounters(firebaseUser?.uid);
+  }, [students.length, firebaseUser?.uid]);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      refreshLocalHomeworkCounters(firebaseUser?.uid);
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      refreshLocalHomeworkCounters(firebaseUser?.uid);
+    };
+    const handleHwSyncUpdated = () => {
+      refreshLocalHomeworkCounters(firebaseUser?.uid);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('glueck-homework-sync-updated', handleHwSyncUpdated);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('glueck-homework-sync-updated', handleHwSyncUpdated);
+    };
+  }, [firebaseUser?.uid, students]);
+
+  useEffect(() => {
+    const unsubAuth = subscribeTeacherAuth(async (u) => {
       setFirebaseUser(u);
       if (u) {
-        downloadWorkspaceFromGoogleCloud()
-          .then((res) => {
-            if (res.summary) setCloudSummary(res.summary);
-            if (res.remoteTimestampIso && !getLastCloudSyncTime()) {
-              setLastSyncTime(res.remoteTimestampIso);
-            }
-          })
-          .catch(() => {});
-      } else {
-        setCloudSummary(null);
+        const updates: Record<string, any> = { isGoogleConnected: true };
+        if (
+          u.displayName &&
+          (!profile.displayName ||
+            profile.displayName === 'Teacher' ||
+            profile.displayName === 'أ. أحمد محمود')
+        ) {
+          updates.displayName = u.displayName;
+          updates.displayNameAr = u.displayName;
+          updates.displayNameEn = u.displayName;
+        }
+        if (u.email && !profile.email) {
+          updates.email = u.email;
+        }
+        if (u.photoURL && !profile.avatarUrl) {
+          updates.avatarUrl = u.photoURL;
+        }
+        updateProfile(updates);
+
+        migrateLegacyHomeworkForAccount({
+          uid: u.uid,
+          email: u.email,
+          ownedGroupIds: groups.map((g) => g.id),
+          ownedSetIds: lernstudioSets.map((s) => s.id),
+          ownedStudentIds: students.map((st) => st.id)
+        });
       }
+      refreshLocalHomeworkCounters(u?.uid || null);
     });
-
-    const handleConfigChange = () => {
-      setAutoSync(isAutoCloudSyncEnabled());
-      setLastSyncTime(getLastCloudSyncTime());
-    };
-
-    const handleStatusEvent = (e: Event) => {
-      const custom = e as CustomEvent;
-      if (custom.detail?.status) {
-        setSyncStatus(custom.detail.status);
-        setLastSyncTime(getLastCloudSyncTime());
-      }
-    };
-
-    window.addEventListener('gluck-cloud-sync-config-changed', handleConfigChange);
-    window.addEventListener('gluck-cloud-sync-status', handleStatusEvent);
 
     return () => {
       unsubAuth();
-      window.removeEventListener('gluck-cloud-sync-config-changed', handleConfigChange);
-      window.removeEventListener('gluck-cloud-sync-status', handleStatusEvent);
     };
   }, []);
 
-  const handleToggleAutoSync = async () => {
-    const next = !autoSync;
-    if (next && firebaseUser) {
-      // If user is enabling sync, check if cloud is paused and reactivate cloud generation
-      const control = await getCloudSyncControlState(firebaseUser.uid);
-      if (control.isPaused) {
-        setActionLoading('sync');
-        const reactRes = await reactivateCloudSync(firebaseUser.uid);
-        setActionLoading(null);
-        if (!reactRes.success) {
-          setFeedbackMsg({
-            type: 'error',
-            text: reactRes.error || 'تعذر إعادة تفعيل المزامنة السحابية.'
-          });
-          return;
-        }
-      }
-    }
-    setAutoSync(next);
-    setAutoCloudSyncEnabled(next);
-    if (triggerToast) {
-      triggerToast(
-        next
-          ? _t(
-              'تم تفعيل المزامنة اللحظية وبدء جيل مزامنة جديد للحساب',
-              'Automatic Google Cloud sync enabled (new generation started)',
-              'Automatische Google Cloud-Synchronisierung aktiviert'
-            )
-          : _t(
-              'تم إيقاف المزامنة التلقائية بالخلفية (يمكنك المزامنة يدوياً)',
-              'Background auto-sync paused',
-              'Automatische Hintergrundsynchronisierung pausiert'
-            )
-      );
-    }
+  const handleSaveVercelDomain = () => {
+    const updated = setVercelPublicDomain(customVercelDomain);
+    setVercelDomainState(updated);
+    setCustomVercelDomain(updated);
+    setIsEditingDomain(false);
+    const msg = _t(
+      'تم حفظ رابط منصة الطلاب والواجبات بنجاح',
+      'Student homework domain saved successfully',
+      'Schüler-Domain erfolgreich gespeichert'
+    );
+    setFeedbackMsg({ type: 'success', text: msg });
+    if (triggerToast) triggerToast(msg);
   };
 
-  const applyUserToLocalProfile = (user: any) => {
-    if (!user) return;
-    setFirebaseUser(user);
+  const handleResetVercelDomain = () => {
+    const updated = setVercelPublicDomain(DEFAULT_VERCEL_DOMAIN);
+    setVercelDomainState(updated);
+    setCustomVercelDomain(updated);
+    setIsEditingDomain(false);
+  };
+
+  const executePostLoginHomeworkAuth = async (user: any) => {
+    const nameToUse = (
+      user.displayName ||
+      profile.displayName ||
+      user.email?.split('@')[0] ||
+      'Teacher'
+    ).trim();
+    const emailToUse = (user.email || profile.email || '').trim();
+    const photoToUse = user.photoURL || profile.avatarUrl || '';
+
     setShowAndroidShaHelper(false);
     setShowEmailLoginFallback(false);
+
+    updateProfile({
+      displayName: nameToUse,
+      displayNameAr: profile.displayNameAr || nameToUse,
+      displayNameEn: profile.displayNameEn || nameToUse,
+      email: emailToUse,
+      avatarUrl: photoToUse,
+      isGoogleConnected: true
+    });
+
     try {
-      updateProfile({
-        email: user.email || profile?.email || '',
-        displayName: user.displayName || profile?.displayName || 'Teacher',
-        avatarUrl: user.photoURL || profile?.avatarUrl || '',
-        isGoogleConnected: true
-      });
-    } catch {
-      // Ignore profile update issues
-    }
-  };
-
-  const executePostLoginSync = async (user: any) => {
-    applyUserToLocalProfile(user);
-    try {
-      const remote = await downloadWorkspaceFromGoogleCloud();
-      if (remote.summary) setCloudSummary(remote.summary);
-
-      const localHasData =
-        students.length > 0 ||
-        groups.length > 0 ||
-        lessons.length > 0 ||
-        payments.length > 0 ||
-        financeTransactions.length > 0 ||
-        hodStudents.length > 0 ||
-        schoolNotes.length > 0;
-
-      if (!remote.hasRemoteData && localHasData) {
-        const snapStr = await performBackup();
-        const upRes = await uploadWorkspaceToGoogleCloud(snapStr, { isManual: true });
-        if (upRes.success) {
-          setLastSyncTime(upRes.syncedAtIso);
-        }
-      } else if (remote.hasRemoteData && remote.backupJsonStr) {
-        const uid = remote.workspaceId || user?.uid || '';
-        const queuedItem = uid
-          ? await enqueueDurablePendingRemoteItem(uid, remote.backupJsonStr, remote.docTokens)
-          : null;
-        const imported = await importBackupFile(remote.backupJsonStr);
-        if (imported) {
-          const postSnap = await performBackup();
-          const ackOk =
-            !uid ||
-            !remote.docTokens ||
-            acknowledgeAppliedRemoteRevisions(uid, remote.docTokens, postSnap);
-          if (ackOk && uid && queuedItem) {
-            await removeDurablePendingRemoteItem(uid, queuedItem.id);
-          }
-          if (ackOk) {
-            setLastSyncTime(remote.remoteTimestampIso);
-          }
-          if (localHasData) {
-            await uploadWorkspaceToGoogleCloud(postSnap, { isManual: true }).catch(() => {});
-          }
-        }
+      if (user?.uid) {
+        migrateLegacyHomeworkForAccount({
+          uid: user.uid,
+          email: user.email,
+          ownedGroupIds: groups.map((g) => g.id),
+          ownedSetIds: lernstudioSets.map((s) => s.id),
+          ownedStudentIds: students.map((st) => st.id)
+        });
       }
+      await flushPendingHomeworkCloudWrites().catch(() => {});
+      refreshLocalHomeworkCounters(user?.uid || null);
+      setLastSyncTime(new Date().toISOString());
 
       const successText = _t(
-        `تم ربط الحساب (${user.email || 'المعلم'}) وتفعيل المزامنة الشاملة بنجاح ✓`,
-        `Connected account (${user.email || 'Teacher'}) and enabled full sync ✓`,
-        `Konto (${user.email || 'Lehrer'}) erfolgreich verbunden ✓`
+        `تم ربط الحساب (${user.email || 'المعلم'}) بسحابة الواجبات الأونلاين بنجاح ✓`,
+        `Connected account (${user.email || 'Teacher'}) to Homework Cloud ✓`,
+        `Konto (${user.email || 'Lehrer'}) mit Hausaufgaben-Cloud verbunden ✓`
       );
       setFeedbackMsg({
         type: 'success',
@@ -273,7 +230,7 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
         triggerToast(successText);
       }
     } catch (syncErr: any) {
-      console.warn('Post login sync warning:', syncErr);
+      console.warn('Post login homework sync notice:', syncErr);
     }
   };
 
@@ -302,7 +259,7 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
     try {
       const user = await signInTeacherWithGoogle();
       if (user) {
-        await executePostLoginSync(user);
+        await executePostLoginHomeworkAuth(user);
       } else if (isAndroidNativePlatform()) {
         await loadAndroidDiagnosticHelper();
         setFeedbackMsg({
@@ -364,14 +321,22 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
     if (!cleanEmail || !cleanEmail.includes('@')) {
       setFeedbackMsg({
         type: 'error',
-        text: _t('يرجى إدخال البريد الإلكتروني بشكل صحيح.', 'Please enter a valid email address.', 'Bitte gültige E-Mail eingeben.')
+        text: _t(
+          'يرجى إدخال البريد الإلكتروني بشكل صحيح.',
+          'Please enter a valid email address.',
+          'Bitte gültige E-Mail eingeben.'
+        )
       });
       return;
     }
     if (cleanPass.length < 6) {
       setFeedbackMsg({
         type: 'error',
-        text: _t('يرجى إدخال كلمة مرور مكونة من 6 أحرف أو أرقام على الأقل.', 'Password must be at least 6 characters.', 'Passwort muss mindestens 6 Zeichen lang sein.')
+        text: _t(
+          'يرجى إدخال كلمة مرور مكونة من 6 أحرف أو أرقام على الأقل.',
+          'Password must be at least 6 characters.',
+          'Passwort muss mindestens 6 Zeichen lang sein.'
+        )
       });
       return;
     }
@@ -396,7 +361,7 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
       }
       if (user) {
         setCloudPasswordInput('');
-        await executePostLoginSync(user);
+        await executePostLoginHomeworkAuth(user);
       }
     } catch (err: any) {
       const errCode = String(err?.code || '');
@@ -409,19 +374,12 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
             'Falsches Passwort oder Konto ist nur mit Google-Login verknüpft.'
           )
         });
-      } else if (errCode === 'auth/operation-not-allowed') {
-        setFeedbackMsg({
-          type: 'error',
-          text: _t(
-            'يرجى تفعيل خيار Email/Password في Firebase Console -> Authentication -> Sign-in method، أو إضافة بصمة SHA-1 لتفعيل زر Google.',
-            'Please enable Email/Password in Firebase Console -> Authentication -> Sign-in method, or add the SHA-1 fingerprint.',
-            'Bitte aktivieren Sie E-Mail/Passwort in der Firebase Console oder fügen Sie den SHA-1 hinzu.'
-          )
-        });
       } else {
         setFeedbackMsg({
           type: 'error',
-          text: err?.message || _t('تعذر تسجيل الدخول بالبريد وكلمة المرور.', 'Email sign-in failed.', 'Anmeldung fehlgeschlagen.')
+          text:
+            err?.message ||
+            _t('تعذر تسجيل الدخول بالبريد وكلمة المرور.', 'Email sign-in failed.', 'Anmeldung fehlgeschlagen.')
         });
       }
     } finally {
@@ -429,162 +387,66 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
     }
   };
 
-  const handlePushToCloud = async () => {
-    setActionLoading('push');
+  const handleSyncHomeworkNow = async () => {
+    if (actionLoading !== null) return;
+    setActionLoading('sync_hw');
     setFeedbackMsg(null);
     setSyncStatus('syncing');
     try {
-      const snapStr = await performBackup();
-      const res = await uploadWorkspaceToGoogleCloud(snapStr, { isManual: true });
-      if (res.success) {
-        setSyncStatus('synced');
-        setLastSyncTime(res.syncedAtIso);
-        setCloudSummary({
-          studentsCount: students.length,
-          groupsCount: groups.length,
-          lessonsCount: lessons.length,
-          paymentsCount: payments.length,
-          financeTransactionsCount: financeTransactions.length,
-          lernstudioSetsCount: lernstudioSets.length,
-          hodRecordsCount: hodStudents.length + schoolNotes.length,
-          updatedAtIso: res.syncedAtIso
-        });
-        const changedCount = res.deltaCount ?? 0;
-        const msg =
-          changedCount === 0
-            ? _t(
-                'جميع البيانات متطابقة بالفعل مع السحابة (0 تغييرات جديدة)',
-                'All data is already up to date with the cloud (0 changes)',
-                'Alle Daten sind bereits auf dem neuesten Stand (0 Änderungen)'
-              )
-            : _t(
-                `تم إرسال التغييرات فقط (${changedCount} عنصر) إلى سحابة Google بنجاح`,
-                `Uploaded only changes (${changedCount} items) to Google Cloud`,
-                `Nur Änderungen (${changedCount} Elemente) erfolgreich hochgeladen`
-              );
-        setFeedbackMsg({ type: 'success', text: msg });
-        if (triggerToast) triggerToast(msg);
-      } else {
-        setSyncStatus('error');
-        setFeedbackMsg({ type: 'error', text: res.error || 'فشل رفع البيانات' });
-      }
+      await flushPendingHomeworkCloudWrites();
+      await syncAndFetchTeacherAssignments(students, { force: true });
+      refreshLocalHomeworkCounters(firebaseUser?.uid);
+      const nowIso = new Date().toISOString();
+      setLastSyncTime(nowIso);
+      setSyncStatus('synced');
+      const msg = _t(
+        'تم تحديث ومزامنة الواجبات ونتائج الطلاب من سحابة الواجبات بنجاح ✓',
+        'Homework assignments and student results synced successfully ✓',
+        'Hausaufgaben und Schülerergebnisse erfolgreich synchronisiert ✓'
+      );
+      setFeedbackMsg({ type: 'success', text: msg });
+      if (triggerToast) triggerToast(msg);
     } catch (err: any) {
       setSyncStatus('error');
-      setFeedbackMsg({ type: 'error', text: err?.message || 'حدث خطأ أثناء الرفع للسحابة' });
+      setFeedbackMsg({
+        type: 'error',
+        text: err?.message || _t('تعذر تحديث الواجبات من السحابة حالياً.', 'Failed to sync homework from cloud.', 'Fehler bei der Hausaufgaben-Synchronisierung.')
+      });
     } finally {
       setActionLoading(null);
     }
   };
 
-  const handlePullFromCloud = async () => {
-    setActionLoading('pull');
+  const handleFlushPendingHomework = async () => {
+    if (actionLoading !== null) return;
+    setActionLoading('flush_hw');
     setFeedbackMsg(null);
     setSyncStatus('syncing');
     try {
-      const res = await downloadWorkspaceFromGoogleCloud();
-      if (!res.hasRemoteData || !res.backupJsonStr) {
-        setSyncStatus('idle');
-        setFeedbackMsg({
-          type: 'error',
-          text: _t(
-            'لا توجد نسخة محفوظة في سحابة جوجل لهذا الحساب بعد. اضغط «رفع بيانات هذا الجهاز للسحابة» أولاً.',
-            'No cloud backup found for this Google account yet. Click Upload first.',
-            'Noch keine Cloud-Daten für dieses Konto vorhanden.'
-          )
-        });
-        return;
-      }
-
-      const uid = res.workspaceId || firebaseUser?.uid || '';
-      const queuedItem = uid
-        ? await enqueueDurablePendingRemoteItem(uid, res.backupJsonStr, res.docTokens)
-        : null;
-      const imported = await importBackupFile(res.backupJsonStr);
-      let ackOk = false;
-      if (imported) {
-        const postSnap = await performBackup();
-        ackOk =
-          !uid ||
-          !res.docTokens ||
-          acknowledgeAppliedRemoteRevisions(uid, res.docTokens, postSnap);
-        if (ackOk && uid && queuedItem) {
-          await removeDurablePendingRemoteItem(uid, queuedItem.id);
-        }
-      }
-      if (imported && ackOk) {
-        setSyncStatus('synced');
-        if (res.summary) setCloudSummary(res.summary);
-        const nowIso = res.remoteTimestampIso || new Date().toISOString();
-        setLastSyncTime(nowIso);
-        setLastCloudSyncTime(nowIso);
-        const msg = _t(
-          'تم استرجاع ودمج التغييرات من سحابة Google بنجاح',
-          'All app data restored and merged from Google Cloud successfully',
-          'Alle Daten erfolgreich aus der Google Cloud zusammengeführt'
-        );
-        setFeedbackMsg({ type: 'success', text: msg });
-        if (triggerToast) triggerToast(msg);
-      } else {
-        setSyncStatus('error');
-        setFeedbackMsg({
-          type: 'error',
-          text: _t('تعذر تطبيق البيانات المسترجعة', 'Failed to apply cloud data', 'Fehler beim Anwenden')
-        });
-      }
+      const res = await flushPendingHomeworkCloudWrites();
+      refreshLocalHomeworkCounters(firebaseUser?.uid);
+      setLastSyncTime(new Date().toISOString());
+      setSyncStatus(res.remainingPending === 0 ? 'synced' : 'idle');
+      const msg =
+        res.remainingPending === 0
+          ? _t(
+              `تم رفع كافة الواجبات والنتائج المعلقة للسحابة بنجاح (${res.syncedAssignments + res.syncedSubmissions} عنصر) ✓`,
+              `Flushed all pending homework items to cloud (${res.syncedAssignments + res.syncedSubmissions}) ✓`,
+              `Alle ausstehenden Hausaufgaben hochgeladen ✓`
+            )
+          : _t(
+              `تم رفع ${res.syncedAssignments + res.syncedSubmissions} عنصر، ويتبقى ${res.remainingPending} بانتظار الشبكة.`,
+              `Uploaded ${res.syncedAssignments + res.syncedSubmissions} items, ${res.remainingPending} remaining.`,
+              `${res.remainingPending} Elemente verbleibend.`
+            );
+      setFeedbackMsg({ type: res.remainingPending === 0 ? 'success' : 'error', text: msg });
+      if (triggerToast) triggerToast(msg);
     } catch (err: any) {
       setSyncStatus('error');
-      setFeedbackMsg({ type: 'error', text: err?.message || 'حدث خطأ أثناء الاسترجاع من السحابة' });
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleSmartSyncNow = async () => {
-    setActionLoading('sync');
-    setFeedbackMsg(null);
-    setSyncStatus('syncing');
-    try {
-      // 1. Upload only local delta changes first so local edits are recorded
-      const snapStr = await performBackup();
-      const upRes = await uploadWorkspaceToGoogleCloud(snapStr, { isManual: true });
-
-      if (upRes.success) {
-        const nowIso = upRes.syncedAtIso || new Date().toISOString();
-        setLastSyncTime(nowIso);
-        setLastCloudSyncTime(nowIso);
-        setSyncStatus('synced');
-        setCloudSummary({
-          studentsCount: students.length,
-          groupsCount: groups.length,
-          lessonsCount: lessons.length,
-          paymentsCount: payments.length,
-          financeTransactionsCount: financeTransactions.length,
-          lernstudioSetsCount: lernstudioSets.length,
-          hodRecordsCount: hodStudents.length + schoolNotes.length,
-          updatedAtIso: nowIso
-        });
-        const changedCount = upRes.deltaCount ?? 0;
-        const msg =
-          changedCount === 0
-            ? _t(
-                'تمت المزامنة الذكية (جميع البيانات محدّثة بالفعل — 0 تغييرات جديدة)',
-                'Smart delta sync complete (already up to date — 0 changes)',
-                'Delta-Synchronisierung abgeschlossen (bereits aktuell — 0 Änderungen)'
-              )
-            : _t(
-                `تمت المزامنة الذكية بنظام Delta بنجاح (تم إرسال ${changedCount} تعديل فقط)`,
-                `Smart Delta Sync completed (${changedCount} changed items synced)`,
-                `Delta-Synchronisierung abgeschlossen (${changedCount} Änderungen gesendet)`
-              );
-        setFeedbackMsg({ type: 'success', text: msg });
-        if (triggerToast) triggerToast(msg);
-      } else {
-        setSyncStatus('error');
-        setFeedbackMsg({ type: 'error', text: upRes.error || 'تعذرت المزامنة' });
-      }
-    } catch (err: any) {
-      setSyncStatus('error');
-      setFeedbackMsg({ type: 'error', text: err?.message || 'حدث خطأ أثناء المزامنة الفورية' });
+      setFeedbackMsg({
+        type: 'error',
+        text: err?.message || 'تعذر رفع الواجبات المعلقة حالياً.'
+      });
     } finally {
       setActionLoading(null);
     }
@@ -596,14 +458,10 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
     try {
       const res = await clearCloudWorkspaceData();
       if (res.success) {
-        setAutoSync(false);
-        setLastSyncTime(null);
-        setCloudSummary(null);
-        setSyncStatus('idle');
         const msg = _t(
-          `تم تنظيف بيانات السحابة بنجاح (تم حذف ${res.deletedCount} جزء ومسح الـ Relay وإيقاف المزامنة التلقائية). بيانات جهازك المحلية والواجبات المنشورة للطلاب محفوظة تماماً.`,
-          `Cloud workspace cleared successfully (${res.deletedCount} chunks removed, auto-sync paused). Local device data and published homework remain safe.`,
-          `Cloud-Arbeitsbereich erfolgreich bereinigt. Lokale Daten bleiben erhalten.`
+          `تم تنظيف بيانات مساحة العمل السحابية القديمة بنجاح (تم حذف ${res.deletedCount} جزء). بيانات جهازك المحلية والواجبات المنشورة للطلاب محفوظة تماماً.`,
+          `Legacy cloud workspace cleared (${res.deletedCount} chunks removed). Local device data and published homework remain safe.`,
+          `Alter Cloud-Arbeitsbereich bereinigt. Lokale Daten und Hausaufgaben bleiben erhalten.`
         );
         setFeedbackMsg({ type: 'success', text: msg });
         if (triggerToast) triggerToast(msg);
@@ -624,46 +482,78 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
     }
   };
 
+  const quotaCooldownActive =
+    isFirestoreReadQuotaExhausted() || isFirestoreWriteQuotaExhaustedToday();
+  const homeworkCloudAvailable = Boolean(firebaseUser && isOnline && !quotaCooldownActive);
+
   return (
     <div className="bg-surface border border-surface-border rounded-2xl p-4 sm:p-5 space-y-4">
       {/* Header Row */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0">
-            <Cloud className="w-5 h-5" />
+            {homeworkCloudAvailable ? <Cloud className="w-5 h-5" /> : <CloudOff className="w-5 h-5" />}
           </div>
           <div>
             <h3 className="text-sm sm:text-base font-black text-text-main">
               {_t(
-                'المزامنة السحابية الشاملة بحساب Google',
-                'Full Google Account Cloud Sync',
-                'Vollständige Google Cloud-Synchronisierung'
+                'سحابة الواجبات الأونلاين وحساب المعلم (Homework Cloud)',
+                'Online Homework Cloud & Teacher Auth',
+                'Online-Hausaufgaben-Cloud & Lehrer-Login'
               )}
             </h3>
+            <p className="text-[11px] text-text-muted mt-0.5">
+              {_t(
+                'مخصصة حصرياً لنشر روابط الواجبات واستقبال حلول الطلاب أونلاين — بينما تتم مزامنة بيانات التطبيق بين أجهزتك عبر P2P',
+                'Dedicated strictly to publishing online homework & receiving student results — general app data syncs via P2P',
+                'Ausschließlich für Online-Hausaufgaben — allgemeine App-Daten werden über P2P synchronisiert'
+              )}
+            </p>
           </div>
         </div>
 
         {/* Unboxed Status Metadata */}
-        {firebaseUser && (
-          <div className="flex items-center gap-2 text-xs font-bold tabular-nums">
-            {syncStatus === 'syncing' || actionLoading ? (
-              <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>{_t('جاري المزامنة...', 'Syncing...', 'Synchronisiere...')}</span>
+        <div className="flex items-center gap-2 text-xs font-bold tabular-nums">
+          {syncStatus === 'syncing' || actionLoading ? (
+            <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              <span>{_t('جاري مزامنة الواجبات...', 'Syncing homework...', 'Synchronisiere...')}</span>
+            </span>
+          ) : !firebaseUser || !isOnline || quotaCooldownActive ? (
+            <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>
+                {!firebaseUser
+                  ? _t('سحابة الواجبات غير متصلة (سجّل الدخول)', 'Homework cloud unavailable (Sign in)', 'Hausaufgaben-Cloud getrennt')
+                  : !isOnline
+                  ? _t('سحابة الواجبات غير متاحة (بدون إنترنت)', 'Homework cloud unavailable (Offline)', 'Hausaufgaben-Cloud offline')
+                  : _t('سحابة الواجبات في تهدئة مؤقتة', 'Homework cloud on quota cooldown', 'Cloud-Cooldown aktiv')}
               </span>
-            ) : syncStatus === 'error' ? (
-              <span className="text-red-600 dark:text-red-400 flex items-center gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5" />
-                <span>{_t('تنبيه في المزامنة', 'Sync notice', 'Sync-Hinweis')}</span>
+            </span>
+          ) : pendingHwCount > 0 ? (
+            <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+              <Upload className="w-3.5 h-3.5" />
+              <span>
+                {_t(
+                  `سحابة الواجبات متصلة (${pendingHwCount} بانتظار الرفع)`,
+                  `Homework cloud connected (${pendingHwCount} pending)`,
+                  `Hausaufgaben-Cloud verbunden (${pendingHwCount} ausstehend)`
+                )}
               </span>
-            ) : (
-              <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>{_t('متصل بسحابة Google', 'Connected to Google Cloud', 'Mit Google Cloud verbunden')}</span>
+            </span>
+          ) : (
+            <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>
+                {_t(
+                  'سحابة الواجبات متصلة وجاهزة',
+                  'Homework cloud connected',
+                  'Hausaufgaben-Cloud verbunden'
+                )}
               </span>
-            )}
-          </div>
-        )}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Signed-Out View vs Signed-In View */}
@@ -686,7 +576,7 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
                   <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
                 </svg>
               )}
-              <span>{_t('تسجيل الدخول بحساب Google', 'Sign in with Google', 'Mit Google anmelden')}</span>
+              <span>{_t('تسجيل الدخول بحساب Google للواجبات', 'Sign in with Google for Homework', 'Mit Google anmelden')}</span>
             </button>
 
             {isAndroidNativePlatform() && (
@@ -845,7 +735,7 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
                     ) : (
                       <LogIn className="w-3.5 h-3.5" />
                     )}
-                    <span>{_t('دخول ومزامنة الآن', 'Sign In & Sync Now', 'Jetzt anmelden')}</span>
+                    <span>{_t('دخول لسحابة الواجبات', 'Sign In to Homework Cloud', 'Jetzt anmelden')}</span>
                   </button>
                 </div>
               </div>
@@ -893,7 +783,7 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
         </div>
       ) : (
         <div className="space-y-4 pt-3 border-t border-surface-border">
-          {/* Account Info + Auto-Sync Switch */}
+          {/* Account Info */}
           <div className="flex flex-wrap items-center justify-between gap-3 bg-surface-hover/50 p-3 rounded-xl border border-surface-border">
             <div className="flex items-center gap-3 min-w-0">
               {firebaseUser.photoURL ? (
@@ -918,29 +808,7 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
               </div>
             </div>
 
-            <div className="flex items-center gap-4">
-              {/* Auto-Sync Toggle */}
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <span className="text-xs font-bold text-text-main">
-                  {_t('مزامنة لحظية تلقائية', 'Real-time Auto-Sync', 'Auto-Sync')}
-                </span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={autoSync}
-                  onClick={handleToggleAutoSync}
-                  className={`w-10 h-5.5 rounded-full transition-colors relative cursor-pointer p-0.5 ${
-                    autoSync ? 'bg-emerald-600' : 'bg-slate-400 dark:bg-slate-700'
-                  }`}
-                >
-                  <span
-                    className={`block w-4.5 h-4.5 rounded-full bg-white transition-transform ${
-                      autoSync ? 'translate-x-4.5 rtl:-translate-x-4.5' : 'translate-x-0'
-                    }`}
-                  />
-                </button>
-              </label>
-
+            <div className="flex items-center gap-3">
               <button
                 type="button"
                 onClick={() => signOutTeacherFirebase()}
@@ -953,45 +821,35 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
             </div>
           </div>
 
-          {/* Unboxed Metadata Summary Line (Zero-Pill Discipline + Tabular Numerals) */}
+          {/* Unboxed Homework Cloud Summary Line (Zero-Pill Discipline + Tabular Numerals) */}
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-text-muted tabular-nums">
             <div className="flex flex-wrap items-center gap-1.5">
               <span>
-                {_t('الطلاب:', 'Students:', 'Schüler:')}{' '}
-                <strong className="text-text-main">{cloudSummary?.studentsCount ?? students.length}</strong>
+                {_t('الواجبات المنشورة:', 'Published Homework:', 'Veröffentlichte Hausaufgaben:')}{' '}
+                <strong className="text-text-main">{hwStats.assignmentsCount}</strong>
               </span>
               <span aria-hidden="true">·</span>
               <span>
-                {_t('المجموعات:', 'Groups:', 'Gruppen:')}{' '}
-                <strong className="text-text-main">{cloudSummary?.groupsCount ?? groups.length}</strong>
+                {_t('الطلاب المكتملون:', 'Completed Submissions:', 'Abgeschlossen:')}{' '}
+                <strong className="text-emerald-600 dark:text-emerald-400">{hwStats.submissionsCount}</strong>
               </span>
               <span aria-hidden="true">·</span>
               <span>
-                {_t('الحصص:', 'Lessons:', 'Lektionen:')}{' '}
-                <strong className="text-text-main">{cloudSummary?.lessonsCount ?? lessons.length}</strong>
+                {_t('قيد الحل الآن:', 'In Progress:', 'In Bearbeitung:')}{' '}
+                <strong className="text-amber-600 dark:text-amber-400">{hwStats.inProgressCount}</strong>
               </span>
               <span aria-hidden="true">·</span>
               <span>
-                {_t('المدفوعات:', 'Payments:', 'Zahlungen:')}{' '}
-                <strong className="text-text-main">{cloudSummary?.paymentsCount ?? payments.length}</strong>
-              </span>
-              <span aria-hidden="true">·</span>
-              <span>
-                {_t('المعاملات المالية:', 'Finance:', 'Finanzen:')}{' '}
-                <strong className="text-text-main">
-                  {cloudSummary?.financeTransactionsCount ?? financeTransactions.length}
+                {_t('واجبات معلقة للرفع:', 'Pending Cloud Uploads:', 'Ausstehende Uploads:')}{' '}
+                <strong className={pendingHwCount > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-text-main'}>
+                  {pendingHwCount}
                 </strong>
-              </span>
-              <span aria-hidden="true">·</span>
-              <span>
-                {_t('مجموعات الليرن ستوديو:', 'Lernstudio Sets:', 'Lernstudio-Sets:')}{' '}
-                <strong className="text-text-main">{cloudSummary?.lernstudioSetsCount ?? lernstudioSets.length}</strong>
               </span>
             </div>
 
             {lastSyncTime && (
               <div className="text-[11px] font-mono text-text-muted tabular-nums">
-                {_t('آخر مزامنة سحابية:', 'Last cloud sync:', 'Letzte Cloud-Sync:')}{' '}
+                {_t('آخر تحديث للواجبات:', 'Last homework check:', 'Letzte Aktualisierung:')}{' '}
                 {new Date(lastSyncTime).toLocaleString('ar-EG', {
                   month: 'short',
                   day: 'numeric',
@@ -1002,60 +860,72 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
             )}
           </div>
 
-          {/* Instant Action Buttons */}
+          {/* Homework Cloud Action Buttons */}
           {!compact && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
               <button
                 type="button"
                 disabled={actionLoading !== null}
-                onClick={handleSmartSyncNow}
+                onClick={handleSyncHomeworkNow}
                 className="py-2.5 px-4 bg-primary hover:bg-primary-hover disabled:opacity-50 text-white font-black text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap shadow-xs"
               >
-                <RefreshCw className={`w-4 h-4 ${actionLoading === 'sync' ? 'animate-spin' : ''}`} />
-                <span>{_t('مزامنة شاملة الآن', 'Sync Everything Now', 'Jetzt alles synchronisieren')}</span>
+                <RefreshCw className={`w-4 h-4 ${actionLoading === 'sync_hw' ? 'animate-spin' : ''}`} />
+                <span>
+                  {_t(
+                    'تحديث الواجبات ونتائج الطلاب من السحابة',
+                    'Refresh Homework & Student Results',
+                    'Hausaufgaben & Ergebnisse aktualisieren'
+                  )}
+                </span>
               </button>
 
               <button
                 type="button"
-                disabled={actionLoading !== null}
-                onClick={handlePushToCloud}
+                disabled={actionLoading !== null || pendingHwCount === 0}
+                onClick={handleFlushPendingHomework}
                 className="py-2.5 px-4 bg-surface hover:bg-surface-hover border border-surface-border disabled:opacity-50 text-text-main font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
               >
-                <Upload className="w-4 h-4 text-primary" />
-                <span>{_t('رفع بيانات هذا الجهاز للسحابة', 'Upload Device to Cloud', 'Gerät in Cloud hochladen')}</span>
-              </button>
-
-              <button
-                type="button"
-                disabled={actionLoading !== null}
-                onClick={handlePullFromCloud}
-                className="py-2.5 px-4 bg-surface hover:bg-surface-hover border border-surface-border disabled:opacity-50 text-text-main font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
-              >
-                <Download className="w-4 h-4 text-emerald-500" />
-                <span>{_t('استرجاع البيانات من السحابة', 'Restore from Cloud', 'Aus Cloud wiederherstellen')}</span>
+                <Upload className={`w-4 h-4 text-primary ${actionLoading === 'flush_hw' ? 'animate-bounce' : ''}`} />
+                <span>
+                  {_t(
+                    `رفع الواجبات المعلقة للسحابة (${pendingHwCount})`,
+                    `Upload Pending Homework (${pendingHwCount})`,
+                    `Ausstehende Hausaufgaben hochladen (${pendingHwCount})`
+                  )}
+                </span>
               </button>
             </div>
           )}
 
-          {/* Danger Zone: Clear Cloud Workspace Button */}
+          {/* Optional Legacy Workspace Cleanup Button */}
           {!compact && (
             <div className="pt-2 flex justify-end">
               <button
                 type="button"
                 disabled={actionLoading !== null}
                 onClick={() => setShowClearConfirmModal(true)}
-                className="py-2 px-3 text-red-600 dark:text-red-400 hover:bg-red-500/10 border border-red-500/20 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                title={_t('تنظيف ومسح بيانات السحابة فقط مع بقاء بيانات هذا الجهاز', 'Clear Cloud Data only', 'Cloud-Daten bereinigen')}
+                className="py-1.5 px-3 text-red-600 dark:text-red-400 hover:bg-red-500/10 border border-red-500/20 rounded-xl text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                title={_t(
+                  'حذف بيانات مساحة العمل القديمة من السحابة مع الحفاظ على الواجبات المنشورة وبيانات الجهاز',
+                  'Clear legacy workspace data in cloud while keeping published homework',
+                  'Alte Cloud-Arbeitsbereichsdaten bereinigen'
+                )}
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>{_t('تنظيف بيانات السحابة (Clear Cloud Data)', 'Clear Cloud Data', 'Cloud-Daten bereinigen')}</span>
+                <span>
+                  {_t(
+                    'حذف النسخة السحابية القديمة لبيانات التطبيق (مع بقاء الواجبات)',
+                    'Clear Legacy Workspace Cloud Data (Keep Homework)',
+                    'Alte Cloud-Daten bereinigen (Hausaufgaben behalten)'
+                  )}
+                </span>
               </button>
             </div>
           )}
         </div>
       )}
 
-      {/* Confirmation Modal for Clearing Cloud Data */}
+      {/* Confirmation Modal for Clearing Legacy Cloud Data */}
       {showClearConfirmModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
           <div className="bg-surface border border-surface-border rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4">
@@ -1066,16 +936,16 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
               <div className="space-y-1">
                 <h3 className="font-black text-sm text-text-main">
                   {_t(
-                    'تأكيد تنظيف بيانات السحابة (Clear Cloud Data)',
-                    'Confirm Clear Cloud Workspace',
+                    'تأكيد تنظيف بيانات مساحة العمل السحابية القديمة',
+                    'Confirm Clear Legacy Cloud Workspace',
                     'Cloud-Bereinigung bestätigen'
                   )}
                 </h3>
                 <p className="text-xs text-text-muted leading-relaxed">
                   {_t(
-                    'سيتم حذف كافة بيانات مساحة العمل الخاصة بك المحفوظة في سحابة Google Cloud Firestore ومسح بيانات الـ Relay السريعة وإيقاف المزامنة التلقائية فوراً لمنع إعادة الرفع.',
-                    'This will remove your private workspace data and relay cache from Google Cloud Firestore and immediately pause auto-sync.',
-                    'Dies löscht den Cloud-Arbeitsbereich und pausiert die automatische Synchronisierung.'
+                    'سيتم حذف بيانات التطبيق العامة القديمة من Google Cloud Firestore لتوفير مساحة السحابة، مع الإبقاء على كافة الواجبات المنشورة وروابط وإجابات الطلاب سليمة تماماً.',
+                    'This removes legacy full-workspace chunks from Firestore while keeping all published homework links and student submissions intact.',
+                    'Dies löscht alte Cloud-Arbeitsbereichsdaten, während alle veröffentlichten Hausaufgaben erhalten bleiben.'
                   )}
                 </p>
               </div>
@@ -1207,7 +1077,6 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
           )}
         </div>
       </div>
-
 
       {/* Feedback Banner */}
       {feedbackMsg && (

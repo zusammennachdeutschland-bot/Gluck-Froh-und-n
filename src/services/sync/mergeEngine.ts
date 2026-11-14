@@ -707,9 +707,13 @@ export function mergeEntities<T extends SyncableRecord>(
         createdCount++;
       }
     } else {
-      // Conflict resolution based on Last-Write-Wins (LWW) + Field-Level Merge
-      const incomingTime = parseTimestampMs(incomingItem.updatedAt);
-      const localTime = parseTimestampMs(localItem.updatedAt);
+      // Conflict resolution based on Last-Write-Wins (LWW) + Android Tie-Breaker + Field-Level Merge
+      const incomingTime = parseTimestampMs(
+        incomingItem.updatedAt ?? (incomingItem as any).completedAt ?? (incomingItem as any).createdAt
+      );
+      const localTime = parseTimestampMs(
+        localItem.updatedAt ?? (localItem as any).completedAt ?? (localItem as any).createdAt
+      );
       const incomingRev = incomingItem.originRevision || 0;
       const localRev = localItem.originRevision || 0;
 
@@ -721,12 +725,17 @@ export function mergeEntities<T extends SyncableRecord>(
         );
         entityMap.set(incomingItem.id, mergedSettings as unknown as T);
         updatedCount++;
+        const incomingIsAndroid = isAndroidOriginRecord(incomingItem);
+        const localIsAndroid = isAndroidOriginRecord(localItem);
+        const remoteWins =
+          incomingTime > localTime ||
+          (incomingTime === localTime && (incomingIsAndroid || !localIsAndroid));
         conflicts.push({
           entityType: 'settings',
           entityId: incomingItem.id,
           localUpdatedAt: localTime,
           remoteUpdatedAt: incomingTime,
-          winner: incomingTime >= localTime ? 'remote' : 'local',
+          winner: remoteWins ? 'remote' : 'local',
           resolutionStrategy: 'FIELD_MERGE',
           timestamp: Date.now()
         });
@@ -743,8 +752,14 @@ export function mergeEntities<T extends SyncableRecord>(
       if (incomingTime > localTime) {
         shouldAcceptIncoming = true;
       } else if (incomingTime === localTime) {
-        // Higher version wins, then higher originRevision, then deterministic device ID tie-breaker
-        if (incomingVer > localVer) {
+        // Android is the authoritative tie-breaker when timestamps are equal
+        const incomingIsAndroid = isAndroidOriginRecord(incomingItem);
+        const localIsAndroid = isAndroidOriginRecord(localItem);
+
+        if (incomingIsAndroid !== localIsAndroid) {
+          shouldAcceptIncoming = incomingIsAndroid;
+          resolutionStrategy = 'TIE_BREAKER';
+        } else if (incomingVer > localVer) {
           shouldAcceptIncoming = true;
           resolutionStrategy = 'TIE_BREAKER';
         } else if (incomingRev > localRev) {
@@ -956,6 +971,14 @@ function mergeArrayById<T extends { id?: string }>(base: T[] = [], fallback: T[]
   return Array.from(map.values());
 }
 
+export function isAndroidOriginRecord(item: any): boolean {
+  if (!item || typeof item !== 'object') return false;
+  if (item.originPlatform === 'android') return true;
+  if (item.originPlatform === 'web') return false;
+  const deviceLabel = String(item.updatedByDeviceId || item.originDeviceId || '');
+  return /android/i.test(deviceLabel);
+}
+
 /**
  * Merges teacher settings with field-level fallbacks so partial remote edits do not wipe local fields.
  */
@@ -963,10 +986,14 @@ export function mergeTeacherSettings(
   local: TeacherSettingsRecord,
   incoming: TeacherSettingsRecord
 ): TeacherSettingsRecord {
-  const localTime = local?.updatedAt || 0;
-  const incomingTime = incoming?.updatedAt || 0;
+  const localTime = parseTimestampMs(local?.updatedAt);
+  const incomingTime = parseTimestampMs(incoming?.updatedAt);
 
-  const isIncomingNewer = incomingTime >= localTime;
+  const incomingIsAndroid = isAndroidOriginRecord(incoming);
+  const localIsAndroid = isAndroidOriginRecord(local);
+  const isIncomingNewer =
+    incomingTime > localTime ||
+    (incomingTime === localTime && (incomingIsAndroid || !localIsAndroid));
   const baseRecord = isIncomingNewer ? incoming : local;
   const fallbackRecord = isIncomingNewer ? local : incoming;
 
@@ -1022,6 +1049,14 @@ export function mergeTeacherSettings(
     } : undefined
   };
 
+  const mergedPickerNames = Array.isArray(baseRecord?.pickerNames) || Array.isArray(fallbackRecord?.pickerNames)
+    ? Array.from(new Set([...(baseRecord?.pickerNames || []), ...(fallbackRecord?.pickerNames || [])].filter(Boolean)))
+    : undefined;
+
+  const mergedPrunedLessonIds = Array.isArray(baseRecord?.prunedLessonIds) || Array.isArray(fallbackRecord?.prunedLessonIds)
+    ? Array.from(new Set([...(baseRecord?.prunedLessonIds || []), ...(fallbackRecord?.prunedLessonIds || [])].filter(Boolean)))
+    : undefined;
+
   return {
     id: 'singleton_teacher_settings',
     profile: mergedProfile,
@@ -1029,11 +1064,35 @@ export function mergeTeacherSettings(
       ...fallbackRecord?.schedulingPreferences,
       ...baseRecord?.schedulingPreferences
     },
+    notificationSettings: (baseRecord?.notificationSettings || fallbackRecord?.notificationSettings)
+      ? {
+          ...fallbackRecord?.notificationSettings,
+          ...baseRecord?.notificationSettings
+        } as any
+      : undefined,
+    inspirationSettings: (baseRecord?.inspirationSettings || fallbackRecord?.inspirationSettings)
+      ? {
+          ...fallbackRecord?.inspirationSettings,
+          ...baseRecord?.inspirationSettings
+        } as any
+      : undefined,
+    inspirationMessages: Array.isArray(baseRecord?.inspirationMessages) || Array.isArray(fallbackRecord?.inspirationMessages)
+      ? mergeArrayById(baseRecord?.inspirationMessages, fallbackRecord?.inspirationMessages)
+      : undefined,
+    pickerNames: mergedPickerNames,
+    prunedLessonIds: mergedPrunedLessonIds,
+    goldPriceSettings: (baseRecord?.goldPriceSettings || fallbackRecord?.goldPriceSettings)
+      ? {
+          ...fallbackRecord?.goldPriceSettings,
+          ...baseRecord?.goldPriceSettings
+        }
+      : undefined,
     recentlyDeleted: mergeRecentlyDeleted(local?.recentlyDeleted, incoming?.recentlyDeleted),
     dismissedDashboardLessons: mergeDismissedDashboardLessons(local?.dismissedDashboardLessons, incoming?.dismissedDashboardLessons, true),
     updatedAt: Math.max(localTime, incomingTime, Date.now()),
     updatedByDeviceId: isIncomingNewer ? incoming?.updatedByDeviceId : local?.updatedByDeviceId,
     originDeviceId: isIncomingNewer ? incoming?.originDeviceId : local?.originDeviceId,
+    originPlatform: isIncomingNewer ? incoming?.originPlatform : local?.originPlatform,
     originRevision: Math.max(local?.originRevision || 1, incoming?.originRevision || 1),
     deleted: false,
     syncedAt: Date.now()

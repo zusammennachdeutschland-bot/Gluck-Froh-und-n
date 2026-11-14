@@ -122,7 +122,7 @@ export interface HomeworkSubmission {
   status?: 'in_progress' | 'completed' | string;
   startedAt: string;
   completedAt: string;
-  updatedAt?: string;
+  updatedAt?: string | number;
   timeSpentSeconds: number;
   totalQuestions: number;
   correctAnswersCount: number;
@@ -172,6 +172,7 @@ export interface HomeworkAssignment {
   groupName?: string;
   assignedStudents?: AssignedStudentSnapshot[]; // Selected group students snapshot (only in 'group' mode)
   createdAt: string;
+  updatedAt?: string | number;
   createdBy: string;
   cloudSynced?: boolean;
   cloudCreatePending?: boolean; // Only true for a new assignment created offline and safe to retry under its owner account.

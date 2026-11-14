@@ -24,7 +24,13 @@ export interface GoldHolding {
   currency: 'EGP';
   notes?: string;
   createdAt: string;
-  updatedAt: string;
+  updatedAt: string | number;
+  updatedByDeviceId?: string;
+  originDeviceId?: string;
+  originPlatform?: 'android' | 'web';
+  originRevision?: number;
+  deleted?: boolean;
+  version?: number;
 }
 
 export interface GoldPriceResult {

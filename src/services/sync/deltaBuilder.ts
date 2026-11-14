@@ -9,6 +9,24 @@ import {
 } from '../../types';
 import { createProtocolHeader } from './protocolNegotiator';
 
+function parseRecordTimestampMs(record: any): number {
+  if (!record || typeof record !== 'object') return 0;
+  const raw = record.updatedAt ?? record.completedAt ?? record.createdAt;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if (typeof raw === 'string' && raw.trim()) {
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+function isUnmodifiedBuiltinCurriculumSet(entityKey: string, record: any): boolean {
+  if (entityKey !== 'lernstudioSets' || !record || typeof record.id !== 'string') return false;
+  const isBuiltinId = record.id.startsWith('curric_') || record.id.startsWith('set_def_');
+  if (!isBuiltinId) return false;
+  return !record.originRevision && !record.updatedByDeviceId && !record.createdByTeacherName && !record.deleted;
+}
+
 export function buildOutboundDelta(
   targetPeerId: string,
   watermarkTable: PeerWatermarkTable,
@@ -29,22 +47,26 @@ export function buildOutboundDelta(
 
     const filteredItems = items.filter((record) => {
       if (!record || !record.id) return false;
+      if (isUnmodifiedBuiltinCurriculumSet(key, record)) return false;
       if (isForceFull) return true;
 
-      const originId = record.originDeviceId || 'unknown';
-      const originRev = record.originRevision || 0;
+      const originId = record.originDeviceId || localDevice.id || 'unknown';
+      const recordTimeMs = parseRecordTimestampMs(record);
+      const originRev = record.originRevision || (recordTimeMs > 0 ? 1 : 0);
       const seenRevision = watermarkTable[targetPeerId]?.[originId] || 0;
       
       // Multi-layer change detection to prevent missed sync:
       // 1. Revision is higher than last seen watermark for origin
       const revHigher = originRev > seenRevision;
       // 2. Or record was updated after peer's last known sync timestamp (with 3-sec clock skew tolerance)
-      const timeNewer = peerLastSynced > 0 && (record.updatedAt || 0) > (peerLastSynced - 3000);
-      // 3. Or tombstone / cancellation modified recently
+      const timeNewer = peerLastSynced > 0 && recordTimeMs > (peerLastSynced - 3000);
+      // 3. Or peer has never synced yet and record has valid content/timestamp
+      const initialPeerTransfer = peerLastSynced === 0 && (originRev > 0 || recordTimeMs > 0);
+      // 4. Or tombstone / cancellation modified recently
       const isRecentTombstone = (record.deleted || (record as any).status === 'cancelled') && 
-        (peerLastSynced === 0 || (record.updatedAt || 0) > (peerLastSynced - 60000));
+        (peerLastSynced === 0 || recordTimeMs > (peerLastSynced - 60000));
 
-      return revHigher || timeNewer || isRecentTombstone;
+      return revHigher || timeNewer || initialPeerTransfer || isRecentTombstone;
     });
 
     if (filteredItems.length > 0) {
@@ -130,10 +152,12 @@ export function calculatePendingOutbox(
     let entityPendingCount = 0;
 
     for (const record of items) {
-      if (!record) continue;
+      if (!record || !record.id) continue;
+      if (isUnmodifiedBuiltinCurriculumSet(entityType, record)) continue;
+
       const originId = record.originDeviceId || 'unknown';
       const originRev = record.originRevision || 0;
-      const updatedAt = record.updatedAt || Date.now();
+      const updatedAt = parseRecordTimestampMs(record) || Date.now();
 
       // Check if ANY paired peer has not seen this revision
       let isUnsynced = false;
@@ -143,7 +167,8 @@ export function calculatePendingOutbox(
       } else {
         isUnsynced = activePeers.some(peer => {
           const peerSeen = watermarkTable[peer.deviceId]?.[originId] || 0;
-          return originRev > peerSeen;
+          const timeNewer = (peer.lastSyncedTimestamp || 0) > 0 && updatedAt > ((peer.lastSyncedTimestamp || 0) - 3000);
+          return originRev > peerSeen || (originRev === 0 && timeNewer);
         });
       }
 
@@ -188,6 +213,14 @@ export function calculatePendingOutbox(
           title = `Recurring Bill: ${(record as any).name || (record as any).id} (${(record as any).amount || 0})`;
         } else if (entityType === 'financeInstallments') {
           title = `Installment: ${(record as any).name || (record as any).id} (${(record as any).amountPerInstallment || 0})`;
+        } else if (entityType === 'goldHoldings') {
+          title = `Gold Holding: ${(record as any).label || (record as any).karat || 'Gold'} (${(record as any).grams || 0}g)`;
+        } else if (entityType === 'homeworkAssignments') {
+          title = `Homework Assignment: ${(record as any).title || (record as any).setTitle || (record as any).id}`;
+        } else if (entityType === 'homeworkSubmissions') {
+          title = `Homework Result: ${(record as any).studentName || (record as any).studentId || (record as any).id}`;
+        } else if (entityType === 'lernstudioSets' || entityType === 'customVerbGroups') {
+          title = `Lernstudio Set: ${(record as any).title || (record as any).titleDe || (record as any).id}`;
         }
 
         pendingItems.push({
@@ -217,3 +250,4 @@ export function calculatePendingOutbox(
     oldestPendingTimestamp
   };
 }
+

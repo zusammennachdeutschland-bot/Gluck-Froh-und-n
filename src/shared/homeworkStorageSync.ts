@@ -1004,7 +1004,27 @@ export function getLocalAssignments(explicitUid?: string | null): HomeworkAssign
     const raw = localStorage.getItem(getAssignmentsStorageKey(scopeUid));
     const parsed: HomeworkAssignment[] = raw ? JSON.parse(raw) : [];
     const deletedSet = getDeletedAssignmentIds(scopeUid);
-    return parsed
+    const combined: HomeworkAssignment[] = [...parsed];
+
+    if (isAuthenticatedScope) {
+      try {
+        const unauthRaw = localStorage.getItem(getAssignmentsStorageKey(UNAUTHENTICATED_HOMEWORK_SCOPE));
+        const unauthParsed: HomeworkAssignment[] = unauthRaw ? JSON.parse(unauthRaw) : [];
+        const existingIds = new Set(combined.filter((a) => a && a.id).map((a) => a.id));
+        for (const hw of unauthParsed) {
+          if (!hw || !hw.id || existingIds.has(hw.id)) continue;
+          const recOwner = hw.ownerUid?.trim() || '';
+          if (!recOwner || recOwner === scopeUid) {
+            combined.push({ ...hw, ownerUid: scopeUid });
+            existingIds.add(hw.id);
+          }
+        }
+      } catch {
+        // Ignore unauth fallback parse errors
+      }
+    }
+
+    return combined
       .filter((hw) => {
         if (!hw || !hw.id || (hw as any).deleted) return false;
         if (deletedSet.has(hw.id) || deletedSet.has(sanitizeDocId(hw.id))) return false;
@@ -1241,6 +1261,8 @@ export function saveLocalAssignment(hw: HomeworkAssignment, syncCloud = true): v
 
   if ((hw.isActive === false || hw.status === 'closed') && resolvedShortId) {
     markShortIdRevokedLocally(resolvedShortId);
+  } else if (hw.isActive === true && hw.status !== 'closed' && resolvedShortId) {
+    clearShortIdRevokedLocally(resolvedShortId);
   }
 
   const normalizedHw = normalizeHomeworkAssignment({
@@ -1384,6 +1406,76 @@ export async function saveAssignmentWithConfirmation(hw: HomeworkAssignment): Pr
     inFlightAssignmentSaves.delete(normalizedHw.id);
     inFlightAssignmentSaves.delete(safeId);
   }
+}
+
+/**
+ * Closes (`isActive = false`) or reopens (`isActive = true`) a homework assignment directly
+ * from Android or Web, updating local state, P2P sync metadata, `homework_assignments`,
+ * and `homework_short_links` in Homework Cloud.
+ */
+export async function setHomeworkAssignmentActiveStatus(
+  assignmentId: string,
+  isActive: boolean
+): Promise<{ assignment: HomeworkAssignment | null; cloudSynced: boolean }> {
+  if (!assignmentId) return { assignment: null, cloudSynced: false };
+  const scopeUid = getActiveHomeworkScopeUid();
+  const safeId = sanitizeDocId(assignmentId);
+  const existing = getLocalAssignments(scopeUid).find(
+    (a) => a.id === assignmentId || sanitizeDocId(a.id) === safeId
+  );
+  if (!existing) {
+    return { assignment: null, cloudSynced: false };
+  }
+
+  if (existing.shortId) {
+    if (isActive) {
+      clearShortIdRevokedLocally(existing.shortId);
+    } else {
+      markShortIdRevokedLocally(existing.shortId);
+    }
+  }
+
+  const updated: HomeworkAssignment = {
+    ...existing,
+    isActive,
+    status: isActive ? 'active' : 'closed',
+    updatedAt: Date.now()
+  } as HomeworkAssignment;
+
+  const res = await saveAssignmentWithConfirmation(updated);
+  notifyHomeworkSyncStateChanged();
+  return res;
+}
+
+/**
+ * Updates editable homework assignment metadata (title, maxAttempts, allowReplay, hideTeacherBranding)
+ * directly on Android or Web and persists the updated snapshot to Homework Cloud & P2P.
+ */
+export async function updateHomeworkAssignmentMetadata(
+  assignmentId: string,
+  updates: Partial<Pick<HomeworkAssignment, 'title' | 'maxAttempts' | 'allowReplay' | 'hideTeacherBranding'>>
+): Promise<{ assignment: HomeworkAssignment | null; cloudSynced: boolean }> {
+  if (!assignmentId) return { assignment: null, cloudSynced: false };
+  const scopeUid = getActiveHomeworkScopeUid();
+  const safeId = sanitizeDocId(assignmentId);
+  const existing = getLocalAssignments(scopeUid).find(
+    (a) => a.id === assignmentId || sanitizeDocId(a.id) === safeId
+  );
+  if (!existing) {
+    return { assignment: null, cloudSynced: false };
+  }
+
+  const nextTitle = updates.title !== undefined ? updates.title.trim() || existing.title : existing.title;
+  const updated: HomeworkAssignment = {
+    ...existing,
+    ...updates,
+    title: nextTitle,
+    updatedAt: Date.now()
+  } as HomeworkAssignment;
+
+  const res = await saveAssignmentWithConfirmation(updated);
+  notifyHomeworkSyncStateChanged();
+  return res;
 }
 
 export interface DeleteLocalAssignmentOptions {
@@ -1955,6 +2047,8 @@ export async function flushPendingHomeworkCloudWrites(): Promise<{
     remainingPending: getPendingHomeworkSyncCount()
   };
 }
+
+export const flushPendingHomeworkSyncQueue = flushPendingHomeworkCloudWrites;
 
 export function getPendingHomeworkSyncCount(explicitUid?: string | null): number {
   const scopeUid = getActiveHomeworkScopeUid(explicitUid);

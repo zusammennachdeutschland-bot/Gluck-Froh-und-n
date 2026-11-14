@@ -161,69 +161,7 @@ export const SetupWizard: React.FC = () => {
     });
 
     if (triggerToast) {
-      triggerToast(`تم تسجيل الدخول وربط الحساب (${emailToUse || nameToUse}) بنجاح ✓`);
-    }
-
-    // Auto-fetch remote cloud backup data if available!
-    try {
-      const cloudRes = await downloadWorkspaceFromGoogleCloud();
-      let remoteHasActualData = false;
-      if (cloudRes.hasRemoteData && cloudRes.backupJsonStr) {
-        try {
-          const p = JSON.parse(cloudRes.backupJsonStr);
-          remoteHasActualData = (
-            (Array.isArray(p.students) && p.students.length > 0) ||
-            (Array.isArray(p.groups) && p.groups.length > 0) ||
-            (Array.isArray(p.lessons) && p.lessons.length > 0) ||
-            (Array.isArray(p.payments) && p.payments.length > 0) ||
-            (Array.isArray(p.financeTransactions) && p.financeTransactions.length > 0) ||
-            (Array.isArray(p.hodStudents) && p.hodStudents.length > 0) ||
-            (Array.isArray(p.schoolNotes) && p.schoolNotes.length > 0) ||
-            (Array.isArray(p.homeworkAssignments) && p.homeworkAssignments.length > 0) ||
-            (Array.isArray(p.financeAccounts) && p.financeAccounts.length > 0)
-          );
-        } catch {
-          remoteHasActualData = false;
-        }
-      }
-
-      if (remoteHasActualData && cloudRes.backupJsonStr) {
-        const uid = cloudRes.workspaceId || user?.uid || '';
-        const queuedItem = uid
-          ? await enqueueDurablePendingRemoteItem(uid, cloudRes.backupJsonStr, cloudRes.docTokens)
-          : null;
-        const success = await importBackupFile(cloudRes.backupJsonStr);
-        if (success) {
-          const postSnap = await performBackup();
-          const ackOk =
-            !uid ||
-            !cloudRes.docTokens ||
-            acknowledgeAppliedRemoteRevisions(uid, cloudRes.docTokens, postSnap);
-          if (ackOk) {
-            if (uid && queuedItem) {
-              await removeDurablePendingRemoteItem(uid, queuedItem.id);
-            }
-            localStorage.setItem('dl_setup_completed', 'true');
-            setIsOpen(false);
-            if (triggerToast) {
-              triggerToast(
-                `أهلاً بك يا ${nameToUse || 'المعلم'}! تم جلب بياناتك السحابية وجميع طلابك ومجموعاتك بنجاح 🌟`
-              );
-            }
-            return;
-          }
-        }
-      } else {
-        // No remote actual data: protect local data and push to cloud if local data exists
-        try {
-          const snapStr = await performBackup();
-          if (snapStr) {
-            await uploadWorkspaceToGoogleCloud(snapStr);
-          }
-        } catch {}
-      }
-    } catch (cloudErr) {
-      console.warn('Cloud sync download notice during setup:', cloudErr);
+      triggerToast(`تم تسجيل الدخول وربط الحساب (${emailToUse || nameToUse}) بسحابة الواجبات الأونلاين بنجاح ✓`);
     }
   };
 

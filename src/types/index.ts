@@ -49,6 +49,7 @@ export interface SyncableRecord {
   updatedByDeviceId?: string; // deterministic tie-breaker
   originDeviceId?: string; // device that authored this specific mutation
   originRevision?: number; // monotonic sequence integer from the authoring device
+  originPlatform?: 'android' | 'web'; // Android primary device tie-breaker when timestamps match
   deleted?: boolean; // tombstone marker for soft deletes
   version?: number; // schema versioning fallback
 }
@@ -93,6 +94,12 @@ export interface TeacherSettingsRecord extends SyncableRecord {
   };
   recentlyDeleted?: RecentlyDeletedData;
   dismissedDashboardLessons?: string[];
+  notificationSettings?: NotificationSettings;
+  inspirationSettings?: InspirationSettings;
+  inspirationMessages?: InspirationMessage[];
+  pickerNames?: string[];
+  prunedLessonIds?: string[];
+  goldPriceSettings?: Record<string, any>;
   syncedAt?: number;
 }
 
@@ -149,7 +156,12 @@ export interface SyncDeltaPayload {
     financeTransactions?: FinanceTransaction[];
     financeRecurring?: FinanceRecurring[];
     financeInstallments?: FinanceInstallment[];
+    financeNotifications?: FinanceNotification[];
+    goldHoldings?: GoldHolding[];
     lernstudioSets?: LernstudioSet[];
+    homeworkAssignments?: any[];
+    homeworkSubmissions?: any[];
+    customVerbGroups?: any[];
   };
   purgedRecords?: PurgedRecordTombstone[];
   hasAuthoritativeTombstones?: boolean;

@@ -721,6 +721,7 @@ export async function signOutTeacherFirebase(): Promise<void> {
 export interface HomeworkTestAuthUser {
   uid: string;
   email?: string | null;
+  getIdToken?: () => Promise<string>;
 }
 
 let testHomeworkAuthUser: HomeworkTestAuthUser | null | undefined = undefined;
@@ -1253,6 +1254,11 @@ export async function saveShortLinkToFirestore(
     ? serializeSafeFirestorePayload(publicSafeSnapshot, 440000)
     : JSON.stringify({ revoked: true, deleted: Boolean((assignment as any).deleted) });
 
+  const shortDedupeSig = `${cleanShortId}::${ownerUid}::${isActive ? '1' : '0'}::${Boolean((assignment as any).deleted) ? '1' : '0'}::${payloadJson}`;
+  if (lastSavedShortLinkPayloadHashById.get(cleanShortId) === shortDedupeSig) {
+    return { saved: true };
+  }
+
   const shortDocPayload: Record<string, any> = {
     shortId: cleanShortId,
     assignmentId: safeAssignmentId,
@@ -1271,10 +1277,11 @@ export async function saveShortLinkToFirestore(
       8000,
       1
     );
+    lastSavedShortLinkPayloadHashById.set(cleanShortId, shortDedupeSig);
     return { saved: true };
   } catch (error) {
-    const currentUser = auth.currentUser;
-    if (currentUser && currentUser.uid === ownerUid) {
+    const currentUser = (testHomeworkAuthUser !== undefined ? testHomeworkAuthUser : auth.currentUser) as any;
+    if (currentUser && currentUser.uid === ownerUid && typeof currentUser.getIdToken === 'function') {
       const token = await currentUser.getIdToken().catch(() => null);
       if (token) {
         const restOk = await writeFirestoreDocViaRest(
@@ -1284,6 +1291,7 @@ export async function saveShortLinkToFirestore(
           token
         );
         if (restOk) {
+          lastSavedShortLinkPayloadHashById.set(cleanShortId, shortDedupeSig);
           return { saved: true };
         }
       }
@@ -1324,8 +1332,8 @@ export async function revokeShortLinkInFirestore(
     );
     revoked = true;
   } catch {
-    const currentUser = auth.currentUser;
-    if (currentUser && currentUser.uid === ownerUid) {
+    const currentUser = (testHomeworkAuthUser !== undefined ? testHomeworkAuthUser : auth.currentUser) as any;
+    if (currentUser && currentUser.uid === ownerUid && typeof currentUser.getIdToken === 'function') {
       const token = await currentUser.getIdToken().catch(() => null);
       if (token) {
         revoked = await writeFirestoreDocViaRest(
@@ -1556,6 +1564,7 @@ export async function saveAssignmentToFirestore(
   }
 
   const payloadJson = serializeSafeFirestorePayload(normalized, 440000);
+  const assignmentDedupeSig = `${safeId}::${ownerUid}::${isActive ? '1' : '0'}::${title}::${payloadJson}`;
   const docPayload = {
     id: safeId,
     ownerUid,
@@ -1565,30 +1574,36 @@ export async function saveAssignmentToFirestore(
     payloadJson
   };
 
-  let firestoreSaved = false;
-  try {
-    await executeConfirmedFirestoreWrite(
-      () => setDoc(doc(db, 'homework_assignments', safeId), docPayload),
-      6000,
-      1
-    );
-    firestoreSaved = true;
-  } catch (error) {
-    // Fallback to direct HTTPS Firestore REST API with the teacher's ID token
-    const currentUser = auth.currentUser;
-    if (currentUser && currentUser.uid === ownerUid) {
-      const token = await currentUser.getIdToken().catch(() => null);
-      if (token) {
-        firestoreSaved = await writeFirestoreDocViaRest(
-          'homework_assignments',
-          safeId,
-          docPayload,
-          token
-        );
+  let firestoreSaved = lastSavedAssignmentPayloadHashById.get(safeId) === assignmentDedupeSig;
+  if (!firestoreSaved) {
+    try {
+      await executeConfirmedFirestoreWrite(
+        () => setDoc(doc(db, 'homework_assignments', safeId), docPayload),
+        6000,
+        1
+      );
+      firestoreSaved = true;
+      lastSavedAssignmentPayloadHashById.set(safeId, assignmentDedupeSig);
+    } catch (error) {
+      // Fallback to direct HTTPS Firestore REST API with the teacher's ID token
+      const currentUser = (testHomeworkAuthUser !== undefined ? testHomeworkAuthUser : auth.currentUser) as any;
+      if (currentUser && currentUser.uid === ownerUid && typeof currentUser.getIdToken === 'function') {
+        const token = await currentUser.getIdToken().catch(() => null);
+        if (token) {
+          firestoreSaved = await writeFirestoreDocViaRest(
+            'homework_assignments',
+            safeId,
+            docPayload,
+            token
+          );
+          if (firestoreSaved) {
+            lastSavedAssignmentPayloadHashById.set(safeId, assignmentDedupeSig);
+          }
+        }
       }
-    }
-    if (!firestoreSaved) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+      if (!firestoreSaved) {
+        handleFirestoreError(error, OperationType.WRITE, path);
+      }
     }
   }
 
@@ -1603,9 +1618,10 @@ export async function saveAssignmentToFirestore(
     shortLinkSaved = shortRes.saved;
   }
 
+  // Only invoke the HTTP API fallback when direct Firestore writes did not complete (and not on native Android APK)
   let apiSaved = false;
-  const currentUser = auth.currentUser;
-  if (currentUser && currentUser.uid === ownerUid) {
+  const currentUser = (testHomeworkAuthUser !== undefined ? testHomeworkAuthUser : auth.currentUser) as any;
+  if (!(firestoreSaved && shortLinkSaved) && !isAndroidNativePlatform() && currentUser && currentUser.uid === ownerUid && typeof currentUser.getIdToken === 'function') {
     try {
       const idToken = await currentUser.getIdToken();
       const response = await fetch('/api/teacher/assignments', {
@@ -1956,6 +1972,9 @@ type SharedMultiplexerEntry<T> = {
 const assignmentsMultiplexer = new Map<string, SharedMultiplexerEntry<HomeworkAssignment>>();
 const submissionsMultiplexer = new Map<string, SharedMultiplexerEntry<HomeworkSubmission>>();
 const lernstudioSetsMultiplexer = new Map<string, SharedMultiplexerEntry<LernstudioSet>>();
+const lastSavedAssignmentPayloadHashById = new Map<string, string>();
+const lastSavedShortLinkPayloadHashById = new Map<string, string>();
+const lastSavedSubmissionPayloadHashById = new Map<string, string>();
 
 const MULTIPLEXER_IDLE_TEARDOWN_MS = 5000;
 
@@ -1974,6 +1993,9 @@ export function resetFirestoreSubscriptionMultiplexers(): void {
   clearMap(assignmentsMultiplexer);
   clearMap(submissionsMultiplexer);
   clearMap(lernstudioSetsMultiplexer);
+  lastSavedAssignmentPayloadHashById.clear();
+  lastSavedShortLinkPayloadHashById.clear();
+  lastSavedSubmissionPayloadHashById.clear();
 }
 
 export function subscribeAssignmentsFromFirestore(
@@ -2109,6 +2131,10 @@ export async function deleteAssignmentFromFirestore(
   }
 
   let firestoreDeleted = false;
+  lastSavedAssignmentPayloadHashById.delete(safeId);
+  if (detectedShortId) {
+    lastSavedShortLinkPayloadHashById.delete(detectedShortId);
+  }
   try {
     await executeConfirmedFirestoreWrite(() => deleteDoc(doc(db, 'homework_assignments', safeId)));
     firestoreDeleted = true;
@@ -2220,12 +2246,19 @@ export async function saveSubmissionToFirestore(
     explicitOwnerUid?.trim() ||
     '';
 
+  const earlyDedupeSig = resolvedOwnerUid
+    ? `${safeId}::${resolvedOwnerUid.slice(0, 128)}::${statusValue}::${completedAtValue}::${docPayloadScoreKey(submission)}::${Array.isArray(submission.responses) ? submission.responses.length : 0}`
+    : '';
+  if (isCompleted && earlyDedupeSig && lastSavedSubmissionPayloadHashById.get(safeId) === earlyDedupeSig) {
+    return true;
+  }
+
   let apiOk = false;
   try {
     if (typeof fetch === 'function' && typeof window !== 'undefined') {
-      const urlToken = new URLSearchParams(window.location.search).get('token')?.trim() || '';
-      const urlOwnerUid = new URLSearchParams(window.location.search).get('ou')?.trim() || '';
-      const pathMatch = window.location.pathname.match(/^\/Herr-Abdul-rahman\/([A-Za-z0-9]+)/i);
+      const urlToken = new URLSearchParams(window.location?.search || '').get('token')?.trim() || '';
+      const urlOwnerUid = new URLSearchParams(window.location?.search || '').get('ou')?.trim() || '';
+      const pathMatch = (window.location?.pathname || '').match(/^\/Herr-Abdul-rahman\/([A-Za-z0-9]+)/i);
       const urlShortId = pathMatch?.[1]?.trim() || '';
       if (!resolvedOwnerUid && urlOwnerUid) {
         resolvedOwnerUid = urlOwnerUid;
@@ -2295,6 +2328,10 @@ export async function saveSubmissionToFirestore(
     };
     delete normalized.ownerEmail;
     const payloadJson = serializeSafeFirestorePayload(normalized, 440000);
+    const submissionDedupeSig = `${safeId}::${ownerUid}::${statusValue}::${completedAtValue}::${docPayloadScoreKey(submission)}::${ Array.isArray(submission.responses) ? submission.responses.length : 0 }`;
+    if (isCompleted && lastSavedSubmissionPayloadHashById.get(safeId) === submissionDedupeSig) {
+      return true;
+    }
     const docPayload = {
       id: safeId,
       assignmentId: safeAssignmentId,
@@ -2317,10 +2354,16 @@ export async function saveSubmissionToFirestore(
         8000,
         1
       );
+      if (isCompleted) {
+        lastSavedSubmissionPayloadHashById.set(safeId, submissionDedupeSig);
+      }
       return true;
     } catch (sdkErr) {
       const restOk = await writeFirestoreDocViaRest('homework_submissions', safeId, docPayload);
       if (restOk) {
+        if (isCompleted) {
+          lastSavedSubmissionPayloadHashById.set(safeId, submissionDedupeSig);
+        }
         return true;
       }
       throw sdkErr;
@@ -2331,6 +2374,15 @@ export async function saveSubmissionToFirestore(
     }
     return apiOk;
   }
+}
+
+function docPayloadScoreKey(submission: HomeworkSubmission): string {
+  const score = Math.max(0, Math.min(100000, Number(submission.score ?? submission.correctAnswersCount) || 0));
+  const acc = Math.max(
+    0,
+    Math.min(100, Number(submission.accuracyPercent ?? submission.scorePercentage ?? submission.accuracy) || 0)
+  );
+  return `${score}:${acc}`;
 }
 
 function mergeSubmissionLists(

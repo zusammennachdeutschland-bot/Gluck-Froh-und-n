@@ -623,7 +623,12 @@ export function evaluateOnlineHomeworkFollowUp(
         needsFollowUp,
         hasSubmission: stSubs.length > 0,
         lastActivity: latestAttempt
-          ? latestAttempt.updatedAt || latestAttempt.completedAt || latestAttempt.startedAt || null
+          ? (typeof latestAttempt.updatedAt === 'number'
+              ? new Date(latestAttempt.updatedAt).toISOString()
+              : latestAttempt.updatedAt) ||
+            latestAttempt.completedAt ||
+            latestAttempt.startedAt ||
+            null
           : null
       });
     }
@@ -705,7 +710,12 @@ export function evaluateOnlineHomeworkFollowUp(
         needsFollowUp,
         hasSubmission: stSubs.length > 0,
         lastActivity: latestAttempt
-          ? latestAttempt.updatedAt || latestAttempt.completedAt || latestAttempt.startedAt || null
+          ? (typeof latestAttempt.updatedAt === 'number'
+              ? new Date(latestAttempt.updatedAt).toISOString()
+              : latestAttempt.updatedAt) ||
+            latestAttempt.completedAt ||
+            latestAttempt.startedAt ||
+            null
           : null
       });
     } else if (previousLesson?.groupId && previousLesson.groupId !== 'quick_group') {
@@ -789,7 +799,12 @@ export function evaluateOnlineHomeworkFollowUp(
           needsFollowUp,
           hasSubmission: stSubs.length > 0,
           lastActivity: latestAttempt
-            ? latestAttempt.updatedAt || latestAttempt.completedAt || latestAttempt.startedAt || null
+            ? (typeof latestAttempt.updatedAt === 'number'
+                ? new Date(latestAttempt.updatedAt).toISOString()
+                : latestAttempt.updatedAt) ||
+              latestAttempt.completedAt ||
+              latestAttempt.startedAt ||
+              null
             : null
         });
       }
@@ -836,7 +851,12 @@ export function evaluateOnlineHomeworkFollowUp(
           needsFollowUp: rawProgressStatus !== 'completed' || bestAccuracy < 50,
           hasSubmission: true,
           lastActivity: latestAttempt
-            ? latestAttempt.updatedAt || latestAttempt.completedAt || latestAttempt.startedAt || null
+            ? (typeof latestAttempt.updatedAt === 'number'
+                ? new Date(latestAttempt.updatedAt).toISOString()
+                : latestAttempt.updatedAt) ||
+              latestAttempt.completedAt ||
+              latestAttempt.startedAt ||
+              null
             : null
         });
       });
