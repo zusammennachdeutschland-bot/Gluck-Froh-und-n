@@ -67,11 +67,9 @@ import {
   getQuestionTypeMeta,
   fetchAssignmentFromFirestore,
   fetchLernstudioSetFromFirestore,
-  fetchSubmissionsForAssignmentFromFirestore,
   buildDeterministicSubmissionId,
   getOrCreateStudentAttemptSecret,
   isHomeworkAssignmentOpenForStudents,
-  getCurrentHomeworkOwnerUid,
   saveSubmissionWithConfirmation,
   flushPendingHomeworkCloudWrites,
   resolveAssignmentAudienceMode,
@@ -86,6 +84,10 @@ import {
   resolveHomeworkShortLink,
   clearFirestoreReadQuotaFlag
 } from '../shared/homeworkStorageSync';
+import {
+  shouldSendProgressCheckpoint,
+  sendExitProgressCheckpointKeepalive
+} from '../shared/homeworkCheckpointSync';
 import {
   splitGermanIntoSyllables,
   splitGermanArticleAndWord
@@ -247,10 +249,17 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
   const [submitting, setSubmitting] = useState(false);
   const [finalScore, setFinalScore] = useState<any | null>(null);
   const [startTime, setStartTime] = useState<string | null>(null);
-  const [cloudSyncState, setCloudSyncState] = useState<'idle' | 'syncing' | 'synced' | 'pending_retry'>('idle');
+  const [cloudSyncState, setCloudSyncState] = useState<'idle' | 'syncing' | 'synced' | 'pending_retry' | 'rejected'>('idle');
+  const [submissionConflictError, setSubmissionConflictError] = useState<string | null>(null);
   const [retryingCloudSync, setRetryingCloudSync] = useState(false);
   const activeSubmissionIdRef = useRef<string>('sub_' + Math.random().toString(36).substring(2, 9));
   const isSubmittingRef = useRef<boolean>(false);
+  const hasSentStartRef = useRef<string>('');
+  const lastSyncedAnsweredCountRef = useRef<number>(0);
+  const phaseRef = useRef(phase);
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
 
   // Gamification & Bonus Card Round State
   const [gamification, setGamification] = useState<HomeworkGamificationState>(() =>
@@ -293,43 +302,6 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
   }, []);
-
-  // Load class leaderboard on-demand once when authenticated as the owning teacher (no continuous onSnapshot listener)
-  useEffect(() => {
-    if (!assignmentId) return;
-    const activeTeacherUid = getCurrentHomeworkOwnerUid();
-    if (!activeTeacherUid || (assignment?.ownerUid && assignment.ownerUid !== activeTeacherUid)) {
-      return;
-    }
-    let cancelled = false;
-    fetchSubmissionsForAssignmentFromFirestore(assignmentId, activeTeacherUid)
-      .then((subs) => {
-        if (cancelled) return;
-        setAllSubmissions(subs);
-        if (subs.length > 0) {
-          const sorted = [...subs]
-            .sort(
-              (a, b) =>
-                (b.goldEarned || 0) - (a.goldEarned || 0) ||
-                (b.scorePercentage || b.accuracyPercent || 0) - (a.scorePercentage || a.accuracyPercent || 0)
-            )
-            .slice(0, 15)
-            .map((s) => ({
-              studentName: s.studentName,
-              scorePercentage: s.scorePercentage ?? s.accuracyPercent ?? s.accuracy ?? 0,
-              correctAnswersCount: s.correctAnswersCount ?? s.score ?? 0,
-              totalQuestions: s.totalQuestions || 10,
-              timeSpentSeconds: s.timeSpentSeconds || 0,
-              goldEarned: s.goldEarned ?? (s.correctAnswersCount || s.score || 0) * 100
-            }));
-          setLeaderboard(sorted);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [assignmentId, assignment?.ownerUid]);
 
   // Load Assignment (Supports both /Herr-Abdul-rahman/{SHORT_ID} and legacy /homework/{assignmentId})
   useEffect(() => {
@@ -424,28 +396,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
           return;
         }
 
-        // 3. Check Firestore directly if authenticated as owning teacher
-        if (getCurrentHomeworkOwnerUid()) {
-          const cloudFound = await fetchAssignmentFromFirestore(routeAssignmentId).catch(() => null);
-          if (cloudFound && cloudFound.setSnapshot) {
-            const cloudToken = (cloudFound.shareToken || '').trim();
-            if (cloudToken && shareToken !== cloudToken) {
-              setError('رابط الواجب غير صالح أو يتطلب رمز مشاركة صحيح من المعلم.');
-              return;
-            }
-            if (!isHomeworkAssignmentOpenForStudents(cloudFound)) {
-              setError('هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
-              return;
-            }
-            const mergedCloud = {
-              ...cloudFound,
-              ...(!cloudFound.questionTypeCounts && hasUrlQtc ? { questionTypeCounts: urlQtc } : {}),
-              ...(!cloudFound.ownerUid && urlOwnerUid ? { ownerUid: urlOwnerUid } : {})
-            };
-            setAssignment(normalizeHomeworkAssignment(mergedCloud));
-            return;
-          }
-        }
+        // 3. No teacher Firestore reads during student link resolution — resolved via Vercel API, local cache, or URL fallback
 
         // 4. Fallback: Reconstruct assignment from share URL query parameters + vocabulary set
         const amParam = searchParams.get('am');
@@ -1447,6 +1398,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     const nextAttempt = studentCompletedAttempts.length + 1;
     setCurrentAttemptNumber(nextAttempt);
     isSubmittingRef.current = false;
+    lastSyncedAnsweredCountRef.current = 0;
+    setSubmissionConflictError(null);
 
     const deterministicId = buildDeterministicSubmissionId(
       assignmentId,
@@ -1475,43 +1428,48 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     setStartTime(nowIso);
     playLernstudioSound('powerup_star');
 
-    // Immediately record the initial in-progress attempt so the teacher sees "In Progress" in real time
-    const initialInProgress: HomeworkSubmission = {
-      id: deterministicId,
-      assignmentId,
-      ...(assignment?.ownerUid ? { ownerUid: assignment.ownerUid } : {}),
-      attemptSecret,
-      audienceMode: check.audienceMode,
-      studentId: finalStudentId,
-      participantId: finalParticipantId,
-      groupId: finalGroupId,
-      studentName: finalStudentName,
-      attemptNumber: nextAttempt,
-      status: 'in_progress',
-      startedAt: nowIso,
-      completedAt: '',
-      updatedAt: nowIso,
-      timeSpentSeconds: 0,
-      totalQuestions: quizQuestions.length || assignment?.questionCount || 0,
-      correctAnswersCount: 0,
-      scorePercentage: 0,
-      accuracyPercent: 0,
-      score: 0,
-      accuracy: 0,
-      goldEarned: 0,
-      maxStreak: 0,
-      completedStudyPhase: false,
-      gamification: toGamificationSnapshot(initialGam),
-      responses: []
-    };
-    setCloudSyncState('syncing');
-    saveSubmissionWithConfirmation(initialInProgress, assignment)
-      .then((res) => {
-        setCloudSyncState(res.cloudSynced ? 'synced' : 'pending_retry');
-      })
-      .catch(() => {
-        setCloudSyncState('pending_retry');
-      });
+    // Emit 1 deduplicated start event per attempt ID so the teacher can monitor in-progress attempts
+    if (hasSentStartRef.current !== deterministicId) {
+      hasSentStartRef.current = deterministicId;
+      const initialInProgress: HomeworkSubmission = {
+        id: deterministicId,
+        assignmentId,
+        ...(assignment?.title ? { assignmentTitle: assignment.title } : {}),
+        ...(assignment?.ownerUid ? { ownerUid: assignment.ownerUid } : {}),
+        attemptSecret,
+        audienceMode: check.audienceMode,
+        studentId: finalStudentId,
+        participantId: finalParticipantId,
+        groupId: finalGroupId,
+        ...(check.audienceMode === 'group' && assignment?.groupName ? { groupName: assignment.groupName } : {}),
+        studentName: finalStudentName,
+        attemptNumber: nextAttempt,
+        status: 'in_progress',
+        startedAt: nowIso,
+        completedAt: '',
+        updatedAt: nowIso,
+        timeSpentSeconds: 0,
+        totalQuestions: quizQuestions.length || assignment?.questionCount || 0,
+        correctAnswersCount: 0,
+        scorePercentage: 0,
+        accuracyPercent: 0,
+        score: 0,
+        accuracy: 0,
+        goldEarned: 0,
+        maxStreak: 0,
+        completedStudyPhase: false,
+        gamification: toGamificationSnapshot(initialGam),
+        responses: []
+      };
+      setCloudSyncState('syncing');
+      saveSubmissionWithConfirmation(initialInProgress, assignment)
+        .then((res) => {
+          setCloudSyncState(res.cloudSynced ? 'synced' : 'pending_retry');
+        })
+        .catch(() => {
+          setCloudSyncState('pending_retry');
+        });
+    }
 
     const initialPhase = studyItems.length > 0 ? 'teacher_study' : 'quiz';
     saveActiveHomeworkSession({
@@ -1632,6 +1590,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     processedQuestionIdsRef.current = new Set(restoredGam.processedQuestionIds);
     latestResponsesRef.current = Array.isArray(saved.responses) ? saved.responses : [];
     activeSubmissionIdRef.current = saved.submissionId;
+    hasSentStartRef.current = saved.submissionId;
+    lastSyncedAnsweredCountRef.current = latestResponsesRef.current.length;
     isSubmittingRef.current = false;
 
     setStudentName(saved.studentName || '');
@@ -1750,13 +1710,6 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
         persistCurrentActiveSession({
           gamification: res.nextState
         });
-        syncLiveProgressToFirestore(
-          latestResponsesRef.current,
-          res.nextState.points,
-          res.nextState.maxStreak,
-          undefined,
-          toGamificationSnapshot(res.nextState)
-        );
         if (res.selectedCard.pointsDelta !== 0) {
           gameEffects.triggerScorePopup(
             res.selectedCard.pointsDelta > 0
@@ -1847,7 +1800,6 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     setResponses(nextResponses);
 
     const snapshot = toGamificationSnapshot(nextGam);
-    syncLiveProgressToFirestore(nextResponses, nextGam.points, nextGam.maxStreak, undefined, snapshot);
     persistCurrentActiveSession({
       phase: 'quiz',
       currentIdx,
@@ -1855,11 +1807,26 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       gamification: nextGam
     });
 
+    // Checkpoint every 10 newly answered questions (and NEVER on the final question)
+    if (
+      shouldSendProgressCheckpoint({
+        answeredCount: nextResponses.length,
+        totalQuestions: quizQuestions.length,
+        lastSyncedAnsweredCount: lastSyncedAnsweredCountRef.current
+      })
+    ) {
+      lastSyncedAnsweredCountRef.current = nextResponses.length;
+      syncLiveProgressToFirestore(nextResponses, nextGam.points, nextGam.maxStreak, undefined, snapshot);
+    }
+
     if (advanceTimeoutRef.current) {
       clearTimeout(advanceTimeoutRef.current);
     }
 
-    if (transition.triggeredBonusRound && nextGam.pendingBonusRound) {
+    const isFinalQuestion =
+      currentIdx + 1 >= quizQuestions.length || nextResponses.length >= quizQuestions.length;
+
+    if (!isFinalQuestion && transition.triggeredBonusRound && nextGam.pendingBonusRound) {
       const triggeredRound = nextGam.pendingBonusRound;
       pendingPostBonusRef.current = { nextResponses };
       advanceTimeoutRef.current = setTimeout(() => {
@@ -1972,6 +1939,119 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     }
   };
 
+  const buildCurrentInProgressSnapshot = useCallback(
+    (
+      currResponses: HomeworkQuestionResponse[],
+      currGold: number,
+      currMaxStreak: number,
+      studyCompletedOverride?: boolean,
+      gamificationSnapshotOverride?: ReturnType<typeof toGamificationSnapshot>
+    ): HomeworkSubmission => {
+      const correctCount = currResponses.filter((r) => r.isCorrect).length;
+      const totalQ = quizQuestions.length || currResponses.length;
+      const localScorePct = totalQ > 0 ? Math.round((correctCount / totalQ) * 100) : 0;
+      const nowIso = new Date().toISOString();
+      const startMs = startTime ? new Date(startTime).getTime() : Date.now() - currResponses.length * 4000;
+      const timeSpentSeconds = Math.max(1, Math.round((Date.now() - startMs) / 1000));
+      const attemptSecret = getOrCreateStudentAttemptSecret(activeSubmissionIdRef.current);
+      const snap = gamificationSnapshotOverride ?? toGamificationSnapshot(gamificationRef.current);
+
+      return {
+        id: activeSubmissionIdRef.current,
+        assignmentId,
+        ...(assignment?.title ? { assignmentTitle: assignment.title } : {}),
+        ...(assignment?.ownerUid ? { ownerUid: assignment.ownerUid } : {}),
+        attemptSecret,
+        audienceMode,
+        studentId: audienceMode === 'group' ? selectedStudentId || undefined : undefined,
+        participantId: audienceMode === 'open' ? resolvedOpenPid || undefined : undefined,
+        groupId: audienceMode === 'group' ? assignment?.groupId : undefined,
+        ...(audienceMode === 'group' && assignment?.groupName ? { groupName: assignment.groupName } : {}),
+        studentName: studentName.trim(),
+        attemptNumber: currentAttemptNumber,
+        status: 'in_progress',
+        startedAt: startTime || nowIso,
+        completedAt: '',
+        updatedAt: nowIso,
+        timeSpentSeconds,
+        totalQuestions: totalQ,
+        correctAnswersCount: correctCount,
+        scorePercentage: localScorePct,
+        accuracyPercent: localScorePct,
+        score: correctCount,
+        accuracy: localScorePct,
+        goldEarned: currGold,
+        maxStreak: currMaxStreak,
+        completedStudyPhase: studyCompletedOverride ?? completedStudyPhase,
+        gamification: snap,
+        responses: currResponses
+      };
+    },
+    [
+      assignmentId,
+      assignment?.title,
+      assignment?.ownerUid,
+      assignment?.groupId,
+      assignment?.groupName,
+      audienceMode,
+      selectedStudentId,
+      resolvedOpenPid,
+      studentName,
+      currentAttemptNumber,
+      startTime,
+      completedStudyPhase,
+      quizQuestions.length
+    ]
+  );
+
+  // Best-effort keepalive progress checkpoint if the student hides, leaves, or closes mid-quiz.
+  // Stored in a ref so the pagehide/visibilitychange/unmount effect runs cleanup ONLY on actual unmount.
+  const flushExitCheckpointRef = useRef<() => void>(() => {});
+  flushExitCheckpointRef.current = () => {
+    if (phaseRef.current !== 'quiz' || isSubmittingRef.current) return;
+    const currResponses = latestResponsesRef.current;
+    if (!assignmentId || !studentName.trim()) return;
+    if (currResponses.length <= lastSyncedAnsweredCountRef.current) return;
+    if (currResponses.length >= quizQuestions.length) return;
+
+    lastSyncedAnsweredCountRef.current = currResponses.length;
+    const snap = gamificationRef.current;
+    const payload = buildCurrentInProgressSnapshot(
+      currResponses,
+      snap.points,
+      snap.maxStreak,
+      undefined,
+      toGamificationSnapshot(snap)
+    );
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      saveSubmissionWithConfirmation(payload, assignment).catch(() => {});
+      return;
+    }
+    const urlShareToken = new URLSearchParams(window.location.search).get('token')?.trim() || '';
+    const activeShortId = (assignment?.shortId || shortIdFromUrl || '').trim();
+    sendExitProgressCheckpointKeepalive(payload, {
+      shortId: activeShortId,
+      shareToken: urlShareToken
+    });
+  };
+
+  useEffect(() => {
+    const handleExit = () => flushExitCheckpointRef.current();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushExitCheckpointRef.current();
+      }
+    };
+
+    window.addEventListener('pagehide', handleExit);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('pagehide', handleExit);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      flushExitCheckpointRef.current();
+    };
+  }, []);
+
   const syncLiveProgressToFirestore = (
     currResponses: HomeworkQuestionResponse[],
     currGold: number,
@@ -1980,44 +2060,13 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     gamificationSnapshotOverride?: ReturnType<typeof toGamificationSnapshot>
   ) => {
     if (!assignmentId || !studentName.trim()) return;
-    const correctCount = currResponses.filter((r) => r.isCorrect).length;
-    const totalQ = quizQuestions.length || currResponses.length;
-    const localScorePct = totalQ > 0 ? Math.round((correctCount / totalQ) * 100) : 0;
-    const nowIso = new Date().toISOString();
-    const startMs = startTime ? new Date(startTime).getTime() : Date.now() - currResponses.length * 4000;
-    const timeSpentSeconds = Math.max(1, Math.round((Date.now() - startMs) / 1000));
-
-    const attemptSecret = getOrCreateStudentAttemptSecret(activeSubmissionIdRef.current);
-    const snap = gamificationSnapshotOverride ?? toGamificationSnapshot(gamificationRef.current);
-
-    const liveSubmissionObj: HomeworkSubmission = {
-      id: activeSubmissionIdRef.current,
-      assignmentId,
-      ...(assignment?.ownerUid ? { ownerUid: assignment.ownerUid } : {}),
-      attemptSecret,
-      audienceMode,
-      studentId: audienceMode === 'group' ? selectedStudentId || undefined : undefined,
-      participantId: audienceMode === 'open' ? resolvedOpenPid || undefined : undefined,
-      groupId: audienceMode === 'group' ? assignment?.groupId : undefined,
-      studentName: studentName.trim(),
-      attemptNumber: currentAttemptNumber,
-      status: 'in_progress',
-      startedAt: startTime || nowIso,
-      completedAt: '',
-      updatedAt: nowIso,
-      timeSpentSeconds,
-      totalQuestions: totalQ,
-      correctAnswersCount: correctCount,
-      scorePercentage: localScorePct,
-      accuracyPercent: localScorePct,
-      score: correctCount,
-      accuracy: localScorePct,
-      goldEarned: currGold,
-      maxStreak: currMaxStreak,
-      completedStudyPhase: studyCompletedOverride ?? completedStudyPhase,
-      gamification: snap,
-      responses: currResponses
-    };
+    const liveSubmissionObj = buildCurrentInProgressSnapshot(
+      currResponses,
+      currGold,
+      currMaxStreak,
+      studyCompletedOverride,
+      gamificationSnapshotOverride
+    );
 
     setCloudSyncState('syncing');
     saveSubmissionWithConfirmation(liveSubmissionObj, assignment)
@@ -2043,6 +2092,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     clearActiveHomeworkSession(assignmentId);
     setActiveOverlayRound(null);
     pendingPostBonusRef.current = null;
+    setSubmissionConflictError(null);
 
     setPhase('completed');
     setSubmitting(true);
@@ -2061,12 +2111,14 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     const localSubmissionObj: HomeworkSubmission = {
       id: activeSubmissionIdRef.current,
       assignmentId,
+      ...(assignment?.title ? { assignmentTitle: assignment.title } : {}),
       ...(assignment?.ownerUid ? { ownerUid: assignment.ownerUid } : {}),
       attemptSecret,
       audienceMode,
       studentId: audienceMode === 'group' ? selectedStudentId || undefined : undefined,
       participantId: audienceMode === 'open' ? resolvedOpenPid || undefined : undefined,
       groupId: audienceMode === 'group' ? assignment?.groupId : undefined,
+      ...(audienceMode === 'group' && assignment?.groupName ? { groupName: assignment.groupName } : {}),
       studentName: studentName.trim(),
       attemptNumber: currentAttemptNumber,
       status: 'completed',
@@ -2087,80 +2139,28 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       responses: allResponses
     };
 
-    // 1. Save immediately to localStorage AND verify Firebase Firestore persistence
-    const confirmRes = await saveSubmissionWithConfirmation(localSubmissionObj, assignment);
-    const syncedSubmissionObj: HomeworkSubmission = {
-      ...confirmRes.submission,
-      cloudSynced: confirmRes.cloudSynced
-    };
-    setCloudSyncState(confirmRes.cloudSynced ? 'synced' : 'pending_retry');
-    setFinalScore(syncedSubmissionObj);
-
+    // Single authoritative final submission path (POST /api/homework/submit once + Firestore fallback if transient)
     try {
-      const urlShareToken = new URLSearchParams(window.location.search).get('token')?.trim() || '';
-      const activeShortId = (assignment?.shortId || shortIdFromUrl || '').trim();
-      const res = await fetch('/api/homework/submit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: activeSubmissionIdRef.current,
-          assignmentId,
-          ...(urlShareToken ? { token: urlShareToken } : {}),
-          ...(activeShortId ? { shortId: activeShortId } : {}),
-          ...(assignment?.ownerUid ? { ownerUid: assignment.ownerUid } : {}),
-          attemptSecret,
-          audienceMode,
-          studentId: audienceMode === 'group' ? selectedStudentId || undefined : undefined,
-          participantId: audienceMode === 'open' ? resolvedOpenPid || undefined : undefined,
-          groupId: audienceMode === 'group' ? assignment?.groupId : undefined,
-          studentName: studentName.trim(),
-          attemptNumber: currentAttemptNumber,
-          responses: allResponses,
-          startedAt: startTime,
-          completedAt: completedAtIso,
-          goldEarned: finalGoldValue,
-          maxStreak: finalMaxStreak,
-          completedStudyPhase,
-          gamification: finalSnapshot
-        })
-      });
-
-      const text = await res.text();
-      let data: any = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = {};
-      }
-
-      const isSynced = confirmRes.cloudSynced || Boolean(res && res.ok && data?.submission);
-      if (res && res.ok && data?.submission) {
-        const mergedFinal: HomeworkSubmission = {
-          ...syncedSubmissionObj,
-          ...data.submission,
-          id: activeSubmissionIdRef.current,
-          audienceMode,
-          studentId: audienceMode === 'group' ? selectedStudentId || data.submission.studentId || undefined : undefined,
-          participantId: audienceMode === 'open' ? resolvedOpenPid || data.submission.participantId || undefined : undefined,
-          groupId: audienceMode === 'group' ? assignment?.groupId : undefined,
-          attemptNumber: currentAttemptNumber,
-          status: 'completed',
-          completedAt: completedAtIso,
-          gamification: data.submission.gamification || finalSnapshot,
-          cloudSynced: isSynced
-        };
-        saveLocalSubmission(mergedFinal, !isSynced);
-        setCloudSyncState(isSynced ? 'synced' : 'pending_retry');
-        setFinalScore(mergedFinal);
-        playLernstudioSound('fanfare_victory');
-      } else {
-        setCloudSyncState(confirmRes.cloudSynced ? 'synced' : 'pending_retry');
-        setFinalScore(syncedSubmissionObj);
-        playLernstudioSound('fanfare_victory');
-      }
-    } catch {
+      const confirmRes = await saveSubmissionWithConfirmation(localSubmissionObj, assignment);
+      const syncedSubmissionObj: HomeworkSubmission = {
+        ...confirmRes.submission,
+        cloudSynced: confirmRes.cloudSynced
+      };
+      setCloudSyncState(confirmRes.cloudSynced ? 'synced' : 'pending_retry');
       setFinalScore(syncedSubmissionObj);
       playLernstudioSound('fanfare_victory');
+    } catch (err: any) {
+      if (err?.rejected || err?.status === 409 || err?.status === 403 || err?.status === 404) {
+        setCloudSyncState('rejected');
+        setSubmissionConflictError(
+          err?.message || 'تم تسجيل تسليم مكتمل لهذه المحاولة مسبقاً ولا يمكن تعديل بياناتها.'
+        );
+        setFinalScore({ ...localSubmissionObj, cloudSynced: false });
+      } else {
+        setCloudSyncState('pending_retry');
+        setFinalScore({ ...localSubmissionObj, cloudSynced: false });
+        playLernstudioSound('fanfare_victory');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -2169,13 +2169,26 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
   const handleManualRetryCloudSync = async () => {
     setRetryingCloudSync(true);
     setCloudSyncState('syncing');
+    setSubmissionConflictError(null);
     try {
       if (finalScore) {
-        const res = await saveSubmissionWithConfirmation(finalScore);
-        if (res.cloudSynced) {
-          setCloudSyncState('synced');
-          setFinalScore((prev: any) => (prev ? { ...prev, cloudSynced: true } : prev));
-          return;
+        try {
+          const res = await saveSubmissionWithConfirmation(finalScore, assignment);
+          if (res.cloudSynced) {
+            setCloudSyncState('synced');
+            setFinalScore((prev: any) =>
+              prev ? { ...prev, ...res.submission, cloudSynced: true } : prev
+            );
+            return;
+          }
+        } catch (err: any) {
+          if (err?.rejected || err?.status === 409 || err?.status === 403 || err?.status === 404) {
+            setCloudSyncState('rejected');
+            setSubmissionConflictError(
+              err?.message || 'تم تسجيل تسليم مكتمل لهذه المحاولة مسبقاً ولا يمكن تعديل بياناتها.'
+            );
+            return;
+          }
         }
       }
       const flushRes = await flushPendingHomeworkCloudWrites();
@@ -2848,13 +2861,6 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                       currentIdx: 0,
                       completedStudyPhase: true
                     });
-                    syncLiveProgressToFirestore(
-                      latestResponsesRef.current,
-                      gamificationRef.current.points,
-                      gamificationRef.current.maxStreak,
-                      true,
-                      toGamificationSnapshot(gamificationRef.current)
-                    );
                   }}
                   className="flex-1 py-2.5 px-4 rounded-xl bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all"
                 >
@@ -2933,7 +2939,14 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             <div className="p-5 sm:p-7 space-y-4">
 
             <div className="space-y-1.5">
-              {cloudSyncState === 'synced' ? (
+              {cloudSyncState === 'rejected' ? (
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs font-bold space-y-1.5 mb-2">
+                  <div className="flex items-center justify-center gap-1.5">
+                    <XCircle className="w-4 h-4 shrink-0" />
+                    <span>{submissionConflictError || 'تعذر حفظ التعديلات لأن هذا الواجب مكتمل ومحمي ضد التعديل.'}</span>
+                  </div>
+                </div>
+              ) : cloudSyncState === 'synced' ? (
                 <div className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 text-xs font-bold mb-1">
                   <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
                   <span>تم حفظ نتيجتك ومزامنتها سحابياً مع المعلم</span>
@@ -3066,6 +3079,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                     clearActiveHomeworkSession(assignmentId);
                     const nextAttempt = Math.max(currentAttemptNumber + 1, studentCompletedAttempts.length + 1);
                     isSubmittingRef.current = false;
+                    lastSyncedAnsweredCountRef.current = 0;
+                    setSubmissionConflictError(null);
                     activeSubmissionIdRef.current = buildDeterministicSubmissionId(
                       assignmentId,
                       audienceMode === 'group' ? selectedStudentId : undefined,
@@ -3073,6 +3088,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                       nextAttempt,
                       audienceMode === 'open' ? resolvedOpenPid : undefined
                     );
+                    hasSentStartRef.current = activeSubmissionIdRef.current;
                     const freshGam = createInitialGamificationState(
                       quizQuestions.length,
                       assignment?.timeLimitMinutes
@@ -3087,9 +3103,48 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                     setResponses([]);
                     syncGamificationState(freshGam);
                     setFinalScore(null);
-                    const nowIso = new Date().toISOString();
+                     const nowIso = new Date().toISOString();
                     setStartTime(nowIso);
                     const replayPhase = studyItems.length > 0 ? 'teacher_study' : 'quiz';
+                    const replayAttemptSecret = getOrCreateStudentAttemptSecret(activeSubmissionIdRef.current);
+                    const replayStartSubmission: HomeworkSubmission = {
+                      id: activeSubmissionIdRef.current,
+                      assignmentId,
+                      ...(assignment?.title ? { assignmentTitle: assignment.title } : {}),
+                      ...(assignment?.ownerUid ? { ownerUid: assignment.ownerUid } : {}),
+                      attemptSecret: replayAttemptSecret,
+                      audienceMode,
+                      studentId: audienceMode === 'group' ? selectedStudentId || undefined : undefined,
+                      participantId: audienceMode === 'open' ? resolvedOpenPid || undefined : undefined,
+                      groupId: audienceMode === 'group' ? assignment?.groupId : undefined,
+                      ...(audienceMode === 'group' && assignment?.groupName ? { groupName: assignment.groupName } : {}),
+                      studentName: studentName.trim(),
+                      attemptNumber: nextAttempt,
+                      status: 'in_progress',
+                      startedAt: nowIso,
+                      completedAt: '',
+                      updatedAt: nowIso,
+                      timeSpentSeconds: 0,
+                      totalQuestions: quizQuestions.length || assignment?.questionCount || 0,
+                      correctAnswersCount: 0,
+                      scorePercentage: 0,
+                      accuracyPercent: 0,
+                      score: 0,
+                      accuracy: 0,
+                      goldEarned: 0,
+                      maxStreak: 0,
+                      completedStudyPhase: studyItems.length === 0,
+                      gamification: toGamificationSnapshot(freshGam),
+                      responses: []
+                    };
+                    setCloudSyncState('syncing');
+                    saveSubmissionWithConfirmation(replayStartSubmission, assignment)
+                      .then((res) => {
+                        setCloudSyncState(res.cloudSynced ? 'synced' : 'pending_retry');
+                      })
+                      .catch(() => {
+                        setCloudSyncState('pending_retry');
+                      });
                     saveActiveHomeworkSession({
                       version: 1,
                       assignmentId,

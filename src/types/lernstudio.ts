@@ -125,6 +125,8 @@ export interface LernstudioSet {
   verbEntriesSnapshot?: VerbEntry[];
   basedOnBuiltinGroupId?: string;
   isArchived?: boolean;
+  published?: boolean;
+  publishedAt?: string;
   deleted?: boolean;
   createdAt: string;
   updatedAt: number;

@@ -38,7 +38,12 @@ import {
   resolveStageQuestionCount,
   calculateTotalHomeworkQuestions,
   setHomeworkAssignmentActiveStatus,
-  updateHomeworkAssignmentMetadata
+  updateHomeworkAssignmentMetadata,
+  getPreservedSubmissionsForDeletedAssignments,
+  getHomeworkLastRefreshTimestamp,
+  ArchivedAssignmentMeta,
+  publishCustomLernstudioSetOnce,
+  isBuiltinCurriculumSetId
 } from '../homeworkStorageSync';
 import { auth, signInTeacherWithGoogle } from '../firebaseCloudSync';
 import {
@@ -250,6 +255,16 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
   const [flushingPending, setFlushingPending] = useState<boolean>(false);
+  const [assignmentsLastRefreshedMs, setAssignmentsLastRefreshedMs] = useState<number>(() =>
+    getHomeworkLastRefreshTimestamp('assignments')
+  );
+  const [preservedDeletedGroups, setPreservedDeletedGroups] = useState<
+    { assignmentMeta: ArchivedAssignmentMeta; submissions: HomeworkSubmission[] }[]
+  >([]);
+  const [showArchivedResults, setShowArchivedResults] = useState<boolean>(false);
+  const [detailsNextCursor, setDetailsNextCursor] = useState<string | null>(null);
+  const [detailsHasMore, setDetailsHasMore] = useState<boolean>(false);
+  const [loadingMoreDetails, setLoadingMoreDetails] = useState<boolean>(false);
 
   const modalBodyRef = useRef<HTMLDivElement | null>(null);
   const selectedDetailsIdRef = useRef<string | null>(null);
@@ -378,26 +393,35 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [isSavingHwEdit, setIsSavingHwEdit] = useState(false);
   const [togglingActiveId, setTogglingActiveId] = useState<string | null>(null);
 
-  const loadAllAssignments = async (forceCloud = true) => {
-    setLoadingResults(true);
+  const loadAllAssignments = async (forceCloud = false) => {
+    setLoadingResults(forceCloud);
     try {
-      const list = await syncAndFetchTeacherAssignments(studentsRef.current, { force: forceCloud });
+      const list = await syncAndFetchTeacherAssignments(studentsRef.current, {
+        force: forceCloud,
+        assignmentsOnly: forceCloud,
+        localOnly: !forceCloud
+      });
       setAssignmentsList(list);
+      setPreservedDeletedGroups(getPreservedSubmissionsForDeletedAssignments());
       setPendingSyncCount(getPendingHomeworkSyncCount());
+      setAssignmentsLastRefreshedMs(
+        forceCloud ? Date.now() : getHomeworkLastRefreshTimestamp('assignments')
+      );
     } finally {
       setLoadingResults(false);
     }
   };
 
-  // On-demand Homework Cloud fetch when opening the modal + local/P2P event listener (no continuous 4s polling or background onSnapshot)
+  // Render strictly from local P2P/localStorage cache on open (0 automatic Firestore reads)
   useEffect(() => {
     if (!isOpen) return;
-    loadAllAssignments(true);
+    loadAllAssignments(false);
 
     const refreshFromLocalOrP2P = () => {
-      syncAndFetchTeacherAssignments(studentsRef.current, { force: false })
+      syncAndFetchTeacherAssignments(studentsRef.current, { localOnly: true })
         .then((list) => {
           setAssignmentsList(list);
+          setPreservedDeletedGroups(getPreservedSubmissionsForDeletedAssignments());
           setPendingSyncCount(getPendingHomeworkSyncCount(activeAuthUid));
         })
         .catch(() => {});
@@ -425,10 +449,19 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     try {
       const res = await flushPendingHomeworkCloudWrites();
       setPendingSyncCount(res.remainingPending);
-      await loadAllAssignments();
+      await loadAllAssignments(false);
       if (selectedDetails?.assignment?.id) {
-        const d = await fetchAssignmentDetailsWithSync(selectedDetails.assignment.id, studentsRef.current);
-        if (d) setSelectedDetails(d);
+        const d = await fetchAssignmentDetailsWithSync(
+          selectedDetails.assignment.id,
+          studentsRef.current,
+          selectedDetails.assignment,
+          { limit: 100 }
+        );
+        if (d) {
+          setSelectedDetails(d);
+          setDetailsNextCursor(d.nextCursor || null);
+          setDetailsHasMore(Boolean(d.hasMore));
+        }
       }
     } finally {
       setFlushingPending(false);
@@ -754,6 +787,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         ...(resolvedOwnerEmail ? { ownerEmail: resolvedOwnerEmail } : {}),
         title: title.trim() || defaultTitle,
         contentSource,
+        ...(contentSource !== 'verb' && currentSet?.id ? { setId: currentSet.id } : {}),
         ...(selectedVerbGroupIds.length > 0 ? { selectedVerbGroupIds: [...selectedVerbGroupIds] } : {}),
         ...(finalVerbs.length > 0 ? { selectedVerbIds: finalVerbs.map((v) => v.id) } : {}),
         ...(immutableVerbSnapshot ? { verbSnapshot: immutableVerbSnapshot } : {}),
@@ -797,7 +831,12 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         createdBy: 'Teacher'
       };
 
-      // Persist assignment snapshot directly via Homework Cloud (no lernstudio_sets Firestore write)
+      // If created from a custom Lernstudio set, publish once (content-hash deduplicated) so Vercel resolves sets safely
+      if (contentSource !== 'verb' && currentSet?.id && !isBuiltinCurriculumSetId(currentSet.id)) {
+        publishCustomLernstudioSetOnce(currentSet, resolvedOwnerUid).catch(() => {});
+      }
+
+      // Persist assignment directly to Firestore (with Vercel API fallback)
       const confirmRes = await saveAssignmentWithConfirmation(payload);
       // Only fall back to HTTP server endpoint if direct Firestore confirmation did not complete
       const serverAssignment = confirmRes.cloudSynced
@@ -845,12 +884,12 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       }
 
       if (autoCloseOnCreate) {
-        loadAllAssignments().catch(() => {});
+        loadAllAssignments(false).catch(() => {});
         onClose();
         return;
       }
 
-      await loadAllAssignments().catch(() => {});
+      await loadAllAssignments(false).catch(() => {});
       const refreshedLocal = getLocalAssignments().find((a) => a.id === finalAssignment.id);
       if (refreshedLocal?.cloudSynced) {
         setCreatedCloudSynced(true);
@@ -868,7 +907,11 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     setTimeout(() => setCopiedId(null), 2200);
   };
 
-  const handleOpenDetails = async (hwId: string, fallbackHw?: HomeworkAssignment | null) => {
+  const handleOpenDetails = async (
+    hwId: string,
+    fallbackHw?: HomeworkAssignment | null,
+    options?: { forceCloud?: boolean }
+  ) => {
     setActiveTab('results');
     setInspectingSubmission(null);
     setInspectingStudentAttempts([]);
@@ -879,24 +922,56 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       assignmentsList.find((a) => a.id === hwId) ||
       (selectedDetails?.assignment?.id === hwId ? selectedDetails.assignment : null);
 
-    // 1. Open details view immediately using local data so the button responds in 0ms
+    // 1. Open report immediately from local cache ONLY (0 cloud reads unless teacher explicitly clicks Refresh Report)
     const instantDetails = getLocalAssignmentDetails(hwId, studentsRef.current, matchedHw);
     if (instantDetails) {
       setSelectedDetails(instantDetails);
+    }
+    if (!options?.forceCloud) {
+      setDetailsNextCursor(null);
+      setDetailsHasMore(false);
     }
     if (modalBodyRef.current) {
       modalBodyRef.current.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    // 2. Refresh from cloud in the background with bounded timeout
+    if (!options?.forceCloud) {
+      return;
+    }
+
+    // 2. Explicit manual report refresh (reads ONLY this assignment + paginated submissions)
     setLoadingDetails(true);
     try {
-      const details = await fetchAssignmentDetailsWithSync(hwId, studentsRef.current, matchedHw);
+      const details = await fetchAssignmentDetailsWithSync(hwId, studentsRef.current, matchedHw, {
+        limit: 100
+      });
       if (details) {
         setSelectedDetails(details);
+        setDetailsNextCursor(details.nextCursor || null);
+        setDetailsHasMore(Boolean(details.hasMore));
       }
     } finally {
       setLoadingDetails(false);
+    }
+  };
+
+  const handleLoadMoreDetails = async () => {
+    if (!selectedDetails?.assignment?.id || !detailsNextCursor || loadingMoreDetails) return;
+    setLoadingMoreDetails(true);
+    try {
+      const details = await fetchAssignmentDetailsWithSync(
+        selectedDetails.assignment.id,
+        studentsRef.current,
+        selectedDetails.assignment,
+        { limit: 100, cursor: detailsNextCursor }
+      );
+      if (details) {
+        setSelectedDetails(details);
+        setDetailsNextCursor(details.nextCursor || null);
+        setDetailsHasMore(Boolean(details.hasMore));
+      }
+    } finally {
+      setLoadingMoreDetails(false);
     }
   };
 
@@ -939,6 +1014,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         ownerUidHint: deleteConfirmHw.ownerUid
       });
       setAssignmentsList((prev) => prev.filter((a) => a.id !== targetId));
+      setPreservedDeletedGroups(getPreservedSubmissionsForDeletedAssignments());
       if (selectedDetails?.assignment?.id === targetId) {
         setSelectedDetails(null);
       }
@@ -2180,15 +2256,31 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                       <span>العودة لكل الواجبات</span>
                     </button>
 
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <button
                         type="button"
-                        onClick={() => handleOpenDetails(selectedDetails.assignment.id, selectedDetails.assignment)}
-                        className="px-3 py-1.5 rounded-lg bg-surface hover:bg-surface-hover border border-surface-border text-text-main text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                        onClick={() =>
+                          handleOpenDetails(selectedDetails.assignment.id, selectedDetails.assignment, {
+                            forceCloud: true
+                          })
+                        }
+                        disabled={loadingDetails}
+                        className="px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 border border-primary/25 text-primary text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                       >
                         <RefreshCw className={`w-3.5 h-3.5 ${loadingDetails ? 'animate-spin' : ''}`} />
-                        <span>تحديث</span>
+                        <span>{loadingDetails ? 'جاري التحديث...' : 'تحديث التقرير'}</span>
                       </button>
+
+                      {detailsHasMore && (
+                        <button
+                          type="button"
+                          onClick={handleLoadMoreDetails}
+                          disabled={loadingMoreDetails}
+                          className="px-3 py-1.5 rounded-lg bg-surface hover:bg-surface-hover border border-surface-border text-text-main text-xs font-bold cursor-pointer"
+                        >
+                          {loadingMoreDetails ? 'جاري التحميل...' : 'تحميل المزيد'}
+                        </button>
+                      )}
 
                       <button
                         type="button"
@@ -2267,8 +2359,13 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                               · 🌍 مفتوح لأي اسم
                             </span>
                           )}
-                          <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                            · <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> متابعة لحظية
+                          <span className="text-[10px] font-semibold text-text-muted tabular-nums">
+                            {selectedDetails.lastRefreshedAtMs
+                              ? `· آخر تحديث: ${new Date(selectedDetails.lastRefreshedAtMs).toLocaleTimeString('ar-EG', {
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}`
+                              : '· محفوظ محلياً (اضغط تحديث التقرير لجلب أحدث التسليمات)'}
                           </span>
                         </div>
                         <p className="text-xs text-text-muted mt-0.5">
@@ -2881,14 +2978,20 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {assignmentsLastRefreshedMs > 0 && (
+                        <span className="text-[11px] text-text-muted tabular-nums">
+                          آخر تحديث: {new Date(assignmentsLastRefreshedMs).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
                       <button
                         type="button"
                         onClick={() => loadAllAssignments(true)}
+                        disabled={loadingResults}
                         className="px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface border border-surface-border text-xs font-bold text-text-main flex items-center gap-1.5 cursor-pointer"
                       >
                         <RefreshCw className={`w-3.5 h-3.5 ${loadingResults ? 'animate-spin' : ''}`} />
-                        <span>تحديث</span>
+                        <span>{loadingResults ? 'جاري التحديث...' : 'تحديث'}</span>
                       </button>
 
                       <button
@@ -3095,6 +3198,69 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                       })}
                     </div>
                   )}
+
+                  {/* Preserved Historical Submissions for Deleted Assignments */}
+                  {preservedDeletedGroups.length > 0 && (
+                    <div className="border-t border-surface-border pt-3 space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowArchivedResults((prev) => !prev)}
+                        className="w-full px-3 py-2 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-xs font-bold text-text-main flex items-center justify-between cursor-pointer"
+                      >
+                        <span className="flex items-center gap-2">
+                          <BarChart3 className="w-3.5 h-3.5 text-primary" />
+                          <span>
+                            نتائج واجبات محذوفة محفوظة ({preservedDeletedGroups.length})
+                          </span>
+                        </span>
+                        <span className="text-[11px] text-text-muted">
+                          {showArchivedResults ? 'إخفاء' : 'عرض السجلات التاريخية'}
+                        </span>
+                      </button>
+
+                      {showArchivedResults && (
+                        <div className="space-y-2">
+                          {preservedDeletedGroups.map((grp) => (
+                            <div
+                              key={grp.assignmentMeta.id}
+                              className="p-3 rounded-xl bg-surface border border-surface-border space-y-2"
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div>
+                                  <h5 className="text-xs font-bold text-text-main">
+                                    {grp.assignmentMeta.title}
+                                  </h5>
+                                  <p className="text-[11px] text-text-muted">
+                                    حُذف في{' '}
+                                    {new Date(grp.assignmentMeta.deletedAt).toLocaleDateString('ar-EG')} ·{' '}
+                                    {grp.submissions.length} تسليم محفوظ
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="space-y-1 max-h-40 overflow-y-auto">
+                                {grp.submissions.map((sub) => (
+                                  <div
+                                    key={sub.id}
+                                    className="px-2.5 py-1.5 rounded-lg bg-surface-hover/60 border border-surface-border flex items-center justify-between text-xs tabular-nums"
+                                  >
+                                    <span className="font-bold text-text-main truncate">
+                                      {sub.studentName} (#{sub.attemptNumber || 1})
+                                    </span>
+                                    <span className="text-text-muted">
+                                      {sub.correctAnswersCount ?? sub.score ?? 0}/{sub.totalQuestions} ·{' '}
+                                      <strong className="text-primary">
+                                        {sub.scorePercentage ?? sub.accuracyPercent ?? sub.accuracy ?? 0}%
+                                      </strong>
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -3206,8 +3372,8 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
             <div>
               <h3 className="text-base font-bold text-text-main">حذف الواجب نهائياً؟</h3>
               <p className="text-xs text-text-muted mt-1 leading-relaxed">
-                هل أنت متأكد من حذف الواجب <span className="text-rose-500 font-bold">"{deleteConfirmHw.title}"</span> نهائياً؟
-                سيتم حذف الواجب وجميع تسليمات إجابات الطلاب المرتبطة به.
+                هل أنت متأكد من حذف الواجب <span className="text-rose-500 font-bold">"{deleteConfirmHw.title}"</span>؟
+                سيتم إيقاف رابط المشاركة وإزالة بطاقة الواجب مع الاحتفاظ بسجلات ودرجات الطلاب التاريخية في التقارير.
               </p>
             </div>
 

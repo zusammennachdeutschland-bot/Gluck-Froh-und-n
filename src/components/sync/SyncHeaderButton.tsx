@@ -78,62 +78,46 @@ export const SyncHeaderButton: React.FC<SyncHeaderButtonProps> = ({
 
   return (
     <motion.button
-      whileHover={{ scale: 1.03 }}
-      whileTap={{ scale: 0.97 }}
+      whileHover={{ scale: 1.05 }}
+      whileTap={{ scale: 0.95 }}
       transition={{ type: 'spring', stiffness: 400, damping: 17 }}
       onClick={onClick}
-      className={`relative px-2 py-1.5 sm:px-2.5 sm:py-1.5 rounded-full border transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+      className={`relative p-1.5 sm:px-2 sm:py-1 rounded-full border transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
         isOpen
           ? 'bg-primary text-white border-primary shadow-xs'
           : `${badgeStyles} hover:opacity-90`
       }`}
-      aria-label={`P2P: ${p2pLabel} | ${hwCloudLabel}`}
+      aria-label={`Sync: ${p2pLabel}`}
       title={`${p2pLabel} • ${hwCloudLabel}`}
     >
-      {/* P2P Indicator Dot / Spinner */}
+      {/* Indicator Dot / Spinner */}
       <div className="relative flex items-center justify-center shrink-0">
         {isSyncing ? (
-          <RefreshCw className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin text-blue-600 dark:text-blue-400" />
+          <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-600 dark:text-blue-400" />
         ) : (
-          <span className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full ${isOpen ? 'bg-white' : dotStyles}`} />
+          <span className={`w-2 h-2 rounded-full ${isOpen ? 'bg-white' : dotStyles}`} />
         )}
       </div>
 
-      {/* P2P Status Icon */}
+      {/* Wifi / Cloud Icon */}
       {isSyncing ? null : isP2PConnected ? (
-        <Wifi className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${isOpen ? 'text-white' : 'text-emerald-600 dark:text-emerald-400'}`} />
+        <Wifi className={`w-3 h-3 ${isOpen ? 'text-white' : 'text-emerald-600 dark:text-emerald-400'}`} />
       ) : (
-        <WifiOff className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${isOpen ? 'text-white/80' : 'text-slate-500 dark:text-slate-400'}`} />
+        <Cloud className={`w-3 h-3 ${isOpen ? 'text-white/80' : 'text-slate-500 dark:text-slate-400'}`} />
       )}
 
-      {/* Clear P2P Text Status Label */}
-      <span className={`text-[11px] sm:text-xs font-bold tracking-tight whitespace-nowrap ${isOpen ? 'text-white' : ''}`}>
-        {p2pLabel}
-      </span>
-
-      {/* Connected Peers Badge Count */}
-      {connectedCount > 0 && (
-        <span className="w-3.5 h-3.5 sm:w-4 sm:h-4 bg-primary text-white font-black text-[9px] rounded-full flex items-center justify-center ring-1 ring-white dark:ring-black shrink-0">
-          {connectedCount}
+      {/* Combined pending changes or connected count badge */}
+      {(pendingP2PChanges > 0 || pendingHwCount > 0) && (
+        <span className="bg-amber-500 text-white font-black text-[9px] px-1 py-0.2 rounded-full font-mono shrink-0">
+          {pendingP2PChanges + pendingHwCount}
         </span>
       )}
 
-      {/* Distinct Homework Cloud Mini-Indicator */}
-      <span
-        className={`inline-flex items-center gap-0.5 pl-1 border-l ${
-          isOpen ? 'border-white/30 text-white' : 'border-slate-300/70 dark:border-slate-700 text-indigo-600 dark:text-indigo-400'
-        }`}
-        title={hwCloudLabel}
-      >
-        {hwCloudOnline ? (
-          <Cloud className="w-3 h-3 shrink-0" />
-        ) : (
-          <CloudOff className="w-3 h-3 shrink-0 opacity-60" />
-        )}
-        {pendingHwCount > 0 && (
-          <span className="text-[9px] font-black text-amber-600 dark:text-amber-300">{pendingHwCount}</span>
-        )}
-      </span>
+      {connectedCount > 0 && (
+        <span className="bg-emerald-600 text-white font-black text-[9px] px-1 py-0.2 rounded-full font-mono shrink-0">
+          {connectedCount}
+        </span>
+      )}
     </motion.button>
   );
 };

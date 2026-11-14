@@ -3,12 +3,22 @@ import crypto from 'crypto';
 import {
   getAuthoritativeAssignment,
   getAuthoritativeShortLink,
+  hasRevokedShortLinkForAssignment,
   listAuthoritativeAssignments,
+  listAuthoritativeAssignmentsPage,
   saveAuthoritativeAssignment,
+  restoreAuthoritativeHomeworkShortLink,
+  regenerateAuthoritativeHomeworkShortLink,
   softDeleteAuthoritativeAssignment,
   getAuthoritativeSubmission,
   listAuthoritativeSubmissions,
+  listAuthoritativeSubmissionsPage,
   saveAuthoritativeSubmission,
+  getAuthoritativePublishedSet,
+  listAuthoritativePublishedSets,
+  saveAuthoritativePublishedSet,
+  isBuiltinCurriculumSetId,
+  invalidateServerAssignmentCache,
   resetAdminFirestoreForTesting
 } from '../server/firebaseAdmin';
 
@@ -39,9 +49,9 @@ app.use((req, res, next) => {
   next();
 });
 
-// Authoritative Firestore helpers (no unbounded in-memory cache)
+// Authoritative Firestore helpers (short-TTL process-local assignment lookup cache in firebaseAdmin)
 export function resetServerMemoryCacheOnly(): void {
-  // Maintained for backward compatibility with test runners
+  invalidateServerAssignmentCache();
 }
 
 export function resetHomeworkStoresForTesting(): void {
@@ -64,9 +74,8 @@ async function listServerSubmissions(ownerUid: string, assignmentId?: string | n
   return await listAuthoritativeSubmissions(ownerUid, assignmentId);
 }
 
-async function saveServerSubmission(sub: any, targetHw: any): Promise<any> {
-  const { submission: saved } = await saveAuthoritativeSubmission(sub, targetHw);
-  return saved;
+async function saveServerSubmission(sub: any, targetHw: any): Promise<{ submission: any; isIdempotentRetry?: boolean }> {
+  return await saveAuthoritativeSubmission(sub, targetHw);
 }
 
 // Gold price cache
@@ -308,9 +317,15 @@ function normalizeServerAssignment(hw: any): any {
 
 function isServerAssignmentOpen(hw: any): boolean {
   if (!hw || !hw.id) return false;
-  if (hw.deleted === true) return false;
+  if (hw.deleted === true || hw.revoked === true) return false;
   if (hw.isActive === false) return false;
-  if (hw.status === 'closed') return false;
+  if (hw.status === 'closed' || hw.status === 'deleted') return false;
+  if (typeof hw.deadline === 'string' && hw.deadline.trim()) {
+    const deadlineMs = Date.parse(hw.deadline.trim());
+    if (Number.isFinite(deadlineMs) && Date.now() > deadlineMs) {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -578,7 +593,7 @@ function validateServerSubmission(hw: any, body: any): {
   }
   const pid =
     String(body?.participantId || '').trim() ||
-    `pid_${String(body?.assignmentId || 'hw').slice(0, 16)}_${Date.now().toString(36)}`;
+    `pid_${String(body?.id || `${body?.assignmentId || 'hw'}_${cleanSubmittedName}`).trim().slice(0, 48)}`;
   return {
     valid: true,
     audienceMode: 'open',
@@ -588,6 +603,135 @@ function validateServerSubmission(hw: any, body: any): {
     normalizedGroupId: undefined
   };
 }
+
+// Shared Published Custom Learning Sets (Synced once from Android, readable by Vercel & all authenticated teachers)
+app.all('/api/homework/sets', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  const authHeader = String(req.headers.authorization || '');
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+
+  if (!bearerToken) {
+    return res.status(401).json({
+      error: 'Unauthorized: Firebase Bearer token is required to access shared learning sets',
+      sets: []
+    });
+  }
+
+  const verification = await verifyFirebaseIdToken(bearerToken);
+  if (!verification.isValid || !verification.payload) {
+    return res.status(401).json({
+      error: `Unauthorized: ${verification.error || 'Invalid Firebase ID token'}`,
+      sets: []
+    });
+  }
+  const verifiedUid = verification.payload.sub;
+
+  if (req.method === 'GET') {
+    const querySetId = req.query.setId ? String(req.query.setId).trim() : '';
+    if (querySetId) {
+      try {
+        const foundSet = await getAuthoritativePublishedSet(querySetId, { includeUnpublished: true });
+        if (!foundSet) {
+          return res.status(404).json({ error: 'Published learning set not found' });
+        }
+        if (foundSet.published === false && String(foundSet.createdByUid || '').trim() !== verifiedUid) {
+          return res.status(403).json({ error: 'Forbidden: Learning set is private/unpublished' });
+        }
+        return res.json({ set: foundSet });
+      } catch (err: any) {
+        return res.status(err?.status || 500).json({ error: err?.message || 'Failed to fetch learning set' });
+      }
+    }
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const cursor = req.query.cursor ? String(req.query.cursor).trim() : undefined;
+    try {
+      const page = await listAuthoritativePublishedSets({
+        limit,
+        cursor,
+        requesterUid: verifiedUid
+      });
+      return res.json(page);
+    } catch (err: any) {
+      return res.status(err?.status || 500).json({
+        error: err?.message || 'Failed to list published learning sets',
+        sets: []
+      });
+    }
+  }
+
+  if (req.method === 'POST') {
+    const body = req.body || {};
+    const setPayload = body.set && typeof body.set === 'object' ? body.set : body;
+    if (!setPayload || !setPayload.id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Set payload with a valid id is required'
+      });
+    }
+    if (isBuiltinCurriculumSetId(String(setPayload.id))) {
+      return res.status(400).json({
+        success: false,
+        error: 'Built-in curriculum sets are bundled locally and do not need cloud publishing'
+      });
+    }
+    const creatorUid = String(setPayload.createdByUid || '').trim();
+    if (creatorUid && creatorUid !== verifiedUid) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: createdByUid does not match authenticated Firebase token'
+      });
+    }
+    try {
+      const result = await saveAuthoritativePublishedSet(setPayload, verifiedUid);
+      return res.json({ success: true, ...result });
+    } catch (err: any) {
+      return res.status(err?.status || 500).json({
+        success: false,
+        error: err?.message || 'Failed to publish custom learning set'
+      });
+    }
+  }
+
+  return res.status(405).json({ error: 'Method not allowed' });
+});
+
+app.get('/api/homework/sets/:setId', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  const authHeader = String(req.headers.authorization || '');
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+
+  if (!bearerToken) {
+    return res.status(401).json({
+      error: 'Unauthorized: Firebase Bearer token is required to read learning sets'
+    });
+  }
+
+  const verification = await verifyFirebaseIdToken(bearerToken);
+  if (!verification.isValid || !verification.payload) {
+    return res.status(401).json({
+      error: `Unauthorized: ${verification.error || 'Invalid Firebase ID token'}`
+    });
+  }
+  const verifiedUid = verification.payload.sub;
+
+  const setId = String(req.params.setId || '').trim();
+  if (!setId) {
+    return res.status(400).json({ error: 'Set id is required' });
+  }
+
+  try {
+    const foundSet = await getAuthoritativePublishedSet(setId, { includeUnpublished: true });
+    if (!foundSet) {
+      return res.status(404).json({ error: 'Published learning set not found or unpublished' });
+    }
+    if (foundSet.published === false && String(foundSet.createdByUid || '').trim() !== verifiedUid) {
+      return res.status(403).json({ error: 'Forbidden: Learning set is private/unpublished' });
+    }
+    return res.json({ set: foundSet });
+  } catch (err: any) {
+    return res.status(err?.status || 500).json({ error: err?.message || 'Failed to fetch learning set' });
+  }
+});
 
 app.all('/api/teacher/assignments', async (req, res) => {
   const authHeader = String(req.headers.authorization || '');
@@ -618,7 +762,18 @@ app.all('/api/teacher/assignments', async (req, res) => {
       });
     }
     const ownerUid = verifiedUid;
+    const hasPagination = req.query.limit !== undefined || req.query.cursor !== undefined;
     try {
+      if (hasPagination) {
+        const limit = req.query.limit ? Number(req.query.limit) : 50;
+        const cursor = req.query.cursor ? String(req.query.cursor).trim() : undefined;
+        const page = await listAuthoritativeAssignmentsPage(ownerUid, { limit, cursor });
+        return res.json({
+          assignments: page.assignments.map(normalizeServerAssignment),
+          nextCursor: page.nextCursor,
+          hasMore: page.hasMore
+        });
+      }
       const filtered = await listServerAssignments(ownerUid);
       return res.json({ assignments: filtered.map(normalizeServerAssignment) });
     } catch (err: any) {
@@ -634,7 +789,13 @@ app.all('/api/teacher/assignments', async (req, res) => {
     if (!id) return res.status(400).json({ success: false, error: 'Homework id is required' });
     try {
       const deleted = await softDeleteAuthoritativeAssignment(id, verifiedUid);
-      return res.json({ success: true, deleted: true, assignmentId: deleted.id });
+      return res.json({
+        success: true,
+        deleted: true,
+        assignmentId: deleted.id,
+        revokedShortIds: deleted.revokedShortIds || [],
+        submissionsPreserved: true
+      });
     } catch (err: any) {
       return res.status(err?.status || 500).json({ success: false, error: err?.message || 'Failed to delete homework' });
     }
@@ -649,6 +810,63 @@ app.all('/api/teacher/assignments', async (req, res) => {
       });
     }
     const effectiveOwnerUid = verifiedUid;
+    const requestedAction = typeof body.action === 'string' ? body.action.trim() : '';
+
+    if (requestedAction === 'restore_link') {
+      const targetId = String(body.id || body.assignmentId || '').trim();
+      if (!targetId) {
+        return res.status(400).json({ success: false, error: 'Assignment id is required' });
+      }
+      try {
+        const result = await restoreAuthoritativeHomeworkShortLink(
+          targetId,
+          effectiveOwnerUid,
+          body.originalShortId ? String(body.originalShortId).trim() : undefined
+        );
+        return res.json({
+          success: true,
+          action: 'restore_link',
+          assignment: normalizeServerAssignment(result.assignment),
+          shortId: result.restoredShortId,
+          previousShortId: result.previousShortId
+        });
+      } catch (err: any) {
+        return res.status(err?.status || 500).json({
+          success: false,
+          code: err?.code,
+          error: err?.message || 'Failed to restore original short link'
+        });
+      }
+    }
+
+    if (requestedAction === 'regenerate_link') {
+      const targetId = String(body.id || body.assignmentId || '').trim();
+      if (!targetId) {
+        return res.status(400).json({ success: false, error: 'Assignment id is required' });
+      }
+      try {
+        const result = await regenerateAuthoritativeHomeworkShortLink(
+          targetId,
+          effectiveOwnerUid,
+          body.newShortId ? String(body.newShortId).trim() : undefined
+        );
+        return res.json({
+          success: true,
+          action: 'regenerate_link',
+          assignment: normalizeServerAssignment(result.assignment),
+          shortId: result.newShortId,
+          previousShortId: result.previousShortId,
+          originalShortId: result.originalShortId
+        });
+      } catch (err: any) {
+        return res.status(err?.status || 500).json({
+          success: false,
+          code: err?.code,
+          error: err?.message || 'Failed to generate new short link'
+        });
+      }
+    }
+
     if (body.audienceMode === 'group') {
       const gid = String(body.groupId || '').trim();
       if (!gid || gid === 'all') {
@@ -663,6 +881,48 @@ app.all('/api/teacher/assignments', async (req, res) => {
       ownerUid: effectiveOwnerUid
     });
     delete normalized.ownerEmail;
+
+    // Resolve published set server-side when setId is supplied without inline items
+    const explicitSetId = typeof body.setId === 'string' ? body.setId.trim() : '';
+    const requestedSetId = String(explicitSetId || normalized.setSnapshot?.id || '').trim();
+    const hasInlineItems = Array.isArray(normalized.setSnapshot?.items) && normalized.setSnapshot.items.length > 0;
+    const hasInlineExercises = Array.isArray(normalized.setSnapshot?.customExercises) && normalized.setSnapshot.customExercises.length > 0;
+    const hasCallerSnapshot = Boolean(body.setSnapshot && typeof body.setSnapshot === 'object');
+    const isVerbOnlySource = normalized.contentSource === 'verbs';
+    if (requestedSetId && !hasInlineItems && !hasInlineExercises && !isVerbOnlySource) {
+      try {
+        const resolvedSet = await getAuthoritativePublishedSet(requestedSetId, { includeUnpublished: true });
+        if (!resolvedSet) {
+          if (explicitSetId || !hasCallerSnapshot) {
+            return res.status(404).json({
+              success: false,
+              error: 'Published learning set not found or unpublished'
+            });
+          }
+        } else {
+          if (resolvedSet.published === false && String(resolvedSet.createdByUid || '').trim() !== effectiveOwnerUid) {
+            return res.status(403).json({
+              success: false,
+              error: 'Forbidden: Learning set is unpublished'
+            });
+          }
+          normalized.setSnapshot = resolvedSet;
+          if (!normalized.title && resolvedSet.title) {
+            normalized.title = resolvedSet.title;
+          }
+          if (!normalized.questionCount && Array.isArray(resolvedSet.items)) {
+            normalized.questionCount = resolvedSet.items.length;
+          }
+        }
+      } catch (err: any) {
+        if (explicitSetId || !hasCallerSnapshot) {
+          return res.status(err?.status || 500).json({
+            success: false,
+            error: err?.message || 'Failed to resolve published learning set'
+          });
+        }
+      }
+    }
 
     if (normalized.id) {
       try {
@@ -722,6 +982,17 @@ app.all('/api/homework/submissions', async (req, res) => {
           });
         }
       }
+      const hasPagination = req.query.limit !== undefined || req.query.cursor !== undefined;
+      if (hasPagination) {
+        const limit = req.query.limit ? Number(req.query.limit) : 100;
+        const cursor = req.query.cursor ? String(req.query.cursor).trim() : undefined;
+        const page = await listAuthoritativeSubmissionsPage(ownerUid, assignmentId, { limit, cursor });
+        return res.json({
+          submissions: page.submissions,
+          nextCursor: page.nextCursor,
+          hasMore: page.hasMore
+        });
+      }
       const list = await listServerSubmissions(ownerUid, assignmentId);
       return res.json({ submissions: list });
     } catch (err: any) {
@@ -733,6 +1004,7 @@ app.all('/api/homework/submissions', async (req, res) => {
   }
   if (req.method === 'POST') {
     const body = req.body || {};
+    const providedShortId = String(body.shortId || req.query.shortId || '').trim();
     // V-05: Never trust client-supplied body.assignmentFallback; require a server-known assignment
     let targetHw: any = null;
     try {
@@ -744,9 +1016,23 @@ app.all('/api/homework/submissions', async (req, res) => {
       });
     }
     if (!targetHw) {
-      return res.status(404).json({
+      let wasRevoked = false;
+      try {
+        if (providedShortId) {
+          const shortResolved = await getAuthoritativeShortLink(providedShortId);
+          wasRevoked = shortResolved.status === 'revoked';
+        }
+        if (!wasRevoked && body.assignmentId) {
+          wasRevoked = await hasRevokedShortLinkForAssignment(String(body.assignmentId));
+        }
+      } catch {
+        wasRevoked = false;
+      }
+      return res.status(wasRevoked ? 403 : 404).json({
         success: false,
-        error: 'Assignment not found'
+        error: wasRevoked
+          ? 'Assignment has been deleted or its link has been revoked and no longer accepts submissions'
+          : 'Assignment not found'
       });
     }
     if (!isServerAssignmentOpen(targetHw)) {
@@ -760,7 +1046,6 @@ app.all('/api/homework/submissions', async (req, res) => {
       targetHw.shareToken !== undefined && targetHw.shareToken !== null ? String(targetHw.shareToken).trim() : '';
     const configuredShortId =
       targetHw.shortId !== undefined && targetHw.shortId !== null ? String(targetHw.shortId).trim() : '';
-    const providedShortId = String(body.shortId || req.query.shortId || '').trim();
     const shortIdAuthorized = Boolean(configuredShortId && providedShortId && providedShortId === configuredShortId);
     if (configuredShareToken && !shortIdAuthorized) {
       const providedToken = String(body.token || body.shareToken || req.query.token || '').trim();
@@ -801,8 +1086,12 @@ app.all('/api/homework/submissions', async (req, res) => {
 
     if (cleanSub.id) {
       try {
-        const saved = await saveServerSubmission(cleanSub, targetHw);
-        return res.json({ success: true, submission: saved });
+        const result = await saveServerSubmission(cleanSub, targetHw);
+        return res.json({
+          success: true,
+          submission: result.submission,
+          ...(result.isIdempotentRetry ? { isIdempotentRetry: true } : {})
+        });
       } catch (err: any) {
         return res.status(err?.status || 500).json({
           success: false,
@@ -895,7 +1184,15 @@ app.get('/api/homework/info', async (req, res) => {
     return res.status(err?.status || 500).json({ error: err?.message || 'Assignment lookup unavailable' });
   }
   if (!found) {
-    return res.status(404).json({ error: 'Assignment not found' });
+    let wasRevoked = false;
+    try {
+      wasRevoked = await hasRevokedShortLinkForAssignment(id);
+    } catch {
+      wasRevoked = false;
+    }
+    return res.status(wasRevoked ? 403 : 404).json({
+      error: wasRevoked ? 'Assignment has been deleted or its link has been revoked' : 'Assignment not found'
+    });
   }
   if (!isServerAssignmentOpen(found)) {
     return res.status(403).json({ error: 'Assignment is closed or inactive' });
@@ -917,6 +1214,7 @@ app.get('/api/homework/info', async (req, res) => {
 
 app.post('/api/homework/submit', async (req, res) => {
   const body = req.body || {};
+  const providedShortId = String(body.shortId || req.query.shortId || '').trim();
   // V-05: Never accept untrusted client-supplied body.assignmentFallback
   let targetHw: any = null;
   try {
@@ -928,9 +1226,23 @@ app.post('/api/homework/submit', async (req, res) => {
     });
   }
   if (!targetHw) {
-    return res.status(404).json({
+    let wasRevoked = false;
+    try {
+      if (providedShortId) {
+        const shortResolved = await getAuthoritativeShortLink(providedShortId);
+        wasRevoked = shortResolved.status === 'revoked';
+      }
+      if (!wasRevoked && body.assignmentId) {
+        wasRevoked = await hasRevokedShortLinkForAssignment(String(body.assignmentId));
+      }
+    } catch {
+      wasRevoked = false;
+    }
+    return res.status(wasRevoked ? 403 : 404).json({
       success: false,
-      error: 'Assignment not found'
+      error: wasRevoked
+        ? 'Assignment has been deleted or its link has been revoked and no longer accepts submissions'
+        : 'Assignment not found'
     });
   }
   if (!isServerAssignmentOpen(targetHw)) {
@@ -945,7 +1257,6 @@ app.post('/api/homework/submit', async (req, res) => {
     targetHw.shareToken !== undefined && targetHw.shareToken !== null ? String(targetHw.shareToken).trim() : '';
   const configuredShortId =
     targetHw.shortId !== undefined && targetHw.shortId !== null ? String(targetHw.shortId).trim() : '';
-  const providedShortId = String(body.shortId || req.query.shortId || '').trim();
   const shortIdAuthorized = Boolean(configuredShortId && providedShortId && providedShortId === configuredShortId);
   if (configuredShareToken && !shortIdAuthorized) {
     const providedToken = String(body.token || body.shareToken || req.query.token || '').trim();
@@ -974,7 +1285,20 @@ app.post('/api/homework/submit', async (req, res) => {
   }
 
   const responses = Array.isArray(body.responses) ? body.responses : [];
-  const setSnapshot = targetHw?.setSnapshot || {};
+  let setSnapshot = targetHw?.setSnapshot || {};
+  const fallbackSetId = String(targetHw?.setId || setSnapshot?.id || '').trim();
+  if (
+    fallbackSetId &&
+    (!Array.isArray(setSnapshot?.items) || setSnapshot.items.length === 0) &&
+    (!Array.isArray(setSnapshot?.customExercises) || setSnapshot.customExercises.length === 0)
+  ) {
+    try {
+      const hydratedSet = await getAuthoritativePublishedSet(fallbackSetId);
+      if (hydratedSet) setSnapshot = hydratedSet;
+    } catch {
+      // Keep existing empty snapshot fallback
+    }
+  }
 
   // Comprehensive Server-Side Authoritative Grading:
   const verifiedResponses = responses.map((r: any) => {
@@ -1053,8 +1377,18 @@ app.post('/api/homework/submit', async (req, res) => {
     : verifiedResponses.length;
   const pct = totalQ > 0 ? Math.round((correctCount / totalQ) * 100) : 0;
   const nowIso = new Date().toISOString();
-  const startMs = body.startedAt ? new Date(body.startedAt).getTime() : Date.now() - totalQ * 4000;
-  const timeSpentSeconds = Math.max(isInProgress ? 1 : 5, Math.round((Date.now() - startMs) / 1000));
+  const hasExplicitStartedAt = typeof body.startedAt === 'string' && body.startedAt.trim().length > 0;
+  const hasExplicitCompletedAt = typeof body.completedAt === 'string' && body.completedAt.trim().length > 0;
+  const hasExplicitTimeSpent =
+    typeof body.timeSpentSeconds === 'number' &&
+    Number.isFinite(body.timeSpentSeconds) &&
+    body.timeSpentSeconds > 0;
+  const effectiveCompletedAt = isInProgress ? '' : (hasExplicitCompletedAt ? String(body.completedAt).trim() : nowIso);
+  const startMs = hasExplicitStartedAt ? new Date(body.startedAt).getTime() : Date.now() - totalQ * 4000;
+  const endMs = !isInProgress && hasExplicitCompletedAt ? new Date(effectiveCompletedAt).getTime() : Date.now();
+  const timeSpentSeconds = hasExplicitTimeSpent
+    ? Math.max(isInProgress ? 1 : 5, Math.round(body.timeSpentSeconds))
+    : Math.max(isInProgress ? 1 : 5, Math.round((endMs - startMs) / 1000));
   const resolvedOwnerUid = hwOwnerUid || bodyOwnerUid || undefined;
 
   const submission: any = {
@@ -1069,8 +1403,8 @@ app.post('/api/homework/submit', async (req, res) => {
     studentName: check.normalizedStudentName,
     attemptNumber: body.attemptNumber || 1,
     status: isInProgress ? 'in_progress' : 'completed',
-    startedAt: body.startedAt || nowIso,
-    completedAt: isInProgress ? '' : (body.completedAt || nowIso),
+    startedAt: hasExplicitStartedAt ? String(body.startedAt).trim() : nowIso,
+    completedAt: effectiveCompletedAt,
     updatedAt: nowIso,
     timeSpentSeconds,
     totalQuestions: totalQ,
@@ -1082,15 +1416,23 @@ app.post('/api/homework/submit', async (req, res) => {
     goldEarned: body.goldEarned || 0,
     maxStreak: body.maxStreak || 0,
     completedStudyPhase: Boolean(body.completedStudyPhase),
+    ...(body.xpEarned !== undefined ? { xpEarned: Number(body.xpEarned) || 0 } : {}),
     ...(body.gamification && typeof body.gamification === 'object'
       ? { gamification: body.gamification }
       : {}),
-    responses: verifiedResponses
+    responses: verifiedResponses,
+    _serverDefaultedStartedAt: !hasExplicitStartedAt,
+    _serverDefaultedCompletedAt: !isInProgress && !hasExplicitCompletedAt,
+    _serverComputedTimeSpent: !hasExplicitTimeSpent
   };
 
   try {
-    const saved = await saveServerSubmission(submission, targetHw);
-    return res.json({ success: true, submission: saved });
+    const result = await saveServerSubmission(submission, targetHw);
+    return res.json({
+      success: true,
+      submission: result.submission,
+      ...(result.isIdempotentRetry ? { isIdempotentRetry: true } : {})
+    });
   } catch (err: any) {
     return res.status(err?.status || 500).json({
       success: false,

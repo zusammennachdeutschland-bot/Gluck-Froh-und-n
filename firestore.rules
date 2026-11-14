@@ -32,12 +32,15 @@ service cloud.firestore {
 
     function isValidLernstudioSet(data) {
       return data.keys().hasAll(['id', 'title', 'payloadJson', 'updatedAtIso'])
-        && data.keys().hasOnly(['id', 'title', 'category', 'payloadJson', 'updatedAtIso', 'deleted'])
+        && data.keys().hasOnly(['id', 'title', 'category', 'payloadJson', 'updatedAtIso', 'deleted', 'published', 'createdByUid', 'createdByTeacherName'])
         && data.id is string && data.id.size() >= 1 && data.id.size() <= 128
         && data.title is string && data.title.size() >= 1 && data.title.size() <= 300
         && data.payloadJson is string && data.payloadJson.size() >= 2 && data.payloadJson.size() <= 500000
         && data.updatedAtIso is string && data.updatedAtIso.size() >= 1 && data.updatedAtIso.size() <= 64
-        && (!('deleted' in data) || data.deleted is bool);
+        && (!('deleted' in data) || data.deleted is bool)
+        && (!('published' in data) || data.published is bool)
+        && (!('createdByUid' in data) || (data.createdByUid is string && data.createdByUid.size() <= 128))
+        && (!('createdByTeacherName' in data) || (data.createdByTeacherName is string && data.createdByTeacherName.size() <= 150));
     }
 
     function isValidHomeworkAssignment(data) {
@@ -53,7 +56,7 @@ service cloud.firestore {
 
     function isValidHomeworkSubmission(data) {
       return data.keys().hasAll(['id', 'assignmentId', 'ownerUid', 'studentName', 'score', 'accuracyPercent', 'completedAt', 'payloadJson'])
-        && data.keys().hasOnly(['id', 'assignmentId', 'ownerUid', 'studentName', 'score', 'accuracyPercent', 'completedAt', 'payloadJson', 'ownerEmail', 'attemptSecret', 'status'])
+        && data.keys().hasOnly(['id', 'assignmentId', 'ownerUid', 'studentName', 'score', 'accuracyPercent', 'completedAt', 'updatedAt', 'payloadJson', 'ownerEmail', 'attemptSecret', 'status'])
         && data.id is string && data.id.size() >= 1 && data.id.size() <= 128
         && data.assignmentId is string && data.assignmentId.size() >= 1 && data.assignmentId.size() <= 128
         && data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128
@@ -61,6 +64,7 @@ service cloud.firestore {
         && data.score is number && data.score >= 0 && data.score <= 100000
         && data.accuracyPercent is number && data.accuracyPercent >= 0 && data.accuracyPercent <= 100
         && data.completedAt is string && data.completedAt.size() >= 0 && data.completedAt.size() <= 64
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64))
         && (!('status' in data) || (data.status is string && data.status.size() >= 1 && data.status.size() <= 32))
         && (!('attemptSecret' in data) || (data.attemptSecret is string && data.attemptSecret.size() >= 1 && data.attemptSecret.size() <= 128))
         && data.payloadJson is string && data.payloadJson.size() >= 2 && data.payloadJson.size() <= 500000;
@@ -104,20 +108,35 @@ service cloud.firestore {
       allow get: if isValidId(docId);
     }
 
-    // Shared Lernstudio library: every authenticated teacher account sees and manages the same custom sets.
-    // Public single-document get remains available for student share links; enumeration requires sign-in.
+    // Shared Lernstudio library: every authenticated teacher account sees and shares published custom sets.
+    // Unauthenticated access and unpublished draft reads/writes are denied; Vercel reads via Firebase Admin SDK.
     match /lernstudio_sets/{setId} {
-      allow get: if isValidId(setId);
-      allow list: if isSignedIn();
+      allow get, list: if isSignedIn()
+        && isValidId(setId)
+        && (
+          (!('published' in existing()) || existing().published == true)
+          || ('createdByUid' in existing() && existing().createdByUid == request.auth.uid)
+        );
       allow create: if isSignedIn()
         && isValidId(setId)
         && isValidLernstudioSet(incoming())
-        && incoming().id == setId;
+        && incoming().id == setId
+        && (!('createdByUid' in incoming()) || incoming().createdByUid == '' || incoming().createdByUid == request.auth.uid);
       allow update: if isSignedIn()
         && isValidId(setId)
         && isValidLernstudioSet(incoming())
-        && incoming().id == setId;
-      allow delete: if isSignedIn() && isValidId(setId);
+        && incoming().id == setId
+        && (
+          (!('published' in existing()) || existing().published == true)
+          || ('createdByUid' in existing() && existing().createdByUid == request.auth.uid)
+        );
+      allow delete: if isSignedIn()
+        && isValidId(setId)
+        && (
+          !('createdByUid' in existing())
+          || existing().createdByUid == ''
+          || existing().createdByUid == request.auth.uid
+        );
     }
 
     // Homework Assignments (Strictly isolated by teacher ownerUid; public get via server Express DTO API)

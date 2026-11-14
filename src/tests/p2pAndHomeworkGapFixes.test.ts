@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import expressApp, {
   resetHomeworkStoresForTesting,
+  resetServerMemoryCacheOnly,
   setGooglePublicCertsCacheForTesting,
   toPublicAssignmentDto
 } from '../api/expressApp';
@@ -27,7 +28,11 @@ import {
   saveShortLinkToFirestore,
   revokeShortLinkInFirestore,
   saveSubmissionToFirestore,
-  resetFirestoreSubscriptionMultiplexers
+  resetFirestoreSubscriptionMultiplexers,
+  getShortLinkGetDocCheckCountForTests,
+  resetShortLinkGetDocCheckCountForTests,
+  __setShortLinkGetDocOverrideForTests,
+  isShortLinkOwnershipVerified
 } from '../shared/firebaseCloudSync';
 import { __setNativeAuthTestAdapter } from '../shared/googleCredentialAuthPlugin';
 import { getInMemoryAdminFirestore } from '../server/firebaseAdmin';
@@ -685,10 +690,10 @@ async function runAll16GapFixTests() {
     assert.equal(delRes.deletedLocally, true);
     assert.equal(delRes.cloudDeleted, true);
     assert.equal(delRes.queuedForRetry, false);
-    assert.deepEqual(deleteCalls, ['hw:hw_online_del', 'subs:hw_online_del']);
+    assert.deepEqual(deleteCalls, ['hw:hw_online_del']);
     assert.equal(getPendingHomeworkDeletes().length, 0);
 
-    logs.push('[PASS] Test 8: Android native URL resolves to Vercel domain and online delete performs single confirmed flow');
+    logs.push('[PASS] Test 8: Android native URL resolves to Vercel domain and online delete preserves historical submissions');
   }
 
   // =========================================================================
@@ -1045,10 +1050,263 @@ async function runAll16GapFixTests() {
     logs.push('[PASS] Test 16: Public DTO preserves hideTeacherBranding, legacy short links resolve cleanly, and Express CORS supports Capacitor Android');
   }
 
+  // =========================================================================
+  // TEST 17: getServerAssignment() Process-Local Cache Across Student Submissions
+  // =========================================================================
+  {
+    resetHomeworkStoresForTesting();
+    const adminDb = getInMemoryAdminFirestore();
+    const expressFetch = createMockFetchAgainstExpress();
+    (globalThis as any).fetch = expressFetch;
+
+    const hwCacheId = 'hw_cache_opt_01';
+    const createRes = await expressFetch('http://localhost:3000/api/teacher/assignments', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${teacherToken}`
+      },
+      body: JSON.stringify({
+        id: hwCacheId,
+        shortId: 'CachOp1',
+        shareToken: 'tok_cache_opt',
+        title: 'واجب اختبار كاش الخادم',
+        isActive: true,
+        status: 'active',
+        audienceMode: 'open',
+        questionCount: 40,
+        setSnapshot: {
+          id: 's_cache',
+          title: 'Set Cache',
+          category: 'A1',
+          items: [{ id: 'w1', german: 'der Tisch', arabic: 'الطاولة' }]
+        }
+      })
+    });
+    assert.equal(createRes.status, 200);
+
+    // Simulate cold start on a Vercel instance before student submissions arrive
+    resetServerMemoryCacheOnly();
+    adminDb.resetReadCounts();
+
+    const subId = `${hwCacheId}__student_omar__attempt_1`;
+    const checkpoints = [
+      { status: 'in_progress', answered: 0 }, // Started event
+      { status: 'in_progress', answered: 10 }, // Checkpoint 10
+      { status: 'in_progress', answered: 20 }, // Checkpoint 20
+      { status: 'in_progress', answered: 30 }, // Checkpoint 30
+      { status: 'completed', answered: 40 } // Final submission
+    ];
+
+    for (const step of checkpoints) {
+      const res = await expressFetch('http://localhost:3000/api/homework/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: subId,
+          assignmentId: hwCacheId,
+          shortId: 'CachOp1',
+          token: 'tok_cache_opt',
+          studentName: 'Omar',
+          attemptNumber: 1,
+          attemptSecret: 'sec_omar_1',
+          status: step.status,
+          totalQuestions: 40,
+          responses: Array.from({ length: step.answered }, (_, idx) => ({
+            questionId: `q_${idx + 1}`,
+            itemId: 'w1',
+            expectedField: 'german',
+            selectedAnswer: 'der Tisch',
+            isCorrect: false // Server authoritative grading must flip this to true!
+          }))
+        })
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.success, true);
+      if (step.answered > 0) {
+        assert.equal(body.submission.correctAnswersCount, step.answered);
+      }
+    }
+
+    // Across 5 POST /api/homework/submit requests (Started + 3 Checkpoints + Final):
+    // homework_assignments/{hwCacheId} was read from Firestore ONLY ONCE (on the first request after cold start)!
+    assert.equal(
+      adminDb.getReadCount('homework_assignments', hwCacheId),
+      1,
+      'Expected exactly 1 Firestore assignment read across all 5 submission requests on a warm instance'
+    );
+    // Each submission request still performs its authoritative transactional read on homework_submissions/{subId}
+    assert.equal(adminDb.getReadCount('homework_submissions', subId), 5);
+
+    // Invalid share token is still strictly rejected even when assignment is served from cache
+    const badTokenSubmit = await expressFetch('http://localhost:3000/api/homework/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: `${hwCacheId}__student_2__attempt_1`,
+        assignmentId: hwCacheId,
+        token: 'wrong_token',
+        studentName: 'Student 2',
+        status: 'in_progress',
+        responses: []
+      })
+    });
+    assert.equal(badTokenSubmit.status, 403);
+
+    // Expired deadline is rejected immediately
+    await expressFetch('http://localhost:3000/api/teacher/assignments', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${teacherToken}`
+      },
+      body: JSON.stringify({
+        id: hwCacheId,
+        shortId: 'CachOp1',
+        shareToken: 'tok_cache_opt',
+        title: 'واجب منتهي الموعد',
+        deadline: new Date(Date.now() - 60000).toISOString(),
+        isActive: true,
+        status: 'active',
+        audienceMode: 'open'
+      })
+    });
+    const expiredSubmit = await expressFetch('http://localhost:3000/api/homework/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: `${hwCacheId}__student_3__attempt_1`,
+        assignmentId: hwCacheId,
+        shortId: 'CachOp1',
+        token: 'tok_cache_opt',
+        studentName: 'Student 3',
+        status: 'in_progress',
+        responses: []
+      })
+    });
+    assert.equal(expiredSubmit.status, 403);
+
+    logs.push('[PASS] Test 17: getServerAssignment() cache reduces repeated Firestore reads from 5 to 1 across student submission lifecycle while preserving security and deadline checks');
+  }
+
+  // =========================================================================
+  // TEST 18: saveShortLinkToFirestore Skips Redundant getDoc() When Ownership Is Verified
+  // =========================================================================
+  {
+    resetFirestoreSubscriptionMultiplexers();
+    resetShortLinkGetDocCheckCountForTests();
+    const remoteShortLinks = new Map<string, Record<string, any>>();
+
+    __setShortLinkGetDocOverrideForTests(async (sid: string) => {
+      const found = remoteShortLinks.get(sid);
+      return {
+        exists: Boolean(found),
+        data: () => (found ? { ...found } : undefined),
+        metadata: { hasPendingWrites: false }
+      };
+    });
+
+    (globalThis as any).fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('firestore.googleapis.com') && url.includes('homework_short_links')) {
+        return new Response(JSON.stringify({ fields: {} }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify({ fields: {} }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    };
+
+    __setHomeworkAuthUserForTests({
+      uid: teacherUid,
+      email: teacherEmail,
+      getIdToken: async () => teacherToken
+    });
+
+    const hwOwned: HomeworkAssignment = {
+      id: 'hw_short_opt_1',
+      shortId: 'OwnLnk1',
+      ownerUid: teacherUid,
+      title: 'واجب الرابط المختصر ١',
+      setSnapshot: { id: 's1', title: 'S1', category: 'A1', items: [{ id: 'i1', german: 'das Auto', arabic: 'السيارة' }] },
+      questionTypes: ['choice_all'],
+      allowedGameModes: ['classic_quiz'],
+      questionCount: 1,
+      maxAttempts: 2,
+      allowReplay: true,
+      audienceMode: 'open',
+      isActive: true,
+      status: 'active',
+      createdAt: '2026-11-14T10:00:00.000Z',
+      createdBy: 'Teacher'
+    };
+
+    // 1. Initial creation of a new short link: ownership is not yet established -> performs 1 getDoc() check
+    const firstSave = await saveShortLinkToFirestore(hwOwned, teacherUid);
+    assert.equal(firstSave.saved, true);
+    assert.equal(getShortLinkGetDocCheckCountForTests(), 1, 'First save of new shortId must perform getDoc collision check');
+    assert.equal(isShortLinkOwnershipVerified('OwnLnk1', hwOwned.id, teacherUid), true);
+    remoteShortLinks.set('OwnLnk1', {
+      shortId: 'OwnLnk1',
+      assignmentId: hwOwned.id,
+      ownerUid: teacherUid,
+      isActive: true
+    });
+
+    // 2. Subsequent edits to the same assignment by the same teacher skip getDoc() (0 reads!)
+    resetShortLinkGetDocCheckCountForTests();
+    const editSave1 = await saveShortLinkToFirestore(
+      { ...hwOwned, title: 'واجب الرابط المختصر ١ - معدل', maxAttempts: 5 },
+      teacherUid
+    );
+    assert.equal(editSave1.saved, true);
+    assert.equal(
+      getShortLinkGetDocCheckCountForTests(),
+      0,
+      'Updating short link with established ownership must skip preliminary getDoc() read'
+    );
+
+    // 3. Toggling active/closed state on the same owned assignment also skips getDoc()
+    const pauseSave = await saveShortLinkToFirestore(
+      { ...hwOwned, isActive: false, status: 'closed' },
+      teacherUid
+    );
+    assert.equal(pauseSave.saved, true);
+    assert.equal(getShortLinkGetDocCheckCountForTests(), 0);
+
+    // 4. Attempting to save the same shortId under a DIFFERENT assignmentId or DIFFERENT teacher does NOT skip getDoc and detects collision
+    const collisionDiffHw = await saveShortLinkToFirestore(
+      { ...hwOwned, id: 'hw_different_999' },
+      teacherUid
+    );
+    assert.equal(collisionDiffHw.saved, false);
+    assert.equal(collisionDiffHw.collision, true);
+    assert.equal(
+      getShortLinkGetDocCheckCountForTests(),
+      1,
+      'Different assignmentId for existing shortId must run collision check and reject'
+    );
+
+    const collisionDiffTeacher = await saveShortLinkToFirestore(
+      { ...hwOwned, ownerUid: 'other_teacher_uid' },
+      'other_teacher_uid'
+    );
+    assert.equal(collisionDiffTeacher.saved, false);
+    assert.equal(collisionDiffTeacher.collision, true);
+    assert.equal(getShortLinkGetDocCheckCountForTests(), 2);
+
+    __setShortLinkGetDocOverrideForTests(null);
+    logs.push('[PASS] Test 18: saveShortLinkToFirestore skips preliminary getDoc() on verified ownership updates while preserving collision protection');
+  }
+
   for (const line of logs) {
     console.log(line);
   }
-  console.log(`\nALL 16 P2P & HOMEWORK CLOUD GAP-FIX TESTS PASSED (${logs.length}/16).`);
+  console.log(`\nALL 18 P2P & HOMEWORK CLOUD GAP-FIX TESTS PASSED (${logs.length}/18).`);
 }
 
 runAll16GapFixTests().catch((err) => {

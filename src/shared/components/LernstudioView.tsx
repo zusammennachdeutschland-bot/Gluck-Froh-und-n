@@ -63,8 +63,9 @@ import {
   subscribeTeacherAuth,
   getCurrentHomeworkOwnerUid,
   migrateLegacyHomeworkForAccount,
-  backfillLegacyCloudHomeworkForAccount,
-  getHomeworkSummaryStats
+  getHomeworkSummaryStats,
+  publishCustomLernstudioSetOnce,
+  fetchPublishedCustomLernstudioSetsFromFirestore
 } from '../homeworkStorageSync';
 import { RandomStudentPickerModal } from '../RandomStudentPickerModal';
 import { speakGermanText } from '../../utils/audioSpeechUtils';
@@ -122,7 +123,8 @@ import {
   Bot,
   GraduationCap,
   Volume2,
-  X
+  X,
+  RefreshCw
 } from 'lucide-react';
 
 interface Props {
@@ -147,7 +149,12 @@ export const LernstudioView: React.FC<Props> = ({
   const { students } = useApp();
   const t = getLernstudioTranslations(language);
 
-  // Local CRUD for Lernstudio sets (synced exclusively via P2P; homework uses embedded setSnapshot)
+  // Local CRUD + 1-shot deduplicated custom set publish to Firestore for Vercel homework generation & cross-teacher sharing
+  const pendingCustomPublishIdsRef = React.useRef<Set<string>>(new Set());
+  const [loadingSharedSets, setLoadingSharedSets] = useState(false);
+  const [sharedSetsCursor, setSharedSetsCursor] = useState<string | null>(null);
+  const [sharedSetsHasMore, setSharedSetsHasMore] = useState(false);
+
   const handleSaveSetWithCloud = (set: LernstudioSet) => {
     const isBuiltin = isBuiltinLernstudioSet(set);
     const fallbackTeacherName =
@@ -156,13 +163,31 @@ export const LernstudioView: React.FC<Props> = ({
       ? set
       : {
           ...set,
+          published: set.published !== false,
+          publishedAt: set.publishedAt || new Date().toISOString(),
           createdByTeacherName: set.createdByTeacherName?.trim() || fallbackTeacherName,
           createdByUid: set.createdByUid?.trim() || activeAuthUid || undefined
         };
     onSaveSet(enrichedSet);
+
+    // Built-in curriculum sets and archived/deleted sets never write to Firestore
+    if (!isBuiltin && !enrichedSet.isArchived && !enrichedSet.deleted && enrichedSet.published !== false) {
+      publishCustomLernstudioSetOnce(enrichedSet, activeAuthUid || undefined)
+        .then((res) => {
+          if (res.synced) {
+            pendingCustomPublishIdsRef.current.delete(enrichedSet.id);
+          } else {
+            pendingCustomPublishIdsRef.current.add(enrichedSet.id);
+          }
+        })
+        .catch(() => {
+          pendingCustomPublishIdsRef.current.add(enrichedSet.id);
+        });
+    }
   };
 
   const handleDeleteSetWithCloud = (setId: string) => {
+    pendingCustomPublishIdsRef.current.delete(setId);
     onDeleteSet(setId);
   };
 
@@ -242,13 +267,6 @@ export const LernstudioView: React.FC<Props> = ({
     const unsubAuth = subscribeTeacherAuth((user) => {
       const nextUid = user?.uid?.trim() || null;
       if (nextUid && user && !backfilledUidsRef.current.has(nextUid)) {
-        const storageDoneKey = `gluck_hw_cloud_backfilled_uid_${nextUid}`;
-        let alreadyBackfilled = false;
-        try {
-          alreadyBackfilled = localStorage.getItem(storageDoneKey) === '1';
-        } catch {
-          alreadyBackfilled = false;
-        }
         const migOpts = {
           uid: nextUid,
           email: user.email,
@@ -258,23 +276,59 @@ export const LernstudioView: React.FC<Props> = ({
         };
         migrateLegacyHomeworkForAccount(migOpts);
         backfilledUidsRef.current.add(nextUid);
-        if (!alreadyBackfilled) {
-          backfillLegacyCloudHomeworkForAccount(migOpts)
-            .then(() => {
-              try {
-                localStorage.setItem(storageDoneKey, '1');
-              } catch {
-                // Ignore storage errors
-              }
-            })
-            .catch(() => {});
-        }
       }
       setActiveAuthUid(nextUid);
       setHomeworkStats(getHomeworkSummaryStats(studentsRef.current));
     });
     return () => unsubAuth();
   }, []);
+
+  // Retry any offline-created custom set publishes once internet returns (0 automatic Firestore reads)
+  React.useEffect(() => {
+    const flushPendingCustomSets = () => {
+      if (pendingCustomPublishIdsRef.current.size === 0) return;
+      const ids = Array.from(pendingCustomPublishIdsRef.current);
+      for (const sid of ids) {
+        const found = setsRef.current.find((s) => s.id === sid);
+        if (!found || found.isArchived || found.deleted || isBuiltinLernstudioSet(found)) {
+          pendingCustomPublishIdsRef.current.delete(sid);
+          continue;
+        }
+        publishCustomLernstudioSetOnce(found, activeAuthUid || undefined)
+          .then((res) => {
+            if (res.synced) {
+              pendingCustomPublishIdsRef.current.delete(sid);
+            }
+          })
+          .catch(() => {});
+      }
+    };
+    window.addEventListener('online', flushPendingCustomSets);
+    return () => window.removeEventListener('online', flushPendingCustomSets);
+  }, [activeAuthUid]);
+
+  const handleRefreshSharedCustomSets = async (loadMore = false) => {
+    if (loadingSharedSets) return;
+    setLoadingSharedSets(true);
+    try {
+      const page = await fetchPublishedCustomLernstudioSetsFromFirestore({
+        limit: 25,
+        cursor: loadMore && sharedSetsCursor ? sharedSetsCursor : undefined
+      });
+      const existingMap = new Map(setsRef.current.map((s) => [s.id, s]));
+      for (const sharedSet of page.sets) {
+        if (!sharedSet?.id || isBuiltinLernstudioSet(sharedSet)) continue;
+        const existing = existingMap.get(sharedSet.id);
+        if (!existing || (sharedSet.updatedAt || 0) >= (existing.updatedAt || 0)) {
+          onSaveSet(sharedSet);
+        }
+      }
+      setSharedSetsCursor(page.nextCursor);
+      setSharedSetsHasMore(page.hasMore);
+    } finally {
+      setLoadingSharedSets(false);
+    }
+  };
 
   // Local event listeners for Homework Monitoring inside Lernstudio (cloud reads happen on-demand inside LernstudioHomeworkModal)
   React.useEffect(() => {
@@ -1447,21 +1501,48 @@ export const LernstudioView: React.FC<Props> = ({
                   </>
                 )}
               </div>
-              {(selectedSourceFilter !== 'all' || selectedTeacherFilter !== 'all' || selectedGradeFilter !== 'all' || selectedCategoryFilter !== 'all' || searchTerm || selectedGroupFilter !== 'all') && (
-                <button
-                  onClick={() => {
-                    setSelectedSourceFilter('all');
-                    setSelectedTeacherFilter('all');
-                    setSelectedGradeFilter('all');
-                    setSelectedCategoryFilter('all');
-                    setSelectedGroupFilter('all');
-                    setSearchTerm('');
-                  }}
-                  className="text-xs text-primary hover:underline font-bold cursor-pointer"
-                >
-                  {t.resetFilters}
-                </button>
-              )}
+              <div className="flex items-center gap-3 flex-wrap">
+                {activeAuthUid && (
+                  <button
+                    type="button"
+                    onClick={() => handleRefreshSharedCustomSets(false)}
+                    disabled={loadingSharedSets}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingSharedSets ? 'animate-spin' : ''}`} />
+                    <span>
+                      {loadingSharedSets
+                        ? (language === 'ar' ? 'جاري التحديث...' : 'Updating...')
+                        : (language === 'ar' ? 'تحديث مجموعات المعلمين' : 'Refresh Teacher Sets')}
+                    </span>
+                  </button>
+                )}
+                {activeAuthUid && sharedSetsHasMore && (
+                  <button
+                    type="button"
+                    onClick={() => handleRefreshSharedCustomSets(true)}
+                    disabled={loadingSharedSets}
+                    className="text-xs font-bold text-text-main hover:text-primary cursor-pointer"
+                  >
+                    {language === 'ar' ? 'تحميل المزيد' : 'Load More'}
+                  </button>
+                )}
+                {(selectedSourceFilter !== 'all' || selectedTeacherFilter !== 'all' || selectedGradeFilter !== 'all' || selectedCategoryFilter !== 'all' || searchTerm || selectedGroupFilter !== 'all') && (
+                  <button
+                    onClick={() => {
+                      setSelectedSourceFilter('all');
+                      setSelectedTeacherFilter('all');
+                      setSelectedGradeFilter('all');
+                      setSelectedCategoryFilter('all');
+                      setSelectedGroupFilter('all');
+                      setSearchTerm('');
+                    }}
+                    className="text-xs text-primary hover:underline font-bold cursor-pointer"
+                  >
+                    {t.resetFilters}
+                  </button>
+                )}
+              </div>
             </div>
           </>
         )}

@@ -110,12 +110,14 @@ export interface HomeworkGamificationSnapshot {
 export interface HomeworkSubmission {
   id: string; // e.g. "sub_abc123"
   assignmentId: string;
+  assignmentTitle?: string; // Parent assignment title snapshot for historical reports after deletion/reinstall
   ownerUid?: string; // Teacher Firebase Auth UID who owns the parent assignment
   ownerEmail?: string; // Optional audit/display email (never used as security authority)
   audienceMode?: HomeworkAudienceMode; // 'open' | 'group'
   studentId?: string; // Real student ID from Glück roster (required in 'group' mode)
   participantId?: string; // Stable per-device participant ID for 'open' mode
   groupId?: string; // Group ID when submitted under 'group' mode
+  groupName?: string; // Group display name snapshot for historical reports
   studentName: string;
   attemptNumber: number;
   attemptSecret?: string; // Per-attempt unguessable token preventing cross-student overwrite
@@ -132,6 +134,7 @@ export interface HomeworkSubmission {
   accuracyPercent?: number;
   goldEarned?: number;
   maxStreak?: number;
+  xpEarned?: number;
   completedStudyPhase?: boolean;
   cloudSynced?: boolean;
   gamification?: HomeworkGamificationSnapshot;
@@ -141,10 +144,12 @@ export interface HomeworkSubmission {
 export interface HomeworkAssignment {
   id: string; // e.g. "hw_abc123"
   shortId?: string; // 7-char URL-safe short code for /Herr-Abdul-rahman/{shortId}
+  originalShortId?: string; // Original 7-char short code preserved across link regenerations for safe restoration
   ownerUid?: string; // Teacher Firebase Auth UID (mandatory security authority for cloud sync)
   ownerEmail?: string; // Optional teacher email (display/audit only)
   shareToken?: string; // Public student share token
   title: string;
+  setId?: string; // Optional reference to published LernstudioSet id
   setSnapshot: any; // LernstudioSet snapshot
   selectedItemIds?: string[]; // Specific word IDs selected by teacher
   contentSource?: HomeworkContentSource; // 'vocab' | 'verb' | 'mixed'
@@ -177,6 +182,27 @@ export interface HomeworkAssignment {
   cloudSynced?: boolean;
   cloudCreatePending?: boolean; // Only true for a new assignment created offline and safe to retry under its owner account.
   hideTeacherBranding?: boolean; // Per-homework option to hide teacher logo, name, and signatures across student screens.
+}
+
+export type HomeworkLinkActionStatus =
+  | 'restored'
+  | 'regenerated'
+  | 'collision'
+  | 'unauthorized'
+  | 'not_found'
+  | 'deleted'
+  | 'invalid_id'
+  | 'failed';
+
+export interface HomeworkLinkManagementResult {
+  success: boolean;
+  status: HomeworkLinkActionStatus;
+  assignment?: HomeworkAssignment;
+  shortId?: string;
+  previousShortId?: string;
+  originalShortId?: string;
+  shareUrl?: string;
+  error?: string;
 }
 
 export interface HomeworkShortLinkRecord {

@@ -1122,7 +1122,7 @@ async function runTests() {
 
     deleteLocalAssignment('hw-del-33', false);
     assert.equal(getLocalAssignmentById('hw-del-33'), null);
-    assert.equal(getLocalSubmissionsForAssignment('hw-del-33').length, 0);
+    assert.equal(getLocalSubmissionsForAssignment('hw-del-33').length, 1);
 
     // Also verify Express API endpoints enforce group vs open validation
     const server = expressApp.listen(0);

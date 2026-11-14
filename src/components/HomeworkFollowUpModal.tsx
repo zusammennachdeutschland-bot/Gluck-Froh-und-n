@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { PendingFollowUp } from '../utils/homeworkFollowUpUtils';
+import { PendingFollowUp, SeparatedHomeworkTrackingLists } from '../utils/homeworkFollowUpUtils';
 import { X, Check, Send, BookOpen, User, Sparkles, AtSign, Phone, Copy, Users, CheckCircle2, Link as LinkIcon, ExternalLink, MessageSquare, AlertCircle, Clock } from 'lucide-react';
 import { buildWhatsAppUrl, resolveStudentWhatsAppContact } from '../utils/phoneUtils';
 import { getStudentRoleLabel, isLikelyFemaleStudent } from '../utils/genderUtils';
@@ -10,20 +10,37 @@ import { isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
 import { useSyncedHomeworkData } from '../hooks/useSyncedHomeworkData';
 import { evaluateOnlineHomeworkFollowUp, resolveLinkedOnlineHomeworkForLesson } from '../utils/lessonHomeworkLinkUtils';
 import { normalizeName } from '../utils/lessonUtils';
+import { restoreOriginalHomeworkShortLink, regenerateHomeworkShortLink } from '../shared/homeworkStorageSync';
 
 interface HomeworkFollowUpModalProps {
   pendingFollowUps: PendingFollowUp[];
   initialGroupId?: string;
+  initialTrackingMode?: 'normal' | 'online';
+  separatedLists?: SeparatedHomeworkTrackingLists;
   onClose: () => void;
 }
 
-export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pendingFollowUps, initialGroupId, onClose }) => {
+export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({
+  pendingFollowUps,
+  initialGroupId,
+  initialTrackingMode = 'normal',
+  separatedLists,
+  onClose
+}) => {
   const { students, groups, updateGroup, updateLesson, profile, _t, reportLanguage } = useApp();
   const { assignments: syncedAssignments, submissions: syncedSubmissions, currentOwnerUid } = useSyncedHomeworkData();
   const currentMsgLang = reportLanguage || 'ar';
   
+  const [trackingMode, setTrackingMode] = useState<'normal' | 'online'>(initialTrackingMode);
+  const modalList =
+    separatedLists
+      ? trackingMode === 'online'
+        ? separatedLists.onlineFollowUps
+        : separatedLists.normalFollowUps
+      : pendingFollowUps;
+
   const [selectedGroup, setSelectedGroup] = useState<PendingFollowUp | null>(() => {
-    const initial = initialGroupId ? pendingFollowUps.find(p => p.groupId === initialGroupId) || null : null;
+    const initial = initialGroupId ? modalList.find(p => p.groupId === initialGroupId) || null : null;
     return initial;
   });
   
@@ -37,9 +54,67 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
   const [copiedGroupToast, setCopiedGroupToast] = useState<boolean>(false);
   const [copiedShortLinkToast, setCopiedShortLinkToast] = useState<boolean>(false);
 
+  // Link management state
+  const [linkActionLoading, setLinkActionLoading] = useState<string | null>(null);
+  const [linkActionMessage, setLinkActionMessage] = useState<{ text: string; isError: boolean } | null>(null);
+
   // Group WhatsApp Link editing state
   const [newGroupLinkInput, setNewGroupLinkInput] = useState<string>('');
   const [isEditingGroupLink, setIsEditingGroupLink] = useState<boolean>(false);
+
+  const handleRestoreLink = async (assignmentId: string) => {
+    if (!assignmentId) return;
+    setLinkActionLoading(assignmentId);
+    setLinkActionMessage(null);
+    try {
+      const res = await restoreOriginalHomeworkShortLink(assignmentId, { explicitOwnerUid: currentOwnerUid });
+      if (res.success) {
+        setLinkActionMessage({
+          text: _t('تم استعادة الرابط الأصلي بنجاح!', 'Original link restored successfully!', 'Originaler Link erfolgreich wiederhergestellt!'),
+          isError: false
+        });
+      } else {
+        setLinkActionMessage({
+          text: res.error || _t('تعذر استعادة الرابط الأصلي.', 'Failed to restore original link.', 'Wiederherstellung fehlgeschlagen.'),
+          isError: true
+        });
+      }
+    } catch (err: any) {
+      setLinkActionMessage({
+        text: err?.message || _t('حدث خطأ أثناء استعادة الرابط.', 'Error restoring link.', 'Fehler beim Wiederherstellen.'),
+        isError: true
+      });
+    } finally {
+      setLinkActionLoading(null);
+    }
+  };
+
+  const handleRegenerateLink = async (assignmentId: string) => {
+    if (!assignmentId) return;
+    setLinkActionLoading(assignmentId);
+    setLinkActionMessage(null);
+    try {
+      const res = await regenerateHomeworkShortLink(assignmentId, { explicitOwnerUid: currentOwnerUid });
+      if (res.success) {
+        setLinkActionMessage({
+          text: _t('تم توليد رابط جديد وإيقاف الرابط السابق بنجاح!', 'New link generated and previous link revoked!', 'Neuer Link generiert!'),
+          isError: false
+        });
+      } else {
+        setLinkActionMessage({
+          text: res.error || _t('تعذر توليد رابط جديد.', 'Failed to generate new link.', 'Generierung fehlgeschlagen.'),
+          isError: true
+        });
+      }
+    } catch (err: any) {
+      setLinkActionMessage({
+        text: err?.message || _t('حدث خطأ أثناء توليد الرابط.', 'Error generating link.', 'Fehler beim Generieren.'),
+        isError: true
+      });
+    } finally {
+      setLinkActionLoading(null);
+    }
+  };
 
   const handleMarkDone = (lessonId: string) => {
     updateLesson(lessonId, { homeworkFollowUpSentAt: new Date().toISOString() });
@@ -470,6 +545,38 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
                       'Link is currently unavailable for sharing (deleted, revoked, closed, or pending sync).',
                       'Link derzeit nicht teilbar.'
                     )}
+                  </div>
+                )}
+
+                {/* Link Management Actions (Restore Original Link & Generate New Link) */}
+                {activeOnlineValidation.assignmentId && (
+                  <div className="pt-2 border-t border-surface-border space-y-2">
+                    {linkActionMessage && (
+                      <div className={`p-2 rounded-lg text-xs font-bold ${linkActionMessage.isError ? 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300' : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'}`}>
+                        {linkActionMessage.text}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        disabled={linkActionLoading === activeOnlineValidation.assignmentId}
+                        onClick={() => handleRestoreLink(activeOnlineValidation.assignmentId)}
+                        className="flex-1 bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                      >
+                        <LinkIcon className="w-3.5 h-3.5 text-primary" />
+                        <span>{_t('استعادة الرابط الأصلي', 'Restore Original Link', 'Originalen Link wiederherstellen')}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={linkActionLoading === activeOnlineValidation.assignmentId}
+                        onClick={() => handleRegenerateLink(activeOnlineValidation.assignmentId)}
+                        className="flex-1 bg-primary hover:bg-primary-hover text-white font-black text-xs py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs disabled:opacity-50"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>{_t('توليد رابط جديد', 'Generate New Link', 'Neuen Link generieren')}</span>
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -966,13 +1073,50 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({ pe
           </div>
         </div>
 
+        {separatedLists && (
+          <div className="px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900/50 border-b border-surface-border shrink-0">
+            <div className="grid grid-cols-2 gap-1 bg-slate-200 dark:bg-slate-800 p-0.5 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setTrackingMode('normal')}
+                className={`py-1.5 px-3 text-xs font-black rounded-md flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  trackingMode === 'normal'
+                    ? 'bg-surface text-primary shadow-2xs font-black'
+                    : 'text-text-muted hover:text-text-main font-bold'
+                }`}
+              >
+                <span>{_t('الواجب العادي', 'Normal HW', 'Normal')}</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-200 dark:bg-slate-700 font-mono">
+                  {separatedLists.normalFollowUps.length}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setTrackingMode('online')}
+                className={`py-1.5 px-3 text-xs font-black rounded-md flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  trackingMode === 'online'
+                    ? 'bg-surface text-primary shadow-2xs font-black'
+                    : 'text-text-muted hover:text-text-main font-bold'
+                }`}
+              >
+                <span>{_t('واجب أونلاين', 'Online HW', 'Online')}</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 font-mono">
+                  {separatedLists.onlineFollowUps.length}
+                </span>
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="p-2 overflow-y-auto">
-          {pendingFollowUps.length === 0 ? (
+          {modalList.length === 0 ? (
             <div className="p-8 text-center text-text-muted text-xs sm:text-sm font-medium">
-              {_t('لا توجد مجموعات بانتظار إرسال متابعة الواجب حالياً.', 'No pending homework follow-ups at the moment.', 'Keine ausstehenden Hausaufgaben-Nachverfolgungen.')}
+              {trackingMode === 'online'
+                ? _t('لا توجد واجبات أونلاين حالياً.', 'No online homework assignments found.', 'Keine Online-Aufgaben vorhanden.')
+                : _t('لا توجد مجموعات بانتظار إرسال متابعة الواجب حالياً.', 'No pending homework follow-ups at the moment.', 'Keine ausstehenden Hausaufgaben-Nachverfolgungen.')}
             </div>
           ) : (
-            pendingFollowUps.map(p => (
+            modalList.map(p => (
               <div 
                 key={p.groupId}
                 onClick={() => {

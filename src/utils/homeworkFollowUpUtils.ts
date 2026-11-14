@@ -5,15 +5,21 @@ import {
   OnlineHomeworkFollowUpSummary,
   OnlineHomeworkValidationResult,
   evaluateOnlineHomeworkFollowUp,
+  isOnlineHomeworkValid,
   resolveLinkedOnlineHomeworkForLesson
 } from './lessonHomeworkLinkUtils';
+import { sanitizeDocId } from '../shared/homeworkStorageSync';
 import { compareLessonsChronologically, normalizeName } from './lessonUtils';
+
+export type HomeworkTrackingMode = 'normal' | 'online';
 
 export interface PendingFollowUp {
   scopeType?: 'group' | 'student';
   groupId: string;
   groupName: string;
   studentId?: string;
+  assignmentId?: string;
+  isStandaloneOnlineAssignment?: boolean;
   latestCompletedLesson: Lesson;
   nextLessonDateStr: string;
   nextLessonTimeStr: string;
@@ -299,6 +305,7 @@ export function buildOnlineAwareHomeworkFollowUps(params: {
       groupId: `student_${scopeId}`,
       groupName: matchedStudent?.name || lesson.studentName || lesson.quickStudentName || lesson.title,
       studentId: matchedStudent?.id || lesson.studentId,
+      assignmentId: linkInfo.assignmentId,
       latestCompletedLesson: lesson,
       nextLessonDateStr: nextLesson?.date || '',
       nextLessonTimeStr: nextLesson?.time || '',
@@ -317,4 +324,193 @@ export function buildOnlineAwareHomeworkFollowUps(params: {
     if (aPriority !== bPriority) return bPriority - aPriority;
     return (b.needsFollowUpCount || 0) - (a.needsFollowUpCount || 0);
   });
+}
+
+export interface SeparatedHomeworkTrackingLists {
+  normalFollowUps: PendingFollowUp[];
+  onlineFollowUps: PendingFollowUp[];
+}
+
+/**
+ * Separates Dashboard Homework Tracking items into two strictly disjoint lists:
+ * - `normalFollowUps`: Only regular/offline homework follow-up items (`hasOnlineHomework: false`),
+ *   preserving traditional schedule-window tracking without mixing any online homework data.
+ * - `onlineFollowUps`: Only online homework assignments and their tracking information (`hasOnlineHomework: true`),
+ *   including lesson-linked online assignments and standalone active online assignments owned by the teacher.
+ *
+ * Performs 0 Firestore reads; operates purely on in-memory / local state.
+ */
+export function buildSeparatedHomeworkTrackingLists(params: {
+  lessons: Lesson[];
+  groups: Group[];
+  students: Student[];
+  assignments: HomeworkAssignment[];
+  submissions: HomeworkSubmission[];
+  currentOwnerUid?: string | null;
+  deletedAssignmentIds?: Set<string>;
+  revokedShortIds?: Set<string>;
+  ignoreBrowserLocalFlags?: boolean;
+  now?: Date;
+}): SeparatedHomeworkTrackingLists {
+  const {
+    lessons,
+    groups,
+    students,
+    assignments,
+    submissions,
+    currentOwnerUid,
+    deletedAssignmentIds,
+    revokedShortIds,
+    ignoreBrowserLocalFlags = false,
+    now = new Date()
+  } = params;
+
+  const activeGroups = (groups || []).filter((g) => g && !g.deleted && g.status !== 'archived');
+  const activeStudents = (students || []).filter((s) => s && !s.deleted && s.status !== 'archived');
+
+  // 1. Normal Homework: regular/offline homework items only (exclude lessons whose follow-up is an online homework assignment)
+  const rawTraditional = getPendingHomeworkFollowUps(lessons, activeGroups);
+  const normalFollowUps: PendingFollowUp[] = rawTraditional
+    .filter((item) => !item.latestCompletedLesson?.report?.onlineHomeworkAssignmentId?.trim())
+    .map((item) => ({
+      ...item,
+      scopeType: 'group',
+      hasOnlineHomework: false,
+      onlineLinkValidation: null,
+      onlineFollowUpSummary: null,
+      needsFollowUpCount: 0
+    }));
+
+  // 2. Online Homework: start with lesson-linked online homework items from buildOnlineAwareHomeworkFollowUps
+  const allCombined = buildOnlineAwareHomeworkFollowUps(params);
+  const onlineFollowUps: PendingFollowUp[] = [];
+  const seenAssignmentIds = new Set<string>();
+
+  for (const item of allCombined) {
+    if (!item.hasOnlineHomework || !item.onlineLinkValidation) continue;
+    const hwId = (
+      item.onlineLinkValidation.assignmentId ||
+      item.latestCompletedLesson?.report?.onlineHomeworkAssignmentId ||
+      ''
+    ).trim();
+    if (hwId) {
+      seenAssignmentIds.add(hwId);
+      seenAssignmentIds.add(sanitizeDocId(hwId));
+    }
+    onlineFollowUps.push({
+      ...item,
+      hasOnlineHomework: true,
+      assignmentId: hwId || item.assignmentId
+    });
+  }
+
+  // 3. Also include any active/owned online assignments not yet linked to a lesson follow-up item
+  const cleanCurrentUid = (currentOwnerUid || '').trim();
+  const todayStr = formatLocalDate(now);
+
+  for (const hw of assignments || []) {
+    if (!hw || !hw.id || (hw as any).deleted || hw.status === 'deleted') continue;
+    const safeId = sanitizeDocId(hw.id);
+    if (seenAssignmentIds.has(hw.id) || seenAssignmentIds.has(safeId)) continue;
+
+    const validation = isOnlineHomeworkValid(hw, {
+      currentOwnerUid: cleanCurrentUid || undefined,
+      deletedIds: deletedAssignmentIds,
+      revokedShortIds,
+      ignoreBrowserLocalFlags
+    });
+
+    if (validation.status === 'unauthorized' || validation.status === 'deleted') {
+      continue;
+    }
+
+    seenAssignmentIds.add(hw.id);
+    seenAssignmentIds.add(safeId);
+
+    const matchedGroup =
+      hw.groupId && hw.groupId !== 'all'
+        ? activeGroups.find((g) => g.id === hw.groupId) || null
+        : null;
+
+    // Look for any recent lesson referencing this assignment or group for attendance context
+    const linkedLesson =
+      (lessons || [])
+        .filter(
+          (l) =>
+            l &&
+            !l.deleted &&
+            l.status !== 'cancelled' &&
+            (l.report?.onlineHomeworkAssignmentId === hw.id ||
+              sanitizeDocId(l.report?.onlineHomeworkAssignmentId || '') === safeId)
+        )
+        .sort((a, b) => compareLessonsChronologically(b, a))[0] || null;
+
+    // Skip if that linked lesson was already marked follow-up done
+    if (linkedLesson?.homeworkFollowUpSentAt) {
+      continue;
+    }
+
+    const summary = evaluateOnlineHomeworkFollowUp(
+      hw,
+      submissions,
+      activeStudents,
+      linkedLesson
+    );
+
+    const syntheticLesson: any =
+      linkedLesson || {
+        id: `online_hw_lesson_${hw.id}`,
+        groupId: matchedGroup?.id || hw.groupId || 'quick_group',
+        groupName: matchedGroup?.name || hw.groupName || hw.title,
+        title: hw.title,
+        date: (hw.createdAt || '').slice(0, 10) || todayStr,
+        time: '00:00',
+        durationMinutes: 60,
+        status: 'completed',
+        type: 'online',
+        report: {
+          studentAttendance: {},
+          onlineHomeworkAssignmentId: hw.id,
+          onlineHomeworkShortId: hw.shortId,
+          onlineHomeworkTitle: hw.title
+        } as any
+      };
+
+    onlineFollowUps.push({
+      scopeType: matchedGroup ? 'group' : 'student',
+      groupId: matchedGroup ? matchedGroup.id : `online_hw_${hw.id}`,
+      groupName: matchedGroup?.name || hw.groupName || hw.title,
+      assignmentId: hw.id,
+      isStandaloneOnlineAssignment: !linkedLesson,
+      latestCompletedLesson: syntheticLesson,
+      nextLessonDateStr: '',
+      nextLessonTimeStr: '',
+      isToday: false,
+      isTomorrow: false,
+      hasOnlineHomework: true,
+      onlineLinkValidation: validation,
+      onlineFollowUpSummary: summary,
+      needsFollowUpCount: summary?.needsFollowUpCount || 0
+    });
+  }
+
+  onlineFollowUps.sort((a, b) => {
+    const aPriority = (a.needsFollowUpCount || 0) > 0 ? 1 : 0;
+    const bPriority = (b.needsFollowUpCount || 0) > 0 ? 1 : 0;
+    if (aPriority !== bPriority) return bPriority - aPriority;
+    return (b.needsFollowUpCount || 0) - (a.needsFollowUpCount || 0);
+  });
+
+  return {
+    normalFollowUps,
+    onlineFollowUps
+  };
+}
+
+export function getHomeworkTrackingItemsByMode(
+  params: Parameters<typeof buildSeparatedHomeworkTrackingLists>[0],
+  mode: HomeworkTrackingMode
+): PendingFollowUp[] {
+  const { normalFollowUps, onlineFollowUps } = buildSeparatedHomeworkTrackingLists(params);
+  return mode === 'online' ? onlineFollowUps : normalFollowUps;
 }
