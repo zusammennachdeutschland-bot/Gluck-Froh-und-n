@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
 import { GraduationCap } from 'lucide-react';
 
+const BASE_URL =
+  ((import.meta as any)?.env?.BASE_URL as string | undefined) || '/';
+
 export const HERR_ABDULRAHMAN_LOGO_SRC =
-  '/assets/aistudio/logo-removebg-preview__1__1a8a6028.png';
+  `${BASE_URL}assets/brand/teacher-crest-logo.png`;
 
 type CrestSize = 'xs' | 'sm' | 'card' | 'md' | 'lg';
 

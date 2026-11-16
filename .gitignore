@@ -14,4 +14,9 @@ android/app/release.keystore.b64
 *.keystore.b64
 *.jks
 *.jks.b64
-
+/public/assets/aistudio/
+/.aistudio/
+/.ai-studio-attachments/
+/chat-attachments/
+/conversation-attachments/
+/android/app/src/main/assets/public/assets/aistudio/

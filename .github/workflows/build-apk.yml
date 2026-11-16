@@ -162,6 +162,7 @@ jobs:
             echo "ERROR: Web build failed - dist/index.html missing!"
             exit 1
           fi
+          node scripts/verify_no_aistudio_attachments.cjs --build
           echo "Web build successfully verified in dist/."
 
       - name: Sync Capacitor Android
@@ -173,6 +174,7 @@ jobs:
             echo "ERROR: Capacitor sync failed - android assets missing!"
             exit 1
           fi
+          node scripts/verify_no_aistudio_attachments.cjs --android
           echo "Android public assets verified."
 
       - name: Setup Gradle

@@ -1,10 +1,44 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import fs from 'fs';
 import path from 'path';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export const CANONICAL_APP_VERSION = '3.0.0';
+
+const ISOLATED_ATTACHMENT_PUBLIC_SUBDIRS = [
+  ['assets', 'aistudio'],
+  ['chat-attachments'],
+  ['conversation-attachments'],
+];
+
+function excludeAiStudioAttachmentsPlugin(): Plugin {
+  let resolvedOutDir = path.resolve(__dirname, 'dist');
+  const stripIsolatedDirs = () => {
+    for (const segments of ISOLATED_ATTACHMENT_PUBLIC_SUBDIRS) {
+      const target = path.join(resolvedOutDir, ...segments);
+      if (fs.existsSync(target)) {
+        fs.rmSync(target, { recursive: true, force: true });
+      }
+    }
+  };
+
+  return {
+    name: 'exclude-aistudio-attachments',
+    apply: 'build',
+    enforce: 'pre',
+    configResolved(config) {
+      resolvedOutDir = path.resolve(config.root, config.build.outDir);
+    },
+    writeBundle() {
+      stripIsolatedDirs();
+    },
+    closeBundle() {
+      stripIsolatedDirs();
+    },
+  };
+}
 
 export default defineConfig(() => {
   const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
@@ -25,6 +59,7 @@ export default defineConfig(() => {
       __APP_BUILD_TIME__: JSON.stringify(buildTime)
     },
     plugins: [
+      excludeAiStudioAttachmentsPlugin(),
       react(), 
       tailwindcss(),
       ...(!isCI ? [
@@ -71,6 +106,7 @@ export default defineConfig(() => {
           },
           workbox: {
             globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,ttf}'],
+            globIgnores: ['**/assets/aistudio/**', 'assets/aistudio/**', '**/chat-attachments/**', '**/conversation-attachments/**'],
             runtimeCaching: [
               {
                 urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,

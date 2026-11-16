@@ -4,7 +4,7 @@ const sharp = require('sharp');
 
 const SOURCE_LOGO_PATH = path.join(
   __dirname,
-  '../public/assets/aistudio/logo-removebg-preview__1__1a8a6028.png'
+  '../public/assets/brand/teacher-crest-logo.png'
 );
 
 // Notification small icon / Web notification monochrome white silhouette (24x24 viewport)

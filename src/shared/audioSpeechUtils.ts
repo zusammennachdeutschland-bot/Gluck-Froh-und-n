@@ -65,7 +65,7 @@ if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
 }
 
 /**
- * HTML5 Audio Fallback via Google Translate TTS for 100% reliable web pronunciation
+ * HTML5 Audio Fallback via Backend Proxy (/api/tts) for 100% reliable web pronunciation
  */
 const playAudioFallback = (cleanText: string, rate: number = 0.85): Promise<boolean> => {
   return new Promise((resolve) => {
@@ -74,9 +74,7 @@ const playAudioFallback = (cleanText: string, rate: number = 0.85): Promise<bool
         activeAudio.pause();
         activeAudio = null;
       }
-      const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(
-        cleanText
-      )}&tl=de&client=tw-ob`;
+      const ttsUrl = `/api/tts?text=${encodeURIComponent(cleanText)}&lang=de`;
       const audio = new Audio(ttsUrl);
       activeAudio = audio;
       audio.playbackRate = Math.min(Math.max(rate, 0.5), 1.5);
@@ -175,18 +173,22 @@ export const speakGermanText = async (text: string, rate: number = 0.85) => {
       const germanVoice =
         cachedGermanVoice ||
         voices.find((v) => v.lang === 'de-DE' || v.lang === 'de_DE') ||
-        voices.find((v) => v.lang.startsWith('de'));
+        voices.find((v) => v.lang.startsWith('de')) ||
+        null;
 
       if (germanVoice) {
         cachedGermanVoice = germanVoice;
-        const utterance = new SpeechSynthesisUtterance(cleanText);
-        utterance.lang = 'de-DE';
-        utterance.rate = Math.min(Math.max(rate, 0.4), 1.5);
-        utterance.volume = 1.0;
-        utterance.voice = germanVoice;
-        window.speechSynthesis.speak(utterance);
-        return;
       }
+
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      utterance.lang = 'de-DE';
+      utterance.rate = Math.min(Math.max(rate, 0.4), 1.5);
+      utterance.volume = 1.0;
+      if (germanVoice) {
+        utterance.voice = germanVoice;
+      }
+      window.speechSynthesis.speak(utterance);
+      return;
     } catch (err) {
       console.warn('Web SpeechSynthesis invocation failed, falling back to HTML5 Audio:', err);
     }
@@ -262,30 +264,34 @@ export const speakGermanTextAndWait = (text: string, rate: number = 0.85): Promi
         const germanVoice =
           cachedGermanVoice ||
           voices.find((v) => v.lang === 'de-DE' || v.lang === 'de_DE') ||
-          voices.find((v) => v.lang.startsWith('de'));
+          voices.find((v) => v.lang.startsWith('de')) ||
+          null;
 
         if (germanVoice) {
           cachedGermanVoice = germanVoice;
-          const utterance = new SpeechSynthesisUtterance(cleanText);
-          utterance.lang = 'de-DE';
-          utterance.rate = Math.min(Math.max(rate, 0.4), 1.5);
-          utterance.volume = 1.0;
-          utterance.voice = germanVoice;
-
-          utterance.onend = () => {
-            clearTimeout(safetyTimer);
-            finish();
-          };
-
-          utterance.onerror = () => {
-            clearTimeout(safetyTimer);
-            // try HTML5 audio fallback if utterance errored
-            playAudioFallback(cleanText, rate).then(() => finish());
-          };
-
-          window.speechSynthesis.speak(utterance);
-          return;
         }
+
+        const utterance = new SpeechSynthesisUtterance(cleanText);
+        utterance.lang = 'de-DE';
+        utterance.rate = Math.min(Math.max(rate, 0.4), 1.5);
+        utterance.volume = 1.0;
+        if (germanVoice) {
+          utterance.voice = germanVoice;
+        }
+
+        utterance.onend = () => {
+          clearTimeout(safetyTimer);
+          finish();
+        };
+
+        utterance.onerror = () => {
+          clearTimeout(safetyTimer);
+          // try HTML5 audio fallback if utterance errored
+          playAudioFallback(cleanText, rate).then(() => finish());
+        };
+
+        window.speechSynthesis.speak(utterance);
+        return;
       } catch (err) {
         console.warn('Web SpeechSynthesis invocation failed:', err);
       }
