@@ -1,5 +1,20 @@
-import { LernstudioSet, LernstudioItem } from '../types/lernstudio';
+import {
+  ExerciseSourceOrigin,
+  GrammarExercise,
+  GrammarExerciseType,
+  LernstudioGameMode,
+  LernstudioItem,
+  LernstudioSet,
+  LernstudioSetKind
+} from '../types/lernstudio';
 import { getItemTranslation } from './lernstudioTranslations';
+import {
+  evaluateNormalizedGrammarAnswer,
+  getGrammarLessonExercises,
+  getLocalizedGrammarField,
+  inferSetKind
+} from './grammarEngine';
+import { getSetPlayableItems } from './lernstudioVocabularyAdapter';
 import {
   ALL_VERBS,
   buildVerbConjugationExercise,
@@ -18,7 +33,8 @@ export type GameQuestionModeFilter =
   | 'article'
   | 'audio'
   | 'verb_conjugation'
-  | 'verb_sentence';
+  | 'verb_sentence'
+  | 'grammar';
 
 export interface GameQuestion {
   id: string;
@@ -31,24 +47,284 @@ export interface GameQuestion {
     | 'emoji_vocab'
     | 'scrambled_letters'
     | 'verb_conjugation'
-    | 'verb_sentence';
+    | 'verb_sentence'
+    | 'grammar_exercise';
   prompt: string;
   subPrompt?: string;
   emoji?: string;
   options?: string[];
   correctAnswer: string;
+  acceptedAnswers?: string[];
   explanation?: string;
   itemRef?: LernstudioItem;
   verbRef?: VerbEntry;
   sentencePieces?: string[];
   missingLetterWord?: string;
   subjectLabel?: string;
+  grammarType?: GrammarExerciseType;
+  sentenceWithBlank?: string;
+  faultySentence?: string;
+  tokens?: string[];
+  sourceOrigin?: ExerciseSourceOrigin;
+  isUncertain?: boolean;
 }
 
 export interface BuildDynamicQuestionPoolOptions {
   questionModeFilter?: GameQuestionModeFilter;
   includeVerbExercises?: boolean;
   subjectPoolMode?: 'pronouns_and_names' | 'pronouns_only';
+}
+
+export type GameCompatibilityStatus = 'supported' | 'adapted' | 'unsupported';
+
+export interface GameCompatibilityRule {
+  status: GameCompatibilityStatus;
+  reasonAr: string;
+  reasonDe: string;
+  reasonEn: string;
+}
+
+export interface ResolvedGameCompatibility extends GameCompatibilityRule {
+  isPlayable: boolean;
+  localizedReason: string;
+}
+
+const FULL_NATIVE: GameCompatibilityRule = {
+  status: 'supported',
+  reasonAr: 'مدعومة بالكامل لهذا النوع من المجموعات',
+  reasonDe: 'Für diesen Set-Typ vollständig unterstützt',
+  reasonEn: 'Fully supported for this set type'
+};
+
+const UNSUPPORTED_GRAMMAR_VOCAB_ONLY: GameCompatibilityRule = {
+  status: 'unsupported',
+  reasonAr: 'هذه اللعبة مخصصة لمجموعات المفردات والأفعال ولا تدعم دروس القواعد الخالصة بدون مفردات',
+  reasonDe: 'Dieses Spiel ist für Wortschatz- und Verbsets gedacht und nicht für reine Grammatiksets geeignet',
+  reasonEn: 'This arcade mode is designed for vocabulary/verb sets and is disabled for pure grammar sets'
+};
+
+const ARTICLE_UNSUPPORTED_VERBS: GameCompatibilityRule = {
+  status: 'unsupported',
+  reasonAr: 'لعبة فرز الأدوات (der/die/das) تتطلب أسماء بأدوات تعريف ولا تناسب مجموعات الأفعال فقط',
+  reasonDe: 'Artikelsortierung erfordert Nomen mit Artikeln (nicht für reine Verbgruppen)',
+  reasonEn: 'Article sorting requires nouns with der/die/das articles'
+};
+
+const ARTICLE_UNSUPPORTED_GRAMMAR: GameCompatibilityRule = {
+  status: 'unsupported',
+  reasonAr: 'فرز الأدوات يتطلب مجموعة مفردات أو مجموعة مختلطة تحتوي على أسماء بأدوات',
+  reasonDe: 'Artikelsortierung erfordert mindestens 2 Nomen mit Artikel',
+  reasonEn: 'Requires at least 2 German nouns with der/die/das articles'
+};
+
+const WORD_SPELLING_UNSUPPORTED_GRAMMAR: GameCompatibilityRule = {
+  status: 'unsupported',
+  reasonAr: 'تخمين الحروف حرفاً بحرف مخصص لمجموعات الكلمات والأفعال',
+  reasonDe: 'Buchstaben-Raten ist für Wort- und Verbsets gedacht',
+  reasonEn: 'Letter-by-letter spelling is designed for word and verb sets'
+};
+
+const VOCAB_ONLY_GAME_MODES = new Set<LernstudioGameMode>([
+  'memory',
+  'balloon_pop',
+  'tictactoe',
+  'ultimate_tictactoe',
+  'basket_catch',
+  'space_defense',
+  'whack_a_mole',
+  'tug_of_war',
+  'word_ninja',
+  'bridge_builder',
+  'color_master',
+  'factory_machine',
+  'follow_clues',
+  'island_crossing',
+  'pit_stop',
+  'puzzle_masters',
+  'robot_repair',
+  'rocket_countdown',
+  'space_fleet',
+  'submarine_explore',
+  'target_attack',
+  'team_auction',
+  'tower_architects',
+  'vending_machine',
+  'whats_in_box',
+  'word_rhythm',
+  'word_wash'
+]);
+
+const VOCAB_KINDS_SUPPORTED: Record<LernstudioSetKind, GameCompatibilityRule> = {
+  vocab: FULL_NATIVE,
+  verb_group: FULL_NATIVE,
+  grammar: UNSUPPORTED_GRAMMAR_VOCAB_ONLY,
+  mixed: FULL_NATIVE
+};
+
+/**
+ * Explicit compatibility matrix covering every LernstudioGameMode across all 4 Set kinds.
+ */
+export const GAME_COMPATIBILITY_MAP: Record<
+  LernstudioGameMode,
+  Record<LernstudioSetKind, GameCompatibilityRule>
+> = {
+  hub: { vocab: FULL_NATIVE, verb_group: FULL_NATIVE, grammar: FULL_NATIVE, mixed: FULL_NATIVE },
+  games_portal: { vocab: FULL_NATIVE, verb_group: FULL_NATIVE, grammar: FULL_NATIVE, mixed: FULL_NATIVE },
+  game: { vocab: FULL_NATIVE, verb_group: FULL_NATIVE, grammar: FULL_NATIVE, mixed: FULL_NATIVE },
+  classroom: { vocab: FULL_NATIVE, verb_group: FULL_NATIVE, grammar: FULL_NATIVE, mixed: FULL_NATIVE },
+  wheel: { vocab: FULL_NATIVE, verb_group: FULL_NATIVE, grammar: FULL_NATIVE, mixed: FULL_NATIVE },
+  race: { vocab: FULL_NATIVE, verb_group: FULL_NATIVE, grammar: FULL_NATIVE, mixed: FULL_NATIVE },
+  sentence_builder: { vocab: FULL_NATIVE, verb_group: FULL_NATIVE, grammar: FULL_NATIVE, mixed: FULL_NATIVE },
+  solo_sentence: { vocab: FULL_NATIVE, verb_group: FULL_NATIVE, grammar: FULL_NATIVE, mixed: FULL_NATIVE },
+  sorting: {
+    vocab: FULL_NATIVE,
+    verb_group: ARTICLE_UNSUPPORTED_VERBS,
+    grammar: ARTICLE_UNSUPPORTED_GRAMMAR,
+    mixed: FULL_NATIVE
+  },
+  word_detective: {
+    vocab: FULL_NATIVE,
+    verb_group: FULL_NATIVE,
+    grammar: WORD_SPELLING_UNSUPPORTED_GRAMMAR,
+    mixed: FULL_NATIVE
+  },
+  memory: VOCAB_KINDS_SUPPORTED,
+  balloon_pop: VOCAB_KINDS_SUPPORTED,
+  tictactoe: VOCAB_KINDS_SUPPORTED,
+  ultimate_tictactoe: VOCAB_KINDS_SUPPORTED,
+  basket_catch: VOCAB_KINDS_SUPPORTED,
+  space_defense: VOCAB_KINDS_SUPPORTED,
+  whack_a_mole: VOCAB_KINDS_SUPPORTED,
+  tug_of_war: VOCAB_KINDS_SUPPORTED,
+  word_ninja: VOCAB_KINDS_SUPPORTED,
+  bridge_builder: VOCAB_KINDS_SUPPORTED,
+  color_master: VOCAB_KINDS_SUPPORTED,
+  factory_machine: VOCAB_KINDS_SUPPORTED,
+  follow_clues: VOCAB_KINDS_SUPPORTED,
+  island_crossing: VOCAB_KINDS_SUPPORTED,
+  pit_stop: VOCAB_KINDS_SUPPORTED,
+  puzzle_masters: VOCAB_KINDS_SUPPORTED,
+  robot_repair: VOCAB_KINDS_SUPPORTED,
+  rocket_countdown: VOCAB_KINDS_SUPPORTED,
+  space_fleet: VOCAB_KINDS_SUPPORTED,
+  submarine_explore: VOCAB_KINDS_SUPPORTED,
+  target_attack: VOCAB_KINDS_SUPPORTED,
+  team_auction: VOCAB_KINDS_SUPPORTED,
+  tower_architects: VOCAB_KINDS_SUPPORTED,
+  vending_machine: VOCAB_KINDS_SUPPORTED,
+  whats_in_box: VOCAB_KINDS_SUPPORTED,
+  word_rhythm: VOCAB_KINDS_SUPPORTED,
+  word_wash: VOCAB_KINDS_SUPPORTED
+};
+
+/**
+ * Resolves live game compatibility for a concrete LernstudioSet (including dynamic checks
+ * for articles, grammar exercises, sentence-ordering sentences, and playable pair counts).
+ */
+export function getGameCompatibilityForSet(
+  gameId: LernstudioGameMode,
+  set?: LernstudioSet | null,
+  language: string = 'ar'
+): ResolvedGameCompatibility {
+  const safeLang = (language || 'ar').toLowerCase();
+  const pickReason = (rule: GameCompatibilityRule) =>
+    safeLang === 'de' ? rule.reasonDe : safeLang === 'en' ? rule.reasonEn : rule.reasonAr;
+
+  if (!set) {
+    const emptyRule: GameCompatibilityRule = {
+      status: 'unsupported',
+      reasonAr: 'لا توجد مجموعة مختارة',
+      reasonDe: 'Kein Set ausgewählt',
+      reasonEn: 'No learning set selected'
+    };
+    return { ...emptyRule, isPlayable: false, localizedReason: pickReason(emptyRule) };
+  }
+
+  const kind = inferSetKind(set);
+  const baseRule = GAME_COMPATIBILITY_MAP[gameId]?.[kind] || FULL_NATIVE;
+
+  // Dynamic overrides based on actual set contents
+  if (gameId === 'sorting') {
+    if (!isArticleGameSupported(set)) {
+      const rule = kind === 'verb_group' ? ARTICLE_UNSUPPORTED_VERBS : ARTICLE_UNSUPPORTED_GRAMMAR;
+      return { ...rule, isPlayable: false, localizedReason: pickReason(rule) };
+    }
+    return { ...FULL_NATIVE, isPlayable: true, localizedReason: pickReason(FULL_NATIVE) };
+  }
+
+  if (gameId === 'word_detective' && kind === 'grammar' && (!set.items || set.items.length === 0)) {
+    return {
+      ...WORD_SPELLING_UNSUPPORTED_GRAMMAR,
+      isPlayable: false,
+      localizedReason: pickReason(WORD_SPELLING_UNSUPPORTED_GRAMMAR)
+    };
+  }
+
+  if (gameId === 'sentence_builder' || gameId === 'solo_sentence') {
+    const sQuestions = buildSentenceGameQuestions(set, safeLang);
+    if (sQuestions.length === 0) {
+      const rule: GameCompatibilityRule = {
+        status: 'unsupported',
+        reasonAr: 'لا توجد جمل كافية لترتيب الكلمات في هذه المجموعة',
+        reasonDe: 'Nicht genügend Sätze für die Satzbau-Übung vorhanden',
+        reasonEn: 'Not enough sentences available for sentence ordering'
+      };
+      return { ...rule, isPlayable: false, localizedReason: pickReason(rule) };
+    }
+  }
+
+  if (VOCAB_ONLY_GAME_MODES.has(gameId)) {
+    const realItemsCount = Array.isArray(set.items) ? set.items.length : 0;
+    if (kind === 'grammar' || realItemsCount === 0) {
+      return {
+        ...UNSUPPORTED_GRAMMAR_VOCAB_ONLY,
+        isPlayable: false,
+        localizedReason: pickReason(UNSUPPORTED_GRAMMAR_VOCAB_ONLY)
+      };
+    }
+    if (gameId === 'memory') {
+      const cards = generateMemoryCardsForSet(set, 4, safeLang);
+      if (cards.length < 4) {
+        const rule: GameCompatibilityRule = {
+          status: 'unsupported',
+          reasonAr: 'تتطلب لعبة الذاكرة مفردتين على الأقل للمطابقة',
+          reasonDe: 'Memory benötigt mindestens 2 Vokabelpaare',
+          reasonEn: 'Memory requires at least 2 vocabulary items'
+        };
+        return { ...rule, isPlayable: false, localizedReason: pickReason(rule) };
+      }
+    }
+  }
+
+  const playableCount = getSetPlayableItems(set).length + getGrammarLessonExercises(set).length;
+  if (playableCount === 0) {
+    const emptySetRule: GameCompatibilityRule = {
+      status: 'unsupported',
+      reasonAr: 'المجموعة لا تحتوي على عناصر أو تمارين كافية بعد',
+      reasonDe: 'Dieses Set enthält noch keine spielbaren Inhalte',
+      reasonEn: 'This set does not have playable items or exercises yet'
+    };
+    return { ...emptySetRule, isPlayable: false, localizedReason: pickReason(emptySetRule) };
+  }
+
+  return {
+    ...baseRule,
+    isPlayable: baseRule.status !== 'unsupported',
+    localizedReason: pickReason(baseRule)
+  };
+}
+
+/**
+ * Evaluates a student answer against any GameQuestion using normalized German grammar comparison.
+ */
+export function evaluateGameQuestionAnswer(
+  studentAnswer: string | undefined | null,
+  question: Pick<GameQuestion, 'correctAnswer' | 'acceptedAnswers'>
+): boolean {
+  return evaluateNormalizedGrammarAnswer(studentAnswer, {
+    correctAnswer: question.correctAnswer,
+    acceptedAnswers: question.acceptedAnswers
+  });
 }
 
 /**
@@ -91,9 +367,36 @@ function buildUniqueDistractors(
   return picked;
 }
 
+export function buildGrammarExerciseOptions(
+  ex: GrammarExercise,
+  allGrammarExercises: GrammarExercise[]
+): string[] | undefined {
+  if (ex.type === 'short_answer' || ex.type === 'sentence_ordering') {
+    return undefined;
+  }
+
+  if (Array.isArray(ex.options) && ex.options.length >= 2) {
+    const deduped = Array.from(new Set(ex.options.map((o) => String(o || '').trim()).filter(Boolean)));
+    const hasCorrect = deduped.some(
+      (o) => o.trim().toLowerCase() === ex.correctAnswer.trim().toLowerCase()
+    );
+    return hasCorrect ? deduped : [ex.correctAnswer, ...deduped];
+  }
+
+  const sameTypePeerAnswers = allGrammarExercises
+    .filter((other) => other.id !== ex.id && other.type === ex.type && other.correctAnswer)
+    .map((other) => other.correctAnswer);
+
+  const distractors = buildUniqueDistractors(ex.correctAnswer, sameTypePeerAnswers, [], 3);
+  if (distractors.length >= 1) {
+    return [ex.correctAnswer, ...distractors].sort(() => 0.5 - Math.random());
+  }
+  return undefined;
+}
+
 /**
- * Dynamically builds a rich pool of questions from a Lernstudio set (vocab, verb group, or mixed),
- * combining custom exercises, verb conjugation & verb-in-sentence tasks from the Shared Verb Engine,
+ * Dynamically builds a rich pool of questions from a Lernstudio set (vocab, verb group, grammar, or mixed),
+ * combining grammar exercises, custom exercises, verb conjugation & verb-in-sentence tasks from the Shared Verb Engine,
  * and vocabulary exercises.
  */
 export function buildDynamicQuestionPool(
@@ -103,7 +406,13 @@ export function buildDynamicQuestionPool(
 ): GameQuestion[] {
   const pool: GameQuestion[] = [];
   const items = set.items || [];
-  if (items.length === 0 && (!set.customExercises || set.customExercises.length === 0)) {
+  const grammarExercises = getGrammarLessonExercises(set);
+
+  if (
+    items.length === 0 &&
+    grammarExercises.length === 0 &&
+    (!set.customExercises || set.customExercises.length === 0)
+  ) {
     return pool;
   }
 
@@ -114,8 +423,77 @@ export function buildDynamicQuestionPool(
       ? PRONOUN_ONLY_SUBJECT_PROMPTS
       : SUBJECT_PROMPTS;
 
-  // 1. Incorporate any custom exercises from set (unless filtered strictly to a non-matching verb mode)
-  if (set.customExercises && set.customExercises.length > 0 && modeFilter !== 'article') {
+  // 0. Incorporate unified Grammar Exercises (`grammarContent.exercises` + grammar `customExercises`)
+  if (grammarExercises.length > 0 && (modeFilter === 'mixed' || modeFilter === 'grammar')) {
+    const grammarIdsSeen = new Set<string>();
+    grammarExercises.forEach((ex, idx) => {
+      grammarIdsSeen.add(ex.id);
+      const options = buildGrammarExerciseOptions(ex, grammarExercises);
+      const localizedExplanation =
+        getLocalizedGrammarField(ex as any, 'explanation', safeLang) || ex.explanation;
+
+      const sentencePieces =
+        ex.type === 'sentence_ordering'
+          ? (ex.tokens && ex.tokens.length >= 2
+              ? [...ex.tokens]
+              : ex.correctAnswer.split(/\s+/).filter(Boolean))
+          : undefined;
+
+      pool.push({
+        id: ex.id || `gram_q_${idx}`,
+        type: 'grammar_exercise',
+        grammarType: ex.type,
+        prompt: ex.question || ex.sentenceWithBlank || ex.faultySentence || ex.prompt || '',
+        subPrompt:
+          ex.faultySentence && ex.faultySentence !== ex.question
+            ? ex.faultySentence
+            : ex.prompt && ex.prompt !== ex.question
+            ? ex.prompt
+            : undefined,
+        emoji: '📘',
+        options,
+        correctAnswer: ex.correctAnswer,
+        acceptedAnswers: ex.acceptedAnswers,
+        explanation: localizedExplanation,
+        sentencePieces,
+        sentenceWithBlank: ex.sentenceWithBlank,
+        faultySentence: ex.faultySentence,
+        tokens: ex.tokens,
+        sourceOrigin: ex.source,
+        isUncertain: ex.isUncertain
+      });
+    });
+
+    // Incorporate any remaining non-grammar customExercises (skip already added)
+    if (set.customExercises && set.customExercises.length > 0 && modeFilter !== 'grammar') {
+      set.customExercises.forEach((ex, idx) => {
+        if (grammarIdsSeen.has(ex.id)) return;
+        let options = ex.options;
+        if ((!options || options.length === 0) && ex.correctAnswer) {
+          const words = ex.correctAnswer.split(' ').filter(Boolean);
+          if (words.length >= 2) {
+            const correctSent = ex.correctAnswer;
+            const perm1 = [...words].sort(() => 0.5 - Math.random()).join(' ');
+            const perm2 = [...words].reverse().join(' ');
+            const perm3 = [...words].sort(() => Math.random() - 0.5).join(' ');
+            options = Array.from(new Set([correctSent, perm1, perm2, perm3]))
+              .filter(Boolean)
+              .sort(() => 0.5 - Math.random());
+          }
+        }
+        pool.push({
+          id: ex.id || `custom_${idx}`,
+          type: ex.type as GameQuestion['type'],
+          prompt: ex.question,
+          options,
+          correctAnswer: ex.correctAnswer,
+          acceptedAnswers: ex.acceptedAnswers,
+          explanation: ex.explanation
+        });
+      });
+    }
+  } else if (set.customExercises && set.customExercises.length > 0 && modeFilter !== 'article') {
+    // Legacy customExercises handling for vocab/verb sets
     set.customExercises.forEach((ex, idx) => {
       let options = ex.options;
       if ((!options || options.length === 0) && ex.correctAnswer) {
@@ -133,10 +511,11 @@ export function buildDynamicQuestionPool(
 
       pool.push({
         id: ex.id || `custom_${idx}`,
-        type: ex.type,
+        type: ex.type as GameQuestion['type'],
         prompt: ex.question,
         options,
         correctAnswer: ex.correctAnswer,
+        acceptedAnswers: ex.acceptedAnswers,
         explanation: ex.explanation
       });
     });
@@ -150,7 +529,7 @@ export function buildDynamicQuestionPool(
     .map((it) => (isItemVerb(it) ? resolveVerbFromLernstudioItem(it) : null))
     .filter((v): v is VerbEntry => Boolean(v));
 
-  // 2. Generate questions dynamically for each item
+  // 2. Generate questions dynamically for each vocabulary / verb item
   items.forEach((item, index) => {
     const itemIsVerb = isItemVerb(item) || set.setKind === 'verb_group';
     const verbEntry = itemIsVerb ? resolveVerbFromLernstudioItem(item) : null;
@@ -187,7 +566,6 @@ export function buildDynamicQuestionPool(
         subjectLabel: chosenPrompt.displayLabel
       });
 
-      // Second varied subject (especially named/combined or sie/Sie disambiguation) when specifically practicing conjugation
       if (modeFilter === 'verb_conjugation') {
         const secondPrompt = subjectPool[(index + 7) % subjectPool.length];
         const conjEx2 = buildVerbConjugationExercise(verbEntry, secondPrompt, 4);
@@ -449,7 +827,7 @@ export function buildDynamicQuestionPool(
     }
   });
 
-  // If modeFilter narrowed pool to 0 (e.g., verb_conjugation requested on vocab-only set), fall back to full mixed pool
+  // Fallback if filtered pool is empty
   if (pool.length === 0 && modeFilter !== 'mixed') {
     return buildDynamicQuestionPool(set, language, {
       ...poolOptions,
@@ -489,7 +867,7 @@ export function generateMemoryCards(
     const article = itemIsVerb ? null : item.article || extractGermanArticle(item.german);
     const trans = getItemTranslation(item, safeLang);
 
-    // Card 1: German word + Emoji
+    // Card 1: German word/phrase + Emoji
     cards.push({
       id: `card_de_${item.id}_${index}`,
       pairId,
@@ -501,7 +879,7 @@ export function generateMemoryCards(
       isMatched: false
     });
 
-    // Card 2: Translation
+    // Card 2: Translation / Meaning
     cards.push({
       id: `card_trans_${item.id}_${index}`,
       pairId,
@@ -515,6 +893,18 @@ export function generateMemoryCards(
   });
 
   return cards.sort(() => 0.5 - Math.random());
+}
+
+/**
+ * Generates Memory cards for any Set (including pure Grammar sets using grammar examples/exercises).
+ */
+export function generateMemoryCardsForSet(
+  set: LernstudioSet,
+  pairsCount: number = 6,
+  language: string = 'ar'
+): MemoryCard[] {
+  const playable = getSetPlayableItems(set);
+  return generateMemoryCards(playable, pairsCount, language);
 }
 
 /**
@@ -581,7 +971,7 @@ export interface SentenceGameQuestion {
 }
 
 /**
- * Builds sentence ordering questions from the set's items and custom exercises
+ * Builds sentence ordering questions from grammarContent, custom exercises, and set items.
  */
 export function buildSentenceGameQuestions(
   set: LernstudioSet,
@@ -591,11 +981,67 @@ export function buildSentenceGameQuestions(
   const results: SentenceGameQuestion[] = [];
   const items = set.items || [];
 
+  // 0. From unified Grammar Content (sentence_ordering exercises + grammar examples)
+  const grammarExercises = getGrammarLessonExercises(set);
+  grammarExercises.forEach((ex, idx) => {
+    if (ex.type === 'sentence_ordering' && ex.correctAnswer) {
+      const full = ex.correctAnswer.trim();
+      const words = (ex.tokens && ex.tokens.length >= 2 ? ex.tokens : full.split(/\s+/)).filter(Boolean);
+      if (words.length >= 2) {
+        const shuffled = [...words].sort(() => 0.5 - Math.random());
+        if (shuffled.join(' ') === words.join(' ') && words.length > 1) {
+          shuffled.reverse();
+        }
+        results.push({
+          id: ex.id || `gram_sb_${idx}`,
+          germanFull: full,
+          arabicFull:
+            ex.question.replace(/^رتب.*?:\s*/i, '').trim() ||
+            ex.explanationAr ||
+            (safeLang === 'de' ? 'Ordne die Wörter richtig an' : 'رتّب الكلمات لتكوين الجملة الصحيحة'),
+          words,
+          scrambledWords: shuffled,
+          emoji: '📘',
+          grammarTip:
+            getLocalizedGrammarField(ex as any, 'explanation', safeLang) ||
+            (safeLang === 'de'
+              ? 'Achte auf die Satzstellung im Deutschen.'
+              : 'انتبه لترتيب الفعل والفاعل حسب القاعدة النحوية.')
+        });
+      }
+    }
+  });
+
+  // Add grammar examples as extra sentence-ordering rounds when helpful
+  if (set.grammarContent?.examples && Array.isArray(set.grammarContent.examples)) {
+    set.grammarContent.examples.forEach((eg, idx) => {
+      const full = (eg.german || '').trim();
+      const words = full.split(/\s+/).filter(Boolean);
+      if (words.length >= 3 && words.length <= 12) {
+        if (results.some((r) => r.germanFull.toLowerCase() === full.toLowerCase())) return;
+        const shuffled = [...words].sort(() => 0.5 - Math.random());
+        if (shuffled.join(' ') === words.join(' ') && words.length > 1) {
+          shuffled.reverse();
+        }
+        results.push({
+          id: `gram_eg_sb_${eg.id || idx}`,
+          germanFull: full,
+          arabicFull: eg.arabic || eg.english || full,
+          words,
+          scrambledWords: shuffled,
+          emoji: '💬',
+          grammarTip: eg.noteAr || set.grammarContent?.explanationAr
+        });
+      }
+    });
+  }
+
   // 1. From custom exercises of type 'sentence_builder'
   if (set.customExercises && set.customExercises.length > 0) {
     set.customExercises.forEach((ex, idx) => {
       if (ex.type === 'sentence_builder' && ex.correctAnswer) {
         const full = ex.correctAnswer.trim();
+        if (results.some((r) => r.germanFull.toLowerCase() === full.toLowerCase())) return;
         const words = full.split(/\s+/).filter(Boolean);
         if (words.length >= 3) {
           const shuffled = [...words].sort(() => 0.5 - Math.random());
@@ -635,6 +1081,7 @@ export function buildSentenceGameQuestions(
       const words = item.sentence4Elements.map((w) => w.trim()).filter(Boolean);
       if (words.length >= 3) {
         const full = words.join(' ');
+        if (results.some((r) => r.germanFull.toLowerCase() === full.toLowerCase())) return;
         const shuffled = [...words].sort(() => 0.5 - Math.random());
         const trans = getItemTranslation(item, safeLang);
         results.push({
@@ -703,7 +1150,7 @@ export function buildSentenceGameQuestions(
     }
   });
 
-  // 4. Fallback: Synthesize sentences
+  // 4. Fallback: Synthesize sentences from items
   if (results.length === 0 && items.length > 0) {
     items.slice(0, 8).forEach((item, idx) => {
       const art = isItemVerb(item) ? null : item.article || extractGermanArticle(item.german);

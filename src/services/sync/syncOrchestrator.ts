@@ -22,6 +22,19 @@ import { syncHistoryService } from './syncHistoryService';
 import { negotiateProtocol, adaptOutboundPayloadForPeer } from './protocolNegotiator';
 import { syncEventQueue } from './syncEventQueue';
 import { recalculateAllAccountBalances } from '../financeService';
+import { fetchPeerPageImageManifest, fetchPeerPageImageChunk } from './syncClient';
+import {
+  DEFAULT_PAGE_IMAGE_CHUNK_SIZE,
+  GrammarPageImageChunk,
+  PageImageChunkAssembler,
+  computePageImageChecksum,
+  getAllStoredPageImageRecords,
+  getPageImageRecord,
+  hasPageImageRecord,
+  listStoredPageImageIds,
+  savePageImageRecord,
+  splitPageImageIntoChunks
+} from '../../shared/lernstudioPageImageStore';
 
 export interface SyncDataSource {
   getLocalData: () => Record<string, SyncableRecord[]>;
@@ -411,6 +424,12 @@ export async function runSyncCycle(
     };
 
     await recordSyncHistory(finalReport, trigger, sentCount, receivedCount);
+
+    // Non-blocking background transfer of any missing grammar textbook page images
+    if (!customExchangeDeltasFn) {
+      void syncMissingPageImagesWithPeer({ peer, dataSource }).catch(() => {});
+    }
+
     return { success: true, report: finalReport };
   } catch (error: any) {
     console.error(`Sync cycle failed for peer ${peerId}:`, error);
@@ -573,3 +592,231 @@ export async function forceFullSync(
 
   return runSyncCycle(peerId, dataSource, trigger);
 }
+
+export interface PageImageManifestEntry {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  width?: number;
+  height?: number;
+  createdAt: number;
+  checksum: string;
+  totalChunks: number;
+}
+
+export interface PageImageSyncTransport {
+  fetchManifest: (params: {
+    requestedImageIds: string[];
+    existingImageIds: string[];
+  }) => Promise<{ availableImages: PageImageManifestEntry[] } | null>;
+  fetchChunk: (params: {
+    imageId: string;
+    chunkIndex: number;
+    chunkSizeChars?: number;
+  }) => Promise<GrammarPageImageChunk | null>;
+}
+
+/**
+ * Collects unique referenced textbook page image IDs from local Lernstudio sets & homework assignments.
+ */
+export function collectReferencedPageImageIds(localData: Record<string, any>): string[] {
+  const ids = new Set<string>();
+  const sets = Array.isArray(localData?.lernstudioSets) ? localData.lernstudioSets : [];
+  for (const s of sets) {
+    const refs = s?.grammarContent?.pageImageRefs;
+    if (!Array.isArray(refs)) continue;
+    for (const r of refs) {
+      const id = String(r?.id || r?.localStorageKey || '').trim();
+      if (id) ids.add(id);
+    }
+  }
+  const homeworks = Array.isArray(localData?.homeworkAssignments) ? localData.homeworkAssignments : [];
+  for (const hw of homeworks) {
+    const refs = hw?.setSnapshot?.grammarContent?.pageImageRefs;
+    if (!Array.isArray(refs)) continue;
+    for (const r of refs) {
+      const id = String(r?.id || r?.localStorageKey || '').trim();
+      if (id) ids.add(id);
+    }
+  }
+  return Array.from(ids);
+}
+
+export async function buildLocalPageImageManifest(params?: {
+  requestedImageIds?: string[];
+  existingImageIds?: string[];
+  chunkSizeChars?: number;
+}): Promise<{ availableImages: PageImageManifestEntry[] }> {
+  const chunkSize = Math.max(1024, params?.chunkSizeChars || DEFAULT_PAGE_IMAGE_CHUNK_SIZE);
+  const existingSet = new Set(
+    (Array.isArray(params?.existingImageIds) ? params.existingImageIds : []).map((x) => String(x || '').trim())
+  );
+  const requestedSet =
+    Array.isArray(params?.requestedImageIds) && params.requestedImageIds.length > 0
+      ? new Set(params.requestedImageIds.map((x) => String(x || '').trim()).filter(Boolean))
+      : null;
+
+  const allLocal = await getAllStoredPageImageRecords();
+  const availableImages: PageImageManifestEntry[] = [];
+  for (const rec of allLocal) {
+    if (!rec?.id) continue;
+    if (existingSet.has(rec.id)) continue;
+    if (requestedSet && !requestedSet.has(rec.id)) continue;
+    const checksum = rec.checksum || computePageImageChecksum(rec.base64Data);
+    const totalChunks = Math.max(1, Math.ceil((rec.base64Data || '').length / chunkSize));
+    availableImages.push({
+      id: rec.id,
+      fileName: rec.fileName,
+      mimeType: rec.mimeType || 'image/jpeg',
+      sizeBytes: rec.sizeBytes,
+      ...(typeof rec.width === 'number' ? { width: rec.width } : {}),
+      ...(typeof rec.height === 'number' ? { height: rec.height } : {}),
+      createdAt: rec.createdAt || Date.now(),
+      checksum,
+      totalChunks
+    });
+  }
+  return { availableImages };
+}
+
+export async function getLocalPageImageChunk(params: {
+  imageId: string;
+  chunkIndex: number;
+  chunkSizeChars?: number;
+}): Promise<GrammarPageImageChunk> {
+  const imageId = String(params.imageId || '').trim();
+  const rec = await getPageImageRecord(imageId);
+  if (!rec) {
+    throw new Error(`Page image ${imageId} not found on peer.`);
+  }
+  const chunks = splitPageImageIntoChunks(rec, params.chunkSizeChars || DEFAULT_PAGE_IMAGE_CHUNK_SIZE);
+  const chunkIdx = Number(params.chunkIndex);
+  if (!Number.isInteger(chunkIdx) || chunkIdx < 0 || chunkIdx >= chunks.length) {
+    throw new Error(`Chunk index ${chunkIdx} out of range for ${imageId}.`);
+  }
+  return chunks[chunkIdx];
+}
+
+/**
+ * Transfers any missing grammar textbook page images from a paired peer in bounded chunks,
+ * skipping duplicates, retrying interrupted chunks, and validating checksums prior to saving.
+ * Never throws: failures are reported cleanly without disturbing P2P delta sync.
+ */
+export async function syncMissingPageImagesWithPeer(params: {
+  peer: Pick<PairedPeer, 'deviceId' | 'pairingToken'>;
+  dataSource: SyncDataSource;
+  transport?: PageImageSyncTransport;
+  chunkSizeChars?: number;
+  maxRetriesPerChunk?: number;
+}): Promise<{
+  transferredIds: string[];
+  skippedExistingIds: string[];
+  failedIds: string[];
+  error?: string;
+}> {
+  const transferredIds: string[] = [];
+  const skippedExistingIds: string[] = [];
+  const failedIds: string[] = [];
+  const chunkSizeChars = Math.max(1024, params.chunkSizeChars || DEFAULT_PAGE_IMAGE_CHUNK_SIZE);
+  const maxRetries = Math.max(1, params.maxRetriesPerChunk ?? 3);
+
+  try {
+    const localData = params.dataSource.getLocalData();
+    const referencedIds = collectReferencedPageImageIds(localData);
+    if (referencedIds.length === 0) {
+      return { transferredIds, skippedExistingIds, failedIds };
+    }
+
+    const existingIds = await listStoredPageImageIds();
+    const existingSet = new Set(existingIds);
+    const missingIds: string[] = [];
+    for (const id of referencedIds) {
+      if (existingSet.has(id) || (await hasPageImageRecord(id))) {
+        skippedExistingIds.push(id);
+      } else {
+        missingIds.push(id);
+      }
+    }
+
+    if (missingIds.length === 0) {
+      return { transferredIds, skippedExistingIds, failedIds };
+    }
+
+    const transport: PageImageSyncTransport = params.transport || {
+      fetchManifest: ({ requestedImageIds, existingImageIds }) =>
+        fetchPeerPageImageManifest(params.peer.deviceId, params.peer.pairingToken, requestedImageIds, existingImageIds),
+      fetchChunk: ({ imageId, chunkIndex, chunkSizeChars: sz }) =>
+        fetchPeerPageImageChunk(params.peer.deviceId, params.peer.pairingToken, imageId, chunkIndex, sz)
+    };
+
+    const manifestResp = await transport.fetchManifest({
+      requestedImageIds: missingIds,
+      existingImageIds: existingIds
+    });
+    const availableImages = Array.isArray(manifestResp?.availableImages) ? manifestResp.availableImages : [];
+    if (availableImages.length === 0) {
+      return { transferredIds, skippedExistingIds, failedIds };
+    }
+
+    for (const meta of availableImages) {
+      if (!meta?.id) continue;
+      if (await hasPageImageRecord(meta.id)) {
+        skippedExistingIds.push(meta.id);
+        continue;
+      }
+
+      const assembler = new PageImageChunkAssembler({
+        imageId: meta.id,
+        fileName: meta.fileName,
+        mimeType: meta.mimeType,
+        sizeBytes: meta.sizeBytes,
+        width: meta.width,
+        height: meta.height,
+        createdAt: meta.createdAt,
+        checksum: meta.checksum,
+        totalChunks: meta.totalChunks
+      });
+
+      // Bounded resume loop: retries any missing chunks up to maxRetries attempts
+      for (let round = 0; round < maxRetries; round++) {
+        const missingChunkIndices = assembler.getMissingChunkIndices();
+        if (missingChunkIndices.length === 0) break;
+
+        for (const chunkIdx of missingChunkIndices) {
+          try {
+            const chunk = await transport.fetchChunk({
+              imageId: meta.id,
+              chunkIndex: chunkIdx,
+              chunkSizeChars
+            });
+            if (chunk) {
+              assembler.addChunk(chunk);
+            }
+          } catch {
+            // Retry on next round
+          }
+        }
+      }
+
+      const finalized = assembler.finalizeRecord();
+      if (!finalized.ok) {
+        failedIds.push(meta.id);
+        continue;
+      }
+
+      await savePageImageRecord(finalized.record);
+      transferredIds.push(meta.id);
+    }
+
+    return { transferredIds, skippedExistingIds, failedIds };
+  } catch (err: any) {
+    return {
+      transferredIds,
+      skippedExistingIds,
+      failedIds,
+      error: err?.message || 'Page image P2P transfer failed'
+    };
+  }
+}
+

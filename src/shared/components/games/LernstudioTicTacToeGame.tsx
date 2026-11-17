@@ -3,6 +3,7 @@ import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/l
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
+import { getSetPlayableItems } from '../../../utils/lernstudioVocabularyAdapter';
 import { GameStageBanner } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
 import {
@@ -37,7 +38,7 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const displayTitle = getLocalizedSetTitle(set, language);
-  const items = useMemo(() => set.items || [], [set.items]);
+  const items = useMemo(() => getSetPlayableItems(set), [set]);
   const { triggerSparkles, triggerScorePopup, triggerCelebration, EffectsOverlay, SettingsBar } = useGameEffects(language);
 
   // Board: 9 cells (0 to 8)

@@ -10,6 +10,7 @@ import {
   isGreetingOrPoliteTerm
 } from './lernstudioDistractors';
 import { getVerbByInfinitive } from './verbEngine';
+import { hasGrammarContent, getGrammarLessonExercises } from './grammarEngine';
 
 // ==========================================
 // 0. BUILD STAMP & PAGE CONSTANTS
@@ -727,6 +728,36 @@ export interface WorksheetData {
     isNumberSet: boolean;
   };
   sentenceOrder?: SentenceOrderQuestion[];
+  grammarGuide?: {
+    lessonTitleDe: string;
+    lessonTitleAr: string;
+    explanationDe?: string;
+    explanationAr?: string;
+    rules: {
+      titleDe: string;
+      titleAr: string;
+      explanationDe: string;
+      explanationAr: string;
+      pattern?: string;
+      table?: { headers: string[]; rows: string[][] };
+    }[];
+    examples: {
+      german: string;
+      arabic: string;
+      noteAr?: string;
+    }[];
+  };
+  grammarLessonExercises?: {
+    number: number;
+    type: string;
+    promptDe: string;
+    promptAr: string;
+    options?: string[];
+    wordBank?: string[];
+    correctAnswer: string;
+    explanationDe?: string;
+    explanationAr?: string;
+  }[];
   vocabularyTable?: {
     showArticles: boolean;
     showPlural: boolean;
@@ -779,7 +810,12 @@ export function buildWorksheetData(
   const result: WorksheetData = {
     buildId: WORKSHEET_BUILD_ID,
     title: cleanTitle,
-    titleArabic: stripCopySuffix(set.titleTranslations?.ar || set.topicTranslations?.ar || 'ورقة عمل تعليمية'),
+    titleArabic: stripCopySuffix(
+      set.titleTranslations?.ar ||
+        set.topicTranslations?.ar ||
+        set.grammarContent?.lessonTitleAr ||
+        'ورقة عمل تعليمية'
+    ),
     level: set.level || 'A1',
     grade: safeGrade,
     topic: cleanTopic,
@@ -1305,6 +1341,48 @@ export function buildWorksheetData(
     };
   }
 
+  // -------------------------------------------------------------
+  // UNIFIED GRAMMAR LESSON GUIDE & EXERCISES (for grammar & mixed sets)
+  // -------------------------------------------------------------
+  if (hasGrammarContent(set) && set.grammarContent) {
+    const gc = set.grammarContent;
+    result.grammarGuide = {
+      lessonTitleDe: gc.lessonTitleDe || cleanTitle,
+      lessonTitleAr: gc.lessonTitleAr || result.titleArabic,
+      explanationDe: gc.explanationDe || undefined,
+      explanationAr: gc.explanationAr || undefined,
+      rules: (gc.rules || []).map((r) => ({
+        titleDe: r.titleDe || r.title || r.titleAr || 'Regel',
+        titleAr: r.titleAr || r.title || r.titleDe || 'قاعدة',
+        explanationDe: r.summaryDe || '',
+        explanationAr: r.summaryAr || '',
+        pattern: r.pattern || undefined,
+        table: r.table && Array.isArray(r.table.headers) && r.table.headers.length > 0 ? r.table : undefined
+      })),
+      examples: (gc.examples || []).map((ex) => ({
+        german: ex.german,
+        arabic: ex.arabic,
+        noteAr: ex.noteAr || ex.noteDe || undefined
+      }))
+    };
+
+    const lessonExercises = getGrammarLessonExercises(set);
+    if (lessonExercises.length > 0) {
+      const selectedExercises = lessonExercises.slice(0, Math.max(questionsLimit, 10));
+      result.grammarLessonExercises = selectedExercises.map((ex, idx) => ({
+        number: idx + 1,
+        type: ex.type,
+        promptDe: ex.question,
+        promptAr: ex.prompt || '',
+        options: Array.isArray(ex.options) && ex.options.length > 0 ? ex.options : undefined,
+        wordBank: Array.isArray(ex.tokens) && ex.tokens.length > 0 ? ex.tokens : undefined,
+        correctAnswer: ex.correctAnswer,
+        explanationDe: ex.explanationDe || undefined,
+        explanationAr: ex.explanationAr || undefined
+      }));
+    }
+  }
+
   return result;
 }
 
@@ -1765,6 +1843,52 @@ export function getWorksheetCss(): string {
       font-weight: 800 !important;
       font-size: 12px !important;
     }
+
+    .grammar-guide-card {
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin-bottom: 8px;
+      background: #f8fafc;
+    }
+
+    .grammar-pattern-chip {
+      display: inline-block;
+      font-family: monospace;
+      font-size: 12px;
+      font-weight: 800;
+      color: #1e40af;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 5px;
+      padding: 2px 7px;
+      margin-top: 3px;
+    }
+
+    .grammar-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 6px;
+    }
+
+    .grammar-table th, .grammar-table td {
+      border: 1px solid #cbd5e1;
+      padding: 4px 8px;
+      font-size: 12px;
+      text-align: left;
+    }
+
+    .grammar-table th {
+      background: #e2e8f0;
+      font-weight: 800;
+      color: #111827;
+    }
+
+    .grammar-ex-card {
+      padding: 6px 4px;
+      border-bottom: 1px dotted #d1d5db;
+      margin-bottom: 6px;
+    }
   `;
 }
 
@@ -1821,6 +1945,193 @@ export function buildWorksheetBlocks(
   });
 
   let exerciseCounter = 1;
+
+  // -------------------------------------------------------------
+  // GRAMMAR LESSON GUIDE (Rules, Tables & Bilingual Examples)
+  // -------------------------------------------------------------
+  if (data.grammarGuide) {
+    const gg = data.grammarGuide;
+    if (gg.explanationDe || gg.explanationAr || gg.rules.length > 0) {
+      blocks.push({
+        id: 'grammar_guide_title',
+        type: 'ex_title',
+        exerciseId: 'grammar_guide',
+        height: 54,
+        html: `
+          <div class="ws-block exercise-header-block" data-block-id="grammar_guide_title">
+            <div style="display: flex; align-items: center;">
+              <span class="ex-num-badge">G</span>
+              <div class="ex-instructions">
+                <div class="ex-instr-de de-text" dir="ltr">${escapeHtml(gg.lessonTitleDe)} — Grammatik-Regeln</div>
+                <div class="ex-instr-ar ar-text" dir="rtl">${escapeHtml(gg.lessonTitleAr)} — ملخص القاعدة والشرح</div>
+              </div>
+            </div>
+            <span class="ex-points">(${gg.rules.length} Regeln)</span>
+          </div>
+        `
+      });
+
+      if (gg.explanationDe || gg.explanationAr) {
+        blocks.push({
+          id: 'grammar_guide_overview',
+          type: 'question',
+          exerciseId: 'grammar_guide',
+          height: 82,
+          html: `
+            <div class="ws-block grammar-guide-card" data-block-id="grammar_guide_overview">
+              ${gg.explanationDe ? `<div class="de-text" dir="ltr" style="font-size: 12px; font-weight: 700; color: #111827; margin-bottom: 3px;">${escapeHtml(gg.explanationDe)}</div>` : ''}
+              ${gg.explanationAr ? `<div class="ar-text" dir="rtl" style="font-size: 12px; font-weight: 600; color: #374151;">${escapeHtml(gg.explanationAr)}</div>` : ''}
+            </div>
+          `
+        });
+      }
+
+      gg.rules.forEach((rule, rIdx) => {
+        const tableRowsHtml = rule.table
+          ? `
+            <table class="grammar-table de-text" dir="ltr">
+              <thead>
+                <tr>${rule.table.headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr>
+              </thead>
+              <tbody>
+                ${rule.table.rows.map((row) => `<tr>${row.map((c) => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('')}
+              </tbody>
+            </table>
+          `
+          : '';
+        const estH = 74 + (rule.pattern ? 24 : 0) + (rule.table ? 32 + rule.table.rows.length * 26 : 0);
+        blocks.push({
+          id: `grammar_rule_${rIdx + 1}`,
+          type: 'question',
+          exerciseId: 'grammar_guide',
+          height: Math.min(estH, 420),
+          html: `
+            <div class="ws-block grammar-guide-card" data-block-id="grammar_rule_${rIdx + 1}">
+              <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 10px;">
+                <span class="de-text" dir="ltr" style="font-size: 13px; font-weight: 800; color: #1e40af;">${rIdx + 1}. ${escapeHtml(rule.titleDe)}</span>
+                <span class="ar-text" dir="rtl" style="font-size: 12px; font-weight: 700; color: #1f2937;">${escapeHtml(rule.titleAr)}</span>
+              </div>
+              ${rule.pattern ? `<div><span class="grammar-pattern-chip de-text" dir="ltr">${escapeHtml(rule.pattern)}</span></div>` : ''}
+              ${rule.explanationDe ? `<div class="de-text" dir="ltr" style="font-size: 12px; color: #111827; margin-top: 4px;">${escapeHtml(rule.explanationDe)}</div>` : ''}
+              ${rule.explanationAr ? `<div class="ar-text" dir="rtl" style="font-size: 12px; color: #374151; margin-top: 2px;">${escapeHtml(rule.explanationAr)}</div>` : ''}
+              ${tableRowsHtml}
+            </div>
+          `
+        });
+      });
+
+      if (gg.examples.length > 0) {
+        const shownExamples = gg.examples.slice(0, 6);
+        const rowsHtml = shownExamples
+          .map(
+            (ex, idx) => `
+              <div style="display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; border-bottom: 1px dotted #e5e7eb;">
+                <span class="de-text" dir="ltr" style="font-size: 12px; font-weight: 700; color: #111827;">${idx + 1}. ${escapeHtml(ex.german)}</span>
+                <span class="ar-text" dir="rtl" style="font-size: 12px; font-weight: 600; color: #374151;">${escapeHtml(ex.arabic)}</span>
+              </div>
+            `
+          )
+          .join('');
+        blocks.push({
+          id: 'grammar_examples_box',
+          type: 'question',
+          exerciseId: 'grammar_guide',
+          height: 44 + shownExamples.length * 28,
+          html: `
+            <div class="ws-block grammar-guide-card" data-block-id="grammar_examples_box">
+              <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 800; color: #1e40af; margin-bottom: 4px;">
+                <span class="de-text" dir="ltr">Beispiele</span>
+                <span class="ar-text" dir="rtl">أمثلة تطبيقية</span>
+              </div>
+              ${rowsHtml}
+            </div>
+          `
+        });
+      }
+    }
+  }
+
+  // -------------------------------------------------------------
+  // GRAMMAR LESSON INTERACTIVE EXERCISES (MCQ / Fill Blank / Ordering / Correction)
+  // -------------------------------------------------------------
+  if (data.grammarLessonExercises && data.grammarLessonExercises.length > 0) {
+    const exNum = exerciseCounter++;
+    const exId = `ex_${exNum}_grammar_lesson`;
+    const answersList: string[] = [];
+
+    blocks.push({
+      id: `${exId}_title`,
+      type: 'ex_title',
+      exerciseId: exId,
+      height: 48,
+      html: `
+        <div class="ws-block exercise-header-block" data-block-id="${exId}_title">
+          <div style="display: flex; align-items: center;">
+            <span class="ex-num-badge">${exNum}</span>
+            <div class="ex-instructions">
+              <div class="ex-instr-de de-text" dir="ltr">Grammatik-Übungen zum Thema</div>
+              <div class="ex-instr-ar ar-text" dir="rtl">تدريبات القواعد التفاعلية على الدرس:</div>
+            </div>
+          </div>
+          <span class="ex-points">(${data.grammarLessonExercises.length} Punkte)</span>
+        </div>
+      `
+    });
+
+    data.grammarLessonExercises.forEach((q) => {
+      answersList.push(`${q.number}) ${q.correctAnswer}`);
+      const qBlockId = `${exId}_q_${q.number}`;
+
+      let bodyHtml = '';
+      let estH = 66;
+      if (q.options && q.options.length > 0) {
+        const letters = ['A', 'B', 'C', 'D', 'E', 'F'];
+        const optsHtml = q.options
+          .map((opt, oIdx) => {
+            const isCorrectOpt = isTeacher && opt.trim().toLowerCase() === q.correctAnswer.trim().toLowerCase();
+            return `
+              <div class="option-btn de-text ${isCorrectOpt ? 'option-correct' : ''}" dir="ltr" style="font-size: 12px;">
+                <strong>${letters[oIdx] || oIdx + 1})</strong> ${escapeHtml(opt)}
+              </div>
+            `;
+          })
+          .join('');
+        bodyHtml = `<div class="options-grid" style="margin-top: 4px;">${optsHtml}</div>`;
+        estH += Math.ceil(q.options.length / 2) * 28;
+      } else if (q.wordBank && q.wordBank.length > 0) {
+        const chipsHtml = q.wordBank.map((w) => `<span class="chip-text">${escapeHtml(w)}</span>`).join('<span class="chip-sep">/</span>');
+        bodyHtml = `
+          <div class="de-text" dir="ltr" style="margin-top: 4px; font-size: 12px;">${chipsHtml}</div>
+          <div style="margin-top: 4px; font-size: 12px; font-weight: 700;">Antwort: <span class="writing-line-tall" style="min-width: 440px;"></span></div>
+        `;
+        estH += 46;
+      } else {
+        bodyHtml = `
+          <div style="margin-top: 4px; font-size: 12px; font-weight: 700;">Antwort: <span class="writing-line-tall" style="min-width: 440px;"></span></div>
+        `;
+        estH += 24;
+      }
+
+      blocks.push({
+        id: qBlockId,
+        type: 'question',
+        exerciseId: exId,
+        height: estH + (isTeacher ? 20 : 0),
+        html: `
+          <div class="ws-block grammar-ex-card" data-block-id="${qBlockId}">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 10px;">
+              <span class="de-text" dir="ltr" style="font-size: 13px; font-weight: 800; color: #111827;">${q.number}) ${escapeHtml(q.promptDe)}</span>
+              ${q.promptAr ? `<span class="ar-text" dir="rtl" style="font-size: 12px; font-weight: 700; color: #374151;">${escapeHtml(q.promptAr)}</span>` : ''}
+            </div>
+            ${bodyHtml}
+            ${isTeacher ? `<div class="teacher-answer de-text" dir="ltr" style="margin-top: 4px;">[Lösung: ${escapeHtml(q.correctAnswer)}]</div>` : ''}
+          </div>
+        `
+      });
+    });
+
+    answerKeyEntries.push({ exName: `Übung ${exNum} (Grammatik-Aufgaben)`, answers: answersList });
+  }
 
   // -------------------------------------------------------------
   // EXERCISE 1: MATCHING (2-Column Grid Side-by-Side)

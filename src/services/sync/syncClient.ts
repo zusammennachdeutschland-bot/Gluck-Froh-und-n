@@ -97,3 +97,31 @@ export async function exchangeDeltas(
   }
 }
 
+export async function fetchPeerPageImageManifest(
+  target: string,
+  token: string,
+  requestedImageIds: string[],
+  existingImageIds: string[]
+) {
+  return await peerNetwork.fetch(
+    target,
+    '/api/sync/page-images/manifest',
+    { token, requestedImageIds, existingImageIds },
+    8000
+  );
+}
+
+export async function fetchPeerPageImageChunk(
+  target: string,
+  token: string,
+  imageId: string,
+  chunkIndex: number,
+  chunkSizeChars?: number
+) {
+  return await peerNetwork.fetch(
+    target,
+    '/api/sync/page-images/chunk',
+    { token, imageId, chunkIndex, chunkSizeChars },
+    10000
+  );
+}

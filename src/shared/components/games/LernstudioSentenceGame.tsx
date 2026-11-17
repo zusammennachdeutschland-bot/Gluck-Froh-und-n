@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { LernstudioSet, LernstudioTheme, TeamScore } from '../../../types/lernstudio';
 import { buildSentenceGameQuestions, SentenceGameQuestion } from '../../../utils/lernstudioQuestionAdapter';
+import { evaluateNormalizedGrammarAnswer } from '../../grammarEngine';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedTeamName } from '../../../utils/lernstudioTranslations';
@@ -104,7 +105,7 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
 
     const expectedSentence = currentQ.germanFull.replace(/\s+/g, ' ').trim();
 
-    if (constructedSentence === expectedSentence) {
+    if (evaluateNormalizedGrammarAnswer(constructedSentence, { correctAnswer: expectedSentence })) {
       setCheckedState('correct');
       playLernstudioSound('correct');
       triggerSparkles(50, 45, '#10b981');

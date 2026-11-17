@@ -30,6 +30,7 @@ import { syncTodayLessonsToWidget } from '../services/widgetService';
 import { runSyncMigration } from '../services/sync/syncMigration';
 import { trackLocalMutation, trackLocalDeletion, getActiveRecords, detectLocalOriginPlatform } from '../services/sync/mutationTracker';
 import { hydrateVerbGroupSet } from '../shared/verbGroupSync';
+import { normalizeLernstudioSet, stripHeavyGrammarMediaForSync } from '../shared/grammarEngine';
 import {
   mergeEntities,
   mergeRecentlyDeleted,
@@ -1064,21 +1065,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const enrichedSaved = nonLegacySaved.map((s: LernstudioSet) => {
         const defaultMatch = DEFAULT_LERNSTUDIO_SETS.find((ds) => ds.id === s.id);
         if (defaultMatch) {
-          return {
+          return normalizeLernstudioSet({
             ...defaultMatch,
             ...s,
             grade: s.grade || defaultMatch.grade,
+            setKind: s.setKind || defaultMatch.setKind,
+            contentOrigin: s.contentOrigin || defaultMatch.contentOrigin,
+            grammarContent: s.grammarContent || defaultMatch.grammarContent,
             titleTranslations: s.titleTranslations || defaultMatch.titleTranslations,
             topicTranslations: s.topicTranslations || defaultMatch.topicTranslations,
             descriptionTranslations: s.descriptionTranslations || defaultMatch.descriptionTranslations
-          };
+          });
         }
-        return s;
+        return normalizeLernstudioSet(s);
       });
 
-      rawSets = [...enrichedSaved, ...missingDefaults];
+      rawSets = [...enrichedSaved, ...missingDefaults.map((ds) => normalizeLernstudioSet(ds))];
     } else {
-      rawSets = DEFAULT_LERNSTUDIO_SETS;
+      rawSets = DEFAULT_LERNSTUDIO_SETS.map((ds) => normalizeLernstudioSet(ds));
     }
 
     // Deduplicate by stable ID only. Different teachers may intentionally create
@@ -1126,11 +1130,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
            getCurrentHomeworkOwnerUid() ||
            undefined);
 
-      const mutated = wrapMutation({
-        ...newSet,
-        ...(resolvedCreatorName ? { createdByTeacherName: resolvedCreatorName } : {}),
-        ...(resolvedCreatorUid ? { createdByUid: resolvedCreatorUid } : {})
-      });
+      const cleanedNewSet = normalizeLernstudioSet(
+        stripHeavyGrammarMediaForSync({
+          ...newSet,
+          contentOrigin: isBuiltin ? 'builtin' : newSet.contentOrigin || existing?.contentOrigin || 'teacher_created',
+          ...(resolvedCreatorName ? { createdByTeacherName: resolvedCreatorName } : {}),
+          ...(resolvedCreatorUid ? { createdByUid: resolvedCreatorUid } : {})
+        })
+      );
+
+      const mutated = wrapMutation(cleanedNewSet);
 
       let updated: LernstudioSet[];
       if (existing) {
@@ -8277,7 +8286,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             if (item.deleted) {
               existingMap.delete(item.id);
             } else {
-              existingMap.set(item.id, hydrateVerbGroupSet(item as LernstudioSet));
+              existingMap.set(item.id, normalizeLernstudioSet(hydrateVerbGroupSet(item as LernstudioSet)));
             }
           }
           const finalSets = Array.from(existingMap.values());

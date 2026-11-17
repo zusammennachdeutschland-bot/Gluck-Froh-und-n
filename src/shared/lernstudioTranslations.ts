@@ -292,6 +292,32 @@ export interface LernstudioTranslations {
   teamNumber: string;
   turnNowOn: string;
   teamQuestion: string;
+
+  // Unified Grammar & Set Kind Integration
+  setKindAll: string;
+  setKindVocab: string;
+  setKindVerbGroup: string;
+  setKindGrammar: string;
+  setKindMixed: string;
+  createFromBookImage: string;
+  grammarRulesCount: string;
+  grammarExercisesCount: string;
+  vocabTeachingTab: string;
+  grammarLessonTab: string;
+  grammarRulesOverviewTab: string;
+  grammarExamplesTab: string;
+  grammarPracticeTab: string;
+  grammarGamesTab: string;
+  ruleExplanation: string;
+  examplesHeader: string;
+  practiceHeader: string;
+  showHint: string;
+  hideHint: string;
+  revealAnswer: string;
+  checkExerciseAnswer: string;
+  recommendedGames: string;
+  adaptedForGrammar: string;
+  unsupportedForGrammar: string;
 }
 
 const translations: Record<AppLanguage, LernstudioTranslations> = {
@@ -571,7 +597,32 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     activeTurnBadge: 'الدور الحالي',
     teamNumber: 'فريق رقم',
     turnNowOn: 'الدور الآن على:',
-    teamQuestion: 'سؤال'
+    teamQuestion: 'سؤال',
+
+    setKindAll: 'كل الأنواع',
+    setKindVocab: 'مفردات',
+    setKindVerbGroup: 'أفعال',
+    setKindGrammar: 'قواعد',
+    setKindMixed: 'مختلط',
+    createFromBookImage: 'استخراج قواعد من صورة كتاب 📷',
+    grammarRulesCount: 'قاعدة',
+    grammarExercisesCount: 'تمرين',
+    vocabTeachingTab: 'تدريس المفردات',
+    grammarLessonTab: 'درس القواعد التفاعلي',
+    grammarRulesOverviewTab: 'الشرح والقواعد',
+    grammarExamplesTab: 'الأمثلة المترجمة',
+    grammarPracticeTab: 'تدريب القواعد التفاعلي',
+    grammarGamesTab: 'الألعاب المتوافقة',
+    ruleExplanation: 'شرح القاعدة',
+    examplesHeader: 'الأمثلة التطبيقية',
+    practiceHeader: 'تدريب تفاعلي على القواعد',
+    showHint: 'إظهار التلميح 💡',
+    hideHint: 'إخفاء التلميح',
+    revealAnswer: 'كشف الإجابة 👁️',
+    checkExerciseAnswer: 'تحقق من الحل ✓',
+    recommendedGames: 'ألعاب متوافقة مع هذا الدرس',
+    adaptedForGrammar: 'مكيّف للقواعد',
+    unsupportedForGrammar: 'غير متاح لهذا النوع من المجموعات'
   },
 
   en: {
@@ -850,7 +901,32 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     activeTurnBadge: 'Active Turn',
     teamNumber: 'Team #',
     turnNowOn: 'Current Turn:',
-    teamQuestion: 'Question for'
+    teamQuestion: 'Question for',
+
+    setKindAll: 'All Types',
+    setKindVocab: 'Vocabulary',
+    setKindVerbGroup: 'Verbs',
+    setKindGrammar: 'Grammar',
+    setKindMixed: 'Mixed',
+    createFromBookImage: 'Grammar from Book Image 📷',
+    grammarRulesCount: 'rules',
+    grammarExercisesCount: 'exercises',
+    vocabTeachingTab: 'Vocabulary Study',
+    grammarLessonTab: 'Grammar Lesson',
+    grammarRulesOverviewTab: 'Rules & Explanation',
+    grammarExamplesTab: 'Bilingual Examples',
+    grammarPracticeTab: 'Interactive Practice',
+    grammarGamesTab: 'Compatible Games',
+    ruleExplanation: 'Rule Explanation',
+    examplesHeader: 'Worked Examples',
+    practiceHeader: 'Interactive Grammar Practice',
+    showHint: 'Show Hint 💡',
+    hideHint: 'Hide Hint',
+    revealAnswer: 'Reveal Answer 👁️',
+    checkExerciseAnswer: 'Check Answer ✓',
+    recommendedGames: 'Compatible Games for This Lesson',
+    adaptedForGrammar: 'Adapted for Grammar',
+    unsupportedForGrammar: 'Unavailable for this set type'
   },
 
   de: {
@@ -1129,7 +1205,32 @@ const translations: Record<AppLanguage, LernstudioTranslations> = {
     activeTurnBadge: 'Am Zug',
     teamNumber: 'Team #',
     turnNowOn: 'Aktueller Zug:',
-    teamQuestion: 'Frage für'
+    teamQuestion: 'Frage für',
+
+    setKindAll: 'Alle Typen',
+    setKindVocab: 'Wortschatz',
+    setKindVerbGroup: 'Verben',
+    setKindGrammar: 'Grammatik',
+    setKindMixed: 'Gemischt',
+    createFromBookImage: 'Grammatik aus Buchseite 📷',
+    grammarRulesCount: 'Regeln',
+    grammarExercisesCount: 'Übungen',
+    vocabTeachingTab: 'Wortschatz lernen',
+    grammarLessonTab: 'Grammatik-Lektion',
+    grammarRulesOverviewTab: 'Regeln & Erklärung',
+    grammarExamplesTab: 'Beispiele',
+    grammarPracticeTab: 'Interaktive Übungen',
+    grammarGamesTab: 'Passende Spiele',
+    ruleExplanation: 'Regelerklärung',
+    examplesHeader: 'Beispiele mit Übersetzung',
+    practiceHeader: 'Interaktive Grammatik-Übung',
+    showHint: 'Hinweis zeigen 💡',
+    hideHint: 'Hinweis ausblenden',
+    revealAnswer: 'Lösung zeigen 👁️',
+    checkExerciseAnswer: 'Antwort prüfen ✓',
+    recommendedGames: 'Passende Spiele für dieses Thema',
+    adaptedForGrammar: 'Für Grammatik angepasst',
+    unsupportedForGrammar: 'Für diesen Set-Typ nicht verfügbar'
   }
 };
 

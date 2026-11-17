@@ -206,7 +206,10 @@ export function sanitizeInitialData(rawData: Record<string, any>): Record<string
       id: String(s.id || `set_${Date.now()}_${idx}`),
       title: String(s.title || 'مجموعة بدون اسم'),
       level: s.level || 'A1',
-      items: Array.isArray(s.items) ? s.items : []
+      items: Array.isArray(s.items) ? s.items : [],
+      ...(s.grammarContent && typeof s.grammarContent === 'object' ? { grammarContent: s.grammarContent } : {}),
+      ...(s.setKind ? { setKind: s.setKind } : {}),
+      ...(s.contentOrigin ? { contentOrigin: s.contentOrigin } : {})
     }));
 
   // 9. Profile

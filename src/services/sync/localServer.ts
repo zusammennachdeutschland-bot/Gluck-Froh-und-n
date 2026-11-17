@@ -1,6 +1,12 @@
 import { peerNetwork } from './peerNetwork';
 import { SyncStateMetadata, PairedPeer } from '../../types';
-import { SyncDataSource, handleInboundExchange } from './syncOrchestrator';
+import {
+  SyncDataSource,
+  handleInboundExchange,
+  buildLocalPageImageManifest,
+  getLocalPageImageChunk,
+  syncMissingPageImagesWithPeer
+} from './syncOrchestrator';
 import { createProtocolHeader, negotiateProtocol, adaptOutboundPayloadForPeer, findAuthenticatedPeer } from './protocolNegotiator';
 
 export { findAuthenticatedPeer };
@@ -95,11 +101,34 @@ export async function startLocalServer(
       
       // Use the orchestrator to merge the incoming records and generate the response delta
       const outboundDelta = await handleInboundExchange(payload, dataSource);
+
+      // Kick off non-blocking background pull of any missing textbook page images
+      void syncMissingPageImagesWithPeer({ peer: matchedPeer, dataSource }).catch(() => {});
       
       // Adapt outbound delta to peer's capabilities
       const agreedCapabilities = matchedPeer.capabilities || ['core_entities'];
       const negotiatedVersion = matchedPeer.protocolVersion || 1;
       return adaptOutboundPayloadForPeer(outboundDelta, negotiatedVersion, agreedCapabilities);
+    }
+
+    if (route === '/api/sync/page-images/manifest') {
+      const { token, requestedImageIds, existingImageIds } = data || {};
+      const currentState = dataSource.getSyncState();
+      const matchedPeer = findAuthenticatedPeer(currentState.pairedPeers, token);
+      if (!matchedPeer) {
+        throw new Error('Invalid pairing token. Device not paired.');
+      }
+      return await buildLocalPageImageManifest({ requestedImageIds, existingImageIds });
+    }
+
+    if (route === '/api/sync/page-images/chunk') {
+      const { token, imageId, chunkIndex, chunkSizeChars } = data || {};
+      const currentState = dataSource.getSyncState();
+      const matchedPeer = findAuthenticatedPeer(currentState.pairedPeers, token);
+      if (!matchedPeer) {
+        throw new Error('Invalid pairing token. Device not paired.');
+      }
+      return await getLocalPageImageChunk({ imageId, chunkIndex, chunkSizeChars });
     }
 
     if (route === '/api/sync/heartbeat') {

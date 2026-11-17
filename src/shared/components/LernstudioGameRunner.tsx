@@ -1,11 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { LernstudioSet, LernstudioItem, LernstudioExerciseType, LernstudioTheme } from '../../types/lernstudio';
-import { CheckCircle2, XCircle, RotateCcw, ArrowRight, Award, Trophy, HelpCircle, Eye, RefreshCw, ThumbsUp } from 'lucide-react';
+import { CheckCircle2, XCircle, RotateCcw, ArrowRight, Award, Trophy, HelpCircle, ThumbsUp, Volume2 } from 'lucide-react';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../utils/lernstudioAudioUtils';
+import { speakGermanText } from '../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../utils/lernstudioTranslations';
 import { GameStageBanner, SharedVictoryTrophyArt } from './GameArtAssets';
 import { useGameEffects } from './effects/GameEffectsOverlay';
 import { GameSetupConfig } from './LernstudioGameSetupScreen';
+import { hasGrammarContent, isGrammarSet } from '../grammarEngine';
+import { buildDynamicQuestionPool, evaluateGameQuestionAnswer, GameQuestion } from '../lernstudioQuestionAdapter';
 import {
   ALL_VERBS,
   SUBJECT_PROMPTS,
@@ -15,7 +18,7 @@ import {
   resolveVerbFromLernstudioItem
 } from '../verbEngine';
 
-type GameRunnerMode = LernstudioExerciseType | 'verb_conjugation' | 'verb_sentence';
+type GameRunnerMode = LernstudioExerciseType | 'verb_conjugation' | 'verb_sentence' | 'grammar';
 
 interface Props {
   set: LernstudioSet;
@@ -29,14 +32,26 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
   const t = getLernstudioTranslations(language);
   const { triggerSparkles, triggerFloatingText, triggerConfetti } = useGameEffects();
 
+  const items = useMemo(() => set.items || [], [set.items]);
+  const hasGrammar = useMemo(() => hasGrammarContent(set), [set]);
+  const isPureGrammarSet = useMemo(() => isGrammarSet(set) && items.length === 0, [set, items.length]);
+
+  const grammarQuestions: GameQuestion[] = useMemo(() => {
+    if (!hasGrammar) return [];
+    const pool = buildDynamicQuestionPool(set, language, { questionModeFilter: 'grammar' });
+    return pool.filter((q) => q.type === 'grammar_exercise');
+  }, [set, language, hasGrammar]);
+
   const hasVerbsInSet = useMemo(
-    () => set.setKind === 'verb_group' || (set.items || []).some((it) => isItemVerb(it)),
-    [set]
+    () => set.setKind === 'verb_group' || items.some((it) => isItemVerb(it)),
+    [set.setKind, items]
   );
 
   const [selectedGameType, setSelectedGameType] = useState<GameRunnerMode>(() => {
+    if (gameConfig?.questionType === 'grammar') return 'grammar';
     if (gameConfig?.questionType === 'verb_conjugation') return 'verb_conjugation';
     if (gameConfig?.questionType === 'verb_sentence') return 'verb_sentence';
+    if (hasGrammarContent(set) && (set.items?.length || 0) === 0) return 'grammar';
     return 'multiple_choice';
   });
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -49,11 +64,13 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
   const [selectedOptionIndex, setSelectedOptionIndex] = useState<number | null>(null);
   const [sentenceBuilt, setSentenceBuilt] = useState<string[]>([]);
   const [scrambledSelected, setScrambledSelected] = useState<number[]>([]);
+  const [grammarOrderedTokens, setGrammarOrderedTokens] = useState<number[]>([]);
   const [feedback, setFeedback] = useState<{ isCorrect: boolean; message: string; showSolution?: boolean } | null>(null);
   const [teacherOverride, setTeacherOverride] = useState(false);
 
-  const items = useMemo(() => set.items || [], [set.items]);
   const currentItem: LernstudioItem | undefined = items[currentIndex];
+  const currentGrammarQuestion: GameQuestion | undefined = grammarQuestions[currentIndex];
+  const activeListLength = selectedGameType === 'grammar' ? grammarQuestions.length : items.length;
 
   // Prepare Multiple Choice Options (German Target Words)
   const mcOptions = useMemo(() => {
@@ -118,18 +135,28 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
     return buildVerbSentenceGapExercise(currentVerbEntry, ALL_VERBS);
   }, [selectedGameType, currentVerbEntry]);
 
+  const grammarScrambledTokens = useMemo(() => {
+    if (!currentGrammarQuestion || currentGrammarQuestion.grammarType !== 'sentence_ordering') return [];
+    const base =
+      currentGrammarQuestion.sentencePieces && currentGrammarQuestion.sentencePieces.length >= 2
+        ? currentGrammarQuestion.sentencePieces
+        : currentGrammarQuestion.correctAnswer.split(/\s+/).filter(Boolean);
+    return base.map((word, idx) => ({ idx, word })).sort(() => 0.5 - Math.random());
+  }, [currentGrammarQuestion, currentIndex]);
+
   const resetQuestionState = () => {
     setUserAnswerText('');
     setSelectedOptionIndex(null);
     setSentenceBuilt([]);
     setScrambledSelected([]);
+    setGrammarOrderedTokens([]);
     setFeedback(null);
     setTeacherOverride(false);
   };
 
   const handleNextQuestion = () => {
     resetQuestionState();
-    if (currentIndex + 1 < items.length) {
+    if (currentIndex + 1 < activeListLength) {
       setCurrentIndex((prev) => prev + 1);
     } else {
       setIsCompleted(true);
@@ -311,7 +338,42 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
     }
   };
 
-  if (!currentItem && !isCompleted) {
+  const handleCheckGrammarAnswer = (answerStr: string, optIdx?: number) => {
+    if (!currentGrammarQuestion || feedback) return;
+    if (optIdx !== undefined) setSelectedOptionIndex(optIdx);
+    const isCorrect = evaluateGameQuestionAnswer(answerStr, currentGrammarQuestion) || teacherOverride;
+    if (isCorrect) {
+      setScore((s) => s + 10);
+      setStreak((st) => st + 1);
+      setFeedback({
+        isCorrect: true,
+        message: currentGrammarQuestion.explanation
+          ? `${t.rightAnswerMsg} — ${currentGrammarQuestion.explanation}`
+          : t.rightAnswerMsg
+      });
+      playLernstudioSound('correct');
+      playGermanVoiceFeedback('richtig');
+      triggerSparkles(50, 50, '#10b981');
+      triggerFloatingText('+10 ★ Richtig!', 50, 40, '#10b981');
+      setTimeout(() => handleNextQuestion(), 1100);
+    } else {
+      setStreak(0);
+      setFeedback({
+        isCorrect: false,
+        message: `${t.wrongAnswerMsg} (${currentGrammarQuestion.correctAnswer})${
+          currentGrammarQuestion.explanation ? ` — ${currentGrammarQuestion.explanation}` : ''
+        }`,
+        showSolution: true
+      });
+      playLernstudioSound('wrong');
+      playGermanVoiceFeedback('noch_einmal');
+    }
+  };
+
+  const hasCurrentQuestion =
+    selectedGameType === 'grammar' ? Boolean(currentGrammarQuestion) : Boolean(currentItem);
+
+  if (!hasCurrentQuestion && !isCompleted) {
     return (
       <div className="p-8 text-center bg-surface border border-surface-border rounded-2xl space-y-4" dir={language === 'ar' ? 'rtl' : 'ltr'}>
         <HelpCircle className="w-12 h-12 text-primary mx-auto opacity-60" />
@@ -332,8 +394,8 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
       <GameStageBanner
         gameId="game"
         title={t.comprehensivePracticeTitle}
-        subtitle={`${getLocalizedSetTitle(set, language)} · ${items.length} ${t.vocabularyCount}`}
-        emoji="🎯"
+        subtitle={`${getLocalizedSetTitle(set, language)} · ${selectedGameType === 'grammar' ? grammarQuestions.length : items.length} ${selectedGameType === 'grammar' ? (language === 'ar' ? 'تمرين قواعد' : language === 'de' ? 'Grammatikübungen' : 'exercises') : t.vocabularyCount}`}
+        emoji={selectedGameType === 'grammar' ? '📘' : '🎯'}
       />
 
       {/* Header Bar */}
@@ -353,7 +415,14 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
               <span>{getLocalizedSetTitle(set, language)}</span>
             </h2>
             <p className="text-xs text-text-muted">
-              {t.levelLabel} {set.level} · {items.length} {t.vocabularyCount}
+              {t.levelLabel} {set.level} · {selectedGameType === 'grammar' ? grammarQuestions.length : items.length}{' '}
+              {selectedGameType === 'grammar'
+                ? language === 'ar'
+                  ? 'تمرين قواعد'
+                  : language === 'de'
+                  ? 'Übungen'
+                  : 'exercises'
+                : t.vocabularyCount}
             </p>
           </div>
         </div>
@@ -374,11 +443,23 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
 
       {/* Game Type Switcher Tabs */}
       <div className="flex flex-wrap gap-1 bg-surface-hover p-1 rounded-lg border border-surface-border text-xs font-bold">
+        {grammarQuestions.length > 0 && (
+          <button
+            type="button"
+            onClick={() => { setSelectedGameType('grammar'); setCurrentIndex(0); resetQuestionState(); }}
+            className={`flex-1 min-w-[130px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
+              selectedGameType === 'grammar' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
+            }`}
+          >
+            📘 {language === 'ar' ? `تمارين القواعد (${grammarQuestions.length})` : language === 'de' ? `Grammatik (${grammarQuestions.length})` : `Grammar (${grammarQuestions.length})`}
+          </button>
+        )}
+
         {hasVerbsInSet && (
           <>
             <button
               type="button"
-              onClick={() => { setSelectedGameType('verb_conjugation'); resetQuestionState(); }}
+              onClick={() => { setSelectedGameType('verb_conjugation'); setCurrentIndex(0); resetQuestionState(); }}
               className={`flex-1 min-w-[120px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
                 selectedGameType === 'verb_conjugation' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
               }`}
@@ -387,7 +468,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
             </button>
             <button
               type="button"
-              onClick={() => { setSelectedGameType('verb_sentence'); resetQuestionState(); }}
+              onClick={() => { setSelectedGameType('verb_sentence'); setCurrentIndex(0); resetQuestionState(); }}
               className={`flex-1 min-w-[120px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
                 selectedGameType === 'verb_sentence' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
               }`}
@@ -397,55 +478,59 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
           </>
         )}
 
-        <button
-          type="button"
-          onClick={() => { setSelectedGameType('multiple_choice'); resetQuestionState(); }}
-          className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
-            selectedGameType === 'multiple_choice' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
-          }`}
-        >
-          {t.tabMultipleChoice}
-        </button>
+        {!isPureGrammarSet && (
+          <>
+            <button
+              type="button"
+              onClick={() => { setSelectedGameType('multiple_choice'); setCurrentIndex(0); resetQuestionState(); }}
+              className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
+                selectedGameType === 'multiple_choice' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
+              }`}
+            >
+              {t.tabMultipleChoice}
+            </button>
 
-        <button
-          type="button"
-          onClick={() => { setSelectedGameType('missing_letter'); resetQuestionState(); }}
-          className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
-            selectedGameType === 'missing_letter' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
-          }`}
-        >
-          {t.tabMissingLetter}
-        </button>
+            <button
+              type="button"
+              onClick={() => { setSelectedGameType('missing_letter'); setCurrentIndex(0); resetQuestionState(); }}
+              className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
+                selectedGameType === 'missing_letter' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
+              }`}
+            >
+              {t.tabMissingLetter}
+            </button>
 
-        <button
-          type="button"
-          onClick={() => { setSelectedGameType('sentence_builder'); resetQuestionState(); }}
-          className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
-            selectedGameType === 'sentence_builder' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
-          }`}
-        >
-          {t.tabSentenceBuilder}
-        </button>
+            <button
+              type="button"
+              onClick={() => { setSelectedGameType('sentence_builder'); setCurrentIndex(0); resetQuestionState(); }}
+              className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
+                selectedGameType === 'sentence_builder' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
+              }`}
+            >
+              {t.tabSentenceBuilder}
+            </button>
 
-        <button
-          type="button"
-          onClick={() => { setSelectedGameType('emoji_vocab'); resetQuestionState(); }}
-          className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
-            selectedGameType === 'emoji_vocab' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
-          }`}
-        >
-          {t.tabEmojiVocab}
-        </button>
+            <button
+              type="button"
+              onClick={() => { setSelectedGameType('emoji_vocab'); setCurrentIndex(0); resetQuestionState(); }}
+              className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
+                selectedGameType === 'emoji_vocab' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
+              }`}
+            >
+              {t.tabEmojiVocab}
+            </button>
 
-        <button
-          type="button"
-          onClick={() => { setSelectedGameType('scrambled_letters'); resetQuestionState(); }}
-          className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
-            selectedGameType === 'scrambled_letters' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
-          }`}
-        >
-          {t.tabScrambledLetters}
-        </button>
+            <button
+              type="button"
+              onClick={() => { setSelectedGameType('scrambled_letters'); setCurrentIndex(0); resetQuestionState(); }}
+              className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
+                selectedGameType === 'scrambled_letters' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
+              }`}
+            >
+              {t.tabScrambledLetters}
+            </button>
+          </>
+        )}
       </div>
 
       {/* Game Area */}
@@ -477,6 +562,229 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
               {t.returnToSetsBtn}
             </button>
           </div>
+        </div>
+      ) : selectedGameType === 'grammar' && currentGrammarQuestion ? (
+        <div className={`p-5 sm:p-7 rounded-3xl space-y-6 shadow-lg border ${activeTheme.cardBg}`}>
+          {/* Question Progress bar */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-xs font-extrabold text-text-muted">
+              <span>{t.questionProgress} {currentIndex + 1} / {grammarQuestions.length}</span>
+              <span>{Math.round(((currentIndex + 1) / Math.max(1, grammarQuestions.length)) * 100)}%</span>
+            </div>
+            <div className="w-full h-2 bg-surface-hover rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all duration-300 rounded-full"
+                style={{ width: `${((currentIndex + 1) / Math.max(1, grammarQuestions.length)) * 100}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="p-4 sm:p-5 bg-primary-soft/50 border border-primary-border/40 rounded-2xl text-center space-y-2">
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              <span className="text-xl">📘</span>
+              <span className="px-2.5 py-0.5 rounded-lg bg-surface border border-surface-border text-[11px] font-black text-primary">
+                {currentGrammarQuestion.grammarType || 'grammar'}
+              </span>
+              {currentGrammarQuestion.isUncertain && (
+                <span className="px-2 py-0.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-[10px] font-black text-amber-600">
+                  ⚠️ {language === 'ar' ? 'يُنصح بالمراجعة' : 'Review'}
+                </span>
+              )}
+            </div>
+            <h3 className="text-lg sm:text-2xl font-black text-text-main leading-relaxed" dir="auto">
+              {currentGrammarQuestion.prompt}
+            </h3>
+            {currentGrammarQuestion.sentenceWithBlank &&
+              currentGrammarQuestion.sentenceWithBlank !== currentGrammarQuestion.prompt && (
+                <p className="text-base sm:text-lg font-mono font-bold text-primary" dir="ltr">
+                  {currentGrammarQuestion.sentenceWithBlank}
+                </p>
+              )}
+            {currentGrammarQuestion.subPrompt && (
+              <p className="text-xs sm:text-sm font-bold text-rose-500 line-through/70" dir="auto">
+                {currentGrammarQuestion.subPrompt}
+              </p>
+            )}
+            {(() => {
+              const nonSpoilerSpeech =
+                currentGrammarQuestion.sentenceWithBlank && !currentGrammarQuestion.sentenceWithBlank.includes('___')
+                  ? currentGrammarQuestion.sentenceWithBlank
+                  : currentGrammarQuestion.faultySentence ||
+                    currentGrammarQuestion.prompt.replace(/_{2,}|\.{3,}/g, ' ').trim();
+              const speechToPlay = feedback !== null ? currentGrammarQuestion.correctAnswer : nonSpoilerSpeech;
+              if (!speechToPlay) return null;
+              return (
+                <button
+                  type="button"
+                  onClick={() => speakGermanText(speechToPlay, 0.85)}
+                  className="mt-1 px-3 py-1 rounded-xl bg-surface border border-surface-border text-[11px] font-bold text-primary hover:bg-surface-hover cursor-pointer inline-flex items-center gap-1"
+                >
+                  <Volume2 className="w-3.5 h-3.5" />
+                  <span>
+                    {feedback !== null
+                      ? language === 'ar'
+                        ? 'نطق الإجابة الصحيحة'
+                        : 'Listen to Answer'
+                      : language === 'ar'
+                      ? 'استمع للسؤال'
+                      : 'Listen'}
+                  </span>
+                </button>
+              );
+            })()}
+          </div>
+
+          {currentGrammarQuestion.grammarType === 'sentence_ordering' ? (
+            <div className="space-y-4">
+              <div
+                className="p-4 bg-surface rounded-2xl border-2 border-dashed border-primary/40 min-h-[64px] flex items-center justify-center gap-2 flex-wrap"
+                dir="ltr"
+              >
+                {grammarOrderedTokens.length === 0 ? (
+                  <span className="text-xs text-text-muted font-bold">
+                    {language === 'ar' ? 'اضغط على الكلمات بالترتيب الصحيح...' : 'Tap words in order...'}
+                  </span>
+                ) : (
+                  grammarOrderedTokens.map((tokIdx, pos) => (
+                    <button
+                      key={`${tokIdx}_${pos}`}
+                      type="button"
+                      disabled={feedback !== null}
+                      onClick={() => setGrammarOrderedTokens((prev) => prev.filter((_, p) => p !== pos))}
+                      className="px-3 py-1.5 bg-primary text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer hover:bg-rose-500 transition-colors font-mono"
+                    >
+                      {grammarScrambledTokens[tokIdx]?.word} ×
+                    </button>
+                  ))
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center justify-center gap-2" dir="ltr">
+                {grammarScrambledTokens.map((item, idx) => {
+                  const used = grammarOrderedTokens.includes(idx);
+                  return (
+                    <button
+                      key={`${item.word}_${idx}`}
+                      type="button"
+                      disabled={used || feedback !== null}
+                      onClick={() => setGrammarOrderedTokens((prev) => [...prev, idx])}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer font-mono ${
+                        used
+                          ? 'opacity-30 bg-surface-hover border-surface-border'
+                          : 'bg-surface hover:bg-primary-soft border-surface-border text-text-main shadow-xs'
+                      }`}
+                    >
+                      {item.word}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  disabled={feedback !== null || grammarOrderedTokens.length === 0}
+                  onClick={() => {
+                    const assembled = grammarOrderedTokens
+                      .map((idx) => grammarScrambledTokens[idx]?.word || '')
+                      .join(' ');
+                    handleCheckGrammarAnswer(assembled);
+                  }}
+                  className={`px-8 py-3 rounded-2xl font-black text-xs shadow-md transition-all cursor-pointer disabled:opacity-50 ${activeTheme.primaryBg}`}
+                >
+                  {t.checkAnswerBtn}
+                </button>
+              </div>
+            </div>
+          ) : currentGrammarQuestion.grammarType === 'short_answer' ||
+            !currentGrammarQuestion.options ||
+            currentGrammarQuestion.options.length < 2 ? (
+            <div className="space-y-3 max-w-md mx-auto">
+              <input
+                type="text"
+                disabled={feedback !== null}
+                value={userAnswerText}
+                onChange={(e) => setUserAnswerText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && userAnswerText.trim()) {
+                    handleCheckGrammarAnswer(userAnswerText);
+                  }
+                }}
+                placeholder={language === 'ar' ? 'اكتب الإجابة بالألمانية...' : 'Type your German answer...'}
+                dir="ltr"
+                className="w-full px-4 py-3 rounded-2xl border border-surface-border bg-surface text-text-main text-center font-bold text-base focus:outline-none focus:border-primary font-mono"
+              />
+              <button
+                type="button"
+                disabled={feedback !== null || !userAnswerText.trim()}
+                onClick={() => handleCheckGrammarAnswer(userAnswerText)}
+                className={`w-full py-3 rounded-2xl font-black text-xs transition-all shadow-md cursor-pointer disabled:opacity-50 ${activeTheme.primaryBg}`}
+              >
+                {t.checkAnswerBtn}
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" dir="ltr">
+              {currentGrammarQuestion.options.map((opt, idx) => (
+                <button
+                  key={`${opt}_${idx}`}
+                  type="button"
+                  disabled={feedback !== null}
+                  onClick={() => handleCheckGrammarAnswer(opt, idx)}
+                  className={`p-4 rounded-2xl font-black text-sm sm:text-base text-center transition-all border cursor-pointer font-mono ${
+                    selectedOptionIndex === idx
+                      ? feedback?.isCorrect
+                        ? 'bg-emerald-500 text-white border-emerald-600'
+                        : 'bg-rose-500 text-white border-rose-600'
+                      : 'bg-surface hover:bg-surface-hover border-surface-border text-text-main'
+                  }`}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {feedback && (
+            <div
+              className={`p-4 sm:p-5 rounded-2xl border animate-scale-up space-y-3 ${
+                feedback.isCorrect
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2 font-bold text-xs sm:text-sm">
+                  {feedback.isCorrect ? (
+                    <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+                  ) : (
+                    <XCircle className="w-5 h-5 text-rose-500 shrink-0" />
+                  )}
+                  <span>{feedback.message}</span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleNextQuestion}
+                  className="px-5 py-2 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-black shadow-md cursor-pointer transition-all inline-flex items-center gap-1"
+                >
+                  <span>
+                    {currentIndex + 1 < grammarQuestions.length
+                      ? language === 'ar'
+                        ? 'السؤال التالي ➔'
+                        : language === 'de'
+                        ? 'Nächste Frage ➔'
+                        : 'Next Question ➔'
+                      : language === 'ar'
+                      ? 'إنهاء التدريب 🎉'
+                      : language === 'de'
+                      ? 'Training beenden 🎉'
+                      : 'Finish Practice 🎉'}
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         currentItem && (

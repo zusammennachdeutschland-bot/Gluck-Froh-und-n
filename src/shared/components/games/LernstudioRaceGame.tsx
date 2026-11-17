@@ -1,6 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { LernstudioSet, LernstudioTheme, TeamScore } from '../../../types/lernstudio';
-import { buildDynamicQuestionPool, GameQuestion } from '../../../utils/lernstudioQuestionAdapter';
+import {
+  buildDynamicQuestionPool,
+  evaluateGameQuestionAnswer,
+  GameQuestion
+} from '../../../utils/lernstudioQuestionAdapter';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
@@ -69,12 +73,20 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
   const [answeredState, setAnsweredState] = useState<'correct' | 'wrong' | null>(null);
   const [boostApplied, setBoostApplied] = useState(false);
   const [sentenceArranged, setSentenceArranged] = useState<string[]>([]);
+  const [typedAnswer, setTypedAnswer] = useState('');
 
   const activeTeam = teams[activeTeamIndex] || teams[0];
-  const currentQuestion: GameQuestion = questionsPool[qIndex % questionsPool.length] || questionsPool[0];
+  const currentQuestion: GameQuestion | undefined = questionsPool[qIndex % Math.max(1, questionsPool.length)] || questionsPool[0];
+  const isSentenceOrdering = Boolean(
+    currentQuestion &&
+      (currentQuestion.type === 'sentence_builder' || currentQuestion.grammarType === 'sentence_ordering') &&
+      currentQuestion.sentencePieces &&
+      currentQuestion.sentencePieces.length > 0
+  );
 
   useEffect(() => {
     setSentenceArranged([]);
+    setTypedAnswer('');
   }, [qIndex]);
 
   const handleToggleTeamCount = (count: number) => {
@@ -337,10 +349,10 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
               )}
             </div>
 
-            {/* Sentence Builder Interactive Word Bank Tiles */}
-            {currentQuestion.sentencePieces && currentQuestion.sentencePieces.length > 0 && (
+            {/* Sentence Builder / Grammar Ordering Tiles ONLY (never dual-rendered with MCQ) */}
+            {isSentenceOrdering && currentQuestion?.sentencePieces && (
               <div className="space-y-3 bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
-                <div className="min-h-12 p-2.5 bg-slate-900 rounded-xl border border-slate-700 flex flex-wrap gap-1.5 items-center justify-center">
+                <div className="min-h-12 p-2.5 bg-slate-900 rounded-xl border border-slate-700 flex flex-wrap gap-1.5 items-center justify-center" dir="ltr">
                   {sentenceArranged.length === 0 ? (
                     <span className="text-xs text-slate-500 font-medium">{t.arrangeWordsOrder}</span>
                   ) : (
@@ -360,7 +372,7 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
                   )}
                 </div>
 
-                <div className="flex flex-wrap gap-1.5 justify-center">
+                <div className="flex flex-wrap gap-1.5 justify-center" dir="ltr">
                   {currentQuestion.sentencePieces.map((piece, idx) => {
                     const countInArranged = sentenceArranged.filter((p) => p === piece).length;
                     const countInPieces = currentQuestion.sentencePieces!.filter((p) => p === piece).length;
@@ -375,9 +387,8 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
                           const nextArranged = [...sentenceArranged, piece];
                           setSentenceArranged(nextArranged);
                           if (nextArranged.length === currentQuestion.sentencePieces!.length) {
-                            const built = nextArranged.join(' ').trim().toLowerCase();
-                            const expected = currentQuestion.correctAnswer.trim().toLowerCase();
-                            handleAnswer(built === expected);
+                            const built = nextArranged.join(' ').trim();
+                            handleAnswer(evaluateGameQuestionAnswer(built, currentQuestion));
                           }
                         }}
                         className={`px-3 py-1.5 rounded-xl border text-xs sm:text-sm font-bold transition-all ${
@@ -394,12 +405,12 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
               </div>
             )}
 
-            {/* Answer Options */}
-            {currentQuestion.options && currentQuestion.options.length > 0 && (
+            {/* Answer Options (MCQ) */}
+            {!isSentenceOrdering && currentQuestion?.options && currentQuestion.options.length > 0 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 pt-1 sm:pt-2">
                 {currentQuestion.options.map((opt, i) => {
                   const isSelected = selectedOpt === opt;
-                  const isCorrect = opt.trim().toLowerCase() === currentQuestion.correctAnswer.trim().toLowerCase();
+                  const isCorrect = evaluateGameQuestionAnswer(opt, currentQuestion);
 
                   let btnColor = 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700';
                   if (answeredState === 'correct' && isCorrect) {
@@ -426,6 +437,42 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
                 })}
               </div>
             )}
+
+            {/* Typed Answer Fallback for short_answer or optionless grammar exercises */}
+            {!isSentenceOrdering &&
+              currentQuestion &&
+              (!currentQuestion.options || currentQuestion.options.length === 0) && (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!typedAnswer.trim() || answeredState) return;
+                    handleAnswer(evaluateGameQuestionAnswer(typedAnswer, currentQuestion));
+                  }}
+                  className="space-y-2.5 pt-1 max-w-lg mx-auto w-full"
+                >
+                  <input
+                    type="text"
+                    dir="ltr"
+                    disabled={!!answeredState}
+                    value={typedAnswer}
+                    onChange={(e) => setTypedAnswer(e.target.value)}
+                    placeholder={language === 'ar' ? 'اكتب الإجابة بالألمانية...' : 'Type your German answer...'}
+                    className="w-full px-4 py-3 rounded-xl bg-slate-950 border-2 border-slate-700 focus:border-primary text-white font-bold text-center outline-none"
+                  />
+                  {answeredState && (
+                    <div className="text-xs font-bold text-center text-emerald-400" dir="ltr">
+                      ✓ {currentQuestion.correctAnswer}
+                    </div>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={!!answeredState || !typedAnswer.trim()}
+                    className="w-full py-2.5 rounded-xl bg-primary hover:bg-primary-hover disabled:opacity-40 text-white font-black text-xs sm:text-sm cursor-pointer"
+                  >
+                    {t.confirmSentenceAnswer || (language === 'ar' ? 'تحقق من الإجابة ✓' : 'Check Answer ✓')}
+                  </button>
+                </form>
+              )}
 
             {/* Teacher Fast Override */}
             <div className="pt-2 sm:pt-3 border-t border-slate-800 flex items-center justify-between text-[11px] sm:text-xs text-slate-400 flex-wrap gap-2">

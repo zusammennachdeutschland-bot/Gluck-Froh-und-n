@@ -9,6 +9,8 @@ import {
   getStudentsForGroup
 } from '../../utils/groupScheduleUtils';
 import { isArticleGameSupported } from '../lernstudioQuestionAdapter';
+import { getGrammarLessonExercises, hasGrammarContent, isGrammarSet } from '../grammarEngine';
+import { getSetPlayableItems } from '../lernstudioVocabularyAdapter';
 import { BUILTIN_VERB_GROUPS, isItemVerb } from '../verbEngine';
 import { isVerbGroupSet } from '../verbGroupSync';
 import {
@@ -35,7 +37,8 @@ export interface GameSetupConfig {
     | 'audio'
     | 'mixed'
     | 'verb_conjugation'
-    | 'verb_sentence';
+    | 'verb_sentence'
+    | 'grammar';
   gameMode: 'single' | 'pvp_2teams' | 'pvp_3teams' | 'pvp_4teams';
   teamNames: string[];
   timerSeconds: number; // 0 = no timer, 8, 15, 20, 30
@@ -75,6 +78,13 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
   const isRtl = language === 'ar';
   const displaySetTitle = getLocalizedSetTitle(set, language);
   const totalItemsCount = set.items?.length || 0;
+  const hasGrammar = useMemo(() => hasGrammarContent(set), [set]);
+  const grammarExerciseCount = useMemo(() => getGrammarLessonExercises(set).length, [set]);
+  const isPureGrammarSet = useMemo(() => isGrammarSet(set) && totalItemsCount === 0, [set, totalItemsCount]);
+  const playablePoolCount = useMemo(() => {
+    const playable = getSetPlayableItems(set).length;
+    return isPureGrammarSet ? Math.max(grammarExerciseCount, playable) : Math.max(totalItemsCount, playable);
+  }, [set, isPureGrammarSet, grammarExerciseCount, totalItemsCount]);
 
   const isArticleSupported = useMemo(() => isArticleGameSupported(set), [set]);
   const isPureVerbSet = useMemo(() => {
@@ -107,9 +117,11 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
 
   // Setup options state
   const [questionCount, setQuestionCount] = useState<number>(() =>
-    totalItemsCount > 0 ? Math.min(10, totalItemsCount) : 10
+    playablePoolCount > 0 ? Math.min(10, playablePoolCount) : 10
   );
-  const [questionType, setQuestionType] = useState<GameSetupConfig['questionType']>('mixed');
+  const [questionType, setQuestionType] = useState<GameSetupConfig['questionType']>(() =>
+    isGrammarSet(set) && (set.items?.length || 0) === 0 ? 'grammar' : 'mixed'
+  );
   const [extraVerbGroupIds, setExtraVerbGroupIds] = useState<string[]>([]);
   const [showMixedVerbPicker, setShowMixedVerbPicker] = useState(false);
 
@@ -124,9 +136,9 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
   // If set has no articles and teacher previously landed on 'article', fall back safely
   useEffect(() => {
     if (questionType === 'article' && !isArticleSupported) {
-      setQuestionType('mixed');
+      setQuestionType(isPureGrammarSet ? 'grammar' : 'mixed');
     }
-  }, [questionType, isArticleSupported]);
+  }, [questionType, isArticleSupported, isPureGrammarSet]);
 
   const [gameMode, setGameMode] = useState<'single' | 'pvp_2teams' | 'pvp_3teams' | 'pvp_4teams'>(
     isSoloGame ? 'single' : 'pvp_2teams'
@@ -276,11 +288,23 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
     descAr: string;
     disabled?: boolean;
   }> = [
+    ...(hasGrammar
+      ? [
+          {
+            id: 'grammar' as const,
+            labelAr: `📘 تمارين القواعد (${grammarExerciseCount})`,
+            labelEn: `📘 Grammar Exercises (${grammarExerciseCount})`,
+            descAr: 'أسئلة القواعد المتنوعة: اختيار من متعدد، أكمل الفراغ، تصحيح الأخطاء، وترتيب الجمل'
+          }
+        ]
+      : []),
     {
       id: 'mixed',
       labelAr: '🔀 أسئلة عشوائية ومختلطة (شامل)',
       labelEn: '🔀 Mixed & Random Questions',
-      descAr: hasVerbContent
+      descAr: hasGrammar
+        ? 'دمج ذكي بين تمارين القواعد والأمثلة والمفردات'
+        : hasVerbContent
         ? 'ترجمة، تصريف الأفعال، أفعال في جمل، واستماع متنوع'
         : 'ترجمة، أدوات der/die/das، واستماع بشكل متنوع'
     },
@@ -304,13 +328,15 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
       id: 'de_to_ar',
       labelAr: '🇩🇪 ⬅️ 🇪🇬 ألماني ⬅️ عربي',
       labelEn: '🇩🇪 ⬅️ 🇪🇬 German to Arabic',
-      descAr: 'عرض الكلمة أو الفعل بالألمانية وتخمين المعنى العربي'
+      descAr: 'عرض الكلمة أو المثال بالألمانية وتخمين المعنى العربي',
+      disabled: playablePoolCount === 0
     },
     {
       id: 'ar_to_de',
       labelAr: '🇪🇬 ⬅️ 🇩🇪 عربي ⬅️ ألماني',
       labelEn: '🇪🇬 ⬅️ 🇩🇪 Arabic to German',
-      descAr: 'عرض المعنى العربي واختيار الكلمة الألمانية الصحيحة'
+      descAr: 'عرض المعنى العربي واختيار التعبير الألماني الصحيح',
+      disabled: playablePoolCount === 0
     },
     {
       id: 'article',
@@ -318,14 +344,15 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
       labelEn: '🏷️ Articles (der / die / das)',
       descAr: isArticleSupported
         ? 'التركيز على حصر وتحديد أداة الاسم الصحيحة'
-        : 'غير متاح لمجموعات الأفعال فقط (يتطلب أسماء بأدوات)',
+        : 'غير متاح لمجموعات الأفعال والقواعد فقط (يتطلب أسماء بأدوات)',
       disabled: !isArticleSupported
     },
     {
       id: 'audio',
       labelAr: '🎧 استماع ونطق بصوت ألماني',
       labelEn: '🎧 Listening & Pronunciation',
-      descAr: 'الاستماع للصوت الألماني النقي وتخمين المفهوم'
+      descAr: 'الاستماع للصوت الألماني النقي وتخمين المفهوم',
+      disabled: playablePoolCount === 0
     }
   ];
 
@@ -351,7 +378,9 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
                 ⚙️ {isRtl ? 'إعدادات اللعبة' : 'Game Setup'}
               </span>
               <span className="text-xs text-text-muted">
-                · {displaySetTitle} ({totalItemsCount} {isPureVerbSet ? (isRtl ? 'فعل' : 'verbs') : (isRtl ? 'كلمة' : 'words')})
+                · {displaySetTitle} ({isPureGrammarSet
+                  ? `${grammarExerciseCount} ${isRtl ? 'تمرين قواعد' : 'grammar'}`
+                  : `${totalItemsCount} ${isPureVerbSet ? (isRtl ? 'فعل' : 'verbs') : (isRtl ? 'كلمة' : 'words')}`})
               </span>
             </div>
             <h1 className="text-base sm:text-lg font-bold text-text-main flex items-center gap-2 mt-0.5">
@@ -488,15 +517,15 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
               {isRtl ? 'عدد الأسئلة المراد لعبها:' : 'Number of Questions:'}
             </label>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-              {[5, 10, 15, 20, Math.min(40, totalItemsCount)].map((cnt, idx) => {
-                if (idx === 4 && (totalItemsCount <= 20 || cnt === 0)) return null;
+              {[5, 10, 15, 20, Math.min(40, playablePoolCount)].map((cnt, idx) => {
+                if (idx === 4 && (playablePoolCount <= 20 || cnt === 0)) return null;
                 const isAll = idx === 4;
-                const targetCount = isAll ? Math.min(40, totalItemsCount) : cnt;
+                const targetCount = isAll ? Math.min(40, playablePoolCount) : cnt;
                 const displayLabel = isAll
                   ? isRtl
-                    ? totalItemsCount > 40
-                      ? `مجموعة كبيرة (40 من ${totalItemsCount})`
-                      : `كل المجموعة (${totalItemsCount})`
+                    ? playablePoolCount > 40
+                      ? `مجموعة كبيرة (40 من ${playablePoolCount})`
+                      : `كل المجموعة (${playablePoolCount})`
                     : `All (${targetCount})`
                   : isRtl
                   ? `${cnt} أسئلة`

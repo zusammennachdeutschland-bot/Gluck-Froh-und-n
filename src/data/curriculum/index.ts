@@ -9,6 +9,7 @@ import { BATCH_07_SETS } from './batch07_professions_routine';
 import { BATCH_08_SETS } from './batch08_actions_sports';
 import { BATCH_09_SETS } from './batch09_adjectives_grammar_shopping';
 import { BATCH_10_SETS } from './batch10_culture_tech_stories_expansion';
+import { BUILTIN_GRAMMAR_SETS } from '../builtinGrammarSets';
 
 export interface RawCurriculumSet {
   id: string;
@@ -110,7 +111,7 @@ function generateSentence4Elements(sentence?: string, germanWord?: string): [str
   return undefined;
 }
 
-export const COMPLETE_CURRICULUM_SETS: LernstudioSet[] = RAW_ALL_SETS.map((raw: any, setIndex) => {
+const MAPPED_VOCAB_SETS: LernstudioSet[] = RAW_ALL_SETS.map((raw: any, setIndex) => {
   const gradeMapping = mapGrade(raw.gradeLevel);
   const grade = raw.grade || gradeMapping.grade;
   const level: LernstudioLevel = raw.level || gradeMapping.level;
@@ -152,6 +153,8 @@ export const COMPLETE_CURRICULUM_SETS: LernstudioSet[] = RAW_ALL_SETS.map((raw: 
     difficulty,
     hasArticles,
     sentenceBuilderSupported: true,
+    setKind: raw.setKind || 'vocab',
+    contentOrigin: 'builtin',
     description: raw.description || `مجموعة تدريبية تفاعلية للأطفال: ${raw.titleTranslation || raw.title}`,
     descriptionTranslations: raw.descriptionTranslations || {
       de: raw.description || raw.title,
@@ -163,6 +166,11 @@ export const COMPLETE_CURRICULUM_SETS: LernstudioSet[] = RAW_ALL_SETS.map((raw: 
     updatedAt: raw.updatedAt || 1767225600000
   };
 });
+
+export const COMPLETE_CURRICULUM_SETS: LernstudioSet[] = [
+  ...MAPPED_VOCAB_SETS,
+  ...BUILTIN_GRAMMAR_SETS
+];
 
 // Category and Grade metadata for rich filtering & curriculum navigation
 export const CURRICULUM_GRADES = [

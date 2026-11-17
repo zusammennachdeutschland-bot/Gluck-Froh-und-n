@@ -3,6 +3,7 @@ import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/l
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText, stopGermanSpeech } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
+import { getSetPlayableItems } from '../../../utils/lernstudioVocabularyAdapter';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
 import { GameEffectsOverlay, GameSettingsControls } from '../effects/GameEffectsOverlay';
@@ -56,7 +57,7 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const displayTitle = getLocalizedSetTitle(set, language);
-  const items = useMemo(() => set.items || [], [set.items]);
+  const items = useMemo(() => getSetPlayableItems(set), [set]);
 
   // Game States
   const [targetIndex, setTargetIndex] = useState(0);

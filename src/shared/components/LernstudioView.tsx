@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { LernstudioSet, LernstudioThemeId, LernstudioLevel, LernstudioGameMode } from '../../types/lernstudio';
+import { LernstudioSet, LernstudioThemeId, LernstudioLevel, LernstudioGameMode, LernstudioSetKind } from '../../types/lernstudio';
 import { Group } from '../../types';
 import { LERNSTUDIO_THEMES } from './lernstudioThemes';
+import { inferSetKind, hasGrammarContent, getGrammarLessonExercises, stripHeavyGrammarMediaForSync } from '../grammarEngine';
 import { LernstudioGameRunner } from './LernstudioGameRunner';
 import { LernstudioClassroomBoard } from './LernstudioClassroomBoard';
 import { LernstudioWheelGame } from './games/LernstudioWheelGame';
@@ -124,7 +125,8 @@ import {
   GraduationCap,
   Volume2,
   X,
-  RefreshCw
+  RefreshCw,
+  Camera
 } from 'lucide-react';
 
 interface Props {
@@ -235,6 +237,7 @@ export const LernstudioView: React.FC<Props> = ({
   const [setToEdit, setSetToEdit] = useState<LernstudioSet | null>(null);
 
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [aiModalInitialTab, setAiModalInitialTab] = useState<'generate' | 'import' | 'from_images'>('generate');
   const [isRandomPickerOpen, setIsRandomPickerOpen] = useState(false);
 
   const [isWorksheetModalOpen, setIsWorksheetModalOpen] = useState(false);
@@ -451,6 +454,7 @@ export const LernstudioView: React.FC<Props> = ({
   // Filters (Vocabulary Sets tab excludes vgrp_* verb groups so the two libraries stay clearly separated)
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSourceFilter, setSelectedSourceFilter] = useState<SetSourceFilter>('all');
+  const [selectedSetKindFilter, setSelectedSetKindFilter] = useState<'all' | LernstudioSetKind>('all');
   const [selectedTeacherFilter, setSelectedTeacherFilter] = useState<string>('all');
   const [selectedGradeFilter, setSelectedGradeFilter] = useState<string>('all');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
@@ -553,6 +557,7 @@ export const LernstudioView: React.FC<Props> = ({
           : !isBuiltin && effectiveTeacher === selectedTeacherFilter;
 
       const matchGrade = matchesGradeFilter(set, selectedGradeFilter);
+      const matchKind = selectedSetKindFilter === 'all' || inferSetKind(set) === selectedSetKindFilter;
       const matchCategory = selectedCategoryFilter === 'all' || set.topic === selectedCategoryFilter;
       const matchGroup = selectedGroupFilter === 'all' || set.assignedGroupId === selectedGroupFilter;
 
@@ -562,16 +567,18 @@ export const LernstudioView: React.FC<Props> = ({
         set.title.toLowerCase().includes(q) ||
         (set.topic && set.topic.toLowerCase().includes(q)) ||
         (set.grade && set.grade.toLowerCase().includes(q)) ||
-        (effectiveTeacher && effectiveTeacher.toLowerCase().includes(q));
+        (effectiveTeacher && effectiveTeacher.toLowerCase().includes(q)) ||
+        (set.grammarContent?.lessonTitleAr && set.grammarContent.lessonTitleAr.toLowerCase().includes(q)) ||
+        (set.grammarContent?.lessonTitleDe && set.grammarContent.lessonTitleDe.toLowerCase().includes(q));
 
-      if (matchSource && matchTeacher && matchGrade && matchCategory && matchGroup && matchQuery) {
+      if (matchSource && matchTeacher && matchGrade && matchKind && matchCategory && matchGroup && matchQuery) {
         seenIds.add(set.id);
         if (cleanTitleKey) seenTitles.add(cleanTitleKey);
         return true;
       }
       return false;
     });
-  }, [vocabSets, selectedSourceFilter, selectedTeacherFilter, selectedGradeFilter, selectedCategoryFilter, selectedGroupFilter, searchTerm, getEffectiveSetTeacherName]);
+  }, [vocabSets, selectedSourceFilter, selectedSetKindFilter, selectedTeacherFilter, selectedGradeFilter, selectedCategoryFilter, selectedGroupFilter, searchTerm, getEffectiveSetTeacherName]);
 
   // Pagination State & Logic
   const ITEMS_PER_PAGE = 12;
@@ -579,7 +586,7 @@ export const LernstudioView: React.FC<Props> = ({
 
   React.useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedSourceFilter, selectedTeacherFilter, selectedGradeFilter, selectedCategoryFilter, selectedGroupFilter]);
+  }, [searchTerm, selectedSourceFilter, selectedSetKindFilter, selectedTeacherFilter, selectedGradeFilter, selectedCategoryFilter, selectedGroupFilter]);
 
   const totalPages = Math.ceil(filteredSets.length / ITEMS_PER_PAGE) || 1;
   const paginatedSets = useMemo(() => {
@@ -640,19 +647,24 @@ export const LernstudioView: React.FC<Props> = ({
   // Handlers
   const handleCopySetCode = (set: LernstudioSet) => {
     const creatorName = getEffectiveSetTeacherName(set);
+    const cleanedSet = stripHeavyGrammarMediaForSync(set);
     const setExportData = {
-      title: set.title,
-      topic: set.topic || 'ألماني',
-      grade: set.grade || '',
-      level: set.level || 'A1',
-      difficulty: set.difficulty || 'medium',
-      hasArticles: set.hasArticles !== false,
-      sentenceBuilderSupported: set.sentenceBuilderSupported !== false,
-      ...(set.setKind ? { setKind: set.setKind } : {}),
-      ...(set.verbIds ? { verbIds: set.verbIds } : {}),
+      title: cleanedSet.title,
+      ...(cleanedSet.titleTranslations ? { titleTranslations: cleanedSet.titleTranslations } : {}),
+      topic: cleanedSet.topic || 'ألماني',
+      ...(cleanedSet.topicTranslations ? { topicTranslations: cleanedSet.topicTranslations } : {}),
+      grade: cleanedSet.grade || '',
+      level: cleanedSet.level || 'A1',
+      difficulty: cleanedSet.difficulty || 'medium',
+      hasArticles: cleanedSet.hasArticles !== false,
+      sentenceBuilderSupported: cleanedSet.sentenceBuilderSupported !== false,
+      setKind: inferSetKind(cleanedSet),
+      ...(cleanedSet.contentOrigin ? { contentOrigin: cleanedSet.contentOrigin } : {}),
+      ...(cleanedSet.verbIds ? { verbIds: cleanedSet.verbIds } : {}),
       ...(creatorName ? { createdByTeacherName: creatorName } : {}),
-      description: set.description || `مجموعة ${set.title}`,
-      items: (set.items || []).map((it) => ({
+      description: cleanedSet.description || `مجموعة ${cleanedSet.title}`,
+      ...(cleanedSet.descriptionTranslations ? { descriptionTranslations: cleanedSet.descriptionTranslations } : {}),
+      items: (cleanedSet.items || []).map((it) => ({
         german: it.german,
         article: it.article || null,
         arabic: it.arabic,
@@ -671,7 +683,8 @@ export const LernstudioView: React.FC<Props> = ({
         ...(it.preposition ? { preposition: it.preposition } : {}),
         ...(it.prepositionCase ? { prepositionCase: it.prepositionCase } : {})
       })),
-      customExercises: set.customExercises || []
+      ...(cleanedSet.grammarContent ? { grammarContent: cleanedSet.grammarContent } : {}),
+      customExercises: cleanedSet.customExercises || []
     };
 
     const jsonString = JSON.stringify(setExportData, null, 2);
@@ -1126,7 +1139,10 @@ export const LernstudioView: React.FC<Props> = ({
           activeTheme={activeTheme}
           language={language}
           gameConfig={gameSetupConfig || undefined}
-          onBack={() => setGameSetupConfig(null)}
+          onBack={() => {
+            setGameSetupConfig(null);
+            setActiveMode('games_portal');
+          }}
         />
       );
     }
@@ -1192,12 +1208,29 @@ export const LernstudioView: React.FC<Props> = ({
             {/* 3. AI Import / Generator */}
             <button
               type="button"
-              onClick={() => setIsAiModalOpen(true)}
+              onClick={() => {
+                setAiModalInitialTab('generate');
+                setIsAiModalOpen(true);
+              }}
               className="p-2.5 bg-surface-hover hover:bg-surface border border-surface-border active:scale-95 text-text-main rounded-xl transition-all flex items-center justify-center cursor-pointer shrink-0"
               title={t.aiImport}
               aria-label={t.aiImport}
             >
               <Bot className="w-4 h-4 shrink-0 text-primary" />
+            </button>
+
+            {/* 3b. Grammar Set from Book / Textbook Images */}
+            <button
+              type="button"
+              onClick={() => {
+                setAiModalInitialTab('from_images');
+                setIsAiModalOpen(true);
+              }}
+              className="p-2.5 bg-surface-hover hover:bg-surface border border-surface-border active:scale-95 text-text-main rounded-xl transition-all flex items-center justify-center cursor-pointer shrink-0"
+              title={t.createFromBookImage}
+              aria-label={t.createFromBookImage}
+            >
+              <Camera className="w-4 h-4 shrink-0 text-primary" />
             </button>
 
             {/* 4. Create Homework */}
@@ -1362,7 +1395,19 @@ export const LernstudioView: React.FC<Props> = ({
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 w-full sm:w-auto shrink-0 min-w-0">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2 w-full sm:w-auto shrink-0 min-w-0">
+                <select
+                  value={selectedSetKindFilter}
+                  onChange={(e) => setSelectedSetKindFilter(e.target.value as 'all' | LernstudioSetKind)}
+                  className="w-full sm:w-auto px-2.5 py-1.5 bg-surface-hover/70 border border-surface-border rounded-lg text-xs font-medium text-text-main focus:outline-none focus:ring-1 focus:ring-primary min-w-0 truncate cursor-pointer"
+                >
+                  <option value="all">📚 {t.setKindAll}</option>
+                  <option value="vocab">🔤 {t.setKindVocab}</option>
+                  <option value="grammar">📐 {t.setKindGrammar}</option>
+                  <option value="mixed">🔀 {t.setKindMixed}</option>
+                  <option value="verb_group">⚡ {t.setKindVerbGroup}</option>
+                </select>
+
                 <select
                   value={selectedSourceFilter}
                   onChange={(e) => setSelectedSourceFilter(e.target.value as SetSourceFilter)}
@@ -1527,10 +1572,11 @@ export const LernstudioView: React.FC<Props> = ({
                     {language === 'ar' ? 'تحميل المزيد' : 'Load More'}
                   </button>
                 )}
-                {(selectedSourceFilter !== 'all' || selectedTeacherFilter !== 'all' || selectedGradeFilter !== 'all' || selectedCategoryFilter !== 'all' || searchTerm || selectedGroupFilter !== 'all') && (
+                {(selectedSourceFilter !== 'all' || selectedSetKindFilter !== 'all' || selectedTeacherFilter !== 'all' || selectedGradeFilter !== 'all' || selectedCategoryFilter !== 'all' || searchTerm || selectedGroupFilter !== 'all') && (
                   <button
                     onClick={() => {
                       setSelectedSourceFilter('all');
+                      setSelectedSetKindFilter('all');
                       setSelectedTeacherFilter('all');
                       setSelectedGradeFilter('all');
                       setSelectedCategoryFilter('all');
@@ -1555,7 +1601,10 @@ export const LernstudioView: React.FC<Props> = ({
             <p className="text-xs text-text-muted">{t.noSetsDesc}</p>
             <button
               type="button"
-              onClick={() => setIsAiModalOpen(true)}
+              onClick={() => {
+                setAiModalInitialTab('generate');
+                setIsAiModalOpen(true);
+              }}
               className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-xl text-xs font-black shadow-md inline-flex items-center gap-1.5 cursor-pointer"
             >
               <Sparkles className="w-4 h-4" />
@@ -1567,9 +1616,21 @@ export const LernstudioView: React.FC<Props> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {paginatedSets.map((set) => {
                 const itemCount = set.items?.length || 0;
+                const setKind = inferSetKind(set);
+                const hasGrammar = hasGrammarContent(set);
+                const rulesCount = set.grammarContent?.rules?.length || 0;
+                const grammarExCount = hasGrammar ? getGrammarLessonExercises(set).length : 0;
                 const assignedGroup = groups.find((g) => g.id === set.assignedGroupId);
                 const isCustom = !isBuiltinLernstudioSet(set);
                 const creatorTeacher = getEffectiveSetTeacherName(set);
+                const kindLabel =
+                  setKind === 'grammar'
+                    ? t.setKindGrammar
+                    : setKind === 'mixed'
+                    ? t.setKindMixed
+                    : setKind === 'verb_group'
+                    ? t.setKindVerbGroup
+                    : t.setKindVocab;
 
                 return (
                   <div
@@ -1580,7 +1641,22 @@ export const LernstudioView: React.FC<Props> = ({
                       {/* Zero-Pill Unboxed Metadata Header */}
                       <div className="flex items-center justify-between gap-1.5 text-xs text-text-muted tabular-nums flex-wrap">
                         <div className="flex items-center gap-1.5 text-[11px] font-medium min-w-0 flex-wrap">
-                          <span className="font-bold text-primary">{itemCount} {t.vocabularyCount}</span>
+                          <span className={`font-black inline-flex items-center gap-1 ${setKind === 'grammar' || setKind === 'mixed' ? 'text-indigo-600 dark:text-indigo-400' : 'text-primary'}`}>
+                            {(setKind === 'grammar' || setKind === 'mixed') && <GraduationCap className="w-3 h-3" />}
+                            <span>{kindLabel}</span>
+                          </span>
+                          <span aria-hidden="true">·</span>
+                          {itemCount > 0 && (
+                            <span className="font-bold text-primary">{itemCount} {t.vocabularyCount}</span>
+                          )}
+                          {hasGrammar && (
+                            <>
+                              {itemCount > 0 && <span aria-hidden="true">·</span>}
+                              <span className="font-bold text-indigo-600 dark:text-indigo-400">
+                                {rulesCount} {t.grammarRulesCount} · {grammarExCount} {t.grammarExercisesCount}
+                              </span>
+                            </>
+                          )}
                           {set.grade && (
                             <>
                               <span aria-hidden="true">·</span>
@@ -2451,6 +2527,7 @@ export const LernstudioView: React.FC<Props> = ({
         {isAiModalOpen && (
           <LernstudioAiModal
             isOpen={isAiModalOpen}
+            initialTab={aiModalInitialTab}
             teacherName={teacherName}
             language={language}
             onClose={() => setIsAiModalOpen(false)}

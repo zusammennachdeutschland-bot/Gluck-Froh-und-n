@@ -3,6 +3,7 @@ import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/l
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
+import { getSetPlayableItems } from '../../../utils/lernstudioVocabularyAdapter';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
 import {
@@ -61,7 +62,7 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const displayTitle = getLocalizedSetTitle(set, language);
-  const items = useMemo(() => set.items || [], [set.items]);
+  const items = useMemo(() => getSetPlayableItems(set), [set]);
   const { triggerSparkles, triggerScorePopup, triggerCelebration, EffectsOverlay, SettingsBar } = useGameEffects(language);
 
   // Game Progress

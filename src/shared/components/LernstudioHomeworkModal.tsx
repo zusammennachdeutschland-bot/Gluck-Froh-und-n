@@ -10,11 +10,14 @@ import {
   HomeworkBlooketMode,
   HomeworkSubmission,
   DEFAULT_HOMEWORK_QUESTION_TYPES,
-  VERB_HOMEWORK_QUESTION_TYPES
+  VERB_HOMEWORK_QUESTION_TYPES,
+  GRAMMAR_HOMEWORK_QUESTION_TYPES
 } from '../homeworkTypes';
 import {
   QUESTION_TYPE_META,
   VERB_QUESTION_TYPE_META,
+  GRAMMAR_QUESTION_TYPE_META,
+  getQuestionTypeMeta,
   buildHomeworkShareUrl,
   getLocalAssignments,
   saveLocalAssignment,
@@ -60,6 +63,14 @@ import {
   verbGroupToLernstudioSet
 } from '../verbGroupSync';
 import { filterLernstudioSetsByQuery } from '../lernstudioTranslations';
+import { isArticleGameSupported } from '../lernstudioQuestionAdapter';
+import {
+  hasGrammarContent,
+  isGrammarSet,
+  isPureGrammarSet,
+  getGrammarLessonExercises,
+  stripHeavyGrammarMediaForSync
+} from '../grammarEngine';
 import type { VerbEntry, VerbGroupCategory, VerbGroupDefinition, VerbLevel } from '../verbLibrary/verbTypes';
 import {
   Sparkles,
@@ -175,7 +186,14 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     studentsRef.current = students;
   }, [students]);
 
-  const vocabSets = useMemo(() => sets.filter((s) => !isVerbGroupSet(s)), [sets]);
+  const grammarSets = useMemo(
+    () => sets.filter((s) => isGrammarSet(s) || hasGrammarContent(s)),
+    [sets]
+  );
+  const vocabSets = useMemo(
+    () => sets.filter((s) => !isVerbGroupSet(s) && !isPureGrammarSet(s)),
+    [sets]
+  );
   const customVerbGroups = useMemo(() => extractVerbGroupsFromLernstudioSets(sets), [sets]);
   const allVerbGroups = useMemo<VerbGroupDefinition[]>(
     () => [...BUILTIN_VERB_GROUPS, ...customVerbGroups],
@@ -184,11 +202,15 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
   // Create Homework State
   const [contentSource, setContentSource] = useState<HomeworkContentSource>(() =>
-    isVerbGroupSet(defaultSet) ? 'verb' : 'vocab'
+    isVerbGroupSet(defaultSet)
+      ? 'verb'
+      : defaultSet && (isGrammarSet(defaultSet) || isPureGrammarSet(defaultSet))
+      ? 'grammar'
+      : 'vocab'
   );
   const [selectedSetId, setSelectedSetId] = useState(() => {
     if (defaultSet && !isVerbGroupSet(defaultSet)) return defaultSet.id;
-    return vocabSets[0]?.id || sets[0]?.id || '';
+    return vocabSets[0]?.id || grammarSets[0]?.id || sets[0]?.id || '';
   });
   const [selectedVerbGroupIds, setSelectedVerbGroupIds] = useState<string[]>(() => {
     if (isVerbGroupSet(defaultSet) && defaultSet?.id) return [defaultSet.id];
@@ -201,9 +223,13 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     return [];
   });
   const [vocabSetSearchQuery, setVocabSetSearchQuery] = useState('');
+  const selectableSetsForSource = useMemo(
+    () => (contentSource === 'grammar' ? grammarSets : vocabSets),
+    [contentSource, grammarSets, vocabSets]
+  );
   const filteredVocabSets = useMemo(
-    () => filterLernstudioSetsByQuery(vocabSets, vocabSetSearchQuery),
-    [vocabSets, vocabSetSearchQuery]
+    () => filterLernstudioSetsByQuery(selectableSetsForSource, vocabSetSearchQuery),
+    [selectableSetsForSource, vocabSetSearchQuery]
   );
 
   const [verbSubjectPoolMode, setVerbSubjectPoolMode] = useState<'pronouns_and_names' | 'pronouns_only'>(
@@ -224,6 +250,8 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [questionTypes, setQuestionTypes] = useState<HomeworkQuestionType[]>(() =>
     isVerbGroupSet(defaultSet)
       ? [...VERB_HOMEWORK_QUESTION_TYPES]
+      : defaultSet && (isGrammarSet(defaultSet) || isPureGrammarSet(defaultSet))
+      ? [...GRAMMAR_HOMEWORK_QUESTION_TYPES]
       : [...DEFAULT_HOMEWORK_QUESTION_TYPES]
   );
   const [questionTypeCounts, setQuestionTypeCounts] = useState<
@@ -231,6 +259,8 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   >({});
   const [blooketMode] = useState<HomeworkBlooketMode>('classic_quiz');
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
+  const [selectedGrammarExerciseIds, setSelectedGrammarExerciseIds] = useState<string[]>([]);
+  const [includeGrammarStudy, setIncludeGrammarStudy] = useState<boolean>(true);
   const [maxAttempts, setMaxAttempts] = useState(0);
   const [hideTeacherBranding, setHideTeacherBranding] = useState(false);
   const [hasDeadline] = useState(false);
@@ -291,14 +321,22 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [vercelDomain] = useState<string>(() => getVercelPublicDomain());
   const activeAuthUid = (firebaseUser?.uid || getCurrentHomeworkOwnerUid() || '').trim() || null;
 
-  const currentSet = useMemo(
-    () =>
+  const currentSet = useMemo(() => {
+    if (contentSource === 'grammar') {
+      return (
+        grammarSets.find((s) => s.id === selectedSetId) ||
+        (defaultSet && (isGrammarSet(defaultSet) || hasGrammarContent(defaultSet)) ? defaultSet : null) ||
+        grammarSets[0] ||
+        sets[0]
+      );
+    }
+    return (
       vocabSets.find((s) => s.id === selectedSetId) ||
       (!isVerbGroupSet(defaultSet) ? defaultSet : null) ||
       vocabSets[0] ||
-      sets[0],
-    [vocabSets, sets, selectedSetId, defaultSet]
-  );
+      sets[0]
+    );
+  }, [contentSource, grammarSets, vocabSets, sets, selectedSetId, defaultSet]);
 
   // Sync activeTab & contextual defaults when modal opens
   useEffect(() => {
@@ -333,12 +371,18 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         });
         setSelectedVerbIds(resolvedVerbs.map((v) => v.id));
         setQuestionTypes([...VERB_HOMEWORK_QUESTION_TYPES]);
+      } else if (defaultSet && (isGrammarSet(defaultSet) || isPureGrammarSet(defaultSet))) {
+        setContentSource('grammar');
+        setSelectedSetId(defaultSet.id);
+        setQuestionTypes([...GRAMMAR_HOMEWORK_QUESTION_TYPES]);
       } else {
         setContentSource((prev) => (prev === 'verb' && !defaultSet ? 'verb' : 'vocab'));
         if ((!selectedSetId || !vocabSets.some((s) => s.id === selectedSetId)) && (defaultSet || vocabSets[0])) {
           setSelectedSetId((!isVerbGroupSet(defaultSet) ? defaultSet?.id : undefined) || vocabSets[0]?.id || '');
         }
+        setQuestionTypes([...DEFAULT_HOMEWORK_QUESTION_TYPES]);
       }
+      setIncludeGrammarStudy(true);
       setHideTeacherBranding(false);
       setVocabSetSearchQuery('');
       setCreateError(null);
@@ -347,12 +391,16 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     }
   }, [isOpen, initialTab, defaultSet, initialAudienceMode, initialGroupId, initialTitle, autoCloseOnCreate, groups, sets]);
 
-  // Initialize selectedItemIds when set changes
+  // Initialize selectedItemIds & selectedGrammarExerciseIds when set changes
   useEffect(() => {
     if (currentSet?.items) {
       setSelectedItemIds(currentSet.items.map((it) => it.id));
-      setQuestionTypeCounts({});
+    } else {
+      setSelectedItemIds([]);
     }
+    const gramEx = currentSet ? getGrammarLessonExercises(currentSet) : [];
+    setSelectedGrammarExerciseIds(gramEx.map((ex) => ex.id));
+    setQuestionTypeCounts({});
   }, [currentSet?.id]);
 
   useEffect(() => {
@@ -471,11 +519,23 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const switchContentSource = (nextSource: HomeworkContentSource) => {
     setContentSource(nextSource);
     setCreateError(null);
+    setVocabSetSearchQuery('');
     setQuestionTypeCounts({});
-    if (nextSource === 'verb' || nextSource === 'mixed') {
+    if (nextSource === 'grammar') {
+      setQuestionTypes([...GRAMMAR_HOMEWORK_QUESTION_TYPES]);
+      if (grammarSets.length > 0 && !grammarSets.some((s) => s.id === selectedSetId)) {
+        setSelectedSetId(grammarSets[0].id);
+      }
+    } else if (nextSource === 'verb' || nextSource === 'mixed') {
       setQuestionTypes([...VERB_HOMEWORK_QUESTION_TYPES]);
+      if (nextSource === 'mixed' && vocabSets.length > 0 && !vocabSets.some((s) => s.id === selectedSetId)) {
+        setSelectedSetId(vocabSets[0].id);
+      }
     } else {
       setQuestionTypes([...DEFAULT_HOMEWORK_QUESTION_TYPES]);
+      if (vocabSets.length > 0 && !vocabSets.some((s) => s.id === selectedSetId)) {
+        setSelectedSetId(vocabSets[0].id);
+      }
     }
   };
 
@@ -574,12 +634,31 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     setTimeout(() => setVerbGroupSaveSuccess(null), 4000);
   };
 
+  const hasArticleItems = useMemo(() => {
+    if (contentSource === 'verb' || contentSource === 'grammar' || !currentSet) return false;
+    return isArticleGameSupported(currentSet);
+  }, [contentSource, currentSet]);
+
+  const currentGrammarExercises = useMemo(
+    () => (currentSet ? getGrammarLessonExercises(currentSet) : []),
+    [currentSet]
+  );
+  const hasGrammarForSet = currentGrammarExercises.length > 0;
+
   const activeQuestionMetaList = useMemo(() => {
-    if (contentSource === 'verb' || contentSource === 'mixed') {
+    if (contentSource === 'grammar') {
+      return GRAMMAR_QUESTION_TYPE_META;
+    }
+    const articleMeta = hasArticleItems ? [getQuestionTypeMeta('article_quiz')] : [];
+    const grammarMeta = hasGrammarForSet ? GRAMMAR_QUESTION_TYPE_META : [];
+    if (contentSource === 'verb') {
       return [...QUESTION_TYPE_META, ...VERB_QUESTION_TYPE_META];
     }
-    return QUESTION_TYPE_META;
-  }, [contentSource]);
+    if (contentSource === 'mixed') {
+      return [...QUESTION_TYPE_META, ...articleMeta, ...VERB_QUESTION_TYPE_META, ...grammarMeta];
+    }
+    return [...QUESTION_TYPE_META, ...articleMeta, ...grammarMeta];
+  }, [contentSource, hasArticleItems, hasGrammarForSet]);
 
   const activeQuestionTypesForSource = useMemo(() => {
     const allowedIds = new Set(activeQuestionMetaList.map((m) => m.id));
@@ -612,21 +691,51 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     });
   };
 
+  const toggleGrammarExerciseItem = (id: string) => {
+    setSelectedGrammarExerciseIds((prev) => {
+      if (prev.includes(id)) {
+        if (prev.length === 1) return prev;
+        return prev.filter((x) => x !== id);
+      }
+      return [...prev, id];
+    });
+  };
+
   const effectiveVocabCount =
-    contentSource === 'verb' ? 0 : Math.max(0, selectedItemIds.length || currentSet?.items?.length || 0);
-  const effectiveVerbCount = contentSource === 'vocab' ? 0 : resolvedSelectedVerbs.length;
+    contentSource === 'verb' || contentSource === 'grammar'
+      ? 0
+      : Math.max(0, selectedItemIds.length || currentSet?.items?.length || 0);
+  const effectiveVerbCount =
+    contentSource === 'vocab' || contentSource === 'grammar' ? 0 : resolvedSelectedVerbs.length;
+  const effectiveGrammarCount =
+    contentSource === 'verb'
+      ? 0
+      : contentSource === 'grammar' || activeQuestionTypesForSource.includes('grammar_exercise')
+      ? Math.max(0, selectedGrammarExerciseIds.length || currentGrammarExercises.length)
+      : 0;
   const effectiveWordStageCount =
-    contentSource === 'verb' ? effectiveVerbCount : effectiveVocabCount;
+    contentSource === 'verb'
+      ? effectiveVerbCount
+      : contentSource === 'grammar'
+      ? effectiveGrammarCount
+      : effectiveVocabCount;
   const maxStageWords = Math.max(1, effectiveWordStageCount || 1);
 
   const getStageMaxCount = (type: HomeworkQuestionType): number => {
     if (type === 'verb_conjugation') return Math.max(1, effectiveVerbCount * 6);
     if (type === 'verb_sentence') return Math.max(1, effectiveVerbCount);
+    if (type === 'grammar_exercise') return Math.max(1, effectiveGrammarCount);
     return maxStageWords;
   };
 
   const getStageQuestionCount = (type: HomeworkQuestionType): number =>
-    resolveStageQuestionCount(type, effectiveVocabCount, questionTypeCounts, effectiveVerbCount);
+    resolveStageQuestionCount(
+      type,
+      effectiveVocabCount,
+      questionTypeCounts,
+      effectiveVerbCount,
+      effectiveGrammarCount
+    );
 
   const setSingleStageQuestionCount = (type: HomeworkQuestionType, nextCount: number) => {
     const stageMax = getStageMaxCount(type);
@@ -664,9 +773,16 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         effectiveVocabCount,
         activeQuestionTypesForSource,
         questionTypeCounts,
-        effectiveVerbCount
+        effectiveVerbCount,
+        effectiveGrammarCount
       ),
-    [effectiveVocabCount, activeQuestionTypesForSource, questionTypeCounts, effectiveVerbCount]
+    [
+      effectiveVocabCount,
+      activeQuestionTypesForSource,
+      questionTypeCounts,
+      effectiveVerbCount,
+      effectiveGrammarCount
+    ]
   );
 
   const fullMaxQuestions = useMemo(
@@ -675,16 +791,21 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         effectiveVocabCount,
         activeQuestionTypesForSource,
         {},
-        effectiveVerbCount
+        effectiveVerbCount,
+        effectiveGrammarCount
       ),
-    [effectiveVocabCount, activeQuestionTypesForSource, effectiveVerbCount]
+    [effectiveVocabCount, activeQuestionTypesForSource, effectiveVerbCount, effectiveGrammarCount]
   );
   const hasCustomStageCounts = totalConfiguredQuestions < fullMaxQuestions;
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (contentSource !== 'verb' && !currentSet) return;
-    if (contentSource !== 'vocab' && resolvedSelectedVerbs.length === 0) {
+    if (contentSource === 'grammar' && currentGrammarExercises.length === 0) {
+      setCreateError('المجموعة المختارة لا تحتوي على تمارين قواعد صالحة.');
+      return;
+    }
+    if ((contentSource === 'verb' || contentSource === 'mixed') && resolvedSelectedVerbs.length === 0) {
       setCreateError('يرجى اختيار فعل واحد أو مجموعة أفعال واحدة على الأقل من مكتبة الأفعال.');
       return;
     }
@@ -709,17 +830,18 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     const resolvedOwnerEmail = firebaseUser?.email || getCurrentHomeworkOwnerEmail() || undefined;
     try {
       const chosenVocabItems =
-        contentSource === 'verb'
+        contentSource === 'verb' || contentSource === 'grammar'
           ? []
           : (currentSet?.items || []).filter((it) => selectedItemIds.includes(it.id));
       const finalVocabItems =
-        contentSource === 'verb'
+        contentSource === 'verb' || contentSource === 'grammar'
           ? []
           : chosenVocabItems.length > 0
           ? chosenVocabItems
           : currentSet?.items || [];
 
-      const finalVerbs = contentSource === 'vocab' ? [] : resolvedSelectedVerbs;
+      const finalVerbs =
+        contentSource === 'vocab' || contentSource === 'grammar' ? [] : resolvedSelectedVerbs;
       const useCompactVerbItems = finalVerbs.length > 180;
       const finalVerbItems = finalVerbs.map((v) =>
         verbEntryToLernstudioItem(v, { compact: useCompactVerbItems })
@@ -728,9 +850,23 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       const finalItems =
         contentSource === 'verb'
           ? finalVerbItems
+          : contentSource === 'grammar'
+          ? []
           : contentSource === 'mixed'
           ? [...finalVocabItems, ...finalVerbItems]
           : finalVocabItems;
+
+      const includesGrammarStage =
+        contentSource === 'grammar' || activeQuestionTypesForSource.includes('grammar_exercise');
+      const finalGrammarExercises =
+        includesGrammarStage && currentGrammarExercises.length > 0
+          ? (() => {
+              const selSet = new Set(selectedGrammarExerciseIds);
+              const filtered = currentGrammarExercises.filter((ex) => selSet.has(ex.id));
+              return filtered.length > 0 ? filtered : currentGrammarExercises;
+            })()
+          : [];
+      const finalGrammarCount = includesGrammarStage ? finalGrammarExercises.length : 0;
 
       const sanitizedCounts: Partial<Record<HomeworkQuestionType, number>> = {};
       const wordStageCap = contentSource === 'verb' ? finalVerbs.length : finalVocabItems.length;
@@ -740,8 +876,16 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
             ? finalVerbs.length * 6
             : qt === 'verb_sentence'
             ? finalVerbs.length
+            : qt === 'grammar_exercise'
+            ? finalGrammarCount
             : wordStageCap;
-        const c = resolveStageQuestionCount(qt, finalVocabItems.length, questionTypeCounts, finalVerbs.length);
+        const c = resolveStageQuestionCount(
+          qt,
+          finalVocabItems.length,
+          questionTypeCounts,
+          finalVerbs.length,
+          finalGrammarCount
+        );
         if (c > 0 && c < cap) {
           sanitizedCounts[qt] = c;
         }
@@ -750,7 +894,8 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         finalVocabItems.length,
         activeQuestionTypesForSource,
         sanitizedCounts,
-        finalVerbs.length
+        finalVerbs.length,
+        finalGrammarCount
       );
       const generatedId = createHomeworkAssignmentId();
 
@@ -772,12 +917,28 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       const defaultTitle =
         contentSource === 'verb'
           ? `واجب أفعال: ${selectedGroupTitles || `${finalVerbs.length} فعل`}`
+          : contentSource === 'grammar'
+          ? `واجب قواعد: ${currentSet?.title || ''}`
           : contentSource === 'mixed'
           ? `واجب مختلط: ${currentSet?.title || ''} + أفعال`
           : `واجب: ${currentSet?.title || ''}`;
 
       const immutableVerbSnapshot: VerbEntry[] | undefined =
         finalVerbs.length > 0 ? JSON.parse(JSON.stringify(finalVerbs)) : undefined;
+
+      const strippedSet =
+        contentSource !== 'verb' && currentSet
+          ? stripHeavyGrammarMediaForSync(currentSet)
+          : null;
+      const resolvedGrammarSnapshot =
+        strippedSet?.grammarContent && (includesGrammarStage || hasGrammarForSet)
+          ? {
+              ...strippedSet.grammarContent,
+              ...(finalGrammarExercises.length > 0
+                ? { exercises: JSON.parse(JSON.stringify(finalGrammarExercises)) }
+                : {})
+            }
+          : strippedSet?.grammarContent;
 
       const payload: HomeworkAssignment = {
         id: generatedId,
@@ -791,7 +952,13 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         ...(selectedVerbGroupIds.length > 0 ? { selectedVerbGroupIds: [...selectedVerbGroupIds] } : {}),
         ...(finalVerbs.length > 0 ? { selectedVerbIds: finalVerbs.map((v) => v.id) } : {}),
         ...(immutableVerbSnapshot ? { verbSnapshot: immutableVerbSnapshot } : {}),
-        ...(contentSource !== 'vocab' ? { verbSubjectPoolMode } : {}),
+        ...(contentSource === 'verb' || contentSource === 'mixed' ? { verbSubjectPoolMode } : {}),
+        ...(finalGrammarExercises.length > 0
+          ? {
+              selectedGrammarExerciseIds: finalGrammarExercises.map((ex) => ex.id),
+              includeGrammarStudy
+            }
+          : {}),
         setSnapshot: {
           id:
             contentSource === 'verb'
@@ -804,9 +971,12 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
           category: contentSource === 'verb' ? 'Verben' : (currentSet as any)?.category || currentSet?.topic || '',
           ...(contentSource === 'verb'
             ? { setKind: 'verb_group', verbIds: finalVerbs.map((v) => v.id) }
+            : contentSource === 'grammar'
+            ? { setKind: 'grammar', ...(strippedSet?.level ? { level: strippedSet.level } : {}) }
             : contentSource === 'mixed'
             ? { setKind: 'mixed', verbIds: finalVerbs.map((v) => v.id) }
             : {}),
+          ...(resolvedGrammarSnapshot ? { grammarContent: resolvedGrammarSnapshot } : {}),
           items: finalItems
         },
         selectedItemIds: finalItems.map((it) => it.id),
@@ -833,7 +1003,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
       // If created from a custom Lernstudio set, publish once (content-hash deduplicated) so Vercel resolves sets safely
       if (contentSource !== 'verb' && currentSet?.id && !isBuiltinCurriculumSetId(currentSet.id)) {
-        publishCustomLernstudioSetOnce(currentSet, resolvedOwnerUid).catch(() => {});
+        publishCustomLernstudioSetOnce(stripHeavyGrammarMediaForSync(currentSet), resolvedOwnerUid).catch(() => {});
       }
 
       // Persist assignment directly to Firestore (with Vercel API fallback)
@@ -1285,7 +1455,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                   </div>
                 )}
 
-                {/* 0. Unified Content Source Switcher (Vocab | Verbs A1–B1 | Mixed) */}
+                {/* 0. Unified Content Source Switcher (Vocab | Grammar | Verbs A1–B1 | Mixed) */}
                 <div className="p-2.5 rounded-xl bg-surface-hover/70 border border-surface-border space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
@@ -1293,12 +1463,13 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                       <span>مصدر محتوى الواجب:</span>
                     </label>
                     <span className="text-[10px] font-bold text-text-muted">
-                      مكتبة الأفعال الموحدة: {ALL_VERBS.length} فعل (A1–B1)
+                      مكتبة الأفعال: {ALL_VERBS.length} فعل · دروس القواعد: {grammarSets.length}
                     </span>
                   </div>
-                  <div className="grid grid-cols-3 gap-1.5 bg-surface p-1 rounded-xl border border-surface-border">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-surface p-1 rounded-xl border border-surface-border">
                     {[
                       { id: 'vocab' as HomeworkContentSource, label: '📚 مجموعات الكلمات' },
+                      { id: 'grammar' as HomeworkContentSource, label: '📘 دروس القواعد' },
                       { id: 'verb' as HomeworkContentSource, label: '🔤 مكتبة الأفعال A1–B1' },
                       { id: 'mixed' as HomeworkContentSource, label: '🔀 مختلط (كلمات + أفعال)' }
                     ].map((src) => (
@@ -1318,19 +1489,23 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                   </div>
                 </div>
 
-                {/* 1. Vocabulary Set (when vocab/mixed) & Audience Mode Selection Row */}
+                {/* 1. Vocabulary / Grammar Set & Audience Mode Selection Row */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {contentSource !== 'verb' ? (
                     <div className="space-y-1.5">
                       <div className="flex items-center justify-between gap-2">
                         <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
-                          <span>📚</span>
-                          <span>مجموعة الكلمات المفتاحية:</span>
+                          <span>{contentSource === 'grammar' ? '📘' : '📚'}</span>
+                          <span>
+                            {contentSource === 'grammar'
+                              ? 'درس القواعد المستهدف:'
+                              : 'مجموعة الكلمات المفتاحية:'}
+                          </span>
                         </label>
                         {vocabSetSearchQuery.trim() && (
                           <span className="text-[10.5px] font-bold text-primary tabular-nums">
                             {filteredVocabSets.length > 0
-                              ? `${filteredVocabSets.length} نتيجة من ${vocabSets.length}`
+                              ? `${filteredVocabSets.length} نتيجة من ${selectableSetsForSource.length}`
                               : 'لا توجد نتائج مطابقة'}
                           </span>
                         )}
@@ -1343,7 +1518,10 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                           onChange={(e) => {
                             const nextQuery = e.target.value;
                             setVocabSetSearchQuery(nextQuery);
-                            const nextFiltered = filterLernstudioSetsByQuery(vocabSets, nextQuery);
+                            const nextFiltered = filterLernstudioSetsByQuery(
+                              selectableSetsForSource,
+                              nextQuery
+                            );
                             if (
                               nextFiltered.length > 0 &&
                               !nextFiltered.some((s) => s.id === selectedSetId)
@@ -1351,7 +1529,11 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                               setSelectedSetId(nextFiltered[0].id);
                             }
                           }}
-                          placeholder="ابحث عن مجموعة كلمات (بالاسم، الصف، المعلم، أو كلمة)..."
+                          placeholder={
+                            contentSource === 'grammar'
+                              ? 'ابحث عن درس قواعد (بالاسم، المستوى، أو الموضوع)...'
+                              : 'ابحث عن مجموعة كلمات (بالاسم، الصف، المعلم، أو كلمة)...'
+                          }
                           className="w-full pr-8 pl-7 py-1.5 bg-surface border border-surface-border rounded-xl text-text-main text-xs font-semibold outline-none focus:ring-1 focus:ring-primary"
                         />
                         {vocabSetSearchQuery && (
@@ -1375,12 +1557,19 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                             -- لا توجد مجموعات تطابق البحث --
                           </option>
                         ) : (
-                          filteredVocabSets.map((s) => (
-                            <option key={s.id} value={s.id}>
-                              {s.title} ({s.items?.length || 0} كلمة)
-                              {s.createdByTeacherName ? ` — أ. ${s.createdByTeacherName}` : ''}
-                            </option>
-                          ))
+                          filteredVocabSets.map((s) => {
+                            const exCount = getGrammarLessonExercises(s).length;
+                            const countText =
+                              contentSource === 'grammar' || isPureGrammarSet(s)
+                                ? `${exCount} تمرين قواعد`
+                                : `${s.items?.length || 0} كلمة${exCount > 0 ? ` + ${exCount} قواعد` : ''}`;
+                            return (
+                              <option key={s.id} value={s.id}>
+                                {s.title} ({countText})
+                                {s.createdByTeacherName ? ` — أ. ${s.createdByTeacherName}` : ''}
+                              </option>
+                            );
+                          })
                         )}
                       </select>
                     </div>
@@ -1464,7 +1653,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                 )}
 
                 {/* Unified Verb Library Group & Verb Picker (shown for 'verb' & 'mixed') */}
-                {contentSource !== 'vocab' && (
+                {(contentSource === 'verb' || contentSource === 'mixed') && (
                   <div className="p-3 rounded-xl bg-surface-hover/70 border border-surface-border space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5">
@@ -1954,49 +2143,120 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                   </div>
                 </div>
 
-                {/* 5. Words Selector Pills (only when vocab or mixed is active) */}
-                {contentSource !== 'verb' && currentSet?.items && currentSet.items.length > 0 && (
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-bold text-text-main">
-                        الكلمات المتضمنة بالواجب ({selectedItemIds.length} من {currentSet.items.length}):
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (selectedItemIds.length === currentSet.items.length) {
-                            setSelectedItemIds([currentSet.items[0].id]);
-                          } else {
-                            setSelectedItemIds(currentSet.items.map((i) => i.id));
-                          }
-                        }}
-                        className="text-[11px] font-bold text-primary hover:underline cursor-pointer"
-                      >
-                        {selectedItemIds.length === currentSet.items.length ? 'إلغاء التحديد' : 'تحديد الكل'}
-                      </button>
+                {/* 5. Words Selector Pills (when vocab or mixed is active) */}
+                {contentSource !== 'verb' &&
+                  contentSource !== 'grammar' &&
+                  currentSet?.items &&
+                  currentSet.items.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-text-main">
+                          الكلمات المتضمنة بالواجب ({selectedItemIds.length} من {currentSet.items.length}):
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (selectedItemIds.length === currentSet.items.length) {
+                              setSelectedItemIds([currentSet.items[0].id]);
+                            } else {
+                              setSelectedItemIds(currentSet.items.map((i) => i.id));
+                            }
+                          }}
+                          className="text-[11px] font-bold text-primary hover:underline cursor-pointer"
+                        >
+                          {selectedItemIds.length === currentSet.items.length ? 'إلغاء التحديد' : 'تحديد الكل'}
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-2 bg-surface-hover rounded-xl border border-surface-border">
+                        {currentSet.items.map((it) => {
+                          const active = selectedItemIds.includes(it.id);
+                          return (
+                            <button
+                              key={it.id}
+                              type="button"
+                              onClick={() => toggleWordItem(it.id)}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                                active
+                                  ? 'bg-primary text-white'
+                                  : 'bg-surface text-text-muted border border-surface-border'
+                              }`}
+                            >
+                              <span>{it.german}</span>
+                              <span className="text-[10px] opacity-75">({it.arabic})</span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-2 bg-surface-hover rounded-xl border border-surface-border">
-                      {currentSet.items.map((it) => {
-                        const active = selectedItemIds.includes(it.id);
-                        return (
+                  )}
+
+                {/* 5b. Grammar Exercises & Study Cards Selector */}
+                {(contentSource === 'grammar' ||
+                  (contentSource !== 'verb' &&
+                    hasGrammarForSet &&
+                    activeQuestionTypesForSource.includes('grammar_exercise'))) &&
+                  currentGrammarExercises.length > 0 && (
+                    <div className="space-y-2 p-3 rounded-xl bg-surface-hover/70 border border-surface-border">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
+                          <span>📘</span>
+                          <span>
+                            تمارين القواعد المتضمنة ({selectedGrammarExerciseIds.length} من{' '}
+                            {currentGrammarExercises.length}):
+                          </span>
+                        </label>
+                        <div className="flex items-center gap-3">
+                          <label className="inline-flex items-center gap-1.5 text-[11px] font-bold text-text-main cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={includeGrammarStudy}
+                              onChange={(e) => setIncludeGrammarStudy(e.target.checked)}
+                              className="rounded border-surface-border text-primary"
+                            />
+                            <span>عرض شرح القاعدة والأمثلة قبل الاختبار</span>
+                          </label>
                           <button
-                            key={it.id}
                             type="button"
-                            onClick={() => toggleWordItem(it.id)}
-                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                              active
-                                ? 'bg-primary text-white'
-                                : 'bg-surface text-text-muted border border-surface-border'
-                            }`}
+                            onClick={() => {
+                              if (selectedGrammarExerciseIds.length === currentGrammarExercises.length) {
+                                setSelectedGrammarExerciseIds([currentGrammarExercises[0].id]);
+                              } else {
+                                setSelectedGrammarExerciseIds(currentGrammarExercises.map((ex) => ex.id));
+                              }
+                            }}
+                            className="text-[11px] font-bold text-primary hover:underline cursor-pointer"
                           >
-                            <span>{it.german}</span>
-                            <span className="text-[10px] opacity-75">({it.arabic})</span>
+                            {selectedGrammarExerciseIds.length === currentGrammarExercises.length
+                              ? 'تمرين واحد فقط'
+                              : 'تحديد كل التمارين'}
                           </button>
-                        );
-                      })}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-2 bg-surface rounded-xl border border-surface-border">
+                        {currentGrammarExercises.map((ex, idx) => {
+                          const active = selectedGrammarExerciseIds.includes(ex.id);
+                          const label = (ex.question || ex.sentenceWithBlank || ex.faultySentence || ex.prompt || ex.correctAnswer || '').slice(0, 48);
+                          return (
+                            <button
+                              key={ex.id}
+                              type="button"
+                              onClick={() => toggleGrammarExerciseItem(ex.id)}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 text-right ${
+                                active
+                                  ? 'bg-primary text-white'
+                                  : 'bg-surface-hover text-text-muted border border-surface-border'
+                              }`}
+                            >
+                              <span className="text-[10px] opacity-80">#{idx + 1}</span>
+                              <span dir="auto" className="truncate max-w-[220px]">
+                                {label}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
                 {/* Submit Action Banner */}
                 <div className="bg-surface-hover border border-surface-border rounded-xl p-3 flex flex-wrap items-center justify-between gap-2.5">
@@ -2009,6 +2269,10 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                       {hasCustomStageCounts ? (
                         <span className="text-[11px] text-amber-600 dark:text-amber-400 font-bold">
                           (مُخفّضة من {fullMaxQuestions} سؤال عبر {activeQuestionTypesForSource.length} مراحل)
+                        </span>
+                      ) : contentSource === 'grammar' ? (
+                        <span>
+                          ({effectiveGrammarCount} تمرين قواعد)
                         </span>
                       ) : contentSource === 'verb' ? (
                         <span>

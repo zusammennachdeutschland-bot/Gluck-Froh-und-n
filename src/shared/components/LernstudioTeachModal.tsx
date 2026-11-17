@@ -5,6 +5,13 @@ import { speakGermanText, speakGermanTextAndWait, stopGermanSpeech } from '../..
 import { playLernstudioSound } from '../../utils/lernstudioAudioUtils';
 import { buildTeacherStudySpeechText, resolveVerbFromLernstudioItem } from '../verbEngine';
 import {
+  hasGrammarContent,
+  getGrammarLessonExercises,
+  evaluateNormalizedGrammarAnswer,
+  getLocalizedGrammarField
+} from '../grammarEngine';
+import { getGameCompatibilityForSet } from '../lernstudioQuestionAdapter';
+import {
   X,
   Volume2,
   VolumeX,
@@ -17,7 +24,12 @@ import {
   Star,
   RotateCcw,
   Sparkles,
-  Shuffle
+  Shuffle,
+  GraduationCap,
+  HelpCircle,
+  Gamepad2,
+  Lightbulb,
+  Eye
 } from 'lucide-react';
 
 function shuffleArray<T>(array: T[]): T[] {
@@ -173,7 +185,23 @@ export const LernstudioTeachModal: React.FC<Props> = ({
   const STORAGE_KEY = `lernstudio_teach_progress_${set?.id || 'default'}`;
   const autoAdvanceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  const vocabAvailable = Boolean(set?.items && set.items.length > 0);
+  const grammarAvailable = Boolean(set && hasGrammarContent(set));
+
   // State
+  const [teachViewMode, setTeachViewMode] = useState<'vocab' | 'grammar'>(
+    !vocabAvailable && grammarAvailable ? 'grammar' : 'vocab'
+  );
+  const [grammarTab, setGrammarTab] = useState<'rules' | 'examples' | 'practice' | 'games'>('rules');
+  const [grammarExIndex, setGrammarExIndex] = useState<number>(0);
+  const [grammarUserAnswer, setGrammarUserAnswer] = useState<string>('');
+  const [grammarOrderTokens, setGrammarOrderTokens] = useState<string[]>([]);
+  const [grammarHintVisible, setGrammarHintVisible] = useState<boolean>(false);
+  const [grammarAnswerRevealed, setGrammarAnswerRevealed] = useState<boolean>(false);
+  const [grammarFeedback, setGrammarFeedback] = useState<{ isCorrect: boolean; message: string } | null>(null);
+  const [grammarScore, setGrammarScore] = useState<{ correct: number; totalAttempted: number }>({ correct: 0, totalAttempted: 0 });
+  const [expandedRuleIds, setExpandedRuleIds] = useState<Record<string, boolean>>({});
+
   const [currentStage, setCurrentStage] = useState<number>(1);
   const [stageQuestionIndex, setStageQuestionIndex] = useState<number>(0);
   const [completedStages, setCompletedStages] = useState<number[]>([]);
@@ -195,9 +223,22 @@ export const LernstudioTeachModal: React.FC<Props> = ({
     }
   };
 
-  // Always reset to Stage 1 and start fresh from the beginning when modal opens
+  // Always reset to Stage 1 / default view mode and start fresh when modal opens
   useEffect(() => {
     if (!isOpen) return;
+    const hasVocab = Boolean(set?.items && set.items.length > 0);
+    const hasGrammar = Boolean(set && hasGrammarContent(set));
+    setTeachViewMode(!hasVocab && hasGrammar ? 'grammar' : 'vocab');
+    setGrammarTab('rules');
+    setGrammarExIndex(0);
+    setGrammarUserAnswer('');
+    setGrammarOrderTokens([]);
+    setGrammarHintVisible(false);
+    setGrammarAnswerRevealed(false);
+    setGrammarFeedback(null);
+    setGrammarScore({ correct: 0, totalAttempted: 0 });
+    setExpandedRuleIds({});
+
     setCurrentStage(1);
     setStageQuestionIndex(0);
     setCompletedStages([]);
@@ -257,12 +298,18 @@ export const LernstudioTeachModal: React.FC<Props> = ({
     setIsAnswerSubmitted(false);
     setIsCorrectAnswer(null);
     setFeedbackMessage('');
+    setGrammarExIndex(0);
+    setGrammarUserAnswer('');
+    setGrammarOrderTokens([]);
+    setGrammarHintVisible(false);
+    setGrammarAnswerRevealed(false);
+    setGrammarFeedback(null);
+    setGrammarScore({ correct: 0, totalAttempted: 0 });
     setShuffleKey((k) => k + 1);
   };
 
-  if (!isOpen || !set || !set.items || set.items.length === 0) return null;
-
-  const items = set.items;
+  const items = useMemo(() => (Array.isArray(set?.items) ? set.items : []), [set?.items]);
+  const grammarExercises = useMemo(() => (set ? getGrammarLessonExercises(set) : []), [set]);
 
   // German Speech Synthesis (Android & Mobile Cross-Platform)
   const handleSpeakGerman = (text: string) => {
@@ -470,9 +517,9 @@ export const LernstudioTeachModal: React.FC<Props> = ({
   const [stage7UsedChoiceIds, setStage7UsedChoiceIds] = useState<string[]>([]);
   const [stage7ErrorChoiceId, setStage7ErrorChoiceId] = useState<string | null>(null);
 
-  // Auto-speak word whenever item or question changes across teach stages
+  // Auto-speak word whenever item or question changes across vocab teach stages
   useEffect(() => {
-    if (!isOpen || !items || items.length === 0 || !soundEnabled) return;
+    if (!isOpen || teachViewMode !== 'vocab' || !items || items.length === 0 || !soundEnabled) return;
 
     let textToSpeak = '';
     if (currentStage === 1 && items[stageQuestionIndex]) {
@@ -959,6 +1006,81 @@ export const LernstudioTeachModal: React.FC<Props> = ({
     ];
   }, [language]);
 
+  const resetGrammarExerciseState = () => {
+    setGrammarUserAnswer('');
+    setGrammarOrderTokens([]);
+    setGrammarHintVisible(false);
+    setGrammarAnswerRevealed(false);
+    setGrammarFeedback(null);
+  };
+
+  const handleCheckGrammarPractice = () => {
+    const currentEx = grammarExercises[grammarExIndex];
+    if (!currentEx) return;
+    const candidate =
+      currentEx.type === 'sentence_ordering' && grammarOrderTokens.length > 0
+        ? grammarOrderTokens.join(' ')
+        : grammarUserAnswer;
+    if (!candidate.trim()) return;
+
+    const ok = evaluateNormalizedGrammarAnswer(candidate, {
+      correctAnswer: currentEx.correctAnswer,
+      acceptedAnswers: currentEx.acceptedAnswers
+    });
+
+    if (soundEnabled) {
+      playLernstudioSound(ok ? 'correct' : 'wrong');
+    }
+
+    setGrammarScore((prev) => ({
+      correct: prev.correct + (ok ? 1 : 0),
+      totalAttempted: prev.totalAttempted + 1
+    }));
+
+    if (ok) {
+      setStars((s) => s + 100);
+      setGrammarFeedback({
+        isCorrect: true,
+        message: isRtl
+          ? `أحسنت! إجابة صحيحة (+100 💰): ${currentEx.correctAnswer}`
+          : `Richtig! (+100 💰): ${currentEx.correctAnswer}`
+      });
+    } else {
+      setGrammarFeedback({
+        isCorrect: false,
+        message: isRtl
+          ? `حاول مرة أخرى أو اعرض التلميح. الصحيح: ${currentEx.correctAnswer}`
+          : `Nochmals versuchen. Richtig: ${currentEx.correctAnswer}`
+      });
+    }
+  };
+
+  const compatibleGrammarGames = useMemo(() => {
+    if (!set) return [];
+    const modes: { mode: LernstudioGameMode; icon: string; title: string }[] = [
+      { mode: 'wheel', icon: '🎡', title: t.wheelGameTitle },
+      { mode: 'race', icon: '🏎️', title: t.raceGameTitle },
+      { mode: 'sentence_builder', icon: '📝', title: t.teamSentenceTitle },
+      { mode: 'solo_sentence', icon: '🧩', title: t.soloSentenceTitle },
+      { mode: 'memory', icon: '🧠', title: t.memoryGameTitle },
+      { mode: 'tictactoe', icon: '❌⭕', title: t.tictactoeTitle },
+      { mode: 'tug_of_war', icon: '🪢', title: t.tugOfWarTitle },
+      { mode: 'balloon_pop', icon: '🎈', title: t.balloonPopTitle },
+      { mode: 'sorting', icon: '📦', title: t.sortingGameTitle }
+    ];
+    return modes.map((m) => ({
+      ...m,
+      compat: getGameCompatibilityForSet(m.mode, set, language)
+    }));
+  }, [set, language, t]);
+
+  if (!isOpen || !set || (!vocabAvailable && !grammarAvailable)) return null;
+
+  const gc = set.grammarContent;
+  const grammarRules = gc?.rules || [];
+  const grammarExamples = gc?.examples || [];
+  const currentGrammarEx = grammarExercises[grammarExIndex];
+
   return (
     <div
       className="fixed inset-0 z-[120] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-hidden"
@@ -982,7 +1104,9 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                 </span>
               </div>
               <p className="text-xs text-text-muted truncate">
-                {set.topic} · {items.length} كلمات
+                {set.topic}
+                {vocabAvailable ? ` · ${items.length} ${t.vocabularyCount}` : ''}
+                {grammarAvailable ? ` · ${grammarRules.length} ${t.grammarRulesCount} · ${grammarExercises.length} ${t.grammarExercisesCount}` : ''}
               </p>
             </div>
           </div>
@@ -1038,6 +1162,475 @@ export const LernstudioTeachModal: React.FC<Props> = ({
           </div>
         </div>
 
+        {/* Mode Switcher Bar (for Mixed Sets with both Vocabulary & Grammar) */}
+        {vocabAvailable && grammarAvailable && (
+          <div className="px-3 py-2 bg-surface border-b border-surface-border grid grid-cols-2 gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setTeachViewMode('vocab')}
+              className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                teachViewMode === 'vocab'
+                  ? 'bg-primary text-white shadow-2xs'
+                  : 'bg-surface-hover text-text-muted hover:text-text-main'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>{t.vocabTeachingTab} ({items.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTeachViewMode('grammar')}
+              className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                teachViewMode === 'grammar'
+                  ? 'bg-primary text-white shadow-2xs'
+                  : 'bg-surface-hover text-text-muted hover:text-text-main'
+              }`}
+            >
+              <GraduationCap className="w-3.5 h-3.5" />
+              <span>{t.grammarLessonTab} ({grammarRules.length})</span>
+            </button>
+          </div>
+        )}
+
+        {/* GRAMMAR LESSON MODE SUB-NAVIGATION */}
+        {teachViewMode === 'grammar' && grammarAvailable ? (
+          <>
+            <div className="bg-surface-hover border-b border-surface-border px-2.5 py-2 shrink-0 grid grid-cols-4 gap-1.5">
+              {[
+                { id: 'rules' as const, label: t.grammarRulesOverviewTab, icon: <GraduationCap className="w-3.5 h-3.5" /> },
+                { id: 'examples' as const, label: `${t.grammarExamplesTab} (${grammarExamples.length})`, icon: <BookOpen className="w-3.5 h-3.5" /> },
+                { id: 'practice' as const, label: `${t.grammarPracticeTab} (${grammarExercises.length})`, icon: <HelpCircle className="w-3.5 h-3.5" /> },
+                { id: 'games' as const, label: t.grammarGamesTab, icon: <Gamepad2 className="w-3.5 h-3.5" /> }
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setGrammarTab(tab.id)}
+                  className={`py-2 px-2 rounded-xl text-[11px] sm:text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 border ${
+                    grammarTab === tab.id
+                      ? 'bg-primary text-white border-primary shadow-2xs'
+                      : 'bg-surface text-text-muted hover:text-text-main border-surface-border'
+                  }`}
+                >
+                  {tab.icon}
+                  <span className="truncate">{tab.label}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="p-4 sm:p-5 overflow-y-auto flex-1 space-y-4">
+              {/* GRAMMAR TAB 1: RULES & EXPLANATION */}
+              {grammarTab === 'rules' && (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-xl bg-primary/5 border border-primary/20 space-y-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <h3 className="text-sm sm:text-base font-black text-primary">
+                        {getLocalizedGrammarField(gc, 'lessonTitle', language) || displaySetTitle}
+                      </h3>
+                      {gc?.sourceBookInfo && (
+                        <span className="text-[11px] font-bold text-text-muted">📚 {gc.sourceBookInfo}</span>
+                      )}
+                    </div>
+                    {(gc?.explanationAr || gc?.explanationDe || gc?.explanationEn) && (
+                      <p className="text-xs sm:text-sm text-text-main leading-relaxed whitespace-pre-line">
+                        {getLocalizedGrammarField(gc, 'explanation', language)}
+                      </p>
+                    )}
+                    {gc?.explanationDe && gc?.explanationAr && language !== 'de' && (
+                      <p className="text-xs text-text-muted font-medium pt-1 border-t border-primary/10" dir="ltr">
+                        🇩🇪 {gc.explanationDe}
+                      </p>
+                    )}
+                  </div>
+
+                  {grammarRules.map((rule, rIdx) => {
+                    const ruleKey = rule.id || `rule_${rIdx}`;
+                    const isCollapsed = Boolean(expandedRuleIds[ruleKey]);
+                    return (
+                      <div key={ruleKey} className="p-4 rounded-xl bg-surface border border-surface-border shadow-2xs space-y-2.5">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedRuleIds((prev) => ({ ...prev, [ruleKey]: !prev[ruleKey] }))}
+                          className="w-full flex items-center justify-between gap-2 text-start cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                            <span className="w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-black flex items-center justify-center shrink-0">
+                              {rIdx + 1}
+                            </span>
+                            <span className="text-sm font-black text-text-main">
+                              {getLocalizedGrammarField(rule, 'title', language)}
+                            </span>
+                          </div>
+                          {rule.pattern && (
+                            <code dir="ltr" className="px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-300 text-[11px] font-mono font-bold shrink-0">
+                              {rule.pattern}
+                            </code>
+                          )}
+                        </button>
+
+                        {!isCollapsed && (
+                          <div className="space-y-2.5 pt-1">
+                            <p className="text-xs sm:text-sm text-text-muted leading-relaxed whitespace-pre-line">
+                              {getLocalizedGrammarField(rule, 'summary', language)}
+                            </p>
+                            {rule.table && rule.table.headers.length > 0 && (
+                              <div className="overflow-x-auto rounded-lg border border-surface-border" dir="ltr">
+                                <table className="w-full text-xs border-collapse">
+                                  <thead>
+                                    <tr className="bg-surface-hover">
+                                      {rule.table.headers.map((h, hIdx) => (
+                                        <th key={hIdx} className="p-2 text-left font-black text-text-main border-b border-surface-border">
+                                          {h}
+                                        </th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {rule.table.rows.map((row, rowIdx) => (
+                                      <tr key={rowIdx} className="border-b border-surface-border/60 last:border-b-0">
+                                        {row.map((cell, cIdx) => (
+                                          <td key={cIdx} className="p-2 text-text-main font-semibold">
+                                            {cell}
+                                          </td>
+                                        ))}
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                            {(rule.tipAr || rule.tipDe) && (
+                              <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2">
+                                <Lightbulb className="w-4 h-4 shrink-0 mt-0.5" />
+                                <span>{getLocalizedGrammarField(rule, 'tip', language)}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* GRAMMAR TAB 2: BILINGUAL EXAMPLES */}
+              {grammarTab === 'examples' && (
+                <div className="space-y-2.5">
+                  {grammarExamples.length === 0 ? (
+                    <div className="py-12 text-center text-xs text-text-muted">{t.noSetsFound}</div>
+                  ) : (
+                    grammarExamples.map((ex, eIdx) => (
+                      <div key={ex.id || eIdx} className="p-3.5 rounded-xl bg-surface-hover/60 border border-surface-border flex items-start justify-between gap-3">
+                        <div className="space-y-1 min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-black text-primary">#{eIdx + 1}</span>
+                            <span className="text-sm sm:text-base font-bold text-text-main" dir="ltr">
+                              {ex.german}
+                            </span>
+                            {ex.highlight && (
+                              <span dir="ltr" className="text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                                {ex.highlight}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-text-muted font-semibold">
+                            {language === 'en' && ex.english ? ex.english : ex.arabic}
+                          </p>
+                          {(ex.noteAr || ex.noteDe) && (
+                            <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                              💡 {language === 'de' ? ex.noteDe || ex.noteAr : ex.noteAr || ex.noteDe}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleSpeakGerman(ex.german)}
+                          className="p-2 rounded-xl bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all cursor-pointer shrink-0"
+                          title={t.listenAudio}
+                        >
+                          <Volume2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {/* GRAMMAR TAB 3: INTERACTIVE PRACTICE */}
+              {grammarTab === 'practice' && (
+                <div className="space-y-4">
+                  {!currentGrammarEx ? (
+                    <div className="py-12 text-center text-xs text-text-muted">{t.noSetsFound}</div>
+                  ) : (
+                    <div className="p-4 sm:p-5 rounded-2xl bg-surface border border-surface-border space-y-4 shadow-xs">
+                      <div className="flex items-center justify-between gap-2 text-xs font-bold text-text-muted">
+                        <span>{t.questionProgress} {grammarExIndex + 1} / {grammarExercises.length}</span>
+                        <span>✅ {grammarScore.correct} / {grammarScore.totalAttempted}</span>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <h4 className="text-base sm:text-lg font-black text-text-main" dir="ltr">
+                            {currentGrammarEx.question}
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() => handleSpeakGerman(currentGrammarEx.question)}
+                            className="p-2 rounded-xl bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer shrink-0"
+                            title={t.listenAudio}
+                          >
+                            <Volume2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                        {currentGrammarEx.prompt && (
+                          <p className="text-xs sm:text-sm font-semibold text-text-muted">
+                            {currentGrammarEx.prompt}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Options-based exercises (multiple_choice / choose_correct_sentence) */}
+                      {(currentGrammarEx.type === 'multiple_choice' || currentGrammarEx.type === 'choose_correct_sentence') &&
+                        Array.isArray(currentGrammarEx.options) &&
+                        currentGrammarEx.options.length > 0 && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5" dir="ltr">
+                          {currentGrammarEx.options.map((opt, oIdx) => {
+                            const selected = grammarUserAnswer === opt;
+                            return (
+                              <button
+                                key={oIdx}
+                                type="button"
+                                onClick={() => {
+                                  setGrammarUserAnswer(opt);
+                                  setGrammarFeedback(null);
+                                }}
+                                className={`p-3 rounded-xl border text-left text-xs sm:text-sm font-bold transition-all cursor-pointer ${
+                                  selected
+                                    ? 'bg-primary/15 border-primary text-primary'
+                                    : 'bg-surface-hover/70 border-surface-border text-text-main hover:border-primary/40'
+                                }`}
+                              >
+                                {opt}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Sentence ordering chips */}
+                      {currentGrammarEx.type === 'sentence_ordering' && Array.isArray(currentGrammarEx.tokens) && currentGrammarEx.tokens.length > 0 && (
+                        <div className="space-y-3" dir="ltr">
+                          <div className="min-h-[48px] p-3 rounded-xl bg-surface-hover border border-dashed border-surface-border flex flex-wrap gap-2 items-center">
+                            {grammarOrderTokens.length === 0 ? (
+                              <span className="text-xs text-text-muted">{t.arrangeWordsOrder}</span>
+                            ) : (
+                              grammarOrderTokens.map((tok, idx) => (
+                                <button
+                                  key={`${tok}_${idx}`}
+                                  type="button"
+                                  onClick={() => {
+                                    setGrammarOrderTokens((prev) => prev.filter((_, i) => i !== idx));
+                                    setGrammarFeedback(null);
+                                  }}
+                                  className="px-2.5 py-1 rounded-lg bg-primary text-white text-xs font-bold cursor-pointer"
+                                >
+                                  {tok}
+                                </button>
+                              ))
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {currentGrammarEx.tokens.map((tok, idx) => (
+                              <button
+                                key={`${tok}_bank_${idx}`}
+                                type="button"
+                                onClick={() => {
+                                  setGrammarOrderTokens((prev) => [...prev, tok]);
+                                  setGrammarFeedback(null);
+                                }}
+                                className="px-3 py-1.5 rounded-lg bg-surface-hover border border-surface-border text-xs font-bold text-text-main hover:border-primary cursor-pointer"
+                              >
+                                {tok}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Text input for fill_blank, correct_mistake, short_answer, or fallback */}
+                      {!(
+                        (currentGrammarEx.type === 'multiple_choice' || currentGrammarEx.type === 'choose_correct_sentence') &&
+                        Array.isArray(currentGrammarEx.options) &&
+                        currentGrammarEx.options.length > 0
+                      ) &&
+                        !(
+                          currentGrammarEx.type === 'sentence_ordering' &&
+                          Array.isArray(currentGrammarEx.tokens) &&
+                          currentGrammarEx.tokens.length > 0
+                        ) && (
+                        <input
+                          type="text"
+                          dir="ltr"
+                          value={grammarUserAnswer}
+                          onChange={(e) => {
+                            setGrammarUserAnswer(e.target.value);
+                            setGrammarFeedback(null);
+                          }}
+                          placeholder="Deutsch Antwort eingeben..."
+                          className="w-full p-3 rounded-xl bg-background border border-surface-border text-sm font-bold text-text-main focus:outline-none focus:border-primary"
+                        />
+                      )}
+
+                      {/* Hint & Reveal Controls */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={handleCheckGrammarPractice}
+                          className="px-4 py-2 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-black cursor-pointer"
+                        >
+                          {t.checkExerciseAnswer}
+                        </button>
+                        {(currentGrammarEx.explanationAr || currentGrammarEx.explanationDe) && (
+                          <button
+                            type="button"
+                            onClick={() => setGrammarHintVisible((v) => !v)}
+                            className="px-3 py-2 rounded-xl bg-surface-hover border border-surface-border text-xs font-bold text-text-main cursor-pointer inline-flex items-center gap-1"
+                          >
+                            <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
+                            <span>{grammarHintVisible ? t.hideHint : t.showHint}</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setGrammarAnswerRevealed((v) => !v)}
+                          className="px-3 py-2 rounded-xl bg-surface-hover border border-surface-border text-xs font-bold text-text-main cursor-pointer inline-flex items-center gap-1"
+                        >
+                          <Eye className="w-3.5 h-3.5 text-primary" />
+                          <span>{t.revealAnswer}</span>
+                        </button>
+                      </div>
+
+                      {grammarHintVisible && (currentGrammarEx.explanationAr || currentGrammarEx.explanationDe) && (
+                        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-800 dark:text-amber-200">
+                          💡 {language === 'de' ? currentGrammarEx.explanationDe || currentGrammarEx.explanationAr : currentGrammarEx.explanationAr || currentGrammarEx.explanationDe}
+                        </div>
+                      )}
+
+                      {grammarAnswerRevealed && (
+                        <div className="p-3 rounded-xl bg-primary/10 border border-primary/20 text-xs font-bold text-primary" dir="ltr">
+                          ✓ {currentGrammarEx.correctAnswer}
+                        </div>
+                      )}
+
+                      {grammarFeedback && (
+                        <div
+                          className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 ${
+                            grammarFeedback.isCorrect
+                              ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20'
+                              : 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/20'
+                          }`}
+                        >
+                          {grammarFeedback.isCorrect ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <XCircle className="w-4 h-4 shrink-0" />}
+                          <span>{grammarFeedback.message}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* GRAMMAR TAB 4: COMPATIBLE GAMES */}
+              {grammarTab === 'games' && (
+                <div className="space-y-3">
+                  <h4 className="text-xs font-black text-text-muted uppercase tracking-wider">
+                    {t.recommendedGames}
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {compatibleGrammarGames.map((g) => (
+                      <button
+                        key={g.mode}
+                        type="button"
+                        disabled={!g.compat.isPlayable || !onLaunchGame}
+                        onClick={() => onLaunchGame && g.compat.isPlayable && onLaunchGame(g.mode)}
+                        className={`p-3 rounded-xl border text-start transition-all flex items-center justify-between gap-2 ${
+                          g.compat.isPlayable
+                            ? 'bg-surface hover:bg-surface-hover border-surface-border hover:border-primary/40 cursor-pointer'
+                            : 'bg-surface/40 border-surface-border/50 opacity-50 cursor-not-allowed'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="text-xl shrink-0">{g.icon}</span>
+                          <div className="min-w-0">
+                            <div className="text-xs font-black text-text-main truncate">{g.title}</div>
+                            <div className="text-[10px] text-text-muted truncate">{g.compat.localizedReason}</div>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-primary/10 text-primary shrink-0">
+                          {g.compat.status === 'supported' ? t.startBtn : g.compat.status === 'adapted' ? t.adaptedForGrammar : t.unavailableBtn}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Grammar Footer */}
+            <div className="px-5 py-3.5 border-t border-surface-border bg-surface flex items-center justify-between shrink-0 gap-2">
+              {grammarTab === 'practice' && grammarExercises.length > 0 ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={grammarExIndex === 0}
+                    onClick={() => {
+                      setGrammarExIndex((i) => Math.max(0, i - 1));
+                      resetGrammarExerciseState();
+                    }}
+                    className="px-4 py-2 bg-surface-hover hover:bg-surface-border disabled:opacity-40 text-text-main rounded-xl text-xs font-bold cursor-pointer inline-flex items-center gap-1"
+                  >
+                    <ChevronRight className={`w-4 h-4 ${isRtl ? '' : 'rotate-180'}`} />
+                    <span>{t.prevSlide}</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={grammarExIndex + 1 >= grammarExercises.length}
+                    onClick={() => {
+                      setGrammarExIndex((i) => Math.min(grammarExercises.length - 1, i + 1));
+                      resetGrammarExerciseState();
+                    }}
+                    className="px-5 py-2 bg-primary hover:bg-primary-hover disabled:opacity-40 text-white rounded-xl text-xs font-black cursor-pointer inline-flex items-center gap-1"
+                  >
+                    <span>{t.nextQuestionBtn}</span>
+                    <ChevronLeft className={`w-4 h-4 ${isRtl ? '' : 'rotate-180'}`} />
+                  </button>
+                </>
+              ) : (
+                <div className="w-full flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (grammarTab === 'rules') setGrammarTab('examples');
+                      else if (grammarTab === 'examples') setGrammarTab('practice');
+                      else if (grammarTab === 'practice') setGrammarTab('games');
+                      else onClose();
+                    }}
+                    className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-black cursor-pointer"
+                  >
+                    {grammarTab === 'games' ? (isRtl ? 'إغلاق' : 'Close') : t.nextSlide}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="px-4 py-2 bg-surface-hover hover:bg-surface border border-surface-border text-text-muted rounded-xl text-xs font-bold cursor-pointer"
+                  >
+                    {isRtl ? 'إغلاق' : 'Close'}
+                  </button>
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
         {/* Stages Stepper Nav - Icon-Only Single Row (Zero Horizontal Scrolling) */}
         <div className="bg-surface-hover border-b border-surface-border px-2.5 py-2 shrink-0">
           <div className="grid grid-cols-9 gap-1 w-full">
@@ -2329,6 +2922,8 @@ export const LernstudioTeachModal: React.FC<Props> = ({
             </div>
           )}
         </div>
+          </>
+        )}
       </div>
     </div>
   );

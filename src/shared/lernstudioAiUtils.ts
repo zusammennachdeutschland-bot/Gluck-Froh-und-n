@@ -5,6 +5,7 @@ import {
   LernstudioDifficulty,
   LernstudioExercise,
   LernstudioWordType,
+  LernstudioSetKind,
   VerbConjugationForms
 } from '../types/lernstudio';
 import {
@@ -13,6 +14,16 @@ import {
   conjugateGermanVerb,
   detectWordType
 } from './lernstudioWorksheetBuilder';
+import {
+  getGrammarLessonExercises,
+  hasGrammarContent,
+  inferSetKind,
+  isGrammarSet,
+  isValidGrammarExerciseType,
+  normalizeGrammarContent,
+  normalizeGrammarExercise,
+  stripHeavyGrammarMediaForSync
+} from './grammarEngine';
 
 export interface PromptGenConfig {
   topic: string;
@@ -21,19 +32,134 @@ export interface PromptGenConfig {
   difficulty: LernstudioDifficulty;
   itemCount: number | 'auto';
   teacherName?: string;
+  setMode?: 'vocab' | 'verb' | 'grammar' | 'mixed';
   includeSentences?: boolean;
   includeExercises?: boolean;
   includeVerbConjugation?: boolean;
 }
 
 export function generateLernstudioPrompt(config: PromptGenConfig): string {
+  const effectiveMode: 'vocab' | 'verb' | 'grammar' | 'mixed' =
+    config.setMode || (config.includeVerbConjugation ? 'verb' : 'vocab');
+
   const isAuto = config.itemCount === 'auto' || !config.itemCount;
   const countInstruction = isAuto
     ? 'Der KI-Assistent wählt automatisch die optimale Anzahl an Begriffen (z.B. 6, 8, 10, 12 oder 15 Wörter) basierend auf der hochgeladenen Lektion oder dem bereitgestellten Bild.'
     : `Erstelle genau ${config.itemCount} Wortschatz-Einträge.`;
 
-  const verbInstructionBlock = config.includeVerbConjugation
-    ? `
+  if (effectiveMode === 'grammar' || effectiveMode === 'mixed') {
+    const isMixed = effectiveMode === 'mixed';
+    return `Du bist ein pädagogischer Deutschlehrer und Lehrplanentwickler für Lernstudio (Glück Teacher).
+Erstelle ein vollständiges, didaktisch strukturiertes ${
+      isMixed ? 'Gemischtes Lern-Set (Wortschatz + Grammatik)' : 'Grammatik-Lern-Set (setKind: "grammar")'
+    } im reinen JSON-Format.
+
+Thema / Grammatikthema: ${config.topic}
+Ziel-Klasse / الصف الدراسي: ${config.grade || 'جريد 3 - 6 / A1-A2'}
+Niveau / المستوى: ${config.level}
+Schwierigkeit: ${config.difficulty}
+
+STRENGSTE REGELN:
+1. Wenn der Benutzer Bilder oder Text einer Lehrbuchseite bereitstellt, extrahiere ALLE sichtbaren Erklärungen, Regeln, Beispiele und Original-Übungen exakt und markiere Original-Übungen mit "source": "original".
+2. Zusätzliche selbst erstellte Übungen müssen klar mit "source": "generated" markiert werden.
+3. Falls ein Ausschnitt im Bild unklar/unsicher ist, setze "isUncertain": true und erkläre den Grund in "uncertaintyReason".
+4. Erstelle im Objekt "grammarContent":
+   - "lessonTitle" (Deutsch), "lessonTitleAr" (Arabisch), "lessonTitleEn" (Englisch)
+   - "grammarTopic", "explanationAr" (klare, schülergerechte arabische Erklärung), "explanationDe", "explanationEn"
+   - "rules": 1-4 strukturierte Regel-Karten (mit "titleAr", "summaryAr", optional "pattern", optional "table": {"headers":[...],"rows":[[...]]}, optional "tipAr")
+   - "examples": 4-6 zweisprachige Beispielsätze ("german", "arabic", "english", optional "highlight", "noteAr")
+   - "exercises": 6-10 abwechslungsreiche Grammatikübungen mit den Typen:
+     * "multiple_choice" (mit "options": [4 Optionen], "correctAnswer")
+     * "fill_blank" (mit "sentenceWithBlank", optional "options", "correctAnswer")
+     * "correct_mistake" (mit "faultySentence", optional "options", "correctAnswer")
+     * "choose_correct_sentence" (mit "options": [3-4 Sätze], "correctAnswer")
+     * "sentence_ordering" (mit "tokens": [einzelne Wörter/Blöcke], "correctAnswer": kompletter Satz)
+     * "short_answer" (mit "correctAnswer", optional "acceptedAnswers": [...], OHNE Pflicht zu options)
+   - "origin": "teacher_created"
+${
+  isMixed
+    ? `5. Erstelle ZUSÄTZLICH mindestens 6-10 passende Wortschatz-Einträge in "items" (inkl. "german", "arabic", "article", "syllables", "exampleSentenceGerman", "exampleSentenceArabic", "sentence4Elements").`
+    : `5. "items" darf ein leeres Array [] bleiben, da es ein reines Grammatik-Set ("setKind": "grammar") ist (oder optional 2-4 Schlüsselwörter enthalten).`
+}
+
+STRENGE JSON-REGELN:
+- Gib AUSSCHLIESSLICH reines, valides JSON ohne \`\`\`json Code-Blöcke zurück.
+- Keine Kommentare, keine Trailing Commas, keine maskierten Klammern (\\[ oder \\{).
+
+JSON-VORLAGE:
+{
+  "title": "${config.topic}",
+  "topic": "${config.topic}",
+  "grade": "${config.grade || 'جريد 4 (Grade 4)'}",
+  "level": "${config.level}",
+  "difficulty": "${config.difficulty}",
+  "setKind": "${isMixed ? 'mixed' : 'grammar'}",
+  "contentOrigin": "teacher_created",
+  "createdByTeacherName": "${(config.teacherName || '').replace(/"/g, '')}",
+  "sentenceBuilderSupported": true,
+  "description": "Grammatik-Set: ${config.topic} (${config.level})",
+  "items": [],
+  "grammarContent": {
+    "lessonTitle": "${config.topic}",
+    "lessonTitleAr": "${config.topic}",
+    "grammarTopic": "${config.topic}",
+    "origin": "teacher_created",
+    "explanationAr": "شرح القاعدة باللغة العربية بأسلوب مبسط مع الأمثلة.",
+    "explanationDe": "Kurze deutsche Zusammenfassung der Regel.",
+    "explanationEn": "Clear English summary of the grammar rule.",
+    "rules": [
+      {
+        "id": "rule_1",
+        "title": "Grundregel",
+        "titleAr": "القاعدة الأساسية",
+        "summaryAr": "تفصيل القاعدة وكيفية التطبيق.",
+        "pattern": "Subjekt + Verb (Pos. 2) + ...",
+        "table": {
+          "headers": ["Pronomen", "Endung", "Beispiel"],
+          "rows": [["ich", "-e", "lerne"], ["du", "-st", "lernst"]]
+        },
+        "tipAr": "ملاحظة هامة للطلاب."
+      }
+    ],
+    "examples": [
+      {
+        "id": "ex_1",
+        "german": "Ich lerne heute Deutsch.",
+        "arabic": "أنا أتعلم الألمانية اليوم.",
+        "english": "I am learning German today.",
+        "highlight": "lerne"
+      }
+    ],
+    "exercises": [
+      {
+        "id": "q_1",
+        "type": "multiple_choice",
+        "prompt": "اختر الإجابة الصحيحة:",
+        "question": "Mona ______ heute ein Buch.",
+        "options": ["liest", "lese", "lest", "lesen"],
+        "correctAnswer": "liest",
+        "explanationAr": "Mona تعادل sie (هي)، والفعل lesen يتغير فيه e إلى ie.",
+        "source": "original",
+        "isUncertain": false
+      },
+      {
+        "id": "q_2",
+        "type": "sentence_ordering",
+        "prompt": "رتب الكلمات لتكوين جملة صحيحة:",
+        "question": "نحن نلعب كرة القدم غداً.",
+        "tokens": ["spielen", "Wir", "morgen", "Fußball."],
+        "correctAnswer": "Wir spielen morgen Fußball.",
+        "explanationAr": "الفعل في المركز الثاني.",
+        "source": "generated"
+      }
+    ]
+  }
+}`;
+  }
+
+  const verbInstructionBlock =
+    effectiveMode === 'verb' || config.includeVerbConjugation
+      ? `
 WICHTIGE ANWEISUNG ZUR VERB-KONJUGATION (PRÄSENS SCHWERPUNKT):
 DIESES SET SIND VERB-KONJUGATIONS-ÜBUNGEN IM PRÄSENS!
 1. STRENGE EXTRAKTION: Identifiziere und extrahiere AUSSCHLIESSLICH Verben, die im bereitgestellten Lehrbuchtext, Arbeitsblatt oder Bild vorkommen (z.B. fahren, lesen, spielen, sprechen, lernen, essen, trinken, sein, haben, kochen). Erfinde KEINE unpassenden Verben!
@@ -48,7 +174,7 @@ DIESES SET SIND VERB-KONJUGATIONS-ÜBUNGEN IM PRÄSENS!
 4. FORMAT DER VERBKONJUGATIONS-ÜBUNGEN (customExercises):
    Erstelle in "customExercises" Satz-Vervollständigungsaufgaben (type: "multiple_choice") mit Lücke "______ (Verb in Grundform)" und genau 4 grammatikalisch plausiblen Antwortoptionen (verschiedene Konjugationsformen) mit korrekter Subjekt-Verb-Kongruenz.
 `
-    : `
+      : `
 WICHTIGE ANWEISUNG ZUR VERB-KONJUGATION (PRÄSENS):
 Falls die Lektion Verben enthält, erstelle auch Übungen zur Verbkonjugation im Präsens (mit variierten Subjekten wie Einzelnamen "Ahmed", mehreren Namen "Ahmed und Mona", kombinierten Subjekten "du und ich" und Pronomen).
 `;
@@ -132,6 +258,7 @@ JSON-STRUKTUR:
   "grade": "${config.grade || ''}",
   "level": "${config.level}",
   "difficulty": "${config.difficulty}",
+  "setKind": "${effectiveMode === 'verb' ? 'verb_group' : 'vocab'}",
   "createdByTeacherName": "${(config.teacherName || '').replace(/"/g, '')}",
   "hasArticles": true,
   "sentenceBuilderSupported": true,
@@ -257,193 +384,259 @@ export function validateAndParseLernstudioJson(
       return { success: false, error: 'تنسيق البيانات غير صحيح (ليس كائن JSON).' };
     }
 
-    const itemsRaw = parsed.items || parsed.words || parsed.vocabulary;
-    if (!Array.isArray(itemsRaw) || itemsRaw.length === 0) {
-      return { success: false, error: 'لم يتم العثور على مصفوفة كلمات (items) داخل كود JSON.' };
+    const itemsRaw = parsed.items || parsed.words || parsed.vocabulary || [];
+    const hasGrammarBlock = Boolean(
+      parsed.grammarContent &&
+        typeof parsed.grammarContent === 'object' &&
+        (
+          (Array.isArray(parsed.grammarContent.rules) && parsed.grammarContent.rules.length > 0) ||
+          (Array.isArray(parsed.grammarContent.examples) && parsed.grammarContent.examples.length > 0) ||
+          (Array.isArray(parsed.grammarContent.exercises) && parsed.grammarContent.exercises.length > 0) ||
+          Boolean(parsed.grammarContent.explanationAr || parsed.grammarContent.explanationDe)
+        )
+    );
+    const hasCustomExBlock = Array.isArray(parsed.customExercises) && parsed.customExercises.length > 0;
+
+    if ((!Array.isArray(itemsRaw) || itemsRaw.length === 0) && !hasGrammarBlock && !hasCustomExBlock) {
+      return {
+        success: false,
+        error: 'لم يتم العثور على مفردات (items) أو محتوى قواعد (grammarContent) أو تمارين صالحة داخل كود JSON.'
+      };
     }
 
     const sanitizedItems: LernstudioItem[] = [];
-    for (let i = 0; i < itemsRaw.length; i++) {
-      const it = itemsRaw[i];
-      if (!it || typeof it !== 'object') continue;
+    if (Array.isArray(itemsRaw)) {
+      for (let i = 0; i < itemsRaw.length; i++) {
+        const it = itemsRaw[i];
+        if (!it || typeof it !== 'object') continue;
 
-      let german = String(it.german || it.word || it.term || '').trim();
-      const arabic = String(it.arabic || it.meaning || it.translation || '').trim();
+        const german = String(it.german || it.word || it.term || '').trim();
+        const arabic = String(it.arabic || it.meaning || it.translation || '').trim();
 
-      if (!german || !arabic) continue;
+        if (!german || !arabic) continue;
 
-      let article: 'der' | 'die' | 'das' | undefined = undefined;
-      const rawArticle = String(it.article || '').toLowerCase().trim();
-      if (['der', 'die', 'das'].includes(rawArticle)) {
-        article = rawArticle as 'der' | 'die' | 'das';
-      } else {
-        const match = german.match(/^(der|die|das)\b/i);
-        if (match) {
-          article = match[1].toLowerCase() as 'der' | 'die' | 'das';
+        let article: 'der' | 'die' | 'das' | undefined = undefined;
+        const rawArticle = String(it.article || '').toLowerCase().trim();
+        if (['der', 'die', 'das'].includes(rawArticle)) {
+          article = rawArticle as 'der' | 'die' | 'das';
+        } else {
+          const match = german.match(/^(der|die|das)\b/i);
+          if (match) {
+            article = match[1].toLowerCase() as 'der' | 'die' | 'das';
+          }
         }
-      }
 
-      // WordType validation
-      let wordType: LernstudioWordType | undefined = undefined;
-      const validWordTypes = ['noun', 'verb', 'adjective', 'phrase', 'other'];
-      if (it.wordType && validWordTypes.includes(String(it.wordType).toLowerCase())) {
-        wordType = String(it.wordType).toLowerCase() as LernstudioWordType;
-      }
-
-      // Conjugation validation (auto-fill from shared verb library if omitted for a verb)
-      let conjugation: VerbConjugationForms | undefined = undefined;
-      if (it.conjugation && typeof it.conjugation === 'object') {
-        const c = it.conjugation;
-        if (c.ich && c.du && c.er_sie_es && c.wir && c.ihr && c.sie_Sie) {
-          conjugation = {
-            ich: String(c.ich).trim(),
-            du: String(c.du).trim(),
-            er_sie_es: String(c.er_sie_es).trim(),
-            wir: String(c.wir).trim(),
-            ihr: String(c.ihr).trim(),
-            sie_Sie: String(c.sie_Sie).trim()
-          };
+        // WordType validation
+        let wordType: LernstudioWordType | undefined = undefined;
+        const validWordTypes = ['noun', 'verb', 'adjective', 'phrase', 'other'];
+        if (it.wordType && validWordTypes.includes(String(it.wordType).toLowerCase())) {
+          wordType = String(it.wordType).toLowerCase() as LernstudioWordType;
         }
-      }
-      if (!conjugation && wordType === 'verb') {
-        conjugation = conjugateGermanVerb(german) || undefined;
-      }
 
-      // 4-element sentence structure
-      let sentence4: [string, string, string, string] | undefined = undefined;
-      const exGerman = it.exampleSentenceGerman ? String(it.exampleSentenceGerman).trim() : undefined;
+        // Conjugation validation
+        let conjugation: VerbConjugationForms | undefined = undefined;
+        if (it.conjugation && typeof it.conjugation === 'object') {
+          const c = it.conjugation;
+          if (c.ich && c.du && c.er_sie_es && c.wir && c.ihr && c.sie_Sie) {
+            conjugation = {
+              ich: String(c.ich).trim(),
+              du: String(c.du).trim(),
+              er_sie_es: String(c.er_sie_es).trim(),
+              wir: String(c.wir).trim(),
+              ihr: String(c.ihr).trim(),
+              sie_Sie: String(c.sie_Sie).trim()
+            };
+          }
+        }
+        if (!conjugation && wordType === 'verb') {
+          conjugation = conjugateGermanVerb(german) || undefined;
+        }
 
-      if (Array.isArray(it.sentence4Elements) && it.sentence4Elements.length === 4) {
-        const rawBlocks: [string, string, string, string] = [
-          String(it.sentence4Elements[0]).trim(),
-          String(it.sentence4Elements[1]).trim(),
-          String(it.sentence4Elements[2]).trim(),
-          String(it.sentence4Elements[3]).trim()
-        ];
-        if (exGerman && isSentence4ElementsValid(exGerman, rawBlocks)) {
-          sentence4 = rawBlocks;
+        // 4-element sentence structure
+        let sentence4: [string, string, string, string] | undefined = undefined;
+        const exGerman = it.exampleSentenceGerman ? String(it.exampleSentenceGerman).trim() : undefined;
+
+        if (Array.isArray(it.sentence4Elements) && it.sentence4Elements.length === 4) {
+          const rawBlocks: [string, string, string, string] = [
+            String(it.sentence4Elements[0]).trim(),
+            String(it.sentence4Elements[1]).trim(),
+            String(it.sentence4Elements[2]).trim(),
+            String(it.sentence4Elements[3]).trim()
+          ];
+          if (exGerman && isSentence4ElementsValid(exGerman, rawBlocks)) {
+            sentence4 = rawBlocks;
+          } else if (exGerman) {
+            sentence4 = rebuildSentence4Elements(exGerman) || rawBlocks;
+          } else {
+            sentence4 = rawBlocks;
+          }
         } else if (exGerman) {
-          sentence4 = rebuildSentence4Elements(exGerman) || rawBlocks;
-        } else {
-          sentence4 = rawBlocks;
+          sentence4 = rebuildSentence4Elements(exGerman) || undefined;
         }
-      } else if (exGerman) {
-        sentence4 = rebuildSentence4Elements(exGerman) || undefined;
-      }
 
-      if (!sentence4 || sentence4.some((c) => !c)) {
-        sentence4 = ['Das', 'Wort', 'heißt', german];
-      }
-
-      let missingLetterWord = String(it.missingLetterWord || '').trim();
-      if (!missingLetterWord && german) {
-        const cleanWord = german.replace(/^(der|die|das)\s+/i, '');
-        if (cleanWord.length > 2) {
-          const midIndex = Math.floor(cleanWord.length / 2);
-          missingLetterWord = cleanWord.substring(0, midIndex) + '_' + cleanWord.substring(midIndex + 1);
-        } else {
-          missingLetterWord = cleanWord + '_';
+        if (!sentence4 || sentence4.some((c) => !c)) {
+          sentence4 = ['Das', 'Wort', 'heißt', german];
         }
-      }
 
-      let syllables: string[] | undefined = undefined;
-      const rawSyl = it.syllables || it.syllableParts || it.silben;
-      if (Array.isArray(rawSyl) && rawSyl.length >= 2) {
-        const cleanedSyl = rawSyl.map((s: any) => String(s).trim()).filter(Boolean);
-        if (cleanedSyl.length >= 2) {
-          syllables = cleanedSyl;
+        let missingLetterWord = String(it.missingLetterWord || '').trim();
+        if (!missingLetterWord && german) {
+          const cleanWord = german.replace(/^(der|die|das)\s+/i, '');
+          if (cleanWord.length > 2) {
+            const midIndex = Math.floor(cleanWord.length / 2);
+            missingLetterWord = cleanWord.substring(0, midIndex) + '_' + cleanWord.substring(midIndex + 1);
+          } else {
+            missingLetterWord = cleanWord + '_';
+          }
         }
+
+        let syllables: string[] | undefined = undefined;
+        const rawSyl = it.syllables || it.syllableParts || it.silben;
+        if (Array.isArray(rawSyl) && rawSyl.length >= 2) {
+          const cleanedSyl = rawSyl.map((s: any) => String(s).trim()).filter(Boolean);
+          if (cleanedSyl.length >= 2) {
+            syllables = cleanedSyl;
+          }
+        }
+
+        sanitizedItems.push({
+          id: it.id ? String(it.id).trim() : `item_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`,
+          german,
+          article,
+          arabic,
+          english: it.english ? String(it.english).trim() : undefined,
+          plural: it.plural ? String(it.plural).trim() : undefined,
+          exampleSentenceGerman: exGerman,
+          exampleSentenceArabic: it.exampleSentenceArabic ? String(it.exampleSentenceArabic).trim() : undefined,
+          emoji: it.emoji ? String(it.emoji).trim() : wordType === 'verb' ? '🔤' : '📚',
+          missingLetterWord,
+          sentence4Elements: sentence4,
+          wordType,
+          conjugation,
+          category: it.category ? String(it.category).trim() : undefined,
+          syllables,
+          ...(it.verbId ? { verbId: String(it.verbId).trim() } : {}),
+          ...(Array.isArray(it.classifications) ? { classifications: it.classifications } : {}),
+          ...(it.separablePrefix ? { separablePrefix: String(it.separablePrefix).trim() } : {}),
+          ...(it.preposition ? { preposition: String(it.preposition).trim() } : {}),
+          ...(it.prepositionCase ? { prepositionCase: String(it.prepositionCase).trim() } : {})
+        });
       }
-
-      sanitizedItems.push({
-        id: it.id ? String(it.id).trim() : `item_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`,
-        german,
-        article,
-        arabic,
-        english: it.english ? String(it.english).trim() : undefined,
-        plural: it.plural ? String(it.plural).trim() : undefined,
-        exampleSentenceGerman: exGerman,
-        exampleSentenceArabic: it.exampleSentenceArabic ? String(it.exampleSentenceArabic).trim() : undefined,
-        emoji: it.emoji ? String(it.emoji).trim() : (wordType === 'verb' ? '🔤' : '📚'),
-        missingLetterWord,
-        sentence4Elements: sentence4,
-        wordType,
-        conjugation,
-        category: it.category ? String(it.category).trim() : undefined,
-        syllables,
-        ...(it.verbId ? { verbId: String(it.verbId).trim() } : {}),
-        ...(Array.isArray(it.classifications) ? { classifications: it.classifications } : {}),
-        ...(it.separablePrefix ? { separablePrefix: String(it.separablePrefix).trim() } : {}),
-        ...(it.preposition ? { preposition: String(it.preposition).trim() } : {}),
-        ...(it.prepositionCase ? { prepositionCase: String(it.prepositionCase).trim() } : {})
-      });
-    }
-
-    if (sanitizedItems.length === 0) {
-      return { success: false, error: 'الكلمات المدخلة تفتقر إلى الألفاظ الألمانية أو الترجمات العربية الصحيحة.' };
     }
 
     const sanitizedExercises: LernstudioExercise[] = [];
     if (Array.isArray(parsed.customExercises) && parsed.customExercises.length > 0) {
       parsed.customExercises.forEach((ex: any, idx: number) => {
-        if (!ex || !ex.question || !ex.correctAnswer) return;
+        if (!ex || (!ex.question && !ex.sentenceWithBlank && !ex.faultySentence) || !ex.correctAnswer) return;
         const correctAns = String(ex.correctAnswer).trim();
+        const exType = ex.type || 'multiple_choice';
+        const requiresMcOptions = exType === 'multiple_choice' || exType === 'choose_correct_sentence';
         let opts: string[] | undefined = Array.isArray(ex.options)
           ? ex.options.map((opt: any) => String(opt).trim()).filter(Boolean)
           : undefined;
 
-        if (opts && opts.length > 0 && !opts.includes(correctAns)) {
+        if (opts && opts.length > 0 && requiresMcOptions && !opts.includes(correctAns)) {
           opts.unshift(correctAns);
         }
+        if (exType === 'short_answer' && opts && opts.length === 0) {
+          opts = undefined;
+        }
 
-        sanitizedExercises.push({
-          id: `ex_${Date.now()}_${idx}`,
-          type: ex.type || 'multiple_choice',
-          question: String(ex.question).trim(),
-          options: opts,
-          correctAnswer: correctAns,
-          explanation: ex.explanation ? String(ex.explanation).trim() : undefined
-        });
+        const grammarNorm = isValidGrammarExerciseType(exType)
+          ? normalizeGrammarExercise(ex, idx, ex.source === 'generated' ? 'generated' : 'original')
+          : null;
+
+        if (grammarNorm) {
+          sanitizedExercises.push(grammarNorm);
+        } else {
+          sanitizedExercises.push({
+            id: ex.id ? String(ex.id).trim() : `ex_${Date.now()}_${idx}`,
+            type: exType,
+            ...(ex.prompt ? { prompt: String(ex.prompt).trim() } : {}),
+            question: String(ex.question || ex.sentenceWithBlank || '').trim(),
+            ...(opts && opts.length > 0 ? { options: opts } : {}),
+            correctAnswer: correctAns,
+            ...(ex.explanation ? { explanation: String(ex.explanation).trim() } : {}),
+            ...(ex.source === 'generated' || ex.source === 'original' ? { source: ex.source } : {}),
+            ...(ex.isUncertain ? { isUncertain: true } : {}),
+            ...(ex.uncertaintyReason ? { uncertaintyReason: String(ex.uncertaintyReason).trim() } : {})
+          });
+        }
       });
     }
 
-    const title = String(parsed.title || parsed.topic || 'مجموعة جديدة').trim();
-    const topic = String(parsed.topic || title).trim();
+    const title = String(parsed.title || parsed.grammarContent?.lessonTitle || parsed.topic || 'مجموعة جديدة').trim();
+    const topic = String(parsed.topic || parsed.grammarContent?.grammarTopic || title).trim();
     const level: LernstudioLevel = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].includes(parsed.level) ? parsed.level : 'A1';
-    const difficulty: LernstudioDifficulty = ['easy', 'medium', 'hard'].includes(parsed.difficulty) ? parsed.difficulty : 'medium';
+    const difficulty: LernstudioDifficulty = ['easy', 'medium', 'hard'].includes(parsed.difficulty)
+      ? parsed.difficulty
+      : 'medium';
+
+    const grammarContent = parsed.grammarContent
+      ? normalizeGrammarContent(parsed.grammarContent, title, topic, 'teacher_created')
+      : undefined;
+
+    if (
+      sanitizedItems.length === 0 &&
+      (!grammarContent ||
+        (grammarContent.rules.length === 0 &&
+          grammarContent.examples.length === 0 &&
+          grammarContent.exercises.length === 0 &&
+          !grammarContent.explanationAr)) &&
+      sanitizedExercises.length === 0
+    ) {
+      return {
+        success: false,
+        error: 'الكلمات أو تمارين القواعد المدخلة غير مكتملة أو تفتقر للإجابات الصحيحة.'
+      };
+    }
 
     const itemsWithRealArticles = sanitizedItems.filter(
       (it) => it.article && ['der', 'die', 'das'].includes(String(it.article).toLowerCase())
     );
-    const hasArticles = parsed.hasArticles !== undefined
-      ? Boolean(parsed.hasArticles) && itemsWithRealArticles.length >= 1
-      : itemsWithRealArticles.length >= 2;
+    const hasArticles =
+      parsed.hasArticles !== undefined
+        ? Boolean(parsed.hasArticles) && itemsWithRealArticles.length >= 1
+        : itemsWithRealArticles.length >= 2;
 
     const rawTeacherName =
       parsed.createdByTeacherName || parsed.teacherName || parsed.creatorName || parsed.author;
     const cleanedTeacherName =
-      typeof rawTeacherName === 'string' && rawTeacherName.trim()
-        ? rawTeacherName.trim()
-        : undefined;
+      typeof rawTeacherName === 'string' && rawTeacherName.trim() ? rawTeacherName.trim() : undefined;
 
-    const newSet: Partial<LernstudioSet> = {
+    const validSetKinds: LernstudioSetKind[] = ['vocab', 'verb_group', 'grammar', 'mixed'];
+    const rawKind = validSetKinds.includes(parsed.setKind) ? (parsed.setKind as LernstudioSetKind) : undefined;
+    const resolvedSetKind: LernstudioSetKind =
+      rawKind ||
+      inferSetKind({
+        items: sanitizedItems,
+        grammarContent,
+        customExercises: sanitizedExercises
+      });
+
+    const newSet: Partial<LernstudioSet> = stripHeavyGrammarMediaForSync({
       title,
       topic,
       grade: parsed.grade ? String(parsed.grade).trim() : undefined,
       level,
       difficulty,
+      ...(parsed.titleTranslations ? { titleTranslations: parsed.titleTranslations } : {}),
+      ...(parsed.topicTranslations ? { topicTranslations: parsed.topicTranslations } : {}),
       ...(cleanedTeacherName ? { createdByTeacherName: cleanedTeacherName } : {}),
       hasArticles,
       sentenceBuilderSupported: true,
-      description: parsed.description ? String(parsed.description).trim() : `مجموعة ${topic} (${level})`,
+      description: parsed.description
+        ? String(parsed.description).trim()
+        : `مجموعة ${topic} (${level})`,
       items: sanitizedItems,
-      customExercises: sanitizedExercises.length > 0 ? sanitizedExercises : undefined,
-      ...(parsed.setKind ? { setKind: parsed.setKind } : {}),
+      ...(sanitizedExercises.length > 0 ? { customExercises: sanitizedExercises } : {}),
+      ...(grammarContent ? { grammarContent } : {}),
+      contentOrigin: parsed.contentOrigin === 'builtin' ? 'builtin' : 'teacher_created',
+      setKind: resolvedSetKind,
       ...(Array.isArray(parsed.verbIds) ? { verbIds: parsed.verbIds } : {}),
       ...(parsed.basedOnBuiltinGroupId
         ? { basedOnBuiltinGroupId: String(parsed.basedOnBuiltinGroupId).trim() }
         : {})
-    };
+    });
 
     return { success: true, data: newSet };
   } catch (err: any) {
@@ -461,24 +654,24 @@ export interface WorksheetValidationResult {
   repairedSet: Partial<LernstudioSet>;
 }
 
-export function validateLernstudioSetForWorksheet(
-  set: Partial<LernstudioSet>
-): WorksheetValidationResult {
+export function validateLernstudioSetForWorksheet(set: Partial<LernstudioSet>): WorksheetValidationResult {
   const warnings: string[] = [];
   let repairedCount = 0;
 
-  if (!set || !Array.isArray(set.items) || set.items.length === 0) {
+  const isGrammar = isGrammarSet(set) || hasGrammarContent(set);
+  const grammarExCount = getGrammarLessonExercises(set).length;
+
+  if (!set || ((!Array.isArray(set.items) || set.items.length === 0) && (!isGrammar || grammarExCount === 0))) {
     return {
-      warnings: ['المجموعة لا تحتوي على كلمات كافية.'],
+      warnings: ['المجموعة لا تحتوي على كلمات أو تمارين قواعد كافية.'],
       repairedCount: 0,
       repairedSet: set || {}
     };
   }
 
-  const repairedItems = set.items.map((item) => {
+  const repairedItems = (set.items || []).map((item) => {
     const newItem = { ...item };
 
-    // Check sentence4Elements vs exampleSentenceGerman mismatch
     if (newItem.exampleSentenceGerman && newItem.sentence4Elements) {
       if (!isSentence4ElementsValid(newItem.exampleSentenceGerman, newItem.sentence4Elements)) {
         const rebuilt = rebuildSentence4Elements(newItem.exampleSentenceGerman);
@@ -489,7 +682,6 @@ export function validateLernstudioSetForWorksheet(
       }
     }
 
-    // Warnings checks
     const wType = detectWordType(newItem);
     if (wType === 'noun') {
       if (!newItem.article) {
@@ -507,7 +699,7 @@ export function validateLernstudioSetForWorksheet(
     return newItem;
   });
 
-  if (repairedItems.length < 3) {
+  if (!isGrammar && repairedItems.length < 3) {
     warnings.push('تحذير: عدد العناصر الصالحة أقل من 3، قد يتم تخطي بعض التمارين في ورقة العمل.');
   }
 

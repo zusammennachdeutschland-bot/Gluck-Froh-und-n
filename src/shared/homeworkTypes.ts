@@ -1,6 +1,6 @@
 import type { VerbEntry } from './verbLibrary/verbTypes';
 
-export type HomeworkContentSource = 'vocab' | 'verb' | 'mixed';
+export type HomeworkContentSource = 'vocab' | 'verb' | 'mixed' | 'grammar';
 
 export type HomeworkQuestionType =
   | 'true_false'          // صح أم خطأ (Richtig / Falsch)
@@ -12,6 +12,7 @@ export type HomeworkQuestionType =
   | 'full_word'           // الكلمة كلها (Wort vervollständigen)
   | 'verb_conjugation'    // تصريف الأفعال في المضارع (Verb Konjugieren)
   | 'verb_sentence'       // إكمال الجملة بالفعل المناسب (Verb im Satz)
+  | 'grammar_exercise'    // تمارين القواعد المتنوعة (Grammatikübungen)
   // Legacy question types kept for backward compatibility with older assignments
   | 'mc_de_ar'            // اختيار من متعدد (ألماني ← عربي)
   | 'listen_choose'       // استمع للنطق واختر الكلمة (صوتي)
@@ -32,6 +33,10 @@ export const VERB_HOMEWORK_QUESTION_TYPES: HomeworkQuestionType[] = [
   ...DEFAULT_HOMEWORK_QUESTION_TYPES,
   'verb_conjugation',
   'verb_sentence'
+];
+
+export const GRAMMAR_HOMEWORK_QUESTION_TYPES: HomeworkQuestionType[] = [
+  'grammar_exercise'
 ];
 
 export type HomeworkFlowMode =
@@ -68,6 +73,10 @@ export interface HomeworkQuestionResponse {
   subject?: string;
   sentence?: string;
   isVerbQuestion?: boolean;
+  exerciseId?: string;
+  grammarType?: string;
+  explanation?: string;
+  pendingServerGrading?: boolean;
 }
 
 export type HomeworkBonusCardType =
@@ -152,7 +161,9 @@ export interface HomeworkAssignment {
   setId?: string; // Optional reference to published LernstudioSet id
   setSnapshot: any; // LernstudioSet snapshot
   selectedItemIds?: string[]; // Specific word IDs selected by teacher
-  contentSource?: HomeworkContentSource; // 'vocab' | 'verb' | 'mixed'
+  selectedGrammarExerciseIds?: string[]; // Specific grammar exercise IDs selected by teacher
+  includeGrammarStudy?: boolean; // Whether to show grammar explanation/rules cards before quiz
+  contentSource?: HomeworkContentSource; // 'vocab' | 'verb' | 'mixed' | 'grammar'
   selectedVerbGroupIds?: string[]; // Ready-made or custom verb group IDs selected
   selectedVerbIds?: string[]; // Specific verb IDs selected by teacher
   verbSnapshot?: VerbEntry[]; // Immutable verb library records captured when assignment was created

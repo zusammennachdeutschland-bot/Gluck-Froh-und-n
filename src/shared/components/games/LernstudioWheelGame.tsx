@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { LernstudioSet, LernstudioTheme, TeamScore } from '../../../types/lernstudio';
-import { buildDynamicQuestionPool, GameQuestion } from '../../../utils/lernstudioQuestionAdapter';
+import {
+  buildDynamicQuestionPool,
+  evaluateGameQuestionAnswer,
+  GameQuestion
+} from '../../../utils/lernstudioQuestionAdapter';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { GameStageBanner } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
@@ -70,9 +74,16 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [answeredState, setAnsweredState] = useState<'pending' | 'correct' | 'wrong' | null>(null);
   const [sentenceArranged, setSentenceArranged] = useState<string[]>([]);
+  const [typedAnswer, setTypedAnswer] = useState('');
   const [eventAlert, setEventAlert] = useState<string | null>(null);
 
   const activeTeam = teams[activeTeamIndex] || teams[0];
+  const isWheelSentenceOrdering = Boolean(
+    activeQuestion &&
+      (activeQuestion.type === 'sentence_builder' || activeQuestion.grammarType === 'sentence_ordering') &&
+      activeQuestion.sentencePieces &&
+      activeQuestion.sentencePieces.length > 0
+  );
 
   // Draw wheel on canvas
   const drawWheel = (rotationAngle: number) => {
@@ -252,11 +263,12 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
       setTimeout(nextTeamTurn, 2500);
     } else {
       // Show question for points, double, or challenge
-      const q = questionsPool[questionIndex % questionsPool.length] || questionsPool[0];
+      const q = questionsPool[questionIndex % Math.max(1, questionsPool.length)] || questionsPool[0];
       setActiveQuestion(q);
       setSelectedAnswer(null);
       setAnsweredState(null);
       setSentenceArranged([]);
+      setTypedAnswer('');
       setQuestionIndex((prev) => prev + 1);
     }
   };
@@ -512,12 +524,12 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
               )}
             </div>
 
-            {/* Answer Options */}
-            {activeQuestion.options && activeQuestion.options.length > 0 && (
+            {/* Answer Options (MCQ) */}
+            {!isWheelSentenceOrdering && activeQuestion.options && activeQuestion.options.length > 0 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                 {activeQuestion.options.map((opt, i) => {
                   const isSelected = selectedAnswer === opt;
-                  const isCorrect = opt.trim().toLowerCase() === activeQuestion.correctAnswer.trim().toLowerCase();
+                  const isCorrect = evaluateGameQuestionAnswer(opt, activeQuestion);
 
                   let btnStyle = 'bg-slate-700 hover:bg-slate-600 text-white border-slate-600';
                   if (answeredState === 'correct' && isCorrect) {
@@ -545,10 +557,10 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
               </div>
             )}
 
-            {/* Sentence Builder pieces */}
-            {activeQuestion.type === 'sentence_builder' && activeQuestion.sentencePieces && (
+            {/* Sentence Builder / Grammar Ordering pieces */}
+            {isWheelSentenceOrdering && activeQuestion.sentencePieces && (
               <div className="space-y-4">
-                <div className="min-h-12 p-3 bg-slate-900 rounded-2xl border border-slate-700 flex flex-wrap gap-2 items-center justify-center">
+                <div className="min-h-12 p-3 bg-slate-900 rounded-2xl border border-slate-700 flex flex-wrap gap-2 items-center justify-center" dir="ltr">
                   {sentenceArranged.length === 0 ? (
                     <span className="text-xs text-slate-500">{t.arrangeWordsOrder}</span>
                   ) : (
@@ -567,9 +579,11 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
                   )}
                 </div>
 
-                <div className="flex flex-wrap gap-2 justify-center">
+                <div className="flex flex-wrap gap-2 justify-center" dir="ltr">
                   {activeQuestion.sentencePieces.map((piece, idx) => {
-                    const isUsed = sentenceArranged.includes(piece);
+                    const countInArranged = sentenceArranged.filter((p) => p === piece).length;
+                    const countInPieces = activeQuestion.sentencePieces!.filter((p) => p === piece).length;
+                    const isUsed = countInArranged >= countInPieces;
                     return (
                       <button
                         key={idx}
@@ -590,9 +604,8 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
                 <button
                   disabled={sentenceArranged.length === 0 || !!answeredState}
                   onClick={() => {
-                    const built = sentenceArranged.join(' ').trim().toLowerCase();
-                    const correct = activeQuestion.correctAnswer.trim().toLowerCase();
-                    handleAnswerSubmit(built === correct);
+                    const built = sentenceArranged.join(' ').trim();
+                    handleAnswerSubmit(evaluateGameQuestionAnswer(built, activeQuestion));
                   }}
                   className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm transition-colors cursor-pointer disabled:opacity-40"
                 >
@@ -600,6 +613,41 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
                 </button>
               </div>
             )}
+
+            {/* Typed Answer Fallback for short_answer or optionless grammar exercises */}
+            {!isWheelSentenceOrdering &&
+              (!activeQuestion.options || activeQuestion.options.length === 0) && (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!typedAnswer.trim() || answeredState) return;
+                    handleAnswerSubmit(evaluateGameQuestionAnswer(typedAnswer, activeQuestion));
+                  }}
+                  className="space-y-3"
+                >
+                  <input
+                    type="text"
+                    dir="ltr"
+                    disabled={!!answeredState}
+                    value={typedAnswer}
+                    onChange={(e) => setTypedAnswer(e.target.value)}
+                    placeholder={language === 'ar' ? 'اكتب الإجابة بالألمانية...' : 'Type your German answer...'}
+                    className="w-full px-4 py-3 rounded-2xl bg-slate-900 border-2 border-slate-600 focus:border-primary text-white font-bold text-center outline-none"
+                  />
+                  {answeredState && (
+                    <div className="text-xs font-bold text-center text-emerald-400" dir="ltr">
+                      ✓ {activeQuestion.correctAnswer}
+                    </div>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={!!answeredState || !typedAnswer.trim()}
+                    className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm transition-colors cursor-pointer disabled:opacity-40"
+                  >
+                    {t.confirmSentenceAnswer}
+                  </button>
+                </form>
+              )}
 
             {/* Teacher Quick Override Buttons */}
             <div className="pt-3 border-t border-slate-700 flex items-center justify-between text-xs text-slate-400">

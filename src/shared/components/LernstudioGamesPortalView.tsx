@@ -1,6 +1,11 @@
 import React from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioGameMode } from '../../types/lernstudio';
-import { isArticleGameSupported, extractSortingItems } from '../../utils/lernstudioQuestionAdapter';
+import {
+  isArticleGameSupported,
+  extractSortingItems,
+  getGameCompatibilityForSet
+} from '../lernstudioQuestionAdapter';
+import { hasGrammarContent, getGrammarLessonExercises } from '../grammarEngine';
 import { getLernstudioTranslations, getLocalizedSetTitle } from '../../utils/lernstudioTranslations';
 import { GameThumbnailArt } from './GameArtAssets';
 import { GameSettingsControls } from './effects/GameEffectsOverlay';
@@ -41,6 +46,9 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
   const isArticleSupported = isArticleGameSupported(set);
   const sortingItems = extractSortingItems(set.items || []);
   const displayTitle = getLocalizedSetTitle(set, language);
+  const hasGrammar = hasGrammarContent(set);
+  const grammarExerciseCount = getGrammarLessonExercises(set).length;
+  const itemsCount = set.items?.length || 0;
 
   const teamGames: GameItemConfig[] = [
     {
@@ -294,6 +302,9 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
     }
   ];
 
+  const adaptedBadgeText =
+    language === 'de' ? 'Grammatik-Modus' : language === 'en' ? 'Grammar Adapted' : 'متكيفة للقواعد';
+
   return (
     <div
       className="min-h-[85vh] p-2 sm:p-4 rounded-2xl space-y-4 select-none transition-all bg-background text-text-main"
@@ -320,7 +331,11 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
               · {displayTitle}
             </span>
             <span className="text-xs text-text-muted">
-              ({set.items?.length || 0} {t.vocabularyCount})
+              {itemsCount > 0 && hasGrammar
+                ? `(${itemsCount} ${t.vocabularyCount} + ${grammarExerciseCount} ${language === 'ar' ? 'تمرين' : language === 'de' ? 'Übungen' : 'exercises'})`
+                : hasGrammar && itemsCount === 0
+                ? `(${grammarExerciseCount} ${language === 'ar' ? 'تمرين قواعد' : language === 'de' ? 'Grammatik-Übungen' : 'grammar exercises'})`
+                : `(${itemsCount} ${t.vocabularyCount})`}
             </span>
           </div>
         </div>
@@ -335,6 +350,24 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
             {language === 'ar'
               ? '🔤 مجموعة أفعال موحدة (Präsens & Verb im Satz): متاحة في جميع الألعاب والتصريف، بينما لعبة فرز الأدوات (der/die/das) مخصصة لمجموعات الأسماء فقط.'
               : '🔤 Unified Verb Set: Verb conjugation & sentence games are active across classroom and arcade modes. Article sorting is disabled because verbs have no der/die/das articles.'}
+          </span>
+        </div>
+      )}
+
+      {(set.setKind === 'grammar' || (set.setKind === 'mixed' && hasGrammar)) && (
+        <div className="px-4 py-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/25 text-xs font-bold text-indigo-600 dark:text-indigo-300 flex items-center justify-between gap-2 flex-wrap">
+          <span>
+            {language === 'ar'
+              ? set.setKind === 'grammar'
+                ? '📘 مجموعة قواعد متكاملة: الألعاب المتوافقة تعتمد على تمارين وأمثلة القاعدة، بينما يتم تعطيل الألعاب الخاصة بالأسماء أو الحروف غير المناسبة تلقائياً مع توضيح السبب.'
+                : '🧩 مجموعة مختلطة (مفردات + قواعد): جميع ألعاب المفردات والقواعد متاحة ويمكنك التبديل بين التمارين والمفردات داخل اللعب.'
+              : language === 'de'
+              ? set.setKind === 'grammar'
+                ? '📘 Grammatik-Set: Kompatible Spiele nutzen automatisch die Grammatikübungen & Beispielsätze dieses Sets.'
+                : '🧩 Gemischtes Set (Wortschatz + Grammatik): Alle passenden Wort- und Grammatikspiele sind aktiv.'
+              : set.setKind === 'grammar'
+              ? '📘 Grammar Set: Compatible games automatically run on this lesson’s grammar exercises and examples. Word-only modes stay disabled with clear reasons.'
+              : '🧩 Mixed Set (Vocabulary + Grammar): Both vocabulary and grammar exercises power classroom and arcade modes.'}
           </span>
         </div>
       )}
@@ -361,46 +394,78 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {teamGames.map((game) => (
-              <div
-                key={game.id}
-                onClick={() => onSelectGame(game.id)}
-                className="group p-3 rounded-xl bg-surface hover:bg-surface-hover border border-surface-border hover:border-primary/50 transition-all duration-200 cursor-pointer flex flex-col justify-between gap-3 shadow-xs overflow-hidden relative"
-              >
-                {/* Thumbnail Header */}
-                <div className="w-full h-28 rounded-lg overflow-hidden bg-background relative shrink-0 border border-surface-border">
-                  <GameThumbnailArt gameId={game.id} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                  <span className="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold bg-black/60 text-white backdrop-blur-xs flex items-center gap-1">
-                    <span>{game.emoji}</span>
-                    <span>{t.teamLabel}</span>
-                  </span>
-                </div>
+            {teamGames.map((game) => {
+              const compat = getGameCompatibilityForSet(game.id, set, language);
+              const isDisabled = !compat.isPlayable;
 
-                {/* Info */}
-                <div className="min-w-0 space-y-1">
-                  <h3 className="text-xs sm:text-sm font-bold text-text-main group-hover:text-primary transition-colors truncate">
-                    {t[game.titleKey]}
-                  </h3>
-                  <div className="flex items-center gap-1.5 text-xs text-text-muted font-medium">
-                    <Users className="w-3 h-3 text-amber-500 shrink-0" />
-                    <span className="truncate">{t[game.categoryKey]}</span>
-                  </div>
-                </div>
-
-                {/* Button */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSelectGame(game.id);
+              return (
+                <div
+                  key={game.id}
+                  onClick={() => {
+                    if (!isDisabled) onSelectGame(game.id);
                   }}
-                  className="w-full py-2 px-3 rounded-lg text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1.5 shrink-0 bg-primary hover:bg-primary-hover text-white transition-colors shadow-xs"
+                  title={compat.localizedReason}
+                  className={`group p-3 rounded-xl border transition-all duration-200 flex flex-col justify-between gap-3 overflow-hidden relative ${
+                    isDisabled
+                      ? 'bg-surface/40 border-surface-border/50 opacity-60 cursor-not-allowed'
+                      : 'bg-surface hover:bg-surface-hover border-surface-border hover:border-primary/50 cursor-pointer shadow-xs'
+                  }`}
                 >
-                  <Play className="w-3.5 h-3.5 fill-current" />
-                  <span>{t.startBtn}</span>
-                </button>
-              </div>
-            ))}
+                  {/* Thumbnail Header */}
+                  <div className="w-full h-28 rounded-lg overflow-hidden bg-background relative shrink-0 border border-surface-border">
+                    <GameThumbnailArt gameId={game.id} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                    <span className="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold bg-black/60 text-white backdrop-blur-xs flex items-center gap-1">
+                      <span>{game.emoji}</span>
+                      <span>{t.teamLabel}</span>
+                    </span>
+                    {!isDisabled && compat.status === 'adapted' && (
+                      <span className="absolute bottom-2 left-2 px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-600/85 text-white backdrop-blur-xs">
+                        📘 {adaptedBadgeText}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Info */}
+                  <div className="min-w-0 space-y-1">
+                    <h3 className={`text-xs sm:text-sm font-bold truncate ${isDisabled ? 'text-text-muted' : 'text-text-main group-hover:text-primary transition-colors'}`}>
+                      {t[game.titleKey]}
+                    </h3>
+                    <div className="flex items-center gap-1.5 text-xs text-text-muted font-medium">
+                      <Users className="w-3 h-3 text-amber-500 shrink-0" />
+                      <span className="truncate">{t[game.categoryKey]}</span>
+                    </div>
+                    {isDisabled && (
+                      <p className="text-[10px] font-bold text-rose-500 line-clamp-2">
+                        {compat.localizedReason}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Button */}
+                  {isDisabled ? (
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full py-2 px-3 rounded-lg text-xs font-bold text-text-muted bg-surface-hover border border-surface-border cursor-not-allowed shrink-0"
+                    >
+                      {t.unavailableBtn}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectGame(game.id);
+                      }}
+                      className="w-full py-2 px-3 rounded-lg text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1.5 shrink-0 bg-primary hover:bg-primary-hover text-white transition-colors shadow-xs"
+                    >
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <span>{t.startBtn}</span>
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -425,7 +490,8 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {soloGames.map((game) => {
-              const isDisabled = Boolean(game.requiresArticles && !isArticleSupported);
+              const compat = getGameCompatibilityForSet(game.id, set, language);
+              const isDisabled = !compat.isPlayable || Boolean(game.requiresArticles && !isArticleSupported);
 
               return (
                 <div
@@ -433,6 +499,7 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
                   onClick={() => {
                     if (!isDisabled) onSelectGame(game.id);
                   }}
+                  title={compat.localizedReason}
                   className={`group p-3 rounded-xl border transition-all duration-200 flex flex-col justify-between gap-3 overflow-hidden relative ${
                     isDisabled
                       ? 'bg-surface/40 border-surface-border/50 opacity-60 cursor-not-allowed'
@@ -446,6 +513,11 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
                       <span>{game.emoji}</span>
                       <span>{t.soloLabel}</span>
                     </span>
+                    {!isDisabled && compat.status === 'adapted' && (
+                      <span className="absolute bottom-2 left-2 px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-600/85 text-white backdrop-blur-xs">
+                        📘 {adaptedBadgeText}
+                      </span>
+                    )}
                   </div>
 
                   {/* Info */}
@@ -464,6 +536,11 @@ export const LernstudioGamesPortalView: React.FC<Props> = ({
                         </span>
                       )}
                     </div>
+                    {isDisabled && !game.requiresArticles && (
+                      <p className="text-[10px] font-bold text-rose-500 line-clamp-2">
+                        {compat.localizedReason}
+                      </p>
+                    )}
                   </div>
 
                   {/* Button */}

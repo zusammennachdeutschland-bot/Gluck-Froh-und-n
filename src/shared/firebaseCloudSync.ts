@@ -57,6 +57,7 @@ import {
 } from './homeworkTypes';
 import { LernstudioSet } from '../types/lernstudio';
 import { DEFAULT_LERNSTUDIO_SETS } from './defaultLernstudioSets';
+import { scrambleOrderingTokensDeterministic } from './grammarEngine';
 
 const BUILTIN_CURRICULUM_SET_ID_SET = new Set<string>(DEFAULT_LERNSTUDIO_SETS.map((s) => s.id));
 
@@ -931,11 +932,35 @@ export function serializeSafeFirestorePayload(record: any, maxUtf8Bytes = 440000
   // Stage 1: Strip inline base64 data URLs and redundant verbEntry/verbEntriesSnapshot duplicates
   const clone: any = { ...record };
   delete clone.verbEntriesSnapshot;
+  if (clone.grammarContent && typeof clone.grammarContent === 'object') {
+    const gcCopy = { ...clone.grammarContent };
+    delete gcCopy.rawImages;
+    if (Array.isArray(gcCopy.pageImageRefs)) {
+      gcCopy.pageImageRefs = gcCopy.pageImageRefs.map((ref: any) => {
+        if (!ref || typeof ref !== 'object') return ref;
+        const { base64Data: _b64, dataUrl: _du, ...rest } = ref;
+        return rest;
+      });
+    }
+    clone.grammarContent = gcCopy;
+  }
   if (clone.setSnapshot && typeof clone.setSnapshot === 'object') {
     const snapCopy = { ...clone.setSnapshot };
     delete snapCopy.verbEntriesSnapshot;
     if (Array.isArray(snapCopy.items)) {
       snapCopy.items = stripHeavyMediaFromItems(snapCopy.items);
+    }
+    if (snapCopy.grammarContent && typeof snapCopy.grammarContent === 'object') {
+      const gcCopy = { ...snapCopy.grammarContent };
+      delete gcCopy.rawImages;
+      if (Array.isArray(gcCopy.pageImageRefs)) {
+        gcCopy.pageImageRefs = gcCopy.pageImageRefs.map((ref: any) => {
+          if (!ref || typeof ref !== 'object') return ref;
+          const { base64Data: _b64, dataUrl: _du, ...rest } = ref;
+          return rest;
+        });
+      }
+      snapCopy.grammarContent = gcCopy;
     }
     clone.setSnapshot = snapCopy;
   }
@@ -1297,7 +1322,7 @@ async function queryAssignmentsViaRest(
   }
 }
 
-function sanitizeShortLinkAssignmentSnapshot(hw: HomeworkAssignment, ownerUid: string): HomeworkAssignment {
+export function sanitizeShortLinkAssignmentSnapshot(hw: HomeworkAssignment, ownerUid: string): HomeworkAssignment {
   const copy: any = {
     ...hw,
     ownerUid
@@ -1307,16 +1332,47 @@ function sanitizeShortLinkAssignmentSnapshot(hw: HomeworkAssignment, ownerUid: s
   if (copy.setSnapshot && typeof copy.setSnapshot === 'object') {
     const cleanSnap = { ...copy.setSnapshot };
     delete cleanSnap.ownerEmail;
+    delete cleanSnap.ownerUid;
+    const sanitizeExerciseItem = (ex: any, idx: number) => {
+      if (!ex || typeof ex !== 'object') return ex;
+      const cleanEx: any = { ...ex };
+      if (cleanEx.type === 'sentence_ordering') {
+        const expectedOrder = String(ex.correctAnswer || '').trim().split(/\s+/).filter(Boolean);
+        const rawTokens =
+          Array.isArray(ex.tokens) && ex.tokens.length >= 2
+            ? ex.tokens.map((t: any) => String(t || '').trim()).filter(Boolean)
+            : expectedOrder;
+        if (rawTokens.length > 0) {
+          cleanEx.tokens = scrambleOrderingTokensDeterministic(
+            rawTokens,
+            String(ex.id || `ex_${idx}`),
+            expectedOrder.length >= 2 ? expectedOrder : undefined
+          );
+        }
+      }
+      delete cleanEx.correctAnswer;
+      delete cleanEx.acceptedAnswers;
+      delete cleanEx.explanation;
+      delete cleanEx.explanationAr;
+      delete cleanEx.explanationDe;
+      delete cleanEx.explanationEn;
+      delete cleanEx.teacherNotes;
+      delete cleanEx.answerKey;
+      return cleanEx;
+    };
     if (Array.isArray(cleanSnap.customExercises)) {
-      cleanSnap.customExercises = cleanSnap.customExercises.map((ex: any) => {
-        if (!ex || typeof ex !== 'object') return ex;
-        const cleanEx = { ...ex };
-        delete cleanEx.correctAnswer;
-        delete cleanEx.explanation;
-        delete cleanEx.teacherNotes;
-        delete cleanEx.answerKey;
-        return cleanEx;
-      });
+      cleanSnap.customExercises = cleanSnap.customExercises.map(sanitizeExerciseItem);
+    }
+    if (cleanSnap.grammarContent && typeof cleanSnap.grammarContent === 'object') {
+      const cleanGc: any = {
+        ...cleanSnap.grammarContent,
+        exercises: Array.isArray(cleanSnap.grammarContent.exercises)
+          ? cleanSnap.grammarContent.exercises.map(sanitizeExerciseItem)
+          : []
+      };
+      delete cleanGc.uploadedImagesBase64;
+      delete cleanGc.rawImages;
+      cleanSnap.grammarContent = cleanGc;
     }
     copy.setSnapshot = cleanSnap;
   }

@@ -1,5 +1,13 @@
 import express from 'express';
 import crypto from 'crypto';
+import { GoogleGenAI, Type } from '@google/genai';
+import {
+  evaluateNormalizedGrammarAnswer,
+  normalizeGrammarContent,
+  normalizeLernstudioSet,
+  scrambleOrderingTokensDeterministic,
+  stripHeavyGrammarMediaForSync
+} from '../shared/grammarEngine';
 import {
   getAuthoritativeAssignment,
   getAuthoritativeShortLink,
@@ -378,23 +386,49 @@ export function sanitizePublicSetSnapshot(rawSnapshot: any): any {
   });
 
   // 2. Sanitize customExercises array (NEVER expose correctAnswer or answer-revealing explanation!)
-  const rawExercises = Array.isArray(rawSnapshot.customExercises) ? rawSnapshot.customExercises : [];
-  const sanitizedExercises = rawExercises.map((ex: any) => {
+  const sanitizePublicExercise = (ex: any, idx: number, includeItemRef = false) => {
     if (!ex || typeof ex !== 'object') return {};
+    const type = String(ex.type || 'multiple_choice').trim();
     const cleanEx: any = {
       id: String(ex.id || ''),
-      type: ex.type || 'multiple_choice',
-      question: String(ex.question || ex.prompt || '')
+      type,
+      question: String(ex.question || ex.sentenceWithBlank || ex.faultySentence || ex.prompt || '')
     };
+    if (ex.prompt) cleanEx.prompt = String(ex.prompt);
+    if (ex.sentenceWithBlank) cleanEx.sentenceWithBlank = String(ex.sentenceWithBlank);
+    if (ex.faultySentence) cleanEx.faultySentence = String(ex.faultySentence);
+    if (type === 'sentence_ordering') {
+      const expectedOrder = String(ex.correctAnswer || '').trim().split(/\s+/).filter(Boolean);
+      const rawTokens =
+        Array.isArray(ex.tokens) && ex.tokens.length >= 2
+          ? ex.tokens.map((t: any) => String(t || '').trim()).filter(Boolean)
+          : expectedOrder;
+      if (rawTokens.length > 0) {
+        cleanEx.tokens = scrambleOrderingTokensDeterministic(
+          rawTokens,
+          String(ex.id || `ex_${idx}`),
+          expectedOrder.length >= 2 ? expectedOrder : undefined
+        );
+      }
+    } else if (Array.isArray(ex.tokens)) {
+      cleanEx.tokens = ex.tokens.map(String);
+    }
     if (Array.isArray(ex.options)) {
       cleanEx.options = ex.options.map(String);
     }
-    if (ex.itemRefId) {
+    if (includeItemRef && ex.itemRefId) {
       cleanEx.itemRefId = String(ex.itemRefId);
     }
-    // STRICTLY OMIT: correctAnswer, explanation, teacherNotes, answerKey
+    if (ex.source) cleanEx.source = String(ex.source);
+    if (ex.ruleRef) cleanEx.ruleRef = String(ex.ruleRef);
+    if (ex.isUncertain) cleanEx.isUncertain = true;
+    if (ex.uncertaintyReason) cleanEx.uncertaintyReason = String(ex.uncertaintyReason);
+    // STRICTLY OMIT: correctAnswer, acceptedAnswers, explanation, explanationAr/De/En, teacherNotes, answerKey
     return cleanEx;
-  });
+  };
+
+  const rawExercises = Array.isArray(rawSnapshot.customExercises) ? rawSnapshot.customExercises : [];
+  const sanitizedExercises = rawExercises.map((ex: any, idx: number) => sanitizePublicExercise(ex, idx, true));
 
   const sanitizedSnapshot: any = {
     id: String(rawSnapshot.id || ''),
@@ -407,6 +441,7 @@ export function sanitizePublicSetSnapshot(rawSnapshot: any): any {
 
   if (rawSnapshot.category) sanitizedSnapshot.category = String(rawSnapshot.category);
   if (rawSnapshot.setKind) sanitizedSnapshot.setKind = String(rawSnapshot.setKind);
+  if (rawSnapshot.contentOrigin) sanitizedSnapshot.contentOrigin = String(rawSnapshot.contentOrigin);
   if (Array.isArray(rawSnapshot.verbIds)) {
     sanitizedSnapshot.verbIds = rawSnapshot.verbIds.map(String);
   }
@@ -416,6 +451,34 @@ export function sanitizePublicSetSnapshot(rawSnapshot: any): any {
   }
   if (sanitizedExercises.length > 0) {
     sanitizedSnapshot.customExercises = sanitizedExercises;
+  }
+
+  // 3. Sanitize grammarContent (allow study rules/examples + student prompts; NEVER leak correctAnswer/acceptedAnswers/explanations)
+  if (rawSnapshot.grammarContent && typeof rawSnapshot.grammarContent === 'object') {
+    const gc = rawSnapshot.grammarContent;
+    const cleanGrammarExercises = Array.isArray(gc.exercises)
+      ? gc.exercises.map((ex: any, idx: number) => sanitizePublicExercise(ex, idx, false))
+      : [];
+
+    sanitizedSnapshot.grammarContent = {
+      lessonTitle: String(gc.lessonTitle || rawSnapshot.title || ''),
+      ...(gc.lessonTitleAr ? { lessonTitleAr: String(gc.lessonTitleAr) } : {}),
+      ...(gc.lessonTitleDe ? { lessonTitleDe: String(gc.lessonTitleDe) } : {}),
+      ...(gc.lessonTitleEn ? { lessonTitleEn: String(gc.lessonTitleEn) } : {}),
+      grammarTopic: String(gc.grammarTopic || rawSnapshot.topic || ''),
+      ...(gc.grammarTopicAr ? { grammarTopicAr: String(gc.grammarTopicAr) } : {}),
+      ...(gc.grammarTopicDe ? { grammarTopicDe: String(gc.grammarTopicDe) } : {}),
+      ...(gc.grammarTopicEn ? { grammarTopicEn: String(gc.grammarTopicEn) } : {}),
+      explanationAr: String(gc.explanationAr || ''),
+      ...(gc.explanationDe ? { explanationDe: String(gc.explanationDe) } : {}),
+      ...(gc.explanationEn ? { explanationEn: String(gc.explanationEn) } : {}),
+      rules: Array.isArray(gc.rules) ? gc.rules : [],
+      examples: Array.isArray(gc.examples) ? gc.examples : [],
+      exercises: cleanGrammarExercises,
+      origin: gc.origin === 'builtin' ? 'builtin' : 'teacher_created',
+      ...(Array.isArray(gc.pageImageRefs) ? { pageImageRefs: gc.pageImageRefs } : {}),
+      ...(gc.sourceBookInfo ? { sourceBookInfo: String(gc.sourceBookInfo) } : {})
+    };
   }
 
   // STRICTLY EXCLUDED: ownerUid, ownerEmail, assignedGroupId, isArchived, createdAt, updatedAt, credentials, PII
@@ -887,9 +950,26 @@ app.all('/api/teacher/assignments', async (req, res) => {
     const requestedSetId = String(explicitSetId || normalized.setSnapshot?.id || '').trim();
     const hasInlineItems = Array.isArray(normalized.setSnapshot?.items) && normalized.setSnapshot.items.length > 0;
     const hasInlineExercises = Array.isArray(normalized.setSnapshot?.customExercises) && normalized.setSnapshot.customExercises.length > 0;
+    const hasInlineGrammar = Boolean(
+      normalized.setSnapshot?.grammarContent &&
+        ((Array.isArray(normalized.setSnapshot.grammarContent.exercises) &&
+          normalized.setSnapshot.grammarContent.exercises.length > 0) ||
+          (Array.isArray(normalized.setSnapshot.grammarContent.rules) &&
+            normalized.setSnapshot.grammarContent.rules.length > 0) ||
+          (Array.isArray(normalized.setSnapshot.grammarContent.examples) &&
+            normalized.setSnapshot.grammarContent.examples.length > 0))
+    );
     const hasCallerSnapshot = Boolean(body.setSnapshot && typeof body.setSnapshot === 'object');
     const isVerbOnlySource = normalized.contentSource === 'verbs';
-    if (requestedSetId && !hasInlineItems && !hasInlineExercises && !isVerbOnlySource) {
+    const isGrammarSource = normalized.contentSource === 'grammar';
+    if (
+      requestedSetId &&
+      !hasInlineItems &&
+      !hasInlineExercises &&
+      !hasInlineGrammar &&
+      !isVerbOnlySource &&
+      !isGrammarSource
+    ) {
       try {
         const resolvedSet = await getAuthoritativePublishedSet(requestedSetId, { includeUnpublished: true });
         if (!resolvedSet) {
@@ -1073,6 +1153,14 @@ app.all('/api/homework/submissions', async (req, res) => {
       });
     }
     const resolvedOwnerUid = hwOwnerUid || bodyOwnerUid || undefined;
+    const rawResponses = Array.isArray(body.responses) ? body.responses : [];
+    const graded = await gradeServerHomeworkResponses(targetHw, rawResponses);
+    if (!graded.valid) {
+      return res.status(graded.status || 400).json({
+        success: false,
+        error: graded.error || 'Invalid question or exercise reference in submission'
+      });
+    }
     const cleanSub = {
       ...body,
       ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
@@ -1080,7 +1168,8 @@ app.all('/api/homework/submissions', async (req, res) => {
       studentId: check.normalizedStudentId,
       participantId: check.normalizedParticipantId,
       groupId: check.normalizedGroupId,
-      studentName: check.normalizedStudentName
+      studentName: check.normalizedStudentName,
+      responses: graded.verifiedResponses
     };
     delete cleanSub.assignmentFallback;
 
@@ -1212,8 +1301,295 @@ app.get('/api/homework/info', async (req, res) => {
   return res.json(sanitizePublicAssignmentInfo(found));
 });
 
-app.post('/api/homework/submit', async (req, res) => {
+async function resolveAuthoritativeAssignmentSnapshot(targetHw: any): Promise<any> {
+  let setSnapshot = targetHw?.setSnapshot || {};
+  const fallbackSetId = String(targetHw?.setId || setSnapshot?.id || '').trim();
+  if (
+    fallbackSetId &&
+    (!Array.isArray(setSnapshot?.items) || setSnapshot.items.length === 0) &&
+    (!Array.isArray(setSnapshot?.customExercises) || setSnapshot.customExercises.length === 0) &&
+    (!Array.isArray(setSnapshot?.grammarContent?.exercises) || setSnapshot.grammarContent.exercises.length === 0)
+  ) {
+    try {
+      const hydratedSet = await getAuthoritativePublishedSet(fallbackSetId);
+      if (hydratedSet) setSnapshot = hydratedSet;
+    } catch {
+      // Keep existing empty snapshot fallback
+    }
+  }
+  return setSnapshot;
+}
+
+async function gradeServerHomeworkResponses(
+  targetHw: any,
+  responses: any[],
+  options?: { requireKnownQuestion?: boolean }
+): Promise<{ valid: boolean; status?: number; error?: string; verifiedResponses: any[] }> {
+  const setSnapshot = await resolveAuthoritativeAssignmentSnapshot(targetHw);
+  const serverCustomExercises = Array.isArray(setSnapshot?.customExercises) ? setSnapshot.customExercises : [];
+  const serverGrammarExercises = Array.isArray(setSnapshot?.grammarContent?.exercises)
+    ? setSnapshot.grammarContent.exercises
+    : [];
+  const allExercises = [...serverGrammarExercises, ...serverCustomExercises].filter(
+    (ex: any) => ex && typeof ex === 'object' && ex.id !== undefined && ex.id !== null
+  );
+  const selectedGrammarIds = Array.isArray(targetHw?.selectedGrammarExerciseIds)
+    ? targetHw.selectedGrammarExerciseIds.map((id: any) => String(id).trim()).filter(Boolean)
+    : [];
+  const allowedExerciseIds =
+    selectedGrammarIds.length > 0 && allExercises.some((ex: any) => selectedGrammarIds.includes(String(ex.id)))
+      ? new Set(selectedGrammarIds)
+      : null;
+
+  const serverItems = Array.isArray(setSnapshot?.items) ? setSnapshot.items : [];
+  const selectedItemIds = Array.isArray(targetHw?.selectedItemIds)
+    ? targetHw.selectedItemIds.map((id: any) => String(id).trim()).filter(Boolean)
+    : [];
+  const allowedItemIds =
+    selectedItemIds.length > 0 && serverItems.some((it: any) => selectedItemIds.includes(String(it.id)))
+      ? new Set(selectedItemIds)
+      : null;
+
+  const findExerciseMatch = (r: any): any | undefined => {
+    const exId = r.exerciseId !== undefined && r.exerciseId !== null ? String(r.exerciseId).trim() : '';
+    const itId = r.itemId !== undefined && r.itemId !== null ? String(r.itemId).trim() : '';
+    const qId = r.questionId !== undefined && r.questionId !== null ? String(r.questionId).trim() : '';
+    const fallbackId = r.id !== undefined && r.id !== null ? String(r.id).trim() : '';
+
+    return allExercises.find((ex: any) => {
+      const idStr = String(ex.id).trim();
+      if (!idStr) return false;
+      if (exId && exId === idStr) return true;
+      if (itId && itId === idStr) return true;
+      if (qId) {
+        if (qId === idStr || qId === `gram_${idStr}` || qId.startsWith(`gram_${idStr}_`)) return true;
+      }
+      if (fallbackId && (fallbackId === idStr || fallbackId === `gram_${idStr}`)) return true;
+      return false;
+    });
+  };
+
+  const verifiedResponses: any[] = [];
+  for (const r of responses) {
+    if (!r || typeof r !== 'object') {
+      verifiedResponses.push(r);
+      continue;
+    }
+    const targetQId = r.exerciseId || r.questionId || r.itemId || r.id;
+    const qType = String(r.questionType || r.type || '');
+    const isVerbQ = Boolean(r.isVerbQuestion || qType === 'verb_conjugation' || qType === 'verb_sentence');
+
+    const matchedExercise = findExerciseMatch(r);
+    if (matchedExercise) {
+      if (allowedExerciseIds && !allowedExerciseIds.has(String(matchedExercise.id).trim())) {
+        return {
+          valid: false,
+          status: 400,
+          error: 'Unassigned grammar exercise ID referenced in request',
+          verifiedResponses: []
+        };
+      }
+      if (matchedExercise.correctAnswer !== undefined && matchedExercise.correctAnswer !== null) {
+        const studentAns = String(
+          r.selectedAnswer ?? r.studentAnswer ?? r.answer ?? r.submittedAnswer ?? r.text ?? ''
+        ).trim();
+        const isActuallyCorrect = evaluateNormalizedGrammarAnswer(studentAns, {
+          correctAnswer: String(matchedExercise.correctAnswer),
+          acceptedAnswers: Array.isArray(matchedExercise.acceptedAnswers)
+            ? matchedExercise.acceptedAnswers.map(String)
+            : undefined
+        });
+        const cleanedR = { ...r, isCorrect: isActuallyCorrect };
+        delete cleanedR.pendingServerGrading;
+        verifiedResponses.push(cleanedR);
+        continue;
+      }
+    } else if (
+      !isVerbQ &&
+      (r.exerciseId ||
+        qType === 'grammar_exercise' ||
+        r.grammarType ||
+        (allExercises.length > 0 && serverItems.length === 0))
+    ) {
+      return {
+        valid: false,
+        status: 400,
+        error: 'Unknown or unassigned grammar exercise ID',
+        verifiedResponses: []
+      };
+    }
+
+    if (isVerbQ) {
+      verifiedResponses.push({
+        ...r,
+        isVerbQuestion: true,
+        ...(r.verbId ? { verbId: String(r.verbId) } : {}),
+        ...(r.infinitive ? { infinitive: String(r.infinitive) } : {}),
+        ...(r.subject ? { subject: String(r.subject) } : {}),
+        ...(r.sentence ? { sentence: String(r.sentence) } : {})
+      });
+      continue;
+    }
+
+    const itemLookupId = r.itemId || r.exerciseId || (r.expectedField ? targetQId : undefined);
+    if (itemLookupId && serverItems.length > 0 && (r.expectedField || typeof r.isCorrect !== 'boolean' || options?.requireKnownQuestion)) {
+      const itemMatch = serverItems.find((it: any) => String(it.id) === String(itemLookupId));
+      if (!itemMatch) {
+        if (r.itemId || options?.requireKnownQuestion) {
+          return {
+            valid: false,
+            status: 400,
+            error: 'Unknown or unassigned vocabulary item ID',
+            verifiedResponses: []
+          };
+        }
+      } else {
+        if (allowedItemIds && !allowedItemIds.has(String(itemMatch.id).trim())) {
+          return {
+            valid: false,
+            status: 400,
+            error: 'Unassigned vocabulary item ID referenced in request',
+            verifiedResponses: []
+          };
+        }
+        const studentAns = String(
+          r.selectedAnswer ?? r.studentAnswer ?? r.answer ?? r.submittedAnswer ?? r.text ?? ''
+        ).trim();
+        const type = String(r.type || r.questionType || r.mode || '').toLowerCase();
+        let expected: string | undefined;
+
+        if (type.includes('article') || type.includes('der_die_das') || r.expectedField === 'article') {
+          const explicitArticle = typeof itemMatch.article === 'string' ? itemMatch.article.trim() : '';
+          const extractedMatch =
+            !explicitArticle && typeof itemMatch.german === 'string'
+              ? itemMatch.german.trim().match(/^(der|die|das)\s+/i)
+              : null;
+          expected = explicitArticle || (extractedMatch ? extractedMatch[1].toLowerCase() : undefined);
+        } else if (type.includes('missing') || r.expectedField === 'missingLetterWord') {
+          expected = itemMatch.missingLetterWord || itemMatch.german;
+        } else if (type.includes('sentence') || type.includes('order') || r.expectedField === 'exampleSentenceGerman') {
+          expected =
+            itemMatch.exampleSentenceGerman ||
+            (Array.isArray(itemMatch.sentence4Elements) ? itemMatch.sentence4Elements.join(' ') : itemMatch.german);
+        } else if (type.includes('arabic') || r.expectedField === 'arabic') {
+          expected = itemMatch.arabic;
+        } else if (type.includes('german') || type.includes('vocab') || type.includes('translation') || r.expectedField === 'german') {
+          expected = itemMatch.german;
+        } else {
+          expected = itemMatch.german || itemMatch.arabic;
+        }
+
+        if (expected !== undefined && expected !== null) {
+          const isActuallyCorrect = studentAns.toLowerCase() === String(expected).trim().toLowerCase();
+          const cleanedR = { ...r, isCorrect: isActuallyCorrect };
+          delete cleanedR.pendingServerGrading;
+          verifiedResponses.push(cleanedR);
+          continue;
+        }
+      }
+    }
+
+    if (options?.requireKnownQuestion) {
+      return {
+        valid: false,
+        status: 400,
+        error: 'Question could not be resolved against assignment snapshot',
+        verifiedResponses: []
+      };
+    }
+    verifiedResponses.push(r);
+  }
+
+  return { valid: true, verifiedResponses };
+}
+
+app.post('/api/homework/check-answer', async (req, res) => {
   const body = req.body || {};
+  const providedShortId = String(body.shortId || req.query.shortId || '').trim();
+  const assignmentId = String(body.assignmentId || body.homeworkId || '').trim();
+  let targetHw: any = null;
+  try {
+    if (assignmentId) {
+      targetHw = await getServerAssignment(assignmentId);
+    } else if (providedShortId) {
+      const resolved = await getAuthoritativeShortLink(providedShortId);
+      if (resolved.status === 'resolved' && resolved.assignment) {
+        targetHw = resolved.assignment;
+      } else if (resolved.status === 'revoked') {
+        return res.status(403).json({ success: false, error: 'Assignment link revoked' });
+      }
+    }
+  } catch (err: any) {
+    return res.status(err?.status || 500).json({
+      success: false,
+      error: err?.message || 'Failed to load assignment from database'
+    });
+  }
+
+  if (!targetHw) {
+    return res.status(404).json({ success: false, error: 'Assignment not found' });
+  }
+  if (!isServerAssignmentOpen(targetHw)) {
+    return res.status(403).json({ success: false, error: 'Assignment is closed or inactive' });
+  }
+
+  const configuredShareToken =
+    targetHw.shareToken !== undefined && targetHw.shareToken !== null ? String(targetHw.shareToken).trim() : '';
+  const configuredShortId =
+    targetHw.shortId !== undefined && targetHw.shortId !== null ? String(targetHw.shortId).trim() : '';
+  const shortIdAuthorized = Boolean(configuredShortId && providedShortId && providedShortId === configuredShortId);
+  if (configuredShareToken && !shortIdAuthorized) {
+    const providedToken = String(body.token || body.shareToken || req.query.token || '').trim();
+    if (!providedToken || providedToken !== configuredShareToken) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Valid share token is required'
+      });
+    }
+  }
+
+  const studentAnswer = String(
+    body.selectedAnswer ?? body.studentAnswer ?? body.answer ?? body.submittedAnswer ?? ''
+  ).trim();
+  if (!studentAnswer) {
+    return res.status(400).json({ success: false, error: 'Student answer is required' });
+  }
+
+  const graded = await gradeServerHomeworkResponses(
+    targetHw,
+    [
+      {
+        questionId: body.questionId,
+        exerciseId: body.exerciseId,
+        itemId: body.itemId,
+        questionType: body.questionType || body.type || 'grammar_exercise',
+        grammarType: body.grammarType,
+        expectedField: body.expectedField,
+        selectedAnswer: studentAnswer
+      }
+    ],
+    { requireKnownQuestion: true }
+  );
+
+  if (!graded.valid) {
+    return res.status(graded.status || 400).json({
+      success: false,
+      error: graded.error || 'Unknown or unassigned question'
+    });
+  }
+
+  return res.json({
+    success: true,
+    isCorrect: Boolean(graded.verifiedResponses[0]?.isCorrect)
+  });
+});
+
+app.post('/api/homework/submit', async (req, res) => {
+  const rawBody = req.body || {};
+  const body =
+    rawBody.submission && typeof rawBody.submission === 'object'
+      ? { ...rawBody, ...rawBody.submission, assignmentId: rawBody.submission.assignmentId || rawBody.submission.homeworkId || rawBody.assignmentId || rawBody.homeworkId }
+      : { ...rawBody, assignmentId: rawBody.assignmentId || rawBody.homeworkId };
   const providedShortId = String(body.shortId || req.query.shortId || '').trim();
   // V-05: Never accept untrusted client-supplied body.assignmentFallback
   let targetHw: any = null;
@@ -1285,90 +1661,14 @@ app.post('/api/homework/submit', async (req, res) => {
   }
 
   const responses = Array.isArray(body.responses) ? body.responses : [];
-  let setSnapshot = targetHw?.setSnapshot || {};
-  const fallbackSetId = String(targetHw?.setId || setSnapshot?.id || '').trim();
-  if (
-    fallbackSetId &&
-    (!Array.isArray(setSnapshot?.items) || setSnapshot.items.length === 0) &&
-    (!Array.isArray(setSnapshot?.customExercises) || setSnapshot.customExercises.length === 0)
-  ) {
-    try {
-      const hydratedSet = await getAuthoritativePublishedSet(fallbackSetId);
-      if (hydratedSet) setSnapshot = hydratedSet;
-    } catch {
-      // Keep existing empty snapshot fallback
-    }
+  const graded = await gradeServerHomeworkResponses(targetHw, responses);
+  if (!graded.valid) {
+    return res.status(graded.status || 400).json({
+      success: false,
+      error: graded.error || 'Invalid question or exercise reference in submission'
+    });
   }
-
-  // Comprehensive Server-Side Authoritative Grading:
-  const verifiedResponses = responses.map((r: any) => {
-    if (!r || typeof r !== 'object') return r;
-    const targetQId = r.exerciseId || r.questionId || r.itemId || r.id;
-    
-    // 1. Check customExercises
-    const serverExercises = Array.isArray(setSnapshot?.customExercises) ? setSnapshot.customExercises : [];
-    if (targetQId && serverExercises.length > 0) {
-      const match = serverExercises.find((ex: any) => String(ex.id) === String(targetQId));
-      if (match && match.correctAnswer !== undefined && match.correctAnswer !== null) {
-        const studentAns = String(r.selectedAnswer ?? r.answer ?? r.submittedAnswer ?? r.text ?? '').trim();
-        const expected = String(match.correctAnswer).trim();
-        const isActuallyCorrect = studentAns.toLowerCase() === expected.toLowerCase();
-        return {
-          ...r,
-          isCorrect: isActuallyCorrect
-        };
-      }
-    }
-
-    // 1.5 Preserve/grade unified verb questions cleanly (never overwrite verb answers with base infinitive match)
-    const qType = String(r.questionType || r.type || '');
-    if (r.isVerbQuestion || qType === 'verb_conjugation' || qType === 'verb_sentence') {
-      return {
-        ...r,
-        isVerbQuestion: true,
-        ...(r.verbId ? { verbId: String(r.verbId) } : {}),
-        ...(r.infinitive ? { infinitive: String(r.infinitive) } : {}),
-        ...(r.subject ? { subject: String(r.subject) } : {}),
-        ...(r.sentence ? { sentence: String(r.sentence) } : {})
-      };
-    }
-
-    // 2. Check setSnapshot items (only when itemId/expectedField is explicitly targeted or isCorrect is omitted)
-    const serverItems = Array.isArray(setSnapshot?.items) ? setSnapshot.items : [];
-    const itemLookupId = r.itemId || r.exerciseId || (r.expectedField ? targetQId : undefined);
-    if (itemLookupId && serverItems.length > 0 && (r.expectedField || typeof r.isCorrect !== 'boolean')) {
-      const itemMatch = serverItems.find((it: any) => String(it.id) === String(itemLookupId));
-      if (itemMatch) {
-        const studentAns = String(r.selectedAnswer ?? r.studentAnswer ?? r.answer ?? r.submittedAnswer ?? r.text ?? '').trim();
-        const type = String(r.type || r.questionType || r.mode || '').toLowerCase();
-        let expected: string | undefined;
-
-        if (type.includes('article') || type.includes('der_die_das') || r.expectedField === 'article') {
-          expected = itemMatch.article;
-        } else if (type.includes('missing') || r.expectedField === 'missingLetterWord') {
-          expected = itemMatch.missingLetterWord || itemMatch.german;
-        } else if (type.includes('sentence') || type.includes('order') || r.expectedField === 'exampleSentenceGerman') {
-          expected = itemMatch.exampleSentenceGerman || (Array.isArray(itemMatch.sentence4Elements) ? itemMatch.sentence4Elements.join(' ') : itemMatch.german);
-        } else if (type.includes('arabic') || r.expectedField === 'arabic') {
-          expected = itemMatch.arabic;
-        } else if (type.includes('german') || type.includes('vocab') || type.includes('translation') || r.expectedField === 'german') {
-          expected = itemMatch.german;
-        } else {
-          expected = itemMatch.german || itemMatch.arabic;
-        }
-
-        if (expected !== undefined && expected !== null) {
-          const isActuallyCorrect = studentAns.toLowerCase() === String(expected).trim().toLowerCase();
-          return {
-            ...r,
-            isCorrect: isActuallyCorrect
-          };
-        }
-      }
-    }
-
-    return r;
-  });
+  const verifiedResponses = graded.verifiedResponses;
 
   const isInProgress = body.status === 'in_progress' && !body.completedAt;
   const correctCount = verifiedResponses.filter((r: any) => r && r.isCorrect).length;
@@ -1875,6 +2175,387 @@ app.post('/api/android/generate-keystore', async (req, res) => {
     } catch {
       // Ignore cleanup errors
     }
+  }
+});
+
+/**
+ * Normalizes and validates extracted Grammar Set payload from Gemini Vision response.
+ * Enforces original vs generated separation and strips heavy inline image blobs.
+ */
+export function parseAndNormalizeExtractedGrammarSet(
+  rawTextOrObj: string | Record<string, any>,
+  options: {
+    title?: string;
+    topic?: string;
+    grade?: string;
+    level?: string;
+    difficulty?: string;
+    teacherName?: string;
+    exerciseMode?: 'original_only' | 'original_and_similar';
+    targetSetKind?: 'grammar' | 'mixed';
+  } = {}
+): { success: boolean; extractedSet?: any; warnings: string[]; error?: string } {
+  let parsed: any = rawTextOrObj;
+  if (typeof rawTextOrObj === 'string') {
+    let clean = rawTextOrObj.trim();
+    if (clean.startsWith('```json')) clean = clean.slice(7);
+    else if (clean.startsWith('```')) clean = clean.slice(3);
+    if (clean.endsWith('```')) clean = clean.slice(0, -3);
+    clean = clean.trim();
+    try {
+      parsed = JSON.parse(clean);
+    } catch (err: any) {
+      return {
+        success: false,
+        warnings: [],
+        error: `Invalid JSON extracted from model output: ${err?.message || 'parse error'}`
+      };
+    }
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    return { success: false, warnings: [], error: 'Extracted payload is not an object.' };
+  }
+
+  const exerciseMode = options.exerciseMode || 'original_and_similar';
+  const rawGrammar = parsed.grammarContent && typeof parsed.grammarContent === 'object' ? parsed.grammarContent : parsed;
+  const rawExercises = Array.isArray(rawGrammar.exercises) ? rawGrammar.exercises : [];
+  const filteredExercises =
+    exerciseMode === 'original_only'
+      ? rawExercises.filter((ex: any) => !ex || ex.source !== 'generated')
+      : rawExercises;
+
+  const warnings: string[] = [];
+  if (Array.isArray(parsed.warnings)) {
+    parsed.warnings.forEach((w: any) => {
+      if (typeof w === 'string' && w.trim()) warnings.push(w.trim());
+    });
+  }
+
+  const normalizedGrammar = normalizeGrammarContent(
+    {
+      ...rawGrammar,
+      exercises: filteredExercises,
+      origin: 'teacher_created'
+    },
+    parsed.title || options.title || 'درس قواعد من الكتاب',
+    parsed.grammarTopic || rawGrammar.grammarTopic || parsed.topic || options.topic || 'Grammatik',
+    'teacher_created'
+  );
+
+  if (!normalizedGrammar) {
+    return { success: false, warnings, error: 'Model output lacked structured grammarContent.' };
+  }
+
+  const uncertainCount = normalizedGrammar.exercises.filter((e) => e.isUncertain).length;
+  if (uncertainCount > 0) {
+    warnings.push(
+      `يوجد ${uncertainCount} تمرين/تمارين غير واضحة جزئياً في الصورة — يرجى مراجعتها وتأكيد إجاباتها قبل الحفظ.`
+    );
+  }
+  if (normalizedGrammar.exercises.length === 0 && normalizedGrammar.rules.length === 0) {
+    warnings.push('لم يتم العثور على تمارين أو قواعد واضحة كفاية في الصور المرفوعة.');
+  }
+
+  const rawItems = Array.isArray(parsed.items) ? parsed.items : [];
+  const resolvedSetKind =
+    options.targetSetKind === 'mixed' && rawItems.length > 0 ? 'mixed' : 'grammar';
+
+  const normalizedSet = stripHeavyGrammarMediaForSync(
+    normalizeLernstudioSet({
+      id: `set_gram_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      title: String(parsed.title || normalizedGrammar.lessonTitle || options.title || 'درس قواعد مستخرج').trim(),
+      topic: String(parsed.topic || normalizedGrammar.grammarTopic || options.topic || 'Grammatik').trim(),
+      level: parsed.level || options.level || 'A1',
+      difficulty: parsed.difficulty || options.difficulty || 'medium',
+      ...(options.grade ? { grade: options.grade } : parsed.grade ? { grade: String(parsed.grade) } : {}),
+      ...(options.teacherName ? { createdByTeacherName: options.teacherName } : {}),
+      description: String(
+        parsed.description || normalizedGrammar.explanationAr || normalizedGrammar.lessonTitle || ''
+      ).trim(),
+      setKind: resolvedSetKind,
+      contentOrigin: 'teacher_created',
+      items: rawItems,
+      grammarContent: normalizedGrammar
+    })
+  );
+
+  return {
+    success: true,
+    extractedSet: normalizedSet,
+    warnings
+  };
+}
+
+// POST /api/lernstudio/extract-grammar — Server-side Gemini Vision extraction for textbook/workbook grammar pages
+app.post('/api/lernstudio/extract-grammar', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+
+  const apiKey = String(process.env.GEMINI_API_KEY || '').trim();
+  if (!apiKey) {
+    return res.status(503).json({
+      success: false,
+      code: 'AI_NOT_CONFIGURED',
+      error: 'Gemini API key is not configured on the server (GEMINI_API_KEY missing).',
+      errorAr:
+        'مفتاح Gemini API غير مضبوط على الخادم (GEMINI_API_KEY). يمكنك استخدام مولّد البرومبت ولصق كود JSON يدوياً بدون تعطيل.'
+    });
+  }
+
+  const body = req.body || {};
+  const rawImages = Array.isArray(body.images) ? body.images : [];
+  if (rawImages.length === 0 || rawImages.length > 6) {
+    return res.status(400).json({
+      success: false,
+      code: 'BAD_REQUEST',
+      error: 'Please supply between 1 and 6 textbook or workbook page images.',
+      errorAr: 'يرجى إرفاق من صورة واحدة إلى 6 صور كحد أقصى.'
+    });
+  }
+
+  const imageParts: Array<{ inlineData: { mimeType: string; data: string } }> = [];
+  for (let i = 0; i < rawImages.length; i++) {
+    const img = rawImages[i];
+    if (!img || typeof img !== 'object') continue;
+    let base64Data = typeof img.dataBase64 === 'string' ? img.dataBase64.trim() : '';
+    let mimeType = typeof img.mimeType === 'string' && img.mimeType.trim() ? img.mimeType.trim() : 'image/jpeg';
+
+    if (!base64Data && typeof img.dataUrl === 'string') {
+      const match = /^data:([^;]+);base64,(.+)$/i.exec(img.dataUrl.trim());
+      if (match) {
+        mimeType = match[1] || mimeType;
+        base64Data = match[2].trim();
+      }
+    }
+
+    if (base64Data) {
+      imageParts.push({
+        inlineData: {
+          mimeType,
+          data: base64Data
+        }
+      });
+    }
+  }
+
+  if (imageParts.length === 0) {
+    return res.status(400).json({
+      success: false,
+      code: 'BAD_REQUEST',
+      error: 'No valid base64 image data was found in the request.',
+      errorAr: 'لم يتم العثور على بيانات صور صالحة في الطلب.'
+    });
+  }
+
+  const exerciseMode: 'original_only' | 'original_and_similar' =
+    body.exerciseMode === 'original_only' ? 'original_only' : 'original_and_similar';
+  const targetSetKind: 'grammar' | 'mixed' = body.targetSetKind === 'mixed' ? 'mixed' : 'grammar';
+  const requestedLevel = String(body.level || 'A1').trim();
+  const requestedTitle = typeof body.title === 'string' ? body.title.trim() : '';
+  const requestedTopic = typeof body.topic === 'string' ? body.topic.trim() : '';
+
+  const exerciseRuleSchema = {
+    type: Type.OBJECT,
+    properties: {
+      id: { type: Type.STRING },
+      title: { type: Type.STRING },
+      titleAr: { type: Type.STRING },
+      titleDe: { type: Type.STRING },
+      titleEn: { type: Type.STRING },
+      summaryAr: { type: Type.STRING },
+      summaryDe: { type: Type.STRING },
+      summaryEn: { type: Type.STRING },
+      pattern: { type: Type.STRING },
+      tipAr: { type: Type.STRING },
+      tipDe: { type: Type.STRING },
+      table: {
+        type: Type.OBJECT,
+        properties: {
+          headers: { type: Type.ARRAY, items: { type: Type.STRING } },
+          rows: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.STRING } } }
+        }
+      }
+    },
+    required: ['title', 'summaryAr']
+  };
+
+  const exampleSchema = {
+    type: Type.OBJECT,
+    properties: {
+      id: { type: Type.STRING },
+      german: { type: Type.STRING },
+      arabic: { type: Type.STRING },
+      english: { type: Type.STRING },
+      highlight: { type: Type.STRING },
+      noteAr: { type: Type.STRING },
+      noteDe: { type: Type.STRING }
+    },
+    required: ['german', 'arabic']
+  };
+
+  const exerciseSchema = {
+    type: Type.OBJECT,
+    properties: {
+      id: { type: Type.STRING },
+      type: {
+        type: Type.STRING,
+        description:
+          'One of: multiple_choice, fill_blank, correct_mistake, choose_correct_sentence, sentence_ordering, short_answer'
+      },
+      prompt: { type: Type.STRING },
+      question: { type: Type.STRING },
+      sentenceWithBlank: { type: Type.STRING },
+      faultySentence: { type: Type.STRING },
+      tokens: { type: Type.ARRAY, items: { type: Type.STRING } },
+      options: { type: Type.ARRAY, items: { type: Type.STRING } },
+      correctAnswer: { type: Type.STRING },
+      acceptedAnswers: { type: Type.ARRAY, items: { type: Type.STRING } },
+      explanationAr: { type: Type.STRING },
+      explanationDe: { type: Type.STRING },
+      ruleRef: { type: Type.STRING },
+      source: {
+        type: Type.STRING,
+        description: '"original" if extracted directly from the uploaded page(s), "generated" if newly created practice'
+      },
+      isUncertain: { type: Type.BOOLEAN },
+      uncertaintyReason: { type: Type.STRING }
+    },
+    required: ['type', 'question', 'correctAnswer', 'source']
+  };
+
+  const responseSchema = {
+    type: Type.OBJECT,
+    properties: {
+      title: { type: Type.STRING },
+      topic: { type: Type.STRING },
+      level: { type: Type.STRING },
+      difficulty: { type: Type.STRING },
+      description: { type: Type.STRING },
+      warnings: { type: Type.ARRAY, items: { type: Type.STRING } },
+      grammarContent: {
+        type: Type.OBJECT,
+        properties: {
+          lessonTitle: { type: Type.STRING },
+          lessonTitleAr: { type: Type.STRING },
+          lessonTitleDe: { type: Type.STRING },
+          grammarTopic: { type: Type.STRING },
+          grammarTopicAr: { type: Type.STRING },
+          grammarTopicDe: { type: Type.STRING },
+          explanationAr: { type: Type.STRING },
+          explanationDe: { type: Type.STRING },
+          explanationEn: { type: Type.STRING },
+          sourceBookInfo: { type: Type.STRING },
+          rules: { type: Type.ARRAY, items: exerciseRuleSchema },
+          examples: { type: Type.ARRAY, items: exampleSchema },
+          exercises: { type: Type.ARRAY, items: exerciseSchema }
+        },
+        required: ['lessonTitle', 'grammarTopic', 'explanationAr', 'rules', 'examples', 'exercises']
+      },
+      items: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            german: { type: Type.STRING },
+            arabic: { type: Type.STRING },
+            english: { type: Type.STRING },
+            emoji: { type: Type.STRING }
+          },
+          required: ['german', 'arabic']
+        }
+      }
+    },
+    required: ['title', 'topic', 'grammarContent']
+  };
+
+  const promptText = [
+    'Analyze the uploaded German textbook / workbook page image(s) carefully.',
+    requestedTitle ? `Preferred set title: ${requestedTitle}` : '',
+    requestedTopic ? `Focus grammar topic: ${requestedTopic}` : '',
+    `Target CEFR level: ${requestedLevel}.`,
+    '1. Extract the German grammar lesson title, topic, clear explanation in Arabic (plus German/English), structured rules (including conjugation/grammar tables if visible), and authentic bilingual German-Arabic example sentences.',
+    '2. Extract ALL grammar exercises visible on the page(s) in order and mark each one with source: "original".',
+    '3. Do NOT guess or fabricate an unreadable line: if any exercise text, answer key, or handwritten blank is blurry or ambiguous, set isUncertain: true and explain briefly in uncertaintyReason (in Arabic).',
+    exerciseMode === 'original_only'
+      ? '4. ONLY return exercises visibly present on the uploaded page(s) with source: "original". Do NOT invent extra generated exercises.'
+      : '4. After extracting all original page exercises (source: "original"), generate 3 to 5 additional similar practice exercises (covering fill_blank, multiple_choice, correct_mistake, choose_correct_sentence, sentence_ordering, or short_answer) clearly marked source: "generated".',
+    targetSetKind === 'mixed'
+      ? '5. Also extract key vocabulary items printed on the page into the items array if present.'
+      : '5. Keep items array empty ([]) unless essential anchor vocabulary is explicitly part of the lesson.',
+    '6. Ensure every exercise has a clear question, valid type (multiple_choice | fill_blank | correct_mistake | choose_correct_sentence | sentence_ordering | short_answer), accurate correctAnswer, options (for multiple_choice / choose_correct_sentence), tokens (for sentence_ordering), and a brief Arabic explanationAr.'
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  try {
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build'
+        }
+      }
+    });
+
+    const geminiGrammarModel = String(process.env.GEMINI_GRAMMAR_MODEL || 'gemini-4-hydrogen').trim() || 'gemini-4-hydrogen';
+
+    const response = await ai.models.generateContent({
+      model: geminiGrammarModel,
+      contents: {
+        parts: [...imageParts, { text: promptText }]
+      },
+      config: {
+        systemInstruction:
+          'You are an expert German (DaF/DaZ) curriculum designer for Arabic-speaking students. Extract structured textbook grammar lessons faithfully without inventing unclear text.',
+        responseMimeType: 'application/json',
+        responseSchema
+      }
+    });
+
+    const rawText = (response.text || '').trim();
+    if (!rawText) {
+      return res.status(502).json({
+        success: false,
+        code: 'INVALID_RESPONSE',
+        error: 'Gemini returned an empty response.',
+        errorAr: 'أعاد نموذج الذكاء الاصطناعي استجابة فارغة. يرجى المحاولة مرة أخرى.'
+      });
+    }
+
+    const normalizedResult = parseAndNormalizeExtractedGrammarSet(rawText, {
+      title: requestedTitle || undefined,
+      topic: requestedTopic || undefined,
+      grade: typeof body.grade === 'string' ? body.grade : undefined,
+      level: requestedLevel,
+      difficulty: typeof body.difficulty === 'string' ? body.difficulty : 'medium',
+      teacherName: typeof body.teacherName === 'string' ? body.teacherName : undefined,
+      exerciseMode,
+      targetSetKind
+    });
+
+    if (!normalizedResult.success || !normalizedResult.extractedSet) {
+      return res.status(502).json({
+        success: false,
+        code: 'INVALID_RESPONSE',
+        error: normalizedResult.error || 'Failed to parse extracted grammar schema.',
+        errorAr: 'تعذر تحليل البيانات المستخرجة إلى بنية درس قواعد صالحة.'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      modelUsed: geminiGrammarModel,
+      extractedSet: normalizedResult.extractedSet,
+      warnings: normalizedResult.warnings
+    });
+  } catch (err: any) {
+    const status = Number(err?.status) || 502;
+    return res.status(status >= 400 && status < 600 ? status : 502).json({
+      success: false,
+      code: 'UPSTREAM_ERROR',
+      error: err?.message || 'Failed to extract grammar content from image(s).',
+      errorAr: 'حدث خطأ أثناء تحليل الصور بالذكاء الاصطناعي. تحقق من الاتصال أو استخدم استيراد JSON اليدوي.'
+    });
   }
 });
 

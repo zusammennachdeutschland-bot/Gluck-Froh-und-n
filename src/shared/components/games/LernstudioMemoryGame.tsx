@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { LernstudioSet, LernstudioTheme } from '../../../types/lernstudio';
-import { generateMemoryCards, MemoryCard } from '../../../utils/lernstudioQuestionAdapter';
+import { generateMemoryCardsForSet, MemoryCard } from '../../../utils/lernstudioQuestionAdapter';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
@@ -32,7 +32,7 @@ export const LernstudioMemoryGame: React.FC<Props> = ({ set, activeTheme, langua
   const displaySetTitle = getLocalizedSetTitle(set, language);
 
   const [cardsCount, setCardsCount] = useState<number>(6); // 6 pairs = 12 cards
-  const [cards, setCards] = useState<MemoryCard[]>(() => generateMemoryCards(set.items || [], 6));
+  const [cards, setCards] = useState<MemoryCard[]>(() => generateMemoryCardsForSet(set, 6, language));
   const [flippedCards, setFlippedCards] = useState<MemoryCard[]>([]);
   const [movesCount, setMovesCount] = useState(0);
   const [timerSeconds, setTimerSeconds] = useState(0);
@@ -117,7 +117,7 @@ export const LernstudioMemoryGame: React.FC<Props> = ({ set, activeTheme, langua
 
   const handleRestart = (newPairCount: number = cardsCount) => {
     setCardsCount(newPairCount);
-    setCards(generateMemoryCards(set.items || [], newPairCount));
+    setCards(generateMemoryCardsForSet(set, newPairCount, language));
     setFlippedCards([]);
     setMovesCount(0);
     setTimerSeconds(0);

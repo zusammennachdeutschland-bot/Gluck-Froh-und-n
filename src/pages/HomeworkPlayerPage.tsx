@@ -57,8 +57,15 @@ import {
   HomeworkSubmission,
   HomeworkShortLinkResolutionStatus,
   DEFAULT_HOMEWORK_QUESTION_TYPES,
-  VERB_HOMEWORK_QUESTION_TYPES
+  VERB_HOMEWORK_QUESTION_TYPES,
+  GRAMMAR_HOMEWORK_QUESTION_TYPES
 } from '../shared/homeworkTypes';
+import {
+  evaluateNormalizedGrammarAnswer,
+  getGrammarLessonExercises,
+  normalizeGrammarContent
+} from '../shared/grammarEngine';
+import type { GrammarExample, GrammarExerciseType, GrammarRule } from '../types/lernstudio';
 import { DEFAULT_LERNSTUDIO_SETS } from '../shared/defaultLernstudioSets';
 import {
   getLocalAssignments,
@@ -82,7 +89,8 @@ import {
   parseQuestionTypeCountsParam,
   extractShortIdFromPathname,
   resolveHomeworkShortLink,
-  clearFirestoreReadQuotaFlag
+  clearFirestoreReadQuotaFlag,
+  checkHomeworkAnswerRemotely
 } from '../shared/homeworkStorageSync';
 import {
   shouldSendProgressCheckpoint,
@@ -145,13 +153,18 @@ interface GeneratedQuizQuestion {
   expectedSyllables?: string[];
   spaceBeforeIndices?: number[];
   tileChoices?: HomeworkTileChoice[];
-  // Unified Verb Exercise metadata
+  // Unified Verb & Grammar Exercise metadata
   audioPromptText?: string;
   verbId?: string;
   infinitive?: string;
   subject?: string;
   sentence?: string;
   isVerbQuestion?: boolean;
+  exerciseId?: string;
+  grammarType?: GrammarExerciseType | string;
+  acceptedAnswers?: string[];
+  explanation?: string;
+  hint?: string;
 }
 
 const GERMAN_DISTRACTOR_LETTERS = [
@@ -233,7 +246,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
   const [currentIdx, setCurrentIdx] = useState(0);
   const [responses, setResponses] = useState<HomeworkQuestionResponse[]>([]);
   const [selectedChoice, setSelectedChoice] = useState<string | null>(null);
-  const [, setFeedback] = useState<'correct' | 'wrong' | null>(null);
+  const [feedback, setFeedback] = useState<'correct' | 'wrong' | 'submitted' | null>(null);
   const [gold, setGold] = useState(0);
   const [streak, setStreak] = useState(0);
   const [maxStreak, setMaxStreak] = useState(0);
@@ -245,6 +258,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
   const [usedTileIds, setUsedTileIds] = useState<string[]>([]);
   const [errorTileId, setErrorTileId] = useState<string | null>(null);
   const [wrongStepsCount, setWrongStepsCount] = useState<number>(0);
+  // Grammar interactive state (short_answer / sentence_ordering)
+  const [grammarTypedInput, setGrammarTypedInput] = useState<string>('');
+  const [grammarOrderedTiles, setGrammarOrderedTiles] = useState<HomeworkTileChoice[]>([]);
+  const [checkingRemoteAnswer, setCheckingRemoteAnswer] = useState<boolean>(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [finalScore, setFinalScore] = useState<any | null>(null);
@@ -429,8 +446,11 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
         const compactWordsParam = (searchParams.get('w') || '').trim();
         const csParam = (searchParams.get('cs') || '').trim() as any;
         const vidsParam = (searchParams.get('vids') || '').trim();
+        const gidsParam = (searchParams.get('gids') || '').trim();
+        const igsParam = searchParams.get('igs');
         const vspParam = (searchParams.get('vsp') || '').trim() as any;
         const urlVerbIds = vidsParam ? vidsParam.split(',').map((s) => s.trim()).filter(Boolean) : [];
+        const urlGrammarExIds = gidsParam ? gidsParam.split(',').map((s) => s.trim()).filter(Boolean) : [];
         const resolvedUrlVerbs = urlVerbIds.length > 0 ? resolveVerbsFromSelection({ verbIds: urlVerbIds }) : [];
 
         if (setId || compactWordsParam || resolvedUrlVerbs.length > 0) {
@@ -439,6 +459,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
           const qtParam = searchParams.get('qt');
           const questionTypesParam = qtParam
             ? (qtParam.split(',') as HomeworkQuestionType[])
+            : csParam === 'grammar'
+            ? [...GRAMMAR_HOMEWORK_QUESTION_TYPES]
             : csParam === 'verb'
             ? [...VERB_HOMEWORK_QUESTION_TYPES]
             : [...DEFAULT_HOMEWORK_QUESTION_TYPES];
@@ -496,18 +518,32 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             };
           }
 
-          if (foundSet && Array.isArray(foundSet.items) && foundSet.items.length > 0) {
+          const foundGrammarEx = foundSet ? getGrammarLessonExercises(foundSet) : [];
+          if (
+            foundSet &&
+            ((Array.isArray(foundSet.items) && foundSet.items.length > 0) || foundGrammarEx.length > 0)
+          ) {
+            const rawSetItems = Array.isArray(foundSet.items) ? foundSet.items : [];
             const items = selectedIds.length > 0
-              ? foundSet.items.filter((it: any) => selectedIds.includes(it.id))
-              : foundSet.items;
-            const resolvedFallbackItems = items.length > 0 ? items : foundSet.items;
+              ? rawSetItems.filter((it: any) => selectedIds.includes(it.id))
+              : rawSetItems;
+            const resolvedFallbackItems = items.length > 0 ? items : rawSetItems;
             const fallbackVerbItems = resolvedUrlVerbs.length > 0 ? resolvedUrlVerbs : [];
-            const fallbackVocabCount = csParam === 'verb' ? 0 : resolvedFallbackItems.filter((it: any) => !isItemVerb(it)).length || resolvedFallbackItems.length;
+            const fallbackVocabCount =
+              csParam === 'verb' || csParam === 'grammar'
+                ? 0
+                : resolvedFallbackItems.filter((it: any) => !isItemVerb(it)).length ||
+                  resolvedFallbackItems.length;
+            const activeFallbackGrammarCount =
+              urlGrammarExIds.length > 0
+                ? foundGrammarEx.filter((ex) => urlGrammarExIds.includes(ex.id)).length || foundGrammarEx.length
+                : foundGrammarEx.length;
             const resolvedTotalQ = calculateTotalHomeworkQuestions(
               fallbackVocabCount,
               questionTypesParam,
               hasUrlQtc ? urlQtc : undefined,
-              fallbackVerbItems.length
+              fallbackVerbItems.length,
+              activeFallbackGrammarCount
             );
 
             const fallbackHw: HomeworkAssignment = {
@@ -517,6 +553,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
               ...(urlOwnerUid ? { ownerUid: urlOwnerUid } : {}),
               ...(csParam ? { contentSource: csParam } : {}),
               ...(urlVerbIds.length > 0 ? { selectedVerbIds: urlVerbIds } : {}),
+              ...(urlGrammarExIds.length > 0 ? { selectedGrammarExerciseIds: urlGrammarExIds } : {}),
+              ...(igsParam === '0' ? { includeGrammarStudy: false } : {}),
               ...(resolvedUrlVerbs.length > 0 ? { verbSnapshot: resolvedUrlVerbs } : {}),
               ...(vspParam ? { verbSubjectPoolMode: vspParam } : {}),
               audienceMode: isGroupUrl ? 'group' : 'open',
@@ -531,6 +569,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                 id: foundSet.id,
                 title: foundSet.title,
                 category: (foundSet as any).category || foundSet.topic || '',
+                ...(foundSet.setKind ? { setKind: foundSet.setKind } : {}),
+                ...(foundSet.grammarContent ? { grammarContent: foundSet.grammarContent } : {}),
                 items: resolvedFallbackItems
               },
               selectedItemIds: selectedIds,
@@ -608,10 +648,84 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     return [];
   }, [assignment, assignmentVerbs]);
 
+  const assignmentGrammarContent = useMemo(
+    () =>
+      assignment?.setSnapshot?.grammarContent
+        ? normalizeGrammarContent(
+            assignment.setSnapshot.grammarContent,
+            assignment.setSnapshot.title,
+            assignment.setSnapshot.topic,
+            'teacher_created',
+            { allowAnswerless: true }
+          )
+        : null,
+    [assignment?.setSnapshot?.grammarContent, assignment?.setSnapshot?.title, assignment?.setSnapshot?.topic]
+  );
+
+  const assignmentGrammarExercises = useMemo(() => {
+    if (!assignment?.setSnapshot) return [];
+    const allEx = getGrammarLessonExercises(assignment.setSnapshot, { allowAnswerless: true });
+    if (
+      Array.isArray(assignment?.selectedGrammarExerciseIds) &&
+      assignment.selectedGrammarExerciseIds.length > 0
+    ) {
+      const allow = new Set(assignment.selectedGrammarExerciseIds);
+      const filtered = allEx.filter((ex) => allow.has(ex.id));
+      if (filtered.length > 0) return filtered;
+    }
+    return allEx;
+  }, [assignment?.setSnapshot, assignment?.selectedGrammarExerciseIds]);
+
+  const grammarStudyCards = useMemo<
+    Array<
+      | {
+          kind: 'overview';
+          id: string;
+          title: string;
+          summaryAr: string;
+          summaryDe: string;
+          explanationAr: string;
+          explanationDe: string;
+          examples: GrammarExample[];
+        }
+      | { kind: 'rule'; id: string; rule: GrammarRule }
+    >
+  >(() => {
+    if (!assignmentGrammarContent) return [];
+    if (assignment?.includeGrammarStudy === false) return [];
+    const cards: any[] = [];
+    if (
+      assignmentGrammarContent.explanationAr ||
+      assignmentGrammarContent.explanationDe ||
+      assignmentGrammarContent.explanationEn ||
+      assignmentGrammarContent.examples.length > 0
+    ) {
+      cards.push({
+        kind: 'overview',
+        id: 'gram_overview',
+        title: assignmentGrammarContent.lessonTitleAr || assignment?.setSnapshot?.title || 'شرح القاعدة',
+        summaryAr: assignmentGrammarContent.explanationAr || '',
+        summaryDe: assignmentGrammarContent.explanationDe || '',
+        explanationAr: assignmentGrammarContent.explanationAr || '',
+        explanationDe: assignmentGrammarContent.explanationDe || '',
+        examples: assignmentGrammarContent.examples || []
+      });
+    }
+    for (const rule of assignmentGrammarContent.rules || []) {
+      cards.push({ kind: 'rule', id: rule.id || `rule_${cards.length}`, rule });
+    }
+    return cards;
+  }, [assignmentGrammarContent, assignment?.includeGrammarStudy, assignment?.setSnapshot?.title]);
+
+  const totalStudySteps = grammarStudyCards.length + studyItems.length;
+
   // Active question types ordered as stored on the assignment (or all stages by default)
   const activeQuestionTypes = useMemo<HomeworkQuestionType[]>(() => {
     if (Array.isArray(assignment?.questionTypes) && assignment.questionTypes.length > 0) {
       return assignment.questionTypes;
+    }
+    if (assignment?.contentSource === 'grammar') {
+      return [...GRAMMAR_HOMEWORK_QUESTION_TYPES];
     }
     if (assignment?.contentSource === 'verb') {
       return [...VERB_HOMEWORK_QUESTION_TYPES];
@@ -621,7 +735,13 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
 
   // Build progressive multi-stage question list based on teacher's chosen questionTypes
   const quizQuestions = useMemo<GeneratedQuizQuestion[]>(() => {
-    if (studyItems.length === 0 && assignmentVerbs.length === 0) return [];
+    if (
+      studyItems.length === 0 &&
+      assignmentVerbs.length === 0 &&
+      assignmentGrammarExercises.length === 0
+    ) {
+      return [];
+    }
     const allSetItems: any[] = assignment?.setSnapshot?.items || studyItems;
     const contentSource = assignment?.contentSource;
     const pureVocabStudyItems =
@@ -751,6 +871,104 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             infinitive: verb.infinitive,
             sentence: ex.sentenceOriginal,
             isVerbQuestion: true
+          });
+        });
+        return;
+      }
+
+      if (qType === 'grammar_exercise') {
+        if (assignmentGrammarExercises.length === 0) return;
+        const stageQuestionCount = resolveStageQuestionCount(
+          qType,
+          vocabPoolForStages.length,
+          assignment?.questionTypeCounts,
+          assignmentVerbs.length,
+          assignmentGrammarExercises.length
+        );
+        const selectedGramEx =
+          stageQuestionCount >= assignmentGrammarExercises.length
+            ? assignmentGrammarExercises
+            : assignmentGrammarExercises.slice(0, stageQuestionCount);
+
+        selectedGramEx.forEach((ex, exIdx) => {
+          const seed = stageIdx * 89 + exIdx * 23 + (ex.question?.length || 7);
+          const hasExplicitTokens = Array.isArray(ex.tokens) && ex.tokens.length > 0;
+          const baseTokens =
+            ex.type === 'sentence_ordering'
+              ? hasExplicitTokens
+                ? ex.tokens!
+                : ex.correctAnswer
+                ? ex.correctAnswer.trim().split(/\s+/).filter(Boolean)
+                : []
+              : [];
+          const tileChoices: HomeworkTileChoice[] | undefined =
+            ex.type === 'sentence_ordering' && baseTokens.length > 0
+              ? hasExplicitTokens && !ex.correctAnswer
+                ? baseTokens.map((tok, tIdx) => ({
+                    id: `gram_tok_${ex.id}_${tIdx}`,
+                    text: tok
+                  }))
+                : deterministicShuffle(
+                    baseTokens.map((tok, tIdx) => ({
+                      id: `gram_tok_${ex.id}_${tIdx}`,
+                      text: tok
+                    })),
+                    seed
+                  )
+              : undefined;
+
+          let finalOptions: string[] = [];
+          if (ex.type !== 'sentence_ordering' && ex.type !== 'short_answer') {
+            const rawOpts = Array.isArray(ex.options) ? ex.options.filter(Boolean) : [];
+            const deduped = Array.from(new Set(rawOpts));
+            if (ex.correctAnswer && !deduped.some((o) => evaluateNormalizedGrammarAnswer(o, ex))) {
+              deduped.unshift(ex.correctAnswer);
+            }
+            finalOptions = deduped.length > 1 ? deterministicShuffle(deduped, seed) : deduped;
+          }
+
+          const promptTitle =
+            ex.prompt ||
+            (ex.type === 'fill_blank'
+              ? 'أكمل الفراغ بالإجابة الصحيحة:'
+              : ex.type === 'correct_mistake'
+              ? 'صحّح الخطأ في الجملة التالية:'
+              : ex.type === 'choose_correct_sentence'
+              ? 'اختر الجملة الألمانية الصحيحة نحوياً:'
+              : ex.type === 'sentence_ordering'
+              ? 'رتب الكلمات التالية لتكوين جملة ألمانية صحيحة:'
+              : ex.type === 'short_answer'
+              ? 'اكتب الإجابة الصحيحة بالألمانية:'
+              : 'اختر الإجابة الصحيحة:');
+
+          const mainSentenceOrQuestion =
+            ex.sentenceWithBlank || ex.faultySentence || ex.question || ex.prompt || '';
+
+          list.push({
+            id: `gram_${ex.id}_${stageIdx}_${exIdx}`,
+            itemId: ex.id,
+            exerciseId: ex.id,
+            grammarType: ex.type,
+            type: 'grammar_exercise',
+            stageIndex: stageIdx,
+            stageLabelAr: stageTitle,
+            stageBadgeEmoji: stageEmoji,
+            germanWord: mainSentenceOrQuestion,
+            audioPromptText: ex.sentenceWithBlank || ex.faultySentence || ex.question || '',
+            arabicMeaning: ex.explanationAr || ex.prompt || '',
+            emoji: '📘',
+            promptTitleAr: promptTitle,
+            promptMainText: mainSentenceOrQuestion,
+            promptSubText:
+              ex.question && mainSentenceOrQuestion !== ex.question
+                ? ex.question
+                : ex.uncertaintyReason || undefined,
+            options: finalOptions,
+            correctAnswer: ex.correctAnswer || '',
+            acceptedAnswers: ex.acceptedAnswers,
+            explanation: ex.explanationAr || ex.explanationDe || ex.explanation,
+            hint: ex.uncertaintyReason,
+            ...(tileChoices ? { tileChoices } : {})
           });
         });
         return;
@@ -1261,10 +1479,15 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     });
 
     return list;
-  }, [studyItems, assignment, assignmentVerbs, activeQuestionTypes]);
+  }, [studyItems, assignment, assignmentVerbs, assignmentGrammarExercises, activeQuestionTypes]);
 
   const currentQuestion = quizQuestions[currentIdx];
-  const currentStudyItem = studyItems[studyIndex];
+  const currentGrammarStudyCard =
+    studyIndex < grammarStudyCards.length ? grammarStudyCards[studyIndex] : null;
+  const currentStudyItem =
+    studyIndex >= grammarStudyCards.length
+      ? studyItems[studyIndex - grammarStudyCards.length]
+      : undefined;
   const currentStudyVerb = useMemo(() => {
     if (!currentStudyItem) return null;
     const snapshotMatch = assignmentVerbs.find(
@@ -1272,12 +1495,17 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     );
     return snapshotMatch || resolveVerbFromLernstudioItem(currentStudyItem);
   }, [currentStudyItem, assignmentVerbs]);
-  const currentStudySpeechText = useMemo(
-    () => buildTeacherStudySpeechText(currentStudyItem, currentStudyVerb),
-    [currentStudyItem, currentStudyVerb]
-  );
+  const currentStudySpeechText = useMemo(() => {
+    if (currentGrammarStudyCard) {
+      if (currentGrammarStudyCard.kind === 'overview') {
+        return currentGrammarStudyCard.examples?.[0]?.german || '';
+      }
+      return assignmentGrammarContent?.examples?.[0]?.german || '';
+    }
+    return buildTeacherStudySpeechText(currentStudyItem, currentStudyVerb);
+  }, [currentGrammarStudyCard, assignmentGrammarContent, currentStudyItem, currentStudyVerb]);
 
-  // Auto-pronounce word (or verb + all conjugations) when entering Teacher Study card
+  // Auto-pronounce word (or verb + all conjugations / grammar example) when entering Teacher Study card
   useEffect(() => {
     if (phase === 'teacher_study' && currentStudySpeechText) {
       const timer = setTimeout(() => {
@@ -1297,6 +1525,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       setUsedTileIds([]);
       setErrorTileId(null);
       setWrongStepsCount(0);
+      setGrammarTypedInput('');
+      setGrammarOrderedTiles([]);
       if (!gamificationRef.current.pendingBonusRound && !activeOverlayRound) {
         const timer = setTimeout(() => {
           if (!isSoundMuted()) {
@@ -1471,7 +1701,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
         });
     }
 
-    const initialPhase = studyItems.length > 0 ? 'teacher_study' : 'quiz';
+    const initialPhase = totalStudySteps > 0 ? 'teacher_study' : 'quiz';
     saveActiveHomeworkSession({
       version: 1,
       assignmentId,
@@ -1483,14 +1713,14 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       phase: initialPhase,
       studyIndex: 0,
       currentIdx: 0,
-      completedStudyPhase: studyItems.length === 0,
+      completedStudyPhase: totalStudySteps === 0,
       startTime: nowIso,
       responses: [],
       gamification: initialGam,
       updatedAtMs: Date.now()
     });
 
-    if (studyItems.length > 0) {
+    if (totalStudySteps > 0) {
       setStudyIndex(0);
       setPhase('teacher_study');
     } else {
@@ -1603,8 +1833,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     setResponses(latestResponsesRef.current);
     syncGamificationState(restoredGam);
 
-    if (saved.phase === 'teacher_study' && studyItems.length > 0) {
-      setStudyIndex(Math.max(0, Math.min(saved.studyIndex || 0, studyItems.length - 1)));
+    if (saved.phase === 'teacher_study' && totalStudySteps > 0) {
+      setStudyIndex(Math.max(0, Math.min(saved.studyIndex || 0, totalStudySteps - 1)));
       setPhase('teacher_study');
       return;
     }
@@ -1634,7 +1864,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       setCurrentIdx(Math.min(targetIdx, Math.max(0, quizQuestions.length - 1)));
       setPhase('quiz');
     }
-  }, [assignmentId, assignment, quizQuestions, studyItems.length, mergedSubmissionsForAssignment, phase, syncGamificationState]);
+  }, [assignmentId, assignment, quizQuestions, totalStudySteps, mergedSubmissionsForAssignment, phase, syncGamificationState]);
 
   // Countdown Timer loop during active Quiz phase (paused while Bonus Card Round is open)
   useEffect(() => {
@@ -1686,6 +1916,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     setUsedTileIds([]);
     setErrorTileId(null);
     setWrongStepsCount(0);
+    setGrammarTypedInput('');
+    setGrammarOrderedTiles([]);
 
     if (currentIdx + 1 < quizQuestions.length) {
       const nextIdx = currentIdx + 1;
@@ -1735,7 +1967,11 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     advanceToNextQuestion(targetResponses, latestGam.points, latestGam.maxStreak);
   }, [currentIdx, quizQuestions.length]);
 
-  const recordQuestionCompletion = (studentAnswerStr: string, isCorrect: boolean) => {
+  const recordQuestionCompletion = (
+    studentAnswerStr: string,
+    isCorrect: boolean,
+    options?: { pendingServerGrading?: boolean }
+  ) => {
     if (!currentQuestion) return;
     if (!studentAnswerStr || !studentAnswerStr.trim()) return;
     if (
@@ -1745,10 +1981,11 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       return;
     }
 
+    const isPendingGrading = Boolean(options?.pendingServerGrading);
     const transition = applyAnswerGamification(gamificationRef.current, {
       questionId: currentQuestion.id,
       questionIndex: currentIdx,
-      isCorrect,
+      isCorrect: isPendingGrading ? true : isCorrect,
       isAnswered: true
     });
     if (transition.ignoredDuplicate) return;
@@ -1756,9 +1993,11 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     processedQuestionIdsRef.current.add(currentQuestion.id);
     const nextGam = transition.nextState;
     syncGamificationState(nextGam);
-    setFeedback(isCorrect ? 'correct' : 'wrong');
+    setFeedback(isPendingGrading ? 'submitted' : isCorrect ? 'correct' : 'wrong');
 
-    if (isCorrect) {
+    if (isPendingGrading) {
+      playLernstudioSound('correct');
+    } else if (isCorrect) {
       playLernstudioSound(transition.doubledApplied ? 'combo_ding' : 'correct');
       gameEffects.triggerScorePopup(
         transition.doubledApplied ? `+${transition.pointsDelta} (×2!)` : `+${transition.pointsDelta}`,
@@ -1773,8 +2012,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       playLernstudioSound('wrong');
       playGermanVoiceFeedback('noch_einmal');
       gameEffects.triggerScorePopup(`${transition.pointsDelta || -5}`, 50, 28, false);
-      if (!isSoundMuted()) {
-        speakGermanText(currentQuestion.germanWord, 0.9);
+      if (!isSoundMuted() && currentQuestion.audioPromptText) {
+        speakGermanText(currentQuestion.audioPromptText, 0.9);
       }
     }
 
@@ -1788,11 +2027,15 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       correctAnswer: currentQuestion.correctAnswer,
       isCorrect,
       timeSpentSeconds: elapsedSec,
+      ...(isPendingGrading ? { pendingServerGrading: true } : {}),
       ...(currentQuestion.isVerbQuestion ? { isVerbQuestion: true } : {}),
       ...(currentQuestion.verbId ? { verbId: currentQuestion.verbId } : {}),
       ...(currentQuestion.infinitive ? { infinitive: currentQuestion.infinitive } : {}),
       ...(currentQuestion.subject ? { subject: currentQuestion.subject } : {}),
-      ...(currentQuestion.sentence ? { sentence: currentQuestion.sentence } : {})
+      ...(currentQuestion.sentence ? { sentence: currentQuestion.sentence } : {}),
+      ...(currentQuestion.exerciseId ? { exerciseId: currentQuestion.exerciseId } : {}),
+      ...(currentQuestion.grammarType ? { grammarType: currentQuestion.grammarType } : {}),
+      ...(currentQuestion.explanation ? { explanation: currentQuestion.explanation } : {})
     };
 
     const nextResponses = [...latestResponsesRef.current, newResponse];
@@ -1839,11 +2082,50 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     }
   };
 
-  const handleSelectOption = (chosenOption: string) => {
-    if (selectedChoice !== null || !currentQuestion || !chosenOption || !chosenOption.trim()) return;
+  const handleSelectOption = async (chosenOption: string) => {
+    if (selectedChoice !== null || checkingRemoteAnswer || !currentQuestion || !chosenOption || !chosenOption.trim()) return;
     if (processedQuestionIdsRef.current.has(currentQuestion.id)) return;
     setSelectedChoice(chosenOption);
-    const isCorrect = chosenOption.trim().toLowerCase() === currentQuestion.correctAnswer.trim().toLowerCase();
+
+    const requiresRemoteCheck =
+      !currentQuestion.correctAnswer &&
+      (currentQuestion.type === 'grammar_exercise' || Boolean(currentQuestion.exerciseId));
+
+    if (requiresRemoteCheck) {
+      setCheckingRemoteAnswer(true);
+      try {
+        const tokenParam =
+          typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('token') || '' : '';
+        const remoteRes = await checkHomeworkAnswerRemotely({
+          assignmentId: assignment?.id || assignmentId,
+          shortId: assignment?.shortId || shortIdFromUrl || undefined,
+          token: tokenParam || undefined,
+          exerciseId: currentQuestion.exerciseId,
+          questionId: currentQuestion.id,
+          itemId: currentQuestion.itemId,
+          questionType: currentQuestion.type,
+          grammarType: currentQuestion.grammarType,
+          selectedAnswer: chosenOption
+        });
+        if (remoteRes.checked && typeof remoteRes.isCorrect === 'boolean') {
+          recordQuestionCompletion(chosenOption, remoteRes.isCorrect);
+        } else {
+          recordQuestionCompletion(chosenOption, false, { pendingServerGrading: true });
+        }
+      } finally {
+        setCheckingRemoteAnswer(false);
+      }
+      return;
+    }
+
+    const isCorrect =
+      currentQuestion.type === 'grammar_exercise' ||
+      (Array.isArray(currentQuestion.acceptedAnswers) && currentQuestion.acceptedAnswers.length > 0)
+        ? evaluateNormalizedGrammarAnswer(chosenOption, {
+            correctAnswer: currentQuestion.correctAnswer,
+            acceptedAnswers: currentQuestion.acceptedAnswers
+          })
+        : chosenOption.trim().toLowerCase() === currentQuestion.correctAnswer.trim().toLowerCase();
     recordQuestionCompletion(chosenOption, isCorrect);
   };
 
@@ -2358,6 +2640,12 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                     <span aria-hidden="true">·</span>
                   </>
                 )}
+                {assignmentGrammarExercises.length > 0 && (
+                  <>
+                    <span>{assignmentGrammarExercises.length} تمرين قواعد</span>
+                    <span aria-hidden="true">·</span>
+                  </>
+                )}
                 <span>{quizQuestions.length} سؤال تفاعلي</span>
               </div>
             </div>
@@ -2556,7 +2844,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
 
             {isStudyPhase ? (
               <span className="px-2.5 py-1 rounded-xl bg-surface-hover border border-surface-border text-primary text-xs font-bold tabular-nums">
-                📖 {studyIndex + 1} / {studyItems.length}
+                📖 {studyIndex + 1} / {Math.max(1, totalStudySteps)}
               </span>
             ) : (
               <span className="px-2.5 py-1 rounded-xl bg-surface-hover border border-surface-border text-text-main text-xs font-bold tabular-nums">
@@ -2613,11 +2901,11 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
   };
 
   // ============================================================================
-  // PHASE 1: TEACHER PRONUNCIATION & FLASHCARD STUDY ("يبدأ بالمعلم اللي هو نطق الكلمة")
+  // PHASE 1: TEACHER PRONUNCIATION, GRAMMAR RULES & FLASHCARD STUDY
   // ============================================================================
-  if (phase === 'teacher_study' && currentStudyItem) {
-    const parsed = stripLeadingArticle(currentStudyItem.german);
-    const article = currentStudyItem.article || parsed.article;
+  if (phase === 'teacher_study' && (currentGrammarStudyCard || currentStudyItem)) {
+    const parsed = currentStudyItem ? stripLeadingArticle(currentStudyItem.german) : { article: null, baseWord: '' };
+    const article = currentStudyItem?.article || parsed.article;
     const articleBadgeClass =
       article === 'der'
         ? 'bg-sky-500/10 border-sky-500/30 text-sky-600 dark:text-sky-400'
@@ -2697,132 +2985,259 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
         <div className="max-w-2xl w-full mx-auto h-2 bg-surface-border rounded-full overflow-hidden mb-5">
           <div
             className="h-full bg-primary transition-all duration-300"
-            style={{ width: `${((studyIndex + 1) / studyItems.length) * 100}%` }}
+            style={{ width: `${((studyIndex + 1) / Math.max(1, totalStudySteps)) * 100}%` }}
           />
         </div>
 
-        {/* Teacher Study Card */}
+        {/* Teacher Study Card (Grammar Explanation / Rule OR Vocabulary Item) */}
         <div className="flex-1 flex flex-col items-center justify-center max-w-2xl w-full mx-auto">
           <motion.div
-            key={currentStudyItem.id}
+            key={currentGrammarStudyCard?.id || currentStudyItem?.id}
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
             className="w-full bg-surface border border-surface-border rounded-2xl p-5 sm:p-7 text-center space-y-4 shadow-xs"
           >
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-hover border border-surface-border text-text-muted text-xs font-bold">
-              <span>👨‍🏫 استمع لنطق المعلّم وردد الكلمة بصوت واضح</span>
-            </div>
+            {currentGrammarStudyCard ? (
+              <div className="space-y-4 text-right">
+                <div className="text-center">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/25 text-primary text-xs font-bold">
+                    <span>📘 شرح القاعدة النحوية قبل بدء الأسئلة</span>
+                  </div>
+                </div>
 
-            {currentStudyItem.emoji && (
-              <div className="text-5xl sm:text-6xl select-none">{currentStudyItem.emoji}</div>
-            )}
-
-            <div className="space-y-1.5" dir="ltr">
-              {article && (
-                <span className={`inline-block px-2.5 py-0.5 rounded-md border text-xs font-bold uppercase ${articleBadgeClass}`}>
-                  {article === 'der' ? 'der (مذكر)' : article === 'die' ? 'die (مؤنث)' : 'das (محايد)'}
-                </span>
-              )}
-              <h2 className="text-2xl sm:text-4xl font-bold text-text-main tracking-wide">
-                {currentStudyItem.german}
-              </h2>
-              {currentStudyItem.plural && (
-                <p className="text-xs font-semibold text-text-muted">الجمع: {currentStudyItem.plural}</p>
-              )}
-            </div>
-
-            <div className="py-2.5 px-5 rounded-xl bg-surface-hover border border-surface-border inline-block">
-              <p className="text-xl sm:text-2xl font-bold text-primary">{currentStudyItem.arabic}</p>
-            </div>
-
-            {(() => {
-              const snapshotMatch = assignmentVerbs.find(
-                (v) => v.id === (currentStudyItem.verbId || currentStudyItem.id)
-              );
-              const studyVerb = snapshotMatch || resolveVerbFromLernstudioItem(currentStudyItem);
-              if (!studyVerb) return null;
-              return (
-                <div className="space-y-2.5 text-right">
-                  <div className="flex flex-wrap items-center justify-center gap-1.5">
-                    <span className="px-2 py-0.5 rounded-md bg-primary/10 border border-primary/20 text-primary text-[11px] font-bold">
-                      {studyVerb.level}
-                    </span>
-                    {studyVerb.classifications.map((cls) => (
-                      <span
-                        key={cls}
-                        className="px-2 py-0.5 rounded-md bg-surface-hover border border-surface-border text-text-main text-[11px] font-semibold"
+                {currentGrammarStudyCard.kind === 'overview' ? (
+                  <div className="space-y-3">
+                    <h2 className="text-xl sm:text-2xl font-black text-text-main text-center">
+                      {currentGrammarStudyCard.title}
+                    </h2>
+                    {currentGrammarStudyCard.summaryAr && (
+                      <div className="p-3.5 rounded-xl bg-primary/5 border border-primary/20 text-sm font-bold text-text-main">
+                        {currentGrammarStudyCard.summaryAr}
+                      </div>
+                    )}
+                    {currentGrammarStudyCard.explanationAr && (
+                      <div className="p-3.5 rounded-xl bg-surface-hover border border-surface-border text-xs sm:text-sm text-text-main leading-relaxed whitespace-pre-line">
+                        {currentGrammarStudyCard.explanationAr}
+                      </div>
+                    )}
+                    {currentGrammarStudyCard.explanationDe && (
+                      <div
+                        dir="ltr"
+                        className="p-3 rounded-xl bg-surface-hover/50 border border-surface-border text-xs text-text-muted leading-relaxed text-left whitespace-pre-line"
                       >
-                        {cls}
-                      </span>
-                    ))}
-                    {studyVerb.preposition && (
-                      <span className="px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/25 text-amber-700 dark:text-amber-300 text-[11px] font-bold" dir="ltr">
-                        +{studyVerb.preposition} ({studyVerb.prepositionCase || 'Akk/Dat'})
-                      </span>
+                        {currentGrammarStudyCard.explanationDe}
+                      </div>
+                    )}
+                    {currentGrammarStudyCard.examples.length > 0 && (
+                      <div className="space-y-2 pt-1">
+                        <p className="text-xs font-bold text-primary">أمثلة توضيحية (اضغط للاستماع):</p>
+                        {currentGrammarStudyCard.examples.slice(0, 6).map((ex) => (
+                          <div
+                            key={ex.id}
+                            className="p-3 rounded-xl bg-surface-hover border border-surface-border flex items-center justify-between gap-2.5"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-bold text-text-main" dir="ltr">
+                                {ex.german}
+                              </p>
+                              {ex.arabic && (
+                                <p className="text-xs text-text-muted mt-0.5">{ex.arabic}</p>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => speakGermanText(ex.german, 0.9)}
+                              className="p-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 shrink-0 cursor-pointer"
+                            >
+                              <Volume2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-xs" dir="ltr">
-                    {[
-                      ['ich (أنا)', studyVerb.praesens.ich],
-                      ['du (أنت)', studyVerb.praesens.du],
-                      ['er/sie/es', studyVerb.praesens.er_sie_es],
-                      ['wir (نحن)', studyVerb.praesens.wir],
-                      ['ihr (أنتم)', studyVerb.praesens.ihr],
-                      ['sie/Sie', studyVerb.praesens.sie_Sie]
-                    ].map(([pron, form]) => (
-                      <div
-                        key={pron}
-                        className="px-2.5 py-1.5 rounded-lg bg-surface-hover border border-surface-border flex items-center justify-between gap-2"
-                      >
-                        <span className="text-[11px] text-text-muted font-semibold">{pron}</span>
-                        <span className="font-bold text-text-main">{form}</span>
-                      </div>
-                    ))}
-                  </div>
-                  {studyVerb.exampleGerman && (
-                    <div className="bg-surface-hover/50 border border-surface-border rounded-xl p-3 text-center space-y-1">
-                      <p className="text-xs sm:text-sm font-semibold text-text-main" dir="ltr">
-                        „{studyVerb.exampleGerman}“
-                      </p>
-                      {studyVerb.exampleArabic && (
-                        <p className="text-xs text-text-muted">{studyVerb.exampleArabic}</p>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="text-center space-y-1">
+                      <h2 className="text-lg sm:text-xl font-black text-text-main" dir="ltr">
+                        {currentGrammarStudyCard.rule.titleDe || currentGrammarStudyCard.rule.titleAr}
+                      </h2>
+                      {currentGrammarStudyCard.rule.titleAr && currentGrammarStudyCard.rule.titleDe && (
+                        <p className="text-sm font-bold text-primary">
+                          {currentGrammarStudyCard.rule.titleAr}
+                        </p>
                       )}
                     </div>
-                  )}
-                </div>
-              );
-            })()}
-
-            {!isItemVerb(currentStudyItem) && (currentStudyItem.exampleSentenceGerman || currentStudyItem.example) && (
-              <div className="bg-surface-hover/50 border border-surface-border rounded-xl p-3 text-center space-y-1">
-                <p className="text-xs sm:text-sm font-semibold text-text-main" dir="ltr">
-                  „{currentStudyItem.exampleSentenceGerman || currentStudyItem.example}“
-                </p>
-                {currentStudyItem.exampleSentenceArabic && (
-                  <p className="text-xs text-text-muted">{currentStudyItem.exampleSentenceArabic}</p>
+                    {currentGrammarStudyCard.rule.summaryAr && (
+                      <div className="p-3.5 rounded-xl bg-surface-hover border border-surface-border text-xs sm:text-sm text-text-main leading-relaxed whitespace-pre-line">
+                        {currentGrammarStudyCard.rule.summaryAr}
+                      </div>
+                    )}
+                    {currentGrammarStudyCard.rule.pattern && (
+                      <div
+                        dir="ltr"
+                        className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs sm:text-sm font-mono font-bold text-amber-800 dark:text-amber-300 text-center"
+                      >
+                        {currentGrammarStudyCard.rule.pattern}
+                      </div>
+                    )}
+                    {currentGrammarStudyCard.rule.table &&
+                      Array.isArray(currentGrammarStudyCard.rule.table.rows) &&
+                      currentGrammarStudyCard.rule.table.rows.length > 0 && (
+                        <div className="overflow-x-auto rounded-xl border border-surface-border" dir="ltr">
+                          <table className="w-full text-xs text-left">
+                            {Array.isArray(currentGrammarStudyCard.rule.table.headers) &&
+                              currentGrammarStudyCard.rule.table.headers.length > 0 && (
+                                <thead className="bg-surface-hover text-text-main font-bold">
+                                  <tr>
+                                    {currentGrammarStudyCard.rule.table.headers.map((h, hi) => (
+                                      <th key={hi} className="px-3 py-2 border-b border-surface-border">
+                                        {h}
+                                      </th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                              )}
+                            <tbody>
+                              {currentGrammarStudyCard.rule.table.rows.map((row, ri) => (
+                                <tr key={ri} className="border-b border-surface-border last:border-b-0">
+                                  {row.map((cell, ci) => (
+                                    <td key={ci} className="px-3 py-2 font-medium text-text-main">
+                                      {cell}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    {currentGrammarStudyCard.rule.tipAr && (
+                      <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/20 text-xs text-text-main leading-relaxed">
+                        💡 {currentGrammarStudyCard.rule.tipAr}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
-            )}
+            ) : currentStudyItem ? (
+              <>
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-hover border border-surface-border text-text-muted text-xs font-bold">
+                  <span>👨‍🏫 استمع لنطق المعلّم وردد الكلمة بصوت واضح</span>
+                </div>
 
-            {/* Pronunciation Buttons */}
-            <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => speakGermanText(currentStudySpeechText || currentStudyItem.german, 0.9)}
-                className="px-4 py-2.5 rounded-xl bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-xs cursor-pointer transition-all"
-              >
-                <Volume2 className="w-4 h-4" />
-                <span>🔊 استمع للنطق</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => speakGermanText(currentStudySpeechText || currentStudyItem.german, 0.55)}
-                className="px-4 py-2.5 rounded-xl bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs sm:text-sm flex items-center gap-2 cursor-pointer active:scale-95 transition-all shadow-2xs"
-              >
-                <Snail className="w-4 h-4 text-primary" />
-                <span>🐢 نطق بطيء</span>
-              </button>
-            </div>
+                {currentStudyItem.emoji && (
+                  <div className="text-5xl sm:text-6xl select-none">{currentStudyItem.emoji}</div>
+                )}
+
+                <div className="space-y-1.5" dir="ltr">
+                  {article && (
+                    <span className={`inline-block px-2.5 py-0.5 rounded-md border text-xs font-bold uppercase ${articleBadgeClass}`}>
+                      {article === 'der' ? 'der (مذكر)' : article === 'die' ? 'die (مؤنث)' : 'das (محايد)'}
+                    </span>
+                  )}
+                  <h2 className="text-2xl sm:text-4xl font-bold text-text-main tracking-wide">
+                    {currentStudyItem.german}
+                  </h2>
+                  {currentStudyItem.plural && (
+                    <p className="text-xs font-semibold text-text-muted">الجمع: {currentStudyItem.plural}</p>
+                  )}
+                </div>
+
+                <div className="py-2.5 px-5 rounded-xl bg-surface-hover border border-surface-border inline-block">
+                  <p className="text-xl sm:text-2xl font-bold text-primary">{currentStudyItem.arabic}</p>
+                </div>
+
+                {(() => {
+                  const snapshotMatch = assignmentVerbs.find(
+                    (v) => v.id === (currentStudyItem.verbId || currentStudyItem.id)
+                  );
+                  const studyVerb = snapshotMatch || resolveVerbFromLernstudioItem(currentStudyItem);
+                  if (!studyVerb) return null;
+                  return (
+                    <div className="space-y-2.5 text-right">
+                      <div className="flex flex-wrap items-center justify-center gap-1.5">
+                        <span className="px-2 py-0.5 rounded-md bg-primary/10 border border-primary/20 text-primary text-[11px] font-bold">
+                          {studyVerb.level}
+                        </span>
+                        {studyVerb.classifications.map((cls) => (
+                          <span
+                            key={cls}
+                            className="px-2 py-0.5 rounded-md bg-surface-hover border border-surface-border text-text-main text-[11px] font-semibold"
+                          >
+                            {cls}
+                          </span>
+                        ))}
+                        {studyVerb.preposition && (
+                          <span className="px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/25 text-amber-700 dark:text-amber-300 text-[11px] font-bold" dir="ltr">
+                            +{studyVerb.preposition} ({studyVerb.prepositionCase || 'Akk/Dat'})
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-xs" dir="ltr">
+                        {[
+                          ['ich (أنا)', studyVerb.praesens.ich],
+                          ['du (أنت)', studyVerb.praesens.du],
+                          ['er/sie/es', studyVerb.praesens.er_sie_es],
+                          ['wir (نحن)', studyVerb.praesens.wir],
+                          ['ihr (أنتم)', studyVerb.praesens.ihr],
+                          ['sie/Sie', studyVerb.praesens.sie_Sie]
+                        ].map(([pron, form]) => (
+                          <div
+                            key={pron}
+                            className="px-2.5 py-1.5 rounded-lg bg-surface-hover border border-surface-border flex items-center justify-between gap-2"
+                          >
+                            <span className="text-[11px] text-text-muted font-semibold">{pron}</span>
+                            <span className="font-bold text-text-main">{form}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {studyVerb.exampleGerman && (
+                        <div className="bg-surface-hover/50 border border-surface-border rounded-xl p-3 text-center space-y-1">
+                          <p className="text-xs sm:text-sm font-semibold text-text-main" dir="ltr">
+                            „{studyVerb.exampleGerman}“
+                          </p>
+                          {studyVerb.exampleArabic && (
+                            <p className="text-xs text-text-muted">{studyVerb.exampleArabic}</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {!isItemVerb(currentStudyItem) && (currentStudyItem.exampleSentenceGerman || currentStudyItem.example) && (
+                  <div className="bg-surface-hover/50 border border-surface-border rounded-xl p-3 text-center space-y-1">
+                    <p className="text-xs sm:text-sm font-semibold text-text-main" dir="ltr">
+                      „{currentStudyItem.exampleSentenceGerman || currentStudyItem.example}“
+                    </p>
+                    {currentStudyItem.exampleSentenceArabic && (
+                      <p className="text-xs text-text-muted">{currentStudyItem.exampleSentenceArabic}</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Pronunciation Buttons */}
+                <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => speakGermanText(currentStudySpeechText || currentStudyItem.german, 0.9)}
+                    className="px-4 py-2.5 rounded-xl bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-xs cursor-pointer transition-all"
+                  >
+                    <Volume2 className="w-4 h-4" />
+                    <span>🔊 استمع للنطق</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => speakGermanText(currentStudySpeechText || currentStudyItem.german, 0.55)}
+                    className="px-4 py-2.5 rounded-xl bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs sm:text-sm flex items-center gap-2 cursor-pointer active:scale-95 transition-all shadow-2xs"
+                  >
+                    <Snail className="w-4 h-4 text-primary" />
+                    <span>🐢 نطق بطيء</span>
+                  </button>
+                </div>
+              </>
+            ) : null}
 
             {/* Prev / Next Navigation */}
             <div className="flex items-center justify-between gap-2.5 pt-4 border-t border-surface-border">
@@ -2836,7 +3251,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                 <span>السابقة</span>
               </button>
 
-              {studyIndex + 1 < studyItems.length ? (
+              {studyIndex + 1 < totalStudySteps ? (
                 <button
                   type="button"
                   onClick={() => {
@@ -2845,7 +3260,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                   }}
                   className="flex-1 py-2.5 px-4 rounded-xl bg-primary hover:bg-primary-hover active:scale-95 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all"
                 >
-                  <span>الكلمة التالية</span>
+                  <span>{currentGrammarStudyCard ? 'التالي في القاعدة' : 'الكلمة التالية'}</span>
                   <ArrowLeft className="w-4 h-4" />
                 </button>
               ) : (
@@ -3027,9 +3442,11 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
 
             {/* Detailed Question Review */}
             <div className="text-right space-y-2 pt-2">
-              <h3 className="text-xs font-bold text-text-main">مراجعة الإجابات ({responses.length}):</h3>
+              <h3 className="text-xs font-bold text-text-main">
+                مراجعة الإجابات ({(finalScore?.responses || responses).length}):
+              </h3>
               <div className="max-h-60 overflow-y-auto space-y-1.5 pr-0.5">
-                {responses.map((r, i) => (
+                {(finalScore?.responses || responses).map((r: HomeworkQuestionResponse, i: number) => (
                   <div
                     key={i}
                     className={`flex items-center justify-between p-2.5 rounded-xl border text-xs font-medium ${
@@ -3052,10 +3469,14 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                       </div>
                     </div>
                     <div>
-                      {r.isCorrect ? (
+                      {r.pendingServerGrading && !r.isCorrect ? (
+                        <span className="text-amber-600 dark:text-amber-400 font-bold">⏳ بانتظار التصحيح</span>
+                      ) : r.isCorrect ? (
                         <span className="text-emerald-600 dark:text-emerald-400 font-bold">✓ صحيح</span>
-                      ) : (
+                      ) : r.correctAnswer ? (
                         <span className="text-rose-600 dark:text-rose-400 font-bold">الصواب: {r.correctAnswer}</span>
+                      ) : (
+                        <span className="text-rose-600 dark:text-rose-400 font-bold">✕ غير صحيحة</span>
                       )}
                     </div>
                   </div>
@@ -3105,7 +3526,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                     setFinalScore(null);
                      const nowIso = new Date().toISOString();
                     setStartTime(nowIso);
-                    const replayPhase = studyItems.length > 0 ? 'teacher_study' : 'quiz';
+                    const replayPhase = totalStudySteps > 0 ? 'teacher_study' : 'quiz';
                     const replayAttemptSecret = getOrCreateStudentAttemptSecret(activeSubmissionIdRef.current);
                     const replayStartSubmission: HomeworkSubmission = {
                       id: activeSubmissionIdRef.current,
@@ -3133,7 +3554,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                       accuracy: 0,
                       goldEarned: 0,
                       maxStreak: 0,
-                      completedStudyPhase: studyItems.length === 0,
+                      completedStudyPhase: totalStudySteps === 0,
                       gamification: toGamificationSnapshot(freshGam),
                       responses: []
                     };
@@ -3156,7 +3577,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                       phase: replayPhase,
                       studyIndex: 0,
                       currentIdx: 0,
-                      completedStudyPhase: studyItems.length === 0,
+                      completedStudyPhase: totalStudySteps === 0,
                       startTime: nowIso,
                       responses: [],
                       gamification: freshGam,
@@ -3186,7 +3607,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
   // ============================================================================
   // PHASE 2: MULTI-STAGE QUIZ & EVALUATION (7 Progressive Stages + Icon-Only Stage Bar)
   // ============================================================================
-  const hasStudyStage = studyItems.length > 0;
+  const hasStudyStage = totalStudySteps > 0;
   const currentStageIdx = currentQuestion?.stageIndex ?? 0;
   const quizStageBarItems = [
     ...(hasStudyStage
@@ -3487,6 +3908,13 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                 <span>بطيء</span>
               </button>
             </div>
+
+            {selectedChoice !== null && currentQuestion.explanation && (
+              <div className="mt-2 p-3 rounded-xl bg-primary/5 border border-primary/25 text-xs text-text-main font-medium text-right">
+                <span className="font-bold text-primary">📘 التفسير: </span>
+                <span>{currentQuestion.explanation}</span>
+              </div>
+            )}
           </motion.div>
 
           {/* Answer Options by Stage Type */}
@@ -3523,6 +3951,124 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                 );
               })}
             </div>
+          ) : currentQuestion.type === 'grammar_exercise' &&
+            currentQuestion.grammarType === 'sentence_ordering' &&
+            Array.isArray(currentQuestion.tileChoices) &&
+            currentQuestion.tileChoices.length > 0 ? (
+            <div className="space-y-3">
+              <div
+                dir="ltr"
+                className="min-h-14 p-3 rounded-xl bg-surface border border-surface-border flex flex-wrap items-center justify-center gap-2"
+              >
+                {grammarOrderedTiles.length === 0 ? (
+                  <span className="text-xs text-text-muted">اضغط على الكلمات بالأسفل لترتيب الجملة...</span>
+                ) : (
+                  grammarOrderedTiles.map((tok, tIdx) => (
+                    <button
+                      key={`${tok.id}_${tIdx}`}
+                      type="button"
+                      disabled={selectedChoice !== null}
+                      onClick={() =>
+                        setGrammarOrderedTiles((prev) => prev.filter((_, idx) => idx !== tIdx))
+                      }
+                      className="px-3 py-1.5 rounded-lg bg-primary text-white font-bold text-sm cursor-pointer"
+                    >
+                      {tok.text}
+                    </button>
+                  ))
+                )}
+              </div>
+              <div dir="ltr" className="flex flex-wrap items-center justify-center gap-2">
+                {currentQuestion.tileChoices.map((tile) => {
+                  const used = grammarOrderedTiles.some((t) => t.id === tile.id);
+                  return (
+                    <button
+                      key={tile.id}
+                      type="button"
+                      disabled={used || selectedChoice !== null}
+                      onClick={() => setGrammarOrderedTiles((prev) => [...prev, tile])}
+                      className={`px-3.5 py-2 rounded-xl border text-sm font-bold transition-all cursor-pointer ${
+                        used
+                          ? 'opacity-30 bg-surface-hover border-surface-border cursor-not-allowed'
+                          : 'bg-surface hover:bg-surface-hover border-surface-border text-text-main hover:border-primary/40'
+                      }`}
+                    >
+                      {tile.text}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex items-center justify-center gap-2.5">
+                <button
+                  type="button"
+                  disabled={selectedChoice !== null || grammarOrderedTiles.length === 0}
+                  onClick={() => setGrammarOrderedTiles([])}
+                  className="px-4 py-2.5 rounded-xl bg-surface-hover border border-surface-border text-xs font-bold text-text-muted disabled:opacity-40 cursor-pointer"
+                >
+                  إعادة
+                </button>
+                <button
+                  type="button"
+                  disabled={selectedChoice !== null || checkingRemoteAnswer || grammarOrderedTiles.length === 0}
+                  onClick={() =>
+                    handleSelectOption(grammarOrderedTiles.map((t) => t.text).join(' '))
+                  }
+                  className="px-6 py-2.5 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs sm:text-sm font-bold disabled:opacity-40 cursor-pointer shadow-xs"
+                >
+                  {checkingRemoteAnswer ? 'جاري التحقق...' : 'تحقق من الجملة ✓'}
+                </button>
+              </div>
+            </div>
+          ) : currentQuestion.type === 'grammar_exercise' &&
+            (currentQuestion.grammarType === 'short_answer' || currentQuestion.options.length === 0) ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (grammarTypedInput.trim()) {
+                  handleSelectOption(grammarTypedInput.trim());
+                }
+              }}
+              className="space-y-3 max-w-md mx-auto w-full"
+            >
+              <input
+                type="text"
+                dir="ltr"
+                disabled={selectedChoice !== null}
+                value={grammarTypedInput}
+                onChange={(e) => setGrammarTypedInput(e.target.value)}
+                placeholder="اكتب الإجابة الصحيحة بالألمانية هنا..."
+                className="w-full px-4 py-3 rounded-xl bg-surface border border-surface-border focus:border-primary text-text-main font-bold text-base text-center outline-none"
+              />
+              {selectedChoice !== null && currentQuestion.correctAnswer && (
+                <div className="text-xs font-bold text-center text-emerald-600 dark:text-emerald-400">
+                  الإجابة النموذجية: <span dir="ltr">{currentQuestion.correctAnswer}</span>
+                </div>
+              )}
+              {selectedChoice !== null && !currentQuestion.correctAnswer && feedback !== null && (
+                <div
+                  className={`text-xs font-bold text-center ${
+                    feedback === 'correct'
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : feedback === 'submitted'
+                      ? 'text-amber-600 dark:text-amber-400'
+                      : 'text-rose-600 dark:text-rose-400'
+                  }`}
+                >
+                  {feedback === 'correct'
+                    ? '✓ إجابة صحيحة!'
+                    : feedback === 'submitted'
+                    ? '✓ تم تسجيل إجابتك للمراجعة السحابية'
+                    : '✕ إجابة غير صحيحة'}
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={selectedChoice !== null || checkingRemoteAnswer || !grammarTypedInput.trim()}
+                className="w-full py-3 rounded-xl bg-primary hover:bg-primary-hover disabled:opacity-40 text-white font-bold text-sm cursor-pointer shadow-xs"
+              >
+                {checkingRemoteAnswer ? 'جاري التحقق...' : 'تحقق من الإجابة ✓'}
+              </button>
+            </form>
           ) : currentQuestion.type === 'missing_letter' ? (
             <div className="flex flex-wrap items-center justify-center gap-2.5 max-w-md mx-auto">
               {currentQuestion.options.map((choiceChar, idx) => {
@@ -3596,16 +4142,37 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             >
               {currentQuestion.options.map((choice, idx) => {
                 const isSelected = selectedChoice === choice;
-                const isRightOption = choice.trim().toLowerCase() === currentQuestion.correctAnswer.trim().toLowerCase();
+                const hasKnownAnswerKey = Boolean(currentQuestion.correctAnswer);
+                const isRightOption = hasKnownAnswerKey
+                  ? currentQuestion.type === 'grammar_exercise'
+                    ? evaluateNormalizedGrammarAnswer(choice, {
+                        correctAnswer: currentQuestion.correctAnswer,
+                        acceptedAnswers: currentQuestion.acceptedAnswers
+                      })
+                    : choice.trim().toLowerCase() === currentQuestion.correctAnswer.trim().toLowerCase()
+                  : isSelected && feedback === 'correct';
 
                 let btnStyle = 'bg-surface hover:bg-surface-hover border-surface-border text-text-main';
                 if (selectedChoice !== null) {
-                  if (isRightOption) {
-                    btnStyle = 'bg-emerald-500/15 border-emerald-500 text-emerald-600 dark:text-emerald-400 ring-2 ring-emerald-500/30';
+                  if (hasKnownAnswerKey) {
+                    if (isRightOption) {
+                      btnStyle = 'bg-emerald-500/15 border-emerald-500 text-emerald-600 dark:text-emerald-400 ring-2 ring-emerald-500/30';
+                    } else if (isSelected) {
+                      btnStyle = 'bg-rose-500/15 border-rose-500 text-rose-600 dark:text-rose-400';
+                    } else {
+                      btnStyle = 'bg-surface border-surface-border opacity-40';
+                    }
                   } else if (isSelected) {
-                    btnStyle = 'bg-rose-500/15 border-rose-500 text-rose-600 dark:text-rose-400';
+                    btnStyle =
+                      feedback === 'correct'
+                        ? 'bg-emerald-500/15 border-emerald-500 text-emerald-600 dark:text-emerald-400 ring-2 ring-emerald-500/30'
+                        : feedback === 'submitted'
+                        ? 'bg-amber-500/15 border-amber-500 text-amber-600 dark:text-amber-400'
+                        : feedback === 'wrong'
+                        ? 'bg-rose-500/15 border-rose-500 text-rose-600 dark:text-rose-400'
+                        : 'bg-primary/10 border-primary text-primary';
                   } else {
-                    btnStyle = 'bg-surface border-surface-border opacity-40';
+                    btnStyle = 'bg-surface border-surface-border opacity-45';
                   }
                 }
 
@@ -3613,14 +4180,16 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                   <button
                     key={idx}
                     type="button"
-                    disabled={selectedChoice !== null}
+                    disabled={selectedChoice !== null || checkingRemoteAnswer}
                     onClick={() => handleSelectOption(choice)}
                     dir="auto"
                     className={`p-3.5 rounded-xl border font-bold text-sm sm:text-base text-center transition-all flex items-center justify-between gap-2.5 cursor-pointer active:scale-95 shadow-2xs ${btnStyle}`}
                   >
                     <span className="flex-1 text-center truncate">{choice}</span>
                     {selectedChoice !== null && isRightOption && <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />}
-                    {selectedChoice !== null && isSelected && !isRightOption && <XCircle className="w-4 h-4 text-rose-600 shrink-0" />}
+                    {selectedChoice !== null && isSelected && feedback === 'wrong' && !isRightOption && (
+                      <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                    )}
                   </button>
                 );
               })}

@@ -1,5 +1,6 @@
-import { LernstudioSet, LernstudioItem } from '../types/lernstudio';
+import { LernstudioItem, LernstudioSet } from '../types/lernstudio';
 import { getItemTranslation } from './lernstudioTranslations';
+import { getGrammarLessonExercises } from './grammarEngine';
 
 export interface AdaptedVocabItem {
   id: string;
@@ -15,16 +16,26 @@ export interface AdaptedVocabItem {
 }
 
 /**
- * Ensures exactly 10 vocabulary items from the selected Set are returned,
+ * Returns real playable LernstudioItem[] present on a set (vocab, verb_group, or mixed).
+ * Pure grammar sets with empty `set.items` return `[]` rather than synthesizing fake vocabulary items.
+ */
+export function getSetPlayableItems(set?: Partial<LernstudioSet> | null): LernstudioItem[] {
+  if (!set || !Array.isArray(set.items)) return [];
+  return set.items;
+}
+
+/**
+ * Ensures vocabulary items (or adapted grammar items for grammar sets) are returned,
  * with fallbacks for missing images, translations, or emojis.
  */
 export function getSetVocabularyItems(set: LernstudioSet, language: string = 'ar'): AdaptedVocabItem[] {
-  if (!set || !set.items || set.items.length === 0) {
+  const sourceItems = getSetPlayableItems(set);
+  if (sourceItems.length === 0) {
     return [];
   }
 
-  // Take the first 10 items from the selected set
-  const rawItems = set.items.slice(0, 10);
+  // Take up to 10 items from the selected set
+  const rawItems = sourceItems.slice(0, 10);
 
   return rawItems.map((item, idx) => {
     const translation = getItemTranslation(item, language) || item.arabic || item.english || item.german;
@@ -34,7 +45,7 @@ export function getSetVocabularyItems(set: LernstudioSet, language: string = 'ar
       id: item.id || `vocab_${idx}`,
       german: item.german.trim(),
       translation: translation.trim(),
-      emoji: emoji,
+      emoji,
       imageUrl: item.imageUrl,
       article: item.article,
       plural: item.plural,
@@ -46,7 +57,7 @@ export function getSetVocabularyItems(set: LernstudioSet, language: string = 'ar
 }
 
 /**
- * Gets 3 distractor choices for a target item from the same vocabulary list.
+ * Gets distractor choices for a target item from the same vocabulary/adapted list.
  */
 export function getDistractorChoices(
   targetItem: AdaptedVocabItem,
@@ -57,8 +68,7 @@ export function getDistractorChoices(
   const shuffled = [...distractors].sort(() => 0.5 - Math.random());
   const selected = shuffled.slice(0, count);
 
-  const choices = [targetItem, ...selected].sort(() => 0.5 - Math.random());
-  return choices;
+  return [targetItem, ...selected].sort(() => 0.5 - Math.random());
 }
 
 /**

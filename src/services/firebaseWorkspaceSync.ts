@@ -670,15 +670,28 @@ async function writeSharedLernstudioSetChanges(changedSets: any[]): Promise<void
         if (remoteTime > localTime) return;
       }
 
-      const payloadSet: any = { ...set };
-      delete payloadSet.ownerUid;
-      delete payloadSet.ownerEmail;
-      if (!payloadSet.createdByTeacherName && existingSet?.createdByTeacherName) {
-        payloadSet.createdByTeacherName = existingSet.createdByTeacherName;
+      const rawPayloadSet: any = { ...set };
+      delete rawPayloadSet.ownerUid;
+      delete rawPayloadSet.ownerEmail;
+      if (!rawPayloadSet.createdByTeacherName && existingSet?.createdByTeacherName) {
+        rawPayloadSet.createdByTeacherName = existingSet.createdByTeacherName;
       }
-      if (!payloadSet.createdByUid && existingSet?.createdByUid) {
-        payloadSet.createdByUid = existingSet.createdByUid;
+      if (!rawPayloadSet.createdByUid && existingSet?.createdByUid) {
+        rawPayloadSet.createdByUid = existingSet.createdByUid;
       }
+      if (rawPayloadSet.grammarContent && typeof rawPayloadSet.grammarContent === 'object') {
+        const gc = { ...rawPayloadSet.grammarContent };
+        delete gc.rawImages;
+        if (Array.isArray(gc.pageImageRefs)) {
+          gc.pageImageRefs = gc.pageImageRefs.map((ref: any) => {
+            if (!ref || typeof ref !== 'object') return ref;
+            const { base64Data: _b64, dataUrl: _du, ...rest } = ref;
+            return rest;
+          });
+        }
+        rawPayloadSet.grammarContent = gc;
+      }
+      const payloadSet = rawPayloadSet;
 
       const payload = JSON.stringify(payloadSet);
       if (payload.length > 500000) {

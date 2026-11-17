@@ -13,7 +13,13 @@ import { speakGermanText } from '../../utils/audioSpeechUtils';
 import { SharedVictoryTrophyArt } from './GameArtAssets';
 import { GameSetupConfig } from './LernstudioGameSetupScreen';
 import { useGameEffects } from './effects/GameEffectsOverlay';
-import { isArticleGameSupported } from '../lernstudioQuestionAdapter';
+import {
+  isArticleGameSupported,
+  buildDynamicQuestionPool,
+  evaluateGameQuestionAnswer
+} from '../lernstudioQuestionAdapter';
+import { hasGrammarContent } from '../grammarEngine';
+import { getSetPlayableItems } from '../lernstudioVocabularyAdapter';
 import {
   ALL_VERBS,
   SUBJECT_PROMPTS,
@@ -99,7 +105,8 @@ export type ClassroomPromptMode =
   | 'article'
   | 'audio'
   | 'verb_conjugation'
-  | 'verb_sentence';
+  | 'verb_sentence'
+  | 'grammar';
 
 export interface BaamboozleTile {
   id: number;
@@ -277,13 +284,14 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
     return 12;
   });
   const isArticleSupported = useMemo(() => isArticleGameSupported(set), [set]);
+  const hasGrammar = useMemo(() => hasGrammarContent(set), [set]);
   const hasVerbsInSet = useMemo(
     () => set.setKind === 'verb_group' || (set.items || []).some((it) => isItemVerb(it)),
     [set]
   );
 
   const [questionPromptMode, setQuestionPromptMode] = useState<ClassroomPromptMode | 'mixed'>(() => {
-    const initial = gameConfig?.questionType || 'mixed';
+    const initial = gameConfig?.questionType || (hasGrammarContent(set) && (set.items?.length || 0) === 0 ? 'grammar' : 'mixed');
     if (initial === 'article' && !isArticleGameSupported(set)) return 'mixed';
     return initial;
   });
@@ -445,15 +453,15 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
   // Generate tiles helper
   const buildGameTiles = useCallback(
     (tileCountToBuild: number, modeToBuild: GameMode, promptModeToUse: typeof questionPromptMode) => {
-      const items = [...(set.items || [])];
-      if (items.length === 0) return [];
+      const rawItems = [...(set.items || [])];
+      const items = rawItems.length > 0 ? rawItems : getSetPlayableItems(set);
+      const grammarPool = hasGrammar
+        ? buildDynamicQuestionPool(set, activeLanguage, { questionModeFilter: 'grammar' }).filter(
+            (q) => q.type === 'grammar_exercise'
+          )
+        : [];
 
-      const pool: LernstudioItem[] = [];
-      while (pool.length < tileCountToBuild) {
-        const shuffled = [...items].sort(() => 0.5 - Math.random());
-        pool.push(...shuffled);
-      }
-      const finalItems = pool.slice(0, tileCountToBuild);
+      if (items.length === 0 && grammarPool.length === 0) return [];
 
       const powerTypesList: PowerCardType[] = [
         'gift_25',
@@ -466,6 +474,60 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
         'give_15',
         'skip_turn'
       ];
+
+      // Grammar tile builder helper
+      const buildGrammarTile = (idx: number, isPower: boolean, randomPower: PowerCardType, points: number): BaamboozleTile | null => {
+        if (grammarPool.length === 0) return null;
+        const gq = grammarPool[idx % grammarPool.length];
+        const opts = gq.options && gq.options.length >= 2
+          ? gq.options
+          : Array.from(
+              new Set([
+                gq.correctAnswer,
+                ...grammarPool
+                  .filter((o) => o.id !== gq.id)
+                  .map((o) => o.correctAnswer)
+                  .slice(0, 3)
+              ])
+            ).sort(() => 0.5 - Math.random());
+
+        const choices: MagicChoiceOption[] = opts.map((opt, optIdx) => ({
+          id: `gram_ch_${idx}_${optIdx}`,
+          label: opt,
+          emoji: '📘',
+          isCorrect: evaluateGameQuestionAnswer(opt, gq)
+        }));
+
+        return {
+          id: idx + 1,
+          points,
+          isPowerCard: isPower,
+          powerType: isPower ? randomPower : undefined,
+          promptType: 'grammar',
+          question: gq.prompt || gq.sentenceWithBlank || gq.correctAnswer,
+          subQuestion: gq.subPrompt || gq.sentenceWithBlank,
+          answer: gq.correctAnswer + (gq.explanation ? ` — ${gq.explanation}` : ''),
+          choices,
+          isAnswered: false
+        };
+      };
+
+      if ((promptModeToUse === 'grammar' || rawItems.length === 0) && grammarPool.length > 0) {
+        return Array.from({ length: tileCountToBuild }).map((_, idx) => {
+          const isPower =
+            modeToBuild === 'power_only' ? true : modeToBuild === 'classic' ? idx % 4 === 3 && Math.random() < 0.75 : false;
+          const randomPower = powerTypesList[Math.floor(Math.random() * powerTypesList.length)];
+          const points = ((idx % 4) + 1) * 10 + 5;
+          return buildGrammarTile(idx, isPower, randomPower, points)!;
+        });
+      }
+
+      const pool: LernstudioItem[] = [];
+      while (pool.length < tileCountToBuild) {
+        const shuffled = [...items].sort(() => 0.5 - Math.random());
+        pool.push(...shuffled);
+      }
+      const finalItems = pool.slice(0, tileCountToBuild);
 
       const vocabModesCycle: ClassroomPromptMode[] = isArticleSupported
         ? ['ar_to_de', 'de_to_ar', 'audio', 'article']
@@ -487,6 +549,12 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
         const randomPower = powerTypesList[Math.floor(Math.random() * powerTypesList.length)];
         const points = ((idx % 4) + 1) * 10 + 5; // 15, 25, 35, 45
 
+        // In mixed mode with grammar exercises available, interleave grammar challenges on even tiles
+        if (promptModeToUse === 'mixed' && grammarPool.length > 0 && idx % 2 === 0) {
+          const gTile = buildGrammarTile(Math.floor(idx / 2), isPower, randomPower, points);
+          if (gTile) return gTile;
+        }
+
         const itemIsVerb = isItemVerb(item) || set.setKind === 'verb_group';
         const verbEntry = itemIsVerb ? resolveVerbFromLernstudioItem(item) : null;
 
@@ -497,6 +565,9 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
               : vocabModesCycle[idx % vocabModesCycle.length]
             : promptModeToUse;
 
+        if (resolvedPrompt === 'grammar') {
+          resolvedPrompt = verbEntry ? 'verb_conjugation' : 'ar_to_de';
+        }
         if (resolvedPrompt === 'article' && (verbEntry || !extractArticle(item.german).article)) {
           resolvedPrompt = verbEntry ? 'verb_conjugation' : 'ar_to_de';
         }
@@ -601,12 +672,12 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
         };
       });
     },
-    [set.items, set.setKind, activeLanguage, isArticleSupported]
+    [set, activeLanguage, isArticleSupported, hasGrammar]
   );
 
   // Auto-launch into the Magic Stage when arriving from LernstudioGameSetupScreen
   useEffect(() => {
-    if (gameConfig && !isPlaying && tiles.length === 0 && teams.length > 0 && (set.items?.length || 0) > 0) {
+    if (gameConfig && !isPlaying && tiles.length === 0 && teams.length > 0 && ((set.items?.length || 0) > 0 || hasGrammar)) {
       const built = buildGameTiles(selectedTileCount, gameMode, questionPromptMode);
       if (built.length > 0) {
         setTiles(built);
@@ -617,7 +688,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
         setBearMessage(getDefaultBearSpeech(teams[0]?.name));
       }
     }
-  }, [gameConfig, isPlaying, tiles.length, teams, set.items, selectedTileCount, gameMode, questionPromptMode, buildGameTiles, getDefaultBearSpeech]);
+  }, [gameConfig, isPlaying, tiles.length, teams, set.items, hasGrammar, selectedTileCount, gameMode, questionPromptMode, buildGameTiles, getDefaultBearSpeech]);
 
   // Auto-detect current active scheduled class
   const handleDetectCurrentClass = () => {
@@ -633,10 +704,10 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
 
   // Start / Restart Game
   const handleStartGame = () => {
-    const items = [...(set.items || [])];
-    if (items.length === 0 || teams.length === 0) return;
+    if (teams.length === 0) return;
 
     const generatedTiles = buildGameTiles(selectedTileCount, gameMode, questionPromptMode);
+    if (generatedTiles.length === 0) return;
     setTiles(generatedTiles);
     setTeams((prev) => prev.map((team) => ({ ...team, score: 0, streak: 0 })));
     setActiveTeamIndex(0);
@@ -1008,7 +1079,9 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
             <div className="px-3.5 py-1.5 rounded-2xl bg-amber-500/20 border border-amber-400/40 backdrop-blur-md text-amber-300 text-xs font-black inline-flex items-center gap-1.5">
               <Wand2 className="w-4 h-4" />
               <span>{set.title}</span>
-              <span className="opacity-75 font-mono tabular-nums">({set.items?.length || 0})</span>
+              <span className="opacity-75 font-mono tabular-nums">
+                ({(set.items?.length || 0) > 0 ? set.items.length : (set.grammarContent?.exercises?.length || 0)})
+              </span>
             </div>
           </div>
 
@@ -1291,6 +1364,15 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
                 className="w-full px-3 py-2.5 bg-slate-900 border border-white/15 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-amber-400"
               >
                 <option value="mixed">{language === 'ar' ? 'شامل ومتنوع 🌟' : 'Mixed Magic Challenges 🌟'}</option>
+                {hasGrammar && (
+                  <option value="grammar">
+                    {language === 'ar'
+                      ? 'تحدي القواعد (Grammatik) 📘'
+                      : language === 'de'
+                      ? 'Grammatik-Übungen 📘'
+                      : 'Grammar Exercises 📘'}
+                  </option>
+                )}
                 {hasVerbsInSet && (
                   <>
                     <option value="verb_conjugation">

@@ -9,6 +9,7 @@ import {
   DEFAULT_HOMEWORK_QUESTION_TYPES
 } from './homeworkTypes';
 import { calculateUnifiedHomeworkQuestionCount } from './verbEngine';
+import { stripHeavyGrammarMediaForSync } from './grammarEngine';
 import {
   getVercelPublicDomain,
   setVercelPublicDomain,
@@ -303,10 +304,21 @@ export const VERB_QUESTION_TYPE_META: QuestionTypeMetaItem[] = [
   }
 ];
 
+export const GRAMMAR_QUESTION_TYPE_META: QuestionTypeMetaItem[] = [
+  {
+    id: 'grammar_exercise',
+    labelAr: 'تمارين القواعد (Grammatik)',
+    labelDe: 'Grammatikübungen',
+    descAr: 'أسئلة تفاعلية شاملة على القواعد (اختيار، ملء فراغ، تصحيح، ترتيب جملة، وكتابة)',
+    badgeEmoji: '📘'
+  }
+];
+
 export function getQuestionTypeMeta(id: HomeworkQuestionType): QuestionTypeMetaItem {
   return (
     QUESTION_TYPE_META.find((m) => m.id === id) ||
     VERB_QUESTION_TYPE_META.find((m) => m.id === id) ||
+    GRAMMAR_QUESTION_TYPE_META.find((m) => m.id === id) ||
     LEGACY_QUESTION_TYPE_META.find((m) => m.id === id) || {
       id,
       labelAr: 'سؤال تفاعلي',
@@ -415,9 +427,15 @@ export function normalizeHomeworkAssignment(hw: HomeworkAssignment): HomeworkAss
     cleanOriginalShortId && isValidHomeworkShortId(cleanOriginalShortId)
       ? { originalShortId: cleanOriginalShortId }
       : {};
+  const normalizedSnapshot =
+    hw.setSnapshot && hw.setSnapshot.grammarContent
+      ? stripHeavyGrammarMediaForSync(hw.setSnapshot)
+      : hw.setSnapshot;
+
   if (mode === 'open') {
     const copy: HomeworkAssignment = {
       ...hw,
+      ...(normalizedSnapshot ? { setSnapshot: normalizedSnapshot } : {}),
       ...normalizedHideBranding,
       ...normalizedOriginalShortId,
       audienceMode: 'open',
@@ -437,6 +455,7 @@ export function normalizeHomeworkAssignment(hw: HomeworkAssignment): HomeworkAss
 
   return {
     ...hw,
+    ...(normalizedSnapshot ? { setSnapshot: normalizedSnapshot } : {}),
     ...normalizedHideBranding,
     ...normalizedOriginalShortId,
     audienceMode: 'group',
@@ -3458,6 +3477,7 @@ const VALID_HOMEWORK_QUESTION_TYPES = new Set<HomeworkQuestionType>([
   'full_word',
   'verb_conjugation',
   'verb_sentence',
+  'grammar_exercise',
   'mc_de_ar',
   'listen_choose',
   'mc_ar_de',
@@ -3466,25 +3486,33 @@ const VALID_HOMEWORK_QUESTION_TYPES = new Set<HomeworkQuestionType>([
 
 /**
  * Resolves how many questions should be asked for a specific stage (`qType`),
- * scaling `verb_conjugation` by 6 slots per verb and `verb_sentence` by 1 per verb.
+ * scaling `verb_conjugation` by 6 slots per verb, `verb_sentence` by 1 per verb,
+ * and `grammar_exercise` by selected grammar exercise count.
  */
 export function resolveStageQuestionCount(
   qType: HomeworkQuestionType,
   maxWordsCount: number,
   questionTypeCounts?: Partial<Record<HomeworkQuestionType, number>>,
-  maxVerbCount?: number
+  maxVerbCount?: number,
+  maxGrammarCount?: number
 ): number {
   const safeWords = Math.max(0, Math.floor(Number(maxWordsCount) || 0));
   const safeVerbs =
     typeof maxVerbCount === 'number' && Number.isFinite(maxVerbCount)
       ? Math.max(0, Math.floor(maxVerbCount))
       : safeWords;
+  const safeGrammar =
+    typeof maxGrammarCount === 'number' && Number.isFinite(maxGrammarCount)
+      ? Math.max(0, Math.floor(maxGrammarCount))
+      : 0;
   const effectiveWordsOrVerbs = safeWords > 0 ? safeWords : safeVerbs;
   const stageMax =
     qType === 'verb_conjugation'
       ? safeVerbs * 6
       : qType === 'verb_sentence'
       ? safeVerbs
+      : qType === 'grammar_exercise'
+      ? safeGrammar
       : effectiveWordsOrVerbs;
 
   if (stageMax <= 0) return 0;
@@ -3497,21 +3525,27 @@ export function resolveStageQuestionCount(
 
 /**
  * Calculates the total number of questions across all active homework stages
- * taking into account any per-stage custom question counts (`questionTypeCounts`)
- * and unified verb stages (`verb_conjugation` = 6 × verbs, `verb_sentence` = 1 × verbs).
+ * taking into account any per-stage custom question counts (`questionTypeCounts`),
+ * unified verb stages (`verb_conjugation` = 6 × verbs, `verb_sentence` = 1 × verbs),
+ * and grammar exercise stages (`grammar_exercise`).
  */
 export function calculateTotalHomeworkQuestions(
   wordsCount: number,
   questionTypes?: HomeworkQuestionType[],
   questionTypeCounts?: Partial<Record<HomeworkQuestionType, number>>,
-  verbCount?: number
+  verbCount?: number,
+  grammarCount?: number
 ): number {
   const safeWords = Math.max(0, Math.floor(Number(wordsCount) || 0));
   const safeVerbs =
     typeof verbCount === 'number' && Number.isFinite(verbCount)
       ? Math.max(0, Math.floor(verbCount))
       : safeWords;
-  if (safeWords <= 0 && safeVerbs <= 0) return 0;
+  const safeGrammar =
+    typeof grammarCount === 'number' && Number.isFinite(grammarCount)
+      ? Math.max(0, Math.floor(grammarCount))
+      : 0;
+  if (safeWords <= 0 && safeVerbs <= 0 && safeGrammar <= 0) return 0;
   const activeTypes =
     Array.isArray(questionTypes) && questionTypes.length > 0
       ? questionTypes
@@ -3528,6 +3562,8 @@ export function calculateTotalHomeworkQuestions(
           ? Math.max(1, safeVerbs * 6)
           : qt === 'verb_sentence'
           ? Math.max(1, safeVerbs)
+          : qt === 'grammar_exercise'
+          ? Math.max(1, safeGrammar)
           : Math.max(1, effectiveWordCap);
       clampedCounts[qt] = Math.min(cap, Math.round(raw));
     }
@@ -3537,7 +3573,8 @@ export function calculateTotalHomeworkQuestions(
     questionTypes: activeTypes,
     questionTypeCounts: clampedCounts,
     vocabItemsCount: safeWords,
-    verbCount: safeVerbs
+    verbCount: safeVerbs,
+    grammarExercisesCount: safeGrammar
   });
 }
 
@@ -3757,10 +3794,14 @@ export function buildLegacyHomeworkShareUrl(hw: HomeworkAssignment, overrideDoma
   }
   const verbCeiling = (hw.selectedVerbIds?.length || hw.verbSnapshot?.length || 0) * 6;
   const wordCeiling = hw.selectedItemIds?.length || hw.setSnapshot?.items?.length || 0;
+  const grammarCeiling =
+    hw.selectedGrammarExerciseIds?.length ||
+    hw.setSnapshot?.grammarContent?.exercises?.length ||
+    0;
   const encodedQtc = encodeQuestionTypeCountsParam(
     hw.questionTypes,
     hw.questionTypeCounts,
-    Math.max(wordCeiling, verbCeiling) || undefined
+    Math.max(wordCeiling, verbCeiling, grammarCeiling) || undefined
   );
   if (encodedQtc) {
     params.set('qtc', encodedQtc);
@@ -3768,10 +3809,15 @@ export function buildLegacyHomeworkShareUrl(hw: HomeworkAssignment, overrideDoma
   if (hw.blooketMode) params.set('bm', hw.blooketMode);
   if (hw.contentSource) params.set('cs', hw.contentSource);
   if (hw.verbSubjectPoolMode) params.set('vsp', hw.verbSubjectPoolMode);
+  if (hw.includeGrammarStudy === false) params.set('igs', '0');
   if (hw.hideTeacherBranding) params.set('htb', '1');
   if (hw.title) params.set('t', hw.title);
   if (hw.selectedItemIds && hw.selectedItemIds.length > 0) {
     params.set('ids', hw.selectedItemIds.join(','));
+  }
+  if (hw.selectedGrammarExerciseIds && hw.selectedGrammarExerciseIds.length > 0) {
+    const joinedGram = hw.selectedGrammarExerciseIds.slice(0, 60).join(',');
+    if (joinedGram.length <= 1200) params.set('gids', joinedGram);
   }
   if (hw.selectedVerbIds && hw.selectedVerbIds.length > 0) {
     const joinedVerbs = hw.selectedVerbIds.slice(0, 60).join(',');
@@ -5130,4 +5176,45 @@ function computeAssignmentDetailsObject(
     }
   };
 }
+
+export async function checkHomeworkAnswerRemotely(params: {
+  assignmentId?: string;
+  shortId?: string;
+  token?: string;
+  exerciseId?: string;
+  questionId?: string;
+  itemId?: string;
+  questionType?: string;
+  grammarType?: string;
+  expectedField?: string;
+  selectedAnswer: string;
+}): Promise<{ checked: boolean; isCorrect?: boolean }> {
+  if (typeof fetch !== 'function') {
+    return { checked: false };
+  }
+  const url = resolveHomeworkApiUrl('/api/homework/check-answer');
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 4500) : null;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+      ...(controller ? { signal: controller.signal } : {})
+    });
+    if (!res.ok) {
+      return { checked: false };
+    }
+    const data = await res.json().catch(() => null);
+    if (data && data.success === true && typeof data.isCorrect === 'boolean') {
+      return { checked: true, isCorrect: data.isCorrect };
+    }
+    return { checked: false };
+  } catch {
+    return { checked: false };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 

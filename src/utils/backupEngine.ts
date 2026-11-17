@@ -8,6 +8,7 @@ import {
   RecentlyDeletedData, PurgedRecordTombstone
 } from '../types';
 import { LernstudioSet } from '../types/lernstudio';
+import { normalizeLernstudioSet, stripHeavyGrammarMediaForSync } from '../shared/grammarEngine';
 import { formatLocalDate } from './timeUtils';
 import { DEFAULT_LERNSTUDIO_SETS } from '../data/defaultLernstudioSets';
 import {
@@ -1057,18 +1058,21 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     const set = rawLernstudioSets[i];
     if (!set || typeof set !== 'object' || Array.isArray(set)) continue;
     const id = typeof set.id === 'string' && set.id.trim() ? set.id.trim() : `set_${Date.now()}_${i}`;
-    sanitizedLernstudioSets.push({
-      ...set,
-      id,
-      title: typeof set.title === 'string' ? set.title : 'Untitled Set',
-      level: set.level || 'A1',
-      topic: typeof set.topic === 'string' ? set.topic : 'General',
-      difficulty: set.difficulty || 'easy',
-      items: Array.isArray(set.items) ? set.items : [],
-      customExercises: Array.isArray(set.customExercises) ? set.customExercises : [],
-      createdAt: typeof set.createdAt === 'string' ? set.createdAt : new Date().toISOString(),
-      updatedAt: typeof set.updatedAt === 'number' ? set.updatedAt : Date.now()
-    });
+    const normalized = normalizeLernstudioSet(
+      stripHeavyGrammarMediaForSync({
+        ...set,
+        id,
+        title: typeof set.title === 'string' ? set.title : 'Untitled Set',
+        level: set.level || 'A1',
+        topic: typeof set.topic === 'string' ? set.topic : 'General',
+        difficulty: set.difficulty || 'easy',
+        items: Array.isArray(set.items) ? set.items : [],
+        customExercises: Array.isArray(set.customExercises) ? set.customExercises : [],
+        createdAt: typeof set.createdAt === 'string' ? set.createdAt : new Date().toISOString(),
+        updatedAt: typeof set.updatedAt === 'number' ? set.updatedAt : Date.now()
+      })
+    );
+    sanitizedLernstudioSets.push(normalized);
   }
 
   // Sanitize School & HOD Settings
@@ -1801,14 +1805,16 @@ export function mergeBackupPayloadIntoWorkspace(
     }
 
     if (hasBackupSection(parsed, 'lernstudioSets') && Array.isArray(data.lernstudioSets)) {
-      const incomingCustomOnly = (data.lernstudioSets as any[]).filter(
-        (s: any) => s && s.id && !DEFAULT_LERNSTUDIO_SETS.some(d => d.id === s.id)
-      );
-      const localCustomOnly = ((localWorkspace.lernstudioSets as any[]) || []).filter(
-        (s: any) => s && s.id && !DEFAULT_LERNSTUDIO_SETS.some(d => d.id === s.id)
-      );
+      const incomingCustomOnly = (data.lernstudioSets as any[])
+        .filter((s: any) => s && s.id && !DEFAULT_LERNSTUDIO_SETS.some(d => d.id === s.id))
+        .map((s: any) => normalizeLernstudioSet(stripHeavyGrammarMediaForSync(s)));
+      const localCustomOnly = ((localWorkspace.lernstudioSets as any[]) || [])
+        .filter((s: any) => s && s.id && !DEFAULT_LERNSTUDIO_SETS.some(d => d.id === s.id))
+        .map((s: any) => normalizeLernstudioSet(stripHeavyGrammarMediaForSync(s)));
       const mergedCustom = mergeEntities(localCustomOnly, incomingCustomOnly, 'lernstudioSets').merged;
-      const customActive = mergedCustom.filter((s: any) => s && !s.deleted);
+      const customActive = mergedCustom
+        .filter((s: any) => s && !s.deleted)
+        .map((s: any) => normalizeLernstudioSet(stripHeavyGrammarMediaForSync(s)));
       nextWorkspace.lernstudioSets = [...customActive, ...DEFAULT_LERNSTUDIO_SETS];
     }
 

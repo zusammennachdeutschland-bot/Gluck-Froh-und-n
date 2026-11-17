@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { GoogleCloudSyncCard } from './GoogleCloudSyncCard';
 import { SmartDataCleanupCard } from './SmartDataCleanupCard';
+import { exportPageImagesBundle, importPageImagesBundle } from '../shared/lernstudioPageImageStore';
 
 interface SmartBackupCenterProps {
   onBack?: () => void;
@@ -63,6 +64,8 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
   const [simpleSuccessMsg, setSimpleSuccessMsg] = useState<string | null>(null);
   const [simpleErrorMsg, setSimpleErrorMsg] = useState<string | null>(null);
   const simpleFileInputRef = useRef<HTMLInputElement>(null);
+  const pageImagesInputRef = useRef<HTMLInputElement>(null);
+  const [isPageBundleBusy, setIsPageBundleBusy] = useState<boolean>(false);
 
   // Backup Category Selection
   const [selectedCategories, setSelectedCategories] = useState<BackupCategory[]>(
@@ -1805,6 +1808,121 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
                 </>
               )}
             </button>
+          </div>
+
+          {/* Textbook Page Images Bundle Transfer (.glueck-pages.json) */}
+          <div className="p-3 rounded-xl bg-surface-hover/70 border border-surface-border space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="space-y-0.5">
+                <p className="text-xs font-bold text-text-main">
+                  {_t(
+                    'صور صفحات الكتب (ملفات القواعد المستخرجة)',
+                    'Textbook Page Images (.glueck-pages.json)',
+                    'Lehrbuch-Seitenbilder (.glueck-pages.json)'
+                  )}
+                </p>
+                <p className="text-[11px] text-text-muted leading-relaxed">
+                  {_t(
+                    'النسخة الاحتياطية JSON تبقى خفيفة وتحتوي على مراجع الصور فقط. تُنقل الصور تلقائياً عبر مزامنة P2P، أو يمكنك تصديرها/استيرادها يدوياً هنا.',
+                    'JSON backups remain lightweight (image references only). Textbook images sync via P2P or can be exported/imported manually here.',
+                    'JSON-Backups bleiben schlank. Seitenbilder werden per P2P übertragen oder können hier manuell exportiert/importiert werden.'
+                  )}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                <button
+                  type="button"
+                  disabled={isPageBundleBusy}
+                  onClick={async () => {
+                    setIsPageBundleBusy(true);
+                    setSimpleSuccessMsg(null);
+                    setSimpleErrorMsg(null);
+                    try {
+                      const bundle = await exportPageImagesBundle();
+                      if (bundle.images.length === 0) {
+                        setSimpleErrorMsg(
+                          _t(
+                            'لا توجد صور صفحات مخزّنة محلياً على هذا الجهاز للتصدير.',
+                            'No locally stored textbook page images to export.',
+                            'Keine lokalen Seitenbilder vorhanden.'
+                          )
+                        );
+                        return;
+                      }
+                      const jsonStr = JSON.stringify(bundle, null, 2);
+                      const fileName = `Glueck_Page_Images_${formatLocalDate()}.glueck-pages.json`;
+                      const blob = new Blob([jsonStr], { type: 'application/json' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = fileName;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      URL.revokeObjectURL(url);
+                      setSimpleSuccessMsg(
+                        _t(
+                          `تم تصدير ${bundle.images.length} صورة صفحة كتاب بنجاح.`,
+                          `Exported ${bundle.images.length} textbook page image(s).`
+                        )
+                      );
+                    } catch (err: any) {
+                      setSimpleErrorMsg(err?.message || 'Failed to export page images bundle');
+                    } finally {
+                      setIsPageBundleBusy(false);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-surface border border-surface-border text-text-main hover:border-primary/40 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1"
+                >
+                  <Download className="w-3.5 h-3.5 text-primary" />
+                  <span>{_t('تصدير صور الصفحات', 'Export Pages')}</span>
+                </button>
+
+                <input
+                  type="file"
+                  accept=".json,.glueck-pages.json"
+                  ref={pageImagesInputRef}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    if (!file) return;
+                    setIsPageBundleBusy(true);
+                    setSimpleSuccessMsg(null);
+                    setSimpleErrorMsg(null);
+                    const reader = new FileReader();
+                    reader.onload = async (evt) => {
+                      try {
+                        const res = await importPageImagesBundle(String(evt.target?.result || ''));
+                        setSimpleSuccessMsg(
+                          _t(
+                            `تم استيراد ${res.importedCount} صورة (تم تخطي ${res.skippedDuplicates} مكررة)`,
+                            `Imported ${res.importedCount} page image(s) (${res.skippedDuplicates} duplicates skipped)`
+                          )
+                        );
+                      } catch (err: any) {
+                        setSimpleErrorMsg(
+                          err?.message || _t('ملف حزمة الصور غير صالح.', 'Invalid page images bundle file.')
+                        );
+                      } finally {
+                        setIsPageBundleBusy(false);
+                      }
+                    };
+                    reader.readAsText(file);
+                  }}
+                  className="hidden"
+                />
+
+                <button
+                  type="button"
+                  disabled={isPageBundleBusy}
+                  onClick={() => pageImagesInputRef.current?.click()}
+                  className="px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 text-[11px] font-bold cursor-pointer inline-flex items-center gap-1"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>{_t('استيراد صور الصفحات', 'Import Pages')}</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

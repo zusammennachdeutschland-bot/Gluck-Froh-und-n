@@ -43,14 +43,33 @@ export interface LernstudioItem {
   prepositionCase?: string;
 }
 
-export type LernstudioExerciseType = 
-  | 'multiple_choice' 
-  | 'missing_letter' 
-  | 'sentence_builder' 
-  | 'emoji_vocab' 
+export type LernstudioSetKind = 'vocab' | 'verb_group' | 'grammar' | 'mixed';
+
+export type LernstudioContentOrigin = 'builtin' | 'teacher_created';
+
+export type ExerciseSourceOrigin = 'original' | 'generated';
+
+export type GrammarExerciseType =
+  | 'multiple_choice'
+  | 'fill_blank'
+  | 'correct_mistake'
+  | 'choose_correct_sentence'
+  | 'sentence_ordering'
+  | 'short_answer';
+
+export type LernstudioExerciseType =
+  | 'multiple_choice'
+  | 'missing_letter'
+  | 'sentence_builder'
+  | 'emoji_vocab'
   | 'scrambled_letters'
   | 'der_die_das'
-  | 'plural_match';
+  | 'plural_match'
+  | 'fill_blank'
+  | 'correct_mistake'
+  | 'choose_correct_sentence'
+  | 'sentence_ordering'
+  | 'short_answer';
 
 export type LernstudioGameMode =
   | 'hub'
@@ -94,11 +113,107 @@ export type LernstudioGameMode =
 export interface LernstudioExercise {
   id: string;
   type: LernstudioExerciseType;
+  prompt?: string;
   question: string;
   options?: string[];
   correctAnswer: string;
+  acceptedAnswers?: string[];
   explanation?: string;
+  explanationAr?: string;
+  explanationDe?: string;
+  explanationEn?: string;
+  sentenceWithBlank?: string;
+  faultySentence?: string;
+  tokens?: string[];
+  ruleRef?: string;
   itemRefId?: string; // Reference to associated vocabulary item if derived
+  source?: ExerciseSourceOrigin;
+  isUncertain?: boolean;
+  uncertaintyReason?: string;
+}
+
+export interface GrammarRule {
+  id: string;
+  title: string;
+  titleAr?: string;
+  titleDe?: string;
+  titleEn?: string;
+  summaryAr: string;
+  summaryDe?: string;
+  summaryEn?: string;
+  pattern?: string;
+  table?: {
+    headers: string[];
+    rows: string[][];
+  };
+  tipAr?: string;
+  tipDe?: string;
+  tipEn?: string;
+}
+
+export interface GrammarExample {
+  id: string;
+  german: string;
+  arabic: string;
+  english?: string;
+  highlight?: string;
+  noteAr?: string;
+  noteDe?: string;
+  noteEn?: string;
+}
+
+export interface GrammarExercise {
+  id: string;
+  type: GrammarExerciseType;
+  prompt?: string;
+  question: string;
+  sentenceWithBlank?: string;
+  faultySentence?: string;
+  tokens?: string[];
+  options?: string[];
+  correctAnswer: string;
+  acceptedAnswers?: string[];
+  explanation?: string;
+  explanationAr?: string;
+  explanationDe?: string;
+  explanationEn?: string;
+  ruleRef?: string;
+  source: ExerciseSourceOrigin;
+  isUncertain?: boolean;
+  uncertaintyReason?: string;
+}
+
+export interface GrammarPageImageRef {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes?: number;
+  width?: number;
+  height?: number;
+  pageOrder: number;
+  localStorageKey?: string;
+  checksum?: string;
+}
+
+export interface GrammarContent {
+  lessonTitle: string;
+  lessonTitleAr?: string;
+  lessonTitleDe?: string;
+  lessonTitleEn?: string;
+  grammarTopic: string;
+  grammarTopicAr?: string;
+  grammarTopicDe?: string;
+  grammarTopicEn?: string;
+  explanationAr: string;
+  explanationDe?: string;
+  explanationEn?: string;
+  rules: GrammarRule[];
+  examples: GrammarExample[];
+  exercises: GrammarExercise[];
+  origin: LernstudioContentOrigin;
+  pageImageRefs?: GrammarPageImageRef[];
+  sourceBookInfo?: string;
+  extractionConfidenceNote?: string;
 }
 
 export interface LernstudioSet {
@@ -117,10 +232,12 @@ export interface LernstudioSet {
   sentenceBuilderSupported?: boolean; // Whether set has sentence builder content
   items: LernstudioItem[];
   customExercises?: LernstudioExercise[];
+  grammarContent?: GrammarContent;
+  contentOrigin?: LernstudioContentOrigin;
   assignedGroupId?: string;
   createdByTeacherName?: string;
   createdByUid?: string;
-  setKind?: 'vocab' | 'verb_group' | 'mixed';
+  setKind?: LernstudioSetKind;
   verbIds?: string[];
   verbEntriesSnapshot?: VerbEntry[];
   basedOnBuiltinGroupId?: string;
