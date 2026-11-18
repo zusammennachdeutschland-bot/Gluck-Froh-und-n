@@ -3,7 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { 
   Home, Calendar, Users, Wallet, BarChart2, Settings, 
   History, Award, Clock, Plus, Zap, UserPlus, Layers,
-  Search, Moon, Sun, BookOpen, Sparkles, Gamepad2,
+  Search, Moon, Sun, BookOpen, Sparkles, Gamepad2, Video,
   PanelLeftClose, PanelLeftOpen, SlidersHorizontal, ArrowUp, ArrowDown, RotateCcw, X
 } from 'lucide-react';
 import { AvatarImage } from '../AvatarImage';
@@ -20,7 +20,7 @@ interface DesktopSidebarProps {
 
 const ALL_NAV_IDS = [
   'home', 'schedule', 'students', 'payments', 'history', 
-  'reports', 'certificates', 'freeTime', 'schoolSchedule', 'hod', 'lernstudio', 'settings'
+  'reports', 'certificates', 'freeTime', 'schoolSchedule', 'hod', 'lernstudio', 'grainRecordings', 'settings'
 ];
 
 export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal }) => {
@@ -266,6 +266,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({ onOpenSyncModal 
     schoolSchedule: { label: _t('جدول المدرسة', 'School Schedule', 'Stundenplan'), icon: BookOpen, badge: null },
     hod: { label: _t('إدارة القسم (HOD Hub)', 'HOD Hub', 'Fachleiter Hub'), icon: Layers, badge: null },
     lernstudio: { label: 'Glück Lernstudio 🇩🇪', icon: Gamepad2, badge: 'NEU' },
+    grainRecordings: { label: _t('تسجيلات الحصص (Grain)', 'Grain Recordings', 'Grain-Aufzeichnungen'), icon: Video, badge: null },
     settings: { label: t('nav_settings') || 'Einstellungen', icon: Settings, badge: null },
   };
 

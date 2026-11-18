@@ -8,11 +8,10 @@ import {
 } from '../../types/lernstudio';
 import {
   generateLernstudioPrompt,
+  generateUniversalSmartLernstudioPrompt,
   validateAndParseLernstudioJson,
   validateLernstudioSetForWorksheet
 } from '../../utils/lernstudioAiUtils';
-import { CHILDREN_TOPICS_PRESETS, CHILDREN_LEVEL_CATEGORIES } from '../../data/childrenTopicsPreset';
-import { PROGRAM_GRADES } from '../../utils/lernstudioTranslations';
 import { auth } from '../firebaseCloudSync';
 import {
   extractGrammarSetFromImages,
@@ -32,12 +31,13 @@ import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
-  BookOpen,
   Camera,
   Check,
+  ClipboardPaste,
   Copy,
   Download,
-  FileText,
+  Eye,
+  EyeOff,
   ImagePlus,
   Loader2,
   Plus,
@@ -64,34 +64,30 @@ export const LernstudioAiModal: React.FC<Props> = ({
   onImportSet
 }) => {
   const defaultCreatorName = teacherName?.trim() || auth?.currentUser?.displayName?.trim() || '';
-  const [activeTab, setActiveTab] = useState<'generate' | 'import' | 'from_images'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'simple' | 'from_images'>(
+    initialTab === 'from_images' ? 'from_images' : 'simple'
+  );
 
   useEffect(() => {
     if (isOpen) {
-      setActiveTab(initialTab);
+      setActiveTab(initialTab === 'from_images' ? 'from_images' : 'simple');
     }
   }, [isOpen, initialTab]);
 
-  // Generator Config
-  const [setMode, setSetMode] = useState<'vocab' | 'verb' | 'grammar' | 'mixed'>('vocab');
-  const [selectedPresetTopic, setSelectedPresetTopic] = useState('');
-  const [topic, setTopic] = useState('');
-  const [grade, setGrade] = useState('');
-  const [level, setLevel] = useState<LernstudioLevel>('A1');
-  const [difficulty, setDifficulty] = useState<LernstudioDifficulty>('medium');
-  const [itemCount, setItemCount] = useState<number | 'auto'>('auto');
-  const [includeVerbConjugation, setIncludeVerbConjugation] = useState(false);
+  // Universal Smart Prompt State
   const [copiedPrompt, setCopiedPrompt] = useState(false);
+  const [showPromptText, setShowPromptText] = useState(false);
 
-  // Importer Config
+  // Importer State
   const [pastedJson, setPastedJson] = useState('');
   const [creatorTeacherName, setCreatorTeacherName] = useState(defaultCreatorName);
-  const [hasManualTeacherNameEdit, setHasManualTeacherNameEdit] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [parsedPreview, setParsedPreview] = useState<Partial<LernstudioSet> | null>(null);
   const [validationInfo, setValidationInfo] = useState<{ warnings: string[]; repairedCount: number } | null>(null);
 
-  // Image-to-Grammar Extractor State
+  // Image-to-Grammar Extractor State (kept for direct camera button)
+  const [level, setLevel] = useState<LernstudioLevel>('A1');
+  const [difficulty] = useState<LernstudioDifficulty>('medium');
   const [uploadedPages, setUploadedPages] = useState<ExtractionPageInput[]>([]);
   const [grammarTitleInput, setGrammarTitleInput] = useState('');
   const [grammarTopicInput, setGrammarTopicInput] = useState('');
@@ -108,73 +104,69 @@ export const LernstudioAiModal: React.FC<Props> = ({
 
   const isRtl = language === 'ar';
 
-  const handleSelectPreset = (topicTitle: string) => {
-    setSelectedPresetTopic(topicTitle);
-    const found = CHILDREN_TOPICS_PRESETS.find((p) => p.topicTitle === topicTitle);
-    if (found) {
-      setTopic(found.topicTitle);
-      setGrade(found.levelCategory);
-      setItemCount(found.wordCount);
-      setLevel(found.cefrLevel);
-    }
-  };
-
-  const generatedPrompt = generateLernstudioPrompt({
-    topic:
-      topic.trim() ||
-      (setMode === 'grammar'
-        ? 'Akkusativ / Präsens / Artikel'
-        : setMode === 'verb'
-        ? 'Alltagsverben'
-        : 'Tiere und Natur'),
-    grade: grade.trim() || undefined,
-    level,
-    difficulty,
-    itemCount,
-    teacherName: creatorTeacherName.trim() || defaultCreatorName || undefined,
-    includeVerbConjugation,
-    setMode
-  });
+  const generatedPrompt = generateUniversalSmartLernstudioPrompt(
+    creatorTeacherName.trim() || defaultCreatorName || undefined
+  );
 
   const handleCopyPrompt = () => {
     navigator.clipboard.writeText(generatedPrompt);
     setCopiedPrompt(true);
-    setTimeout(() => setCopiedPrompt(false), 2500);
+    setTimeout(() => setCopiedPrompt(false), 3000);
   };
 
-  const handleParseJson = () => {
+  const evaluateJsonInput = (rawText: string) => {
+    setPastedJson(rawText);
     setImportError(null);
     setValidationInfo(null);
-    const result = validateAndParseLernstudioJson(pastedJson);
+
+    if (!rawText.trim()) {
+      setParsedPreview(null);
+      return null;
+    }
+
+    const result = validateAndParseLernstudioJson(rawText);
     if (result.success && result.data) {
       const valRes = validateLernstudioSetForWorksheet(result.data);
       setParsedPreview(valRes.repairedSet);
-      if (!hasManualTeacherNameEdit && valRes.repairedSet.createdByTeacherName?.trim()) {
+      if (valRes.repairedSet.createdByTeacherName?.trim() && !creatorTeacherName.trim()) {
         setCreatorTeacherName(valRes.repairedSet.createdByTeacherName.trim());
-      } else if (!hasManualTeacherNameEdit && !creatorTeacherName.trim() && defaultCreatorName) {
-        setCreatorTeacherName(defaultCreatorName);
       }
       setValidationInfo({
         warnings: valRes.warnings,
         repairedCount: valRes.repairedCount
       });
+      return valRes.repairedSet;
     } else {
       setParsedPreview(null);
-      setImportError(result.error || (isRtl ? 'تنسيق JSON غير صالح.' : 'Invalid JSON format.'));
+      setImportError(result.error || (isRtl ? 'تنسيق الكود غير مكتمل أو غير صالح.' : 'Invalid JSON format.'));
+      return null;
+    }
+  };
+
+  const handlePasteFromClipboard = async () => {
+    try {
+      const clipText = await navigator.clipboard.readText();
+      if (clipText) {
+        evaluateJsonInput(clipText);
+      }
+    } catch {
+      // Clipboard API permission denied or unsupported; user can paste manually
     }
   };
 
   const handleConfirmImport = () => {
-    if (!parsedPreview) return;
-    const hasVocab = Array.isArray(parsedPreview.items) && parsedPreview.items.length > 0;
+    const targetPreview = parsedPreview || evaluateJsonInput(pastedJson);
+    if (!targetPreview) return;
+
+    const hasVocab = Array.isArray(targetPreview.items) && targetPreview.items.length > 0;
     const hasGrammar =
-      Boolean(parsedPreview.grammarContent) ||
-      (Array.isArray(parsedPreview.customExercises) && parsedPreview.customExercises.length > 0);
+      Boolean(targetPreview.grammarContent) ||
+      (Array.isArray(targetPreview.customExercises) && targetPreview.customExercises.length > 0);
     if (!hasVocab && !hasGrammar) return;
 
     const resolvedTeacherName =
       creatorTeacherName.trim() ||
-      (parsedPreview as any).createdByTeacherName?.trim() ||
+      (targetPreview as any).createdByTeacherName?.trim() ||
       teacherName?.trim() ||
       auth?.currentUser?.displayName?.trim() ||
       undefined;
@@ -182,20 +174,20 @@ export const LernstudioAiModal: React.FC<Props> = ({
     const fullSet: LernstudioSet = stripHeavyGrammarMediaForSync(
       normalizeLernstudioSet({
         id: `set_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        title: parsedPreview.title || topic || (isRtl ? 'مجموعة مستوردة' : 'Imported Set'),
-        topic: parsedPreview.topic || topic || 'ألماني',
-        grade: parsedPreview.grade || grade || undefined,
-        level: parsedPreview.level || level,
-        difficulty: parsedPreview.difficulty || difficulty,
-        setKind: parsedPreview.setKind,
+        title: targetPreview.title || (isRtl ? 'مجموعة مستوردة' : 'Imported Set'),
+        topic: targetPreview.topic || targetPreview.title || 'ألماني',
+        grade: targetPreview.grade || undefined,
+        level: targetPreview.level || 'A1',
+        difficulty: targetPreview.difficulty || 'medium',
+        setKind: targetPreview.setKind,
         contentOrigin: 'teacher_created',
-        hasArticles: parsedPreview.hasArticles,
-        sentenceBuilderSupported: parsedPreview.sentenceBuilderSupported,
+        hasArticles: targetPreview.hasArticles,
+        sentenceBuilderSupported: targetPreview.sentenceBuilderSupported,
         ...(resolvedTeacherName ? { createdByTeacherName: resolvedTeacherName } : {}),
-        description: parsedPreview.description || `مجموعة ${parsedPreview.title}`,
-        items: parsedPreview.items || [],
-        customExercises: parsedPreview.customExercises,
-        grammarContent: parsedPreview.grammarContent,
+        description: targetPreview.description || `مجموعة ${targetPreview.title || ''}`,
+        items: targetPreview.items || [],
+        customExercises: targetPreview.customExercises,
+        grammarContent: targetPreview.grammarContent,
         createdAt: new Date().toISOString(),
         updatedAt: Date.now()
       })
@@ -269,7 +261,6 @@ export const LernstudioAiModal: React.FC<Props> = ({
       images: uploadedPages,
       title: grammarTitleInput.trim() || undefined,
       topic: grammarTopicInput.trim() || undefined,
-      grade: grade.trim() || undefined,
       level,
       difficulty,
       teacherName: resolvedTeacherName,
@@ -297,12 +288,11 @@ export const LernstudioAiModal: React.FC<Props> = ({
         grammarTopicInput.trim() ||
         grammarTitleInput.trim() ||
         'استخراج درس القواعد والتمارين من صور صفحات الكتاب المرفقة',
-      grade: grade.trim() || undefined,
       level,
       difficulty,
       itemCount: 'auto',
       teacherName: creatorTeacherName.trim() || defaultCreatorName || undefined,
-      setMode: 'grammar'
+      setMode: 'auto'
     });
     navigator.clipboard.writeText(prompt);
     setCopiedVisionFallbackPrompt(true);
@@ -454,7 +444,6 @@ export const LernstudioAiModal: React.FC<Props> = ({
       normalizeLernstudioSet({
         ...extractedDraft,
         ...(resolvedTeacherName ? { createdByTeacherName: resolvedTeacherName } : {}),
-        ...(grade ? { grade } : {}),
         grammarContent: normalizedGrammar,
         contentOrigin: 'teacher_created',
         updatedAt: Date.now()
@@ -465,20 +454,25 @@ export const LernstudioAiModal: React.FC<Props> = ({
     onClose();
   };
 
+  const setKindLabelAr = (kind?: string) => {
+    if (kind === 'grammar') return 'قواعد (Grammar)';
+    if (kind === 'verb_group') return 'أفعال وتصريف (Verbs)';
+    if (kind === 'mixed') return 'شامل: كلمات + قواعد (Mixed)';
+    return 'كلمات ومفردات (Vocab)';
+  };
+
   return (
     <div
       className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-hidden"
       dir={isRtl ? 'rtl' : 'ltr'}
     >
-      <div className="bg-surface border border-surface-border rounded-2xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
-        {/* Header */}
+      <div className="bg-surface border border-surface-border rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+        {/* Clean Header */}
         <div className="px-5 py-4 border-b border-surface-border flex items-center justify-between bg-surface shrink-0">
           <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-primary" />
+            <Sparkles className="w-4 h-4 text-primary shrink-0" />
             <h2 className="text-sm sm:text-base font-bold text-text-main">
-              {isRtl
-                ? 'استيراد وتوليد مجموعات الذكاء الاصطناعي وصور الكتاب'
-                : 'AI Set Generator, Image Extraction & JSON Import'}
+              {isRtl ? 'إضافة درس بالذكاء الاصطناعي (برومبت شامل)' : 'Smart AI Lesson Set'}
             </h2>
           </div>
           <button
@@ -490,283 +484,152 @@ export const LernstudioAiModal: React.FC<Props> = ({
           </button>
         </div>
 
-        {/* 3-Tab Switcher */}
-        <div className="grid grid-cols-3 p-1 bg-surface-hover border-b border-surface-border text-xs font-bold shrink-0 gap-1">
-          <button
-            type="button"
-            onClick={() => setActiveTab('generate')}
-            className={`py-2 px-2 rounded-lg transition-all cursor-pointer truncate ${
-              activeTab === 'generate' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
-            }`}
-          >
-            {isRtl ? '1. مولّد البرومبت' : '1. AI Prompt'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('from_images')}
-            className={`py-2 px-2 rounded-lg transition-all cursor-pointer inline-flex items-center justify-center gap-1.5 truncate ${
-              activeTab === 'from_images' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
-            }`}
-          >
-            <Camera className="w-3.5 h-3.5 shrink-0" />
-            <span>{isRtl ? '2. قواعد من صور الكتاب' : '2. Grammar from Images'}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('import')}
-            className={`py-2 px-2 rounded-lg transition-all cursor-pointer truncate ${
-              activeTab === 'import' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
-            }`}
-          >
-            {isRtl ? '3. استيراد JSON' : '3. Import JSON'}
-          </button>
-        </div>
-
         {/* Body Content */}
-        <div className="p-4 sm:p-6 overflow-y-auto space-y-4 flex-1">
-          {activeTab === 'generate' && (
-            <div className="space-y-4">
-              {/* Set Mode Selector */}
-              <div className="p-3 bg-surface-hover border border-surface-border rounded-xl space-y-2">
-                <label className="text-xs font-black text-text-main block">
-                  {isRtl ? 'نوع المجموعة المستهدفة (Set Kind):' : 'Target Set Type:'}
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {(
-                    [
-                      ['vocab', isRtl ? 'مفردات (Vocab)' : 'Vocabulary'],
-                      ['verb', isRtl ? 'أفعال وتصريف' : 'Verbs & Conjugation'],
-                      ['grammar', isRtl ? 'قواعد نحوية (Grammar)' : 'Grammar Lesson'],
-                      ['mixed', isRtl ? 'مختلطة (كلمات + قواعد)' : 'Mixed (Vocab + Grammar)']
-                    ] as const
-                  ).map(([id, label]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => {
-                        setSetMode(id);
-                        if (id === 'verb') setIncludeVerbConjugation(true);
-                      }}
-                      className={`px-3 py-2 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
-                        setMode === id
-                          ? 'bg-primary text-white border-primary shadow-xs'
-                          : 'bg-surface text-text-main border-surface-border hover:border-primary/40'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
+        <div className="p-4 sm:p-6 overflow-y-auto space-y-5 flex-1">
+          {activeTab === 'simple' && (
+            <div className="space-y-5">
+              {/* STEP 1: Copy Smart Prompt */}
+              <div className="p-4 bg-surface-hover border border-surface-border rounded-2xl space-y-3">
+                <div className="space-y-1">
+                  <h3 className="text-xs sm:text-sm font-black text-text-main">
+                    {isRtl
+                      ? '1. انسخ البرومبت الذكي وصوّر الدرس للـ AI'
+                      : '1. Copy Smart Prompt & Send Lesson Photo to AI'}
+                  </h3>
+                  <p className="text-xs text-text-muted leading-relaxed">
+                    {isRtl
+                      ? 'انسخ البرومبت الشامل وابعته مع صورة الدرس لأي ذكاء اصطناعي (ChatGPT أو Gemini) — هو هيختار كل حاجة لوحده، ولو معرفش هيسألك عن نوع السيت والجريد.'
+                      : 'Copy this universal prompt and send it with a photo of the lesson page to any AI. It will detect everything automatically or ask you for the Set Type and Grade if unclear.'}
+                  </p>
                 </div>
-              </div>
 
-              {/* Quick Children Topics Preset Picker (shown for vocab/verb/mixed) */}
-              {setMode !== 'grammar' && (
-                <div className="p-3 bg-surface-hover border border-surface-border rounded-xl space-y-1.5">
-                  <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
-                    <BookOpen className="w-4 h-4 text-primary" />
-                    <span>{isRtl ? 'قائمة موضوعات الأطفال المعتمدة:' : 'Children Approved Topics Presets:'}</span>
-                  </label>
-                  <select
-                    value={selectedPresetTopic}
-                    onChange={(e) => handleSelectPreset(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary shadow-xs"
-                  >
-                    <option value="">
-                      -- {isRtl ? 'اختر من قائمة 70 موضوعًا للأطفال' : 'Select from 70 Children Topics'} --
-                    </option>
-                    {CHILDREN_LEVEL_CATEGORIES.map((cat) => {
-                      const catTopics = CHILDREN_TOPICS_PRESETS.filter((p) => p.levelCategory === cat);
-                      return (
-                        <optgroup key={cat} label={`📂 ${cat}`}>
-                          {catTopics.map((p) => (
-                            <option key={p.topicTitle} value={p.topicTitle}>
-                              • {p.topicTitle} ({p.wordCount} كلمات) - {p.cefrLevel}
-                            </option>
-                          ))}
-                        </optgroup>
-                      );
-                    })}
-                  </select>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-text-muted block mb-1">
-                    {setMode === 'grammar'
+                <button
+                  type="button"
+                  onClick={handleCopyPrompt}
+                  className={`w-full py-3 px-4 rounded-xl text-xs sm:text-sm font-black shadow-xs transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                    copiedPrompt
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-primary hover:bg-primary-hover text-white'
+                  }`}
+                >
+                  {copiedPrompt ? <Check className="w-4 h-4 shrink-0" /> : <Copy className="w-4 h-4 shrink-0" />}
+                  <span>
+                    {copiedPrompt
                       ? isRtl
-                        ? 'موضوع القاعدة (Grammar Topic):'
-                        : 'Grammar Topic:'
+                        ? 'تم نسخ البرومبت الشامل! ابعته الآن مع صورة الدرس للـ AI'
+                        : 'Copied! Send it with your lesson photo to AI'
                       : isRtl
-                      ? 'موضوع الدرس (Topic):'
-                      : 'Lesson Topic:'}
-                  </label>
-                  <input
-                    type="text"
-                    value={topic}
-                    onChange={(e) => {
-                      setTopic(e.target.value);
-                      setSelectedPresetTopic('');
-                    }}
-                    placeholder={
-                      setMode === 'grammar'
-                        ? 'مثال: Akkusativ, Modalverben, Trennbare Verben...'
-                        : 'مثال: Tiere, Schule, Familie, Essen...'
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
+                      ? 'نسخ البرومبت الشامل (Copy Prompt)'
+                      : 'Copy Universal Smart Prompt'}
+                  </span>
+                </button>
+
+                <div className="flex items-center justify-between pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowPromptText((prev) => !prev)}
+                    className="text-[11px] font-bold text-text-muted hover:text-text-main inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    {showPromptText ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    <span>
+                      {showPromptText
+                        ? isRtl
+                          ? 'إخفاء نص البرومبت'
+                          : 'Hide prompt text'
+                        : isRtl
+                        ? 'معاينة نص البرومبت (اختياري)'
+                        : 'Preview prompt text (optional)'}
+                    </span>
+                  </button>
+                </div>
+
+                {showPromptText && (
+                  <textarea
+                    readOnly
+                    value={generatedPrompt}
+                    rows={6}
+                    dir="rtl"
+                    className="w-full p-3 bg-surface border border-surface-border rounded-xl text-[11px] font-mono text-text-main focus:outline-none resize-none"
                   />
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-text-muted block mb-1">
-                    {isRtl ? 'الصف / المرحلة (Grade):' : 'Grade / Category:'}
-                  </label>
-                  <select
-                    value={grade}
-                    onChange={(e) => setGrade(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary cursor-pointer"
-                  >
-                    <option value="">
-                      {isRtl ? '-- اسأل الذكاء الاصطناعي (دا جريد كام؟) --' : '-- Ask AI (Which Grade?) --'}
-                    </option>
-                    {PROGRAM_GRADES.map((g) => (
-                      <option key={g.id} value={g.labelAr}>
-                        {language === 'ar' ? g.labelAr : language === 'de' ? g.labelDe : g.labelEn}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-text-muted block mb-1">
-                    {isRtl ? 'المستوى الأوروبي (CEFR Level):' : 'CEFR Level:'}
-                  </label>
-                  <select
-                    value={level}
-                    onChange={(e) => setLevel(e.target.value as LernstudioLevel)}
-                    className="w-full px-3 py-2 rounded-lg border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
-                  >
-                    <option value="A1">A1 - {isRtl ? 'مبتدئ' : 'Beginner'}</option>
-                    <option value="A2">A2 - {isRtl ? 'أساسي' : 'Elementary'}</option>
-                    <option value="B1">B1 - {isRtl ? 'متوسط' : 'Intermediate'}</option>
-                    <option value="B2">B2 - {isRtl ? 'متوسط متقدم' : 'Upper Intermediate'}</option>
-                    <option value="C1">C1 - {isRtl ? 'متقدم' : 'Advanced'}</option>
-                    <option value="C2">C2 - {isRtl ? 'محترف' : 'Mastery'}</option>
-                  </select>
-                </div>
-
-                {setMode !== 'grammar' && (
-                  <div>
-                    <label className="text-xs font-bold text-text-muted block mb-1">
-                      {isRtl ? 'عدد المفردات المطلوبة (Item Count):' : 'Vocabulary Item Count:'}
-                    </label>
-                    <select
-                      value={itemCount}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setItemCount(val === 'auto' ? 'auto' : Number(val));
-                      }}
-                      className="w-full px-3 py-2 rounded-lg border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
-                    >
-                      <option value="auto">
-                        {isRtl ? 'تلقائي يحدده الذكاء الاصطناعي (5 إلى 30 كلمة)' : 'Auto determined by AI (5 to 30 words)'}
-                      </option>
-                      <option value="5">5</option>
-                      <option value="10">10</option>
-                      <option value="15">15</option>
-                      <option value="20">20</option>
-                      <option value="24">24</option>
-                      <option value="26">26</option>
-                    </select>
-                  </div>
                 )}
-
-                <div className={setMode === 'grammar' ? '' : 'sm:col-span-2'}>
-                  <label className="text-xs font-bold text-text-muted block mb-1">
-                    {isRtl ? 'اسم المدرس مُنشئ المجموعة:' : 'Creator Teacher Name:'}
-                  </label>
-                  <input
-                    type="text"
-                    value={creatorTeacherName}
-                    onChange={(e) => {
-                      setCreatorTeacherName(e.target.value);
-                      setHasManualTeacherNameEdit(true);
-                    }}
-                    placeholder={isRtl ? 'مثال: أ. محمد / Herr Ahmed' : 'Lehrername'}
-                    className="w-full px-3 py-2 rounded-lg border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
-                  />
-                </div>
               </div>
 
-              {setMode !== 'grammar' && (
-                <div className="p-3 bg-surface-hover border border-surface-border rounded-xl flex items-center justify-between gap-3 shadow-2xs">
-                  <div className="flex items-center gap-2.5">
-                    <div
-                      className={`p-2 rounded-lg transition-colors ${
-                        includeVerbConjugation
-                          ? 'bg-primary/20 text-primary'
-                          : 'bg-surface border border-surface-border text-text-muted'
-                      }`}
-                    >
-                      <Sparkles className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-text-main">
-                        {isRtl ? 'تركيز على تصريف الأفعال (Präsens)' : 'Verb Conjugation Focus (Präsens)'}
-                      </h4>
-                      <p className="text-[11px] font-medium text-text-muted mt-0.5">
-                        {isRtl
-                          ? 'استخراج الأفعال من الدرس وإنشاء تمارين اختيارات مع تنويع الفاعل'
-                          : 'Extract verbs & generate conjugation exercises'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                    <input
-                      type="checkbox"
-                      checked={includeVerbConjugation}
-                      onChange={(e) => setIncludeVerbConjugation(e.target.checked)}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-surface-border peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-                  </label>
-                </div>
-              )}
-
-              {/* Prompt Output Box */}
-              <div className="space-y-1.5 pt-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-text-main flex items-center gap-1">
-                    <FileText className="w-4 h-4 text-primary" />
-                    <span>
-                      {isRtl ? 'الأمر البرمجي المصمم للذكاء الاصطناعي (Prompt):' : 'Generated AI Prompt:'}
-                    </span>
-                  </span>
+              {/* STEP 2: Paste JSON & Save */}
+              <div className="p-4 bg-surface-hover border border-surface-border rounded-2xl space-y-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <h3 className="text-xs sm:text-sm font-black text-text-main">
+                    {isRtl
+                      ? '2. الصق كود الـ JSON اللي طلعه الـ AI هنا'
+                      : '2. Paste the AI JSON Code Here'}
+                  </h3>
 
                   <button
                     type="button"
-                    onClick={handleCopyPrompt}
-                    className="px-3 py-1.5 bg-primary hover:bg-primary-hover text-white rounded-lg text-xs font-bold shadow-xs transition-colors cursor-pointer inline-flex items-center gap-1"
+                    onClick={handlePasteFromClipboard}
+                    className="px-3 py-1.5 rounded-lg bg-surface hover:bg-surface-border/40 border border-surface-border text-primary text-xs font-bold cursor-pointer inline-flex items-center gap-1.5 transition-colors"
                   >
-                    {copiedPrompt ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedPrompt ? (isRtl ? 'تم النسخ' : 'Copied') : isRtl ? 'نسخ البرومبت' : 'Copy Prompt'}</span>
+                    <ClipboardPaste className="w-3.5 h-3.5" />
+                    <span>{isRtl ? 'لصق الكود' : 'Paste Code'}</span>
                   </button>
                 </div>
 
                 <textarea
-                  readOnly
-                  value={generatedPrompt}
-                  rows={8}
+                  value={pastedJson}
+                  onChange={(e) => evaluateJsonInput(e.target.value)}
+                  rows={6}
                   dir="ltr"
-                  className="w-full p-3 bg-surface-hover border border-surface-border rounded-xl text-[11px] font-mono text-text-main focus:outline-none resize-none"
+                  placeholder='{\n  "title": "...",\n  "setKind": "vocab | grammar | mixed",\n  "grade": "جريد 4",\n  ...\n}'
+                  className="w-full p-3 bg-surface border border-surface-border rounded-xl text-xs font-mono text-text-main focus:outline-none focus:border-primary resize-none"
                 />
+
+                {importError && (
+                  <div className="p-3 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 rounded-xl text-xs font-bold flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{importError}</span>
+                  </div>
+                )}
+
+                {parsedPreview && (
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs space-y-1">
+                    <div className="font-bold text-emerald-700 dark:text-emerald-300">
+                      ✓ {parsedPreview.title} · {setKindLabelAr(parsedPreview.setKind)}
+                      {parsedPreview.grade ? ` · ${parsedPreview.grade}` : ''}
+                    </div>
+                    <div className="text-[11px] text-text-muted">
+                      {parsedPreview.items?.length || 0} {isRtl ? 'كلمة' : 'items'}
+                      {parsedPreview.grammarContent
+                        ? ` · ${parsedPreview.grammarContent.rules.length} ${isRtl ? 'قواعد' : 'rules'} · ${parsedPreview.grammarContent.exercises.length} ${isRtl ? 'تمارين قواعد' : 'exercises'}`
+                        : ''}
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleConfirmImport}
+                  disabled={!pastedJson.trim() || Boolean(importError)}
+                  className="w-full py-3 px-4 bg-primary hover:bg-primary-hover disabled:opacity-40 text-white rounded-xl text-xs sm:text-sm font-black shadow-xs transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Download className="w-4 h-4 shrink-0" />
+                  <span>
+                    {isRtl ? 'حفظ وإضافة السيت الآن' : 'Save & Import Set Now'}
+                  </span>
+                </button>
               </div>
             </div>
           )}
 
           {activeTab === 'from_images' && (
             <div className="space-y-4">
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('simple')}
+                  className="px-3 py-1.5 rounded-lg bg-surface-hover border border-surface-border text-xs font-bold text-primary cursor-pointer"
+                >
+                  {isRtl ? '← العودة لنسخ البرومبت الشامل ولصق الكود' : '← Back to Simple Copy Prompt & Paste JSON'}
+                </button>
+              </div>
               <div className="p-3.5 bg-primary/5 border border-primary/20 rounded-xl space-y-1">
                 <h3 className="text-xs font-black text-primary flex items-center gap-1.5">
                   <Camera className="w-4 h-4" />
@@ -1021,10 +884,10 @@ export const LernstudioAiModal: React.FC<Props> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => setActiveTab('import')}
+                      onClick={() => setActiveTab('simple')}
                       className="px-3 py-1.5 rounded-lg bg-primary/15 text-primary text-[11px] font-bold cursor-pointer"
                     >
-                      {isRtl ? 'الانتقال إلى لصق JSON يدوياً →' : 'Go to Paste JSON →'}
+                      {isRtl ? 'الانتقال إلى لصق الكود →' : 'Go to Paste Code →'}
                     </button>
                   </div>
                 </div>
@@ -1432,152 +1295,6 @@ export const LernstudioAiModal: React.FC<Props> = ({
                       ))}
                     </div>
                   </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {activeTab === 'import' && (
-            <div className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-text-main block">
-                  {isRtl
-                    ? 'اسم المدرس مُنشئ المجموعة (يُثبّت على الـ Set للفلترة): *'
-                    : 'Creator Teacher Name: *'}
-                </label>
-                <input
-                  type="text"
-                  value={creatorTeacherName}
-                  onChange={(e) => {
-                    setCreatorTeacherName(e.target.value);
-                    setHasManualTeacherNameEdit(true);
-                  }}
-                  placeholder={isRtl ? 'مثال: أ. محمد / Herr Ahmed' : 'Lehrername'}
-                  className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-black text-text-main block">
-                  {isRtl
-                    ? 'الصق كود JSON الصادر من الذكاء الاصطناعي هنا (مفردات / أفعال / قواعد / مختلط):'
-                    : 'Paste AI JSON here (Vocab / Verbs / Grammar / Mixed):'}
-                </label>
-                <textarea
-                  value={pastedJson}
-                  onChange={(e) => {
-                    setPastedJson(e.target.value);
-                    setImportError(null);
-                    setParsedPreview(null);
-                  }}
-                  rows={8}
-                  dir="ltr"
-                  placeholder='{\n  "title": "Akkusativ",\n  "setKind": "grammar",\n  "level": "A1",\n  "items": [],\n  "grammarContent": { ... }\n}'
-                  className="w-full p-3 bg-surface border border-surface-border rounded-xl text-[11px] font-mono text-text-main focus:outline-none focus:border-primary resize-none"
-                />
-              </div>
-
-              {/* Validation & Preview Controls */}
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <button
-                  type="button"
-                  onClick={handleParseJson}
-                  disabled={!pastedJson.trim()}
-                  className="px-4 py-2 bg-surface hover:bg-surface-hover border border-surface-border text-text-main rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-primary" />
-                  <span>{isRtl ? 'فحص ومعاينة البيانات' : 'Validate & Preview'}</span>
-                </button>
-
-                {parsedPreview && (
-                  <button
-                    type="button"
-                    onClick={handleConfirmImport}
-                    className="px-5 py-2 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer inline-flex items-center gap-1 transition-colors"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>
-                      {parsedPreview.grammarContent
-                        ? isRtl
-                          ? `حفظ واستيراد المجموعة (${parsedPreview.grammarContent.exercises.length} تمارين قواعد${
-                              parsedPreview.items?.length ? ` · ${parsedPreview.items.length} مفردة` : ''
-                            })`
-                          : `Save Set (${parsedPreview.grammarContent.exercises.length} grammar exercises)`
-                        : isRtl
-                        ? `حفظ واستيراد الـ Set (${parsedPreview.items?.length || 0} مفردات)`
-                        : `Save & Import Set (${parsedPreview.items?.length || 0} items)`}
-                    </span>
-                  </button>
-                )}
-              </div>
-
-              {/* Error Message */}
-              {importError && (
-                <div className="p-3 bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 rounded-xl text-xs font-bold flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{importError}</span>
-                </div>
-              )}
-
-              {/* Preview Cards */}
-              {parsedPreview && (
-                <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl space-y-3">
-                  <div className="flex items-center justify-between flex-wrap gap-1">
-                    <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300">
-                      ✓ {parsedPreview.title} ({parsedPreview.setKind || 'vocab'}) —{' '}
-                      {parsedPreview.items?.length || 0} {isRtl ? 'مفردة' : 'items'}
-                      {parsedPreview.grammarContent
-                        ? ` · ${parsedPreview.grammarContent.rules.length} ${isRtl ? 'قواعد' : 'rules'} · ${parsedPreview.grammarContent.exercises.length} ${isRtl ? 'تمارين' : 'exercises'}`
-                        : ''}
-                    </span>
-                    {validationInfo && validationInfo.repairedCount > 0 && (
-                      <span className="text-[11px] font-bold bg-amber-500/20 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded-lg border border-amber-500/30">
-                        {isRtl
-                          ? `تم إصلاح ${validationInfo.repairedCount} جملة ترتيب تلقائياً.`
-                          : `Auto-repaired ${validationInfo.repairedCount} sentence ordering items.`}
-                      </span>
-                    )}
-                  </div>
-
-                  {validationInfo && validationInfo.warnings.length > 0 && (
-                    <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[11px] text-amber-800 dark:text-amber-300 space-y-1">
-                      <span className="font-bold block">
-                        {isRtl ? 'ملاحظات التحقق من الجودة:' : 'Quality Notes:'}
-                      </span>
-                      <ul className="list-disc list-inside space-y-0.5">
-                        {validationInfo.warnings.map((w, idx) => (
-                          <li key={idx}>{w}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {parsedPreview.grammarContent && (
-                    <div className="p-2.5 bg-surface rounded-lg border border-surface-border text-xs space-y-1">
-                      <p className="font-black text-primary">
-                        📘 {parsedPreview.grammarContent.lessonTitle} — {parsedPreview.grammarContent.grammarTopic}
-                      </p>
-                      {parsedPreview.grammarContent.explanationAr && (
-                        <p className="text-[11px] text-text-muted">{parsedPreview.grammarContent.explanationAr}</p>
-                      )}
-                    </div>
-                  )}
-
-                  {Array.isArray(parsedPreview.items) && parsedPreview.items.length > 0 && (
-                    <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
-                      {parsedPreview.items.map((item, idx) => (
-                        <div
-                          key={idx}
-                          className="p-2 bg-surface rounded-lg border border-surface-border text-xs flex items-center justify-between gap-2"
-                        >
-                          <span className="font-bold text-primary font-mono" dir="ltr">
-                            {item.emoji} {item.german}
-                          </span>
-                          <span className="text-text-muted">{item.arabic}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
               )}
             </div>

@@ -1133,16 +1133,41 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                                 </span>
                               )}
                               <span className="text-[10px] text-slate-400 font-bold font-mono">
-                                {lesson.date}
+                                {lesson.date}{lesson.time ? ` • ${lesson.time}` : ''}
                               </span>
                             </div>
                           </div>
+
+                          {/* Grain Verified Metadata Badge & Duration */}
+                          {(lesson.grainMeta?.recordingTitle || lesson.grainMeta?.durationMinutes) && (
+                            <div className="flex items-center gap-2 text-[10px] text-purple-700 dark:text-purple-300 bg-purple-50/60 dark:bg-purple-950/30 px-2.5 py-1 rounded-lg border border-purple-100 dark:border-purple-900/40">
+                              <Video className="w-3 h-3 shrink-0 text-purple-600" />
+                              <span className="font-bold truncate">
+                                {lesson.grainMeta?.recordingTitle || _t('تسجيل Grain مرتبط', 'Linked Grain Recording', 'Verknüpfte Grain-Aufnahme')}
+                              </span>
+                              {lesson.grainMeta?.durationMinutes ? (
+                                <span className="font-mono text-[10px] text-purple-600 dark:text-purple-400 shrink-0">
+                                  • {lesson.grainMeta.durationMinutes} min
+                                </span>
+                              ) : null}
+                            </div>
+                          )}
 
                           {/* Homework / Topic summary */}
                           {(lesson.report?.homeworkTitle || lesson.whatWasTaught) && (
                             <p className="text-[11px] text-slate-600 dark:text-slate-300 font-medium line-clamp-1">
                               <span className="font-bold text-slate-800 dark:text-white">{_t('موضوع الحصة: ', 'Topic: ', 'Thema: ')}</span>
                               {lesson.report?.homeworkTitle || lesson.whatWasTaught}
+                            </p>
+                          )}
+
+                          {/* Teacher-approved Grain summary (only shown if approved by teacher, never raw transcript) */}
+                          {(lesson.grainMeta?.approvedSummary || lesson.report?.grainMeta?.approvedSummary) && (
+                            <p className="text-[11px] text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/50 px-2.5 py-1.5 rounded-lg border border-slate-100 dark:border-slate-800">
+                              <span className="font-bold text-slate-800 dark:text-white">
+                                {_t('ملخص الحصة المعتمد: ', 'Approved Lesson Summary: ', 'Bestätigte Zusammenfassung: ')}
+                              </span>
+                              {lesson.grainMeta?.approvedSummary || lesson.report?.grainMeta?.approvedSummary}
                             </p>
                           )}
 

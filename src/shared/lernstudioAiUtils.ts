@@ -32,13 +32,181 @@ export interface PromptGenConfig {
   difficulty: LernstudioDifficulty;
   itemCount: number | 'auto';
   teacherName?: string;
-  setMode?: 'vocab' | 'verb' | 'grammar' | 'mixed';
+  setMode?: 'auto' | 'vocab' | 'verb' | 'grammar' | 'mixed';
   includeSentences?: boolean;
   includeExercises?: boolean;
   includeVerbConjugation?: boolean;
 }
 
+export function generateUniversalSmartLernstudioPrompt(teacherName?: string): string {
+  const cleanTeacher = (teacherName || '').replace(/"/g, '').trim();
+  return `أنت خبير مناهج لغة ألمانية ومصمم محتوى تعليمي تفاعلي لتطبيق (Glück Teacher – Lernstudio).
+سأرسل لك الآن صورة (أو عدة صور / نص) من درس في كتاب اللغة الألمانية أو كراسة التدريبات.
+
+مهمتك الذكية (التصرف التلقائي خطوة بخطوة):
+1. افحص صورة الدرس المرفقة جيداً واستنتج تلقائياً:
+   - عنوان الدرس وموضوعه (title & topic)
+   - المستوى الأوروبي المناسب (level: A1 أو A2 أو B1 أو B2) ومستوى الصعوبة (difficulty: easy أو medium أو hard)
+   - نوع السيت الأنسب لمحتوى الصورة (setKind):
+     * "vocab" -> إذا كانت الصفحة تركز على كلمات ومفردات جديدة.
+     * "verb_group" -> إذا كانت الصفحة تركز على أفعال وتصريف الأفعال (Konjugation).
+     * "grammar" -> إذا كانت الصفحة تشرح قاعدة نحوية أو تدريبات قواعد فقط.
+     * "mixed" -> إذا كانت الصفحة تجمع بين كلمات جديدة + شرح وتدريبات قواعد معاً.
+   - الصف الدراسي المستهدف (grade: من "جريد 1" إلى "جريد 12").
+
+2. قاعدة السؤال الذكي قبل التوليد (مهم جداً):
+   - إذا لم أذكر لك (نوع السيت) أو (الصف الدراسي / الجريد) مع الصورة، ولم تكن واضحة بنسبة 100% من الصورة، توقف واسألني أولاً بالعربية في رسالة قصيرة جداً ومباشرة:
+     "قبل استخراج الكود، فضلاً حدد لي:
+      1️⃣ نوع السيت المطلوب؟ (كلمات Vocab / أفعال Verbs / قواعد Grammar / شامل Mixed)
+      2️⃣ دا جريد كام؟ (من جريد 1 إلى جريد 12)"
+   - أما إذا كتبتُ لك النوع والجريد مع الصورة (أو بمجرد أن أرد عليك)، ابدأ فوراً بإخراج كود JSON النهائي فقط بدون أي كلام إضافي.
+
+3. قواعد استخراج المحتوى الصارمة (بدون تأليف عشوائي):
+   - التزم تماماً بالكلمات والأفعال والقواعد والتمارين الموجودة في صورة الدرس المرفقة.
+   - في حالة وجود كلمات أو أفعال ("vocab" أو "verb_group" أو "mixed")، املأ مصفوفة "items" بحيث يحتوي كل عنصر على:
+     * "german": الكلمة بالألمانية مع الأرتيكل للأسماء (مثل "der Hund", "die Schule", "das Buch", "spielen").
+     * "article": فقط للأسماء ("der" أو "die" أو "das") وبدون أرتيكل للأفعال والصفات.
+     * "arabic": الترجمة العربية الدقيقة.
+     * "syllables": تقسيم الكلمة (بدون الأرتيكل) إلى مقطعين صوتيين أو أكثر (مثل ["Schu", "le"] أو ["fah", "ren"]).
+     * "plural": صيغة الجمع مع الأرتيكل للأسماء (مثل "die Bücher").
+     * "wordType": نوع الكلمة ("noun" | "verb" | "adjective" | "phrase" | "other").
+     * "conjugation": للأفعال فقط في المضارع Präsens بالحقول {"ich","du","er_sie_es","wir","ihr","sie_Sie"} مع مراعاة تغير الحروف المتحركة.
+     * "exampleSentenceGerman": جملة مثال ألمانية صحيحة من 4 أجزاء.
+     * "exampleSentenceArabic": ترجمة الجملة للعربية.
+     * "sentence4Elements": نفس جملة "exampleSentenceGerman" مقسمة بالضبط إلى 4 عناصر في مصفوفة (مجموعها بمسافات يطابق الجملة تماماً).
+     * "missingLetterWord": الكلمة بدون أرتيكل مع إخفاء حرف واحد بعلامة "_" (مثل "B_ch").
+     * "emoji": إيموجي معبر.
+   - في حالة وجود قواعد ("grammar" أو "mixed")، املأ كائن "grammarContent" كاملاً (ويمكن ترك "items": [] إذا كان السيت قواعد فقط "grammar"):
+     * "lessonTitle", "lessonTitleAr", "grammarTopic", "explanationAr" (شرح عربي واضح ومبسط للقاعدة), "explanationDe"
+     * "rules": مصفوفة قواعد منظمة (كل قاعدة بها "id", "title", "titleAr", "summaryAr", "pattern", واختيارياً جدول "table": {"headers":[...],"rows":[[...]]} و "tipAr").
+     * "examples": من 4 إلى 6 أمثلة ("id", "german", "arabic", "highlight").
+     * "exercises": جميع تمارين الصفحة الأصلية (مع وضع "source": "original") + تمارين إضافية مشابهة للتدريب (مع وضع "source": "generated") باستخدام الأنواع التالية:
+       - "multiple_choice" (مع 4 خيارات في "options" و "correctAnswer")
+       - "fill_blank" (أكمل الفراغ مع "options" و "correctAnswer")
+       - "correct_mistake" (صحح الخطأ مع "faultySentence" و "options" و "correctAnswer")
+       - "choose_correct_sentence" (اختر الجملة الصحيحة من "options")
+       - "sentence_ordering" (ترتيب جملة مع مصفوفة الكلمات المبعثرة في "tokens" والجملة الكاملة في "correctAnswer")
+       - "short_answer" (إجابة كتابية مع "correctAnswer" وبدائل مقبولة في "acceptedAnswers")
+   - أضف أيضاً من 3 إلى 6 تمارين اختيار من متعدد في "customExercises" (مع تنويع الفاعل في جمل الأفعال مثل الأسماء المفردة "Ahmed"، والمركبة "Mona und Sara"، و"du und ich").
+
+4. قواعد تنسيق JSON الصارمة:
+   - عند توليد النتيجة، أخرج كود JSON خام وصالح 100% فقط (بدون علامات \`\`\`json وبدون أي نص قبل أو بعد الكود).
+   - لا تستخدم أبداً فواصل زائدة (Trailing Commas) ولا تهرب الأقواس (لا تكتب \\[ أو \\{).
+
+نموذج هيكل الـ JSON المطلوب إخراجه:
+{
+  "title": "عنوان الدرس المستخرج",
+  "topic": "موضوع الدرس",
+  "grade": "جريد 4",
+  "level": "A1",
+  "difficulty": "medium",
+  "setKind": "vocab | verb_group | grammar | mixed",
+  "contentOrigin": "teacher_created",
+  "createdByTeacherName": "${cleanTeacher}",
+  "hasArticles": true,
+  "sentenceBuilderSupported": true,
+  "description": "وصف مختصر للدرس",
+  "items": [
+    {
+      "german": "das Buch",
+      "article": "das",
+      "arabic": "الكتاب",
+      "syllables": ["Bu", "ch"],
+      "plural": "die Bücher",
+      "wordType": "noun",
+      "exampleSentenceGerman": "Mona liest ein Buch.",
+      "exampleSentenceArabic": "منى تقرأ كتاباً.",
+      "emoji": "📖",
+      "missingLetterWord": "B_ch",
+      "sentence4Elements": ["Mona", "liest", "ein", "Buch."]
+    },
+    {
+      "german": "lesen",
+      "arabic": "يقرأ",
+      "syllables": ["le", "sen"],
+      "wordType": "verb",
+      "conjugation": {
+        "ich": "lese",
+        "du": "liest",
+        "er_sie_es": "liest",
+        "wir": "lesen",
+        "ihr": "lest",
+        "sie_Sie": "lesen"
+      },
+      "exampleSentenceGerman": "Ahmed liest heute viel.",
+      "exampleSentenceArabic": "أحمد يقرأ كثيراً اليوم.",
+      "emoji": "📚",
+      "missingLetterWord": "l_sen",
+      "sentence4Elements": ["Ahmed", "liest", "heute", "viel."]
+    }
+  ],
+  "grammarContent": {
+    "lessonTitle": "عنوان القاعدة (إن وجد)",
+    "lessonTitleAr": "عنوان القاعدة بالعربية",
+    "grammarTopic": "اسم القاعدة",
+    "origin": "teacher_created",
+    "explanationAr": "شرح مبسط وواضح للقاعدة باللغة العربية.",
+    "explanationDe": "Kurze deutsche Erklärung.",
+    "rules": [
+      {
+        "id": "rule_1",
+        "title": "Grundregel",
+        "titleAr": "القاعدة الأساسية",
+        "summaryAr": "ملخص القاعدة بالعربية.",
+        "pattern": "Subjekt + Verb + ...",
+        "table": {
+          "headers": ["Pronomen", "Verb"],
+          "rows": [["ich", "lese"], ["du", "liest"]]
+        }
+      }
+    ],
+    "examples": [
+      {
+        "id": "ex_1",
+        "german": "Mona liest ein Buch.",
+        "arabic": "منى تقرأ كتاباً.",
+        "highlight": "liest"
+      }
+    ],
+    "exercises": [
+      {
+        "id": "q_1",
+        "type": "multiple_choice",
+        "prompt": "اختر الإجابة الصحيحة:",
+        "question": "Mona ______ heute ein Buch.",
+        "options": ["liest", "lese", "lest", "lesen"],
+        "correctAnswer": "liest",
+        "explanationAr": "Mona = sie -> liest",
+        "source": "original"
+      },
+      {
+        "id": "q_2",
+        "type": "sentence_ordering",
+        "prompt": "رتب الكلمات لتكوين جملة صحيحة:",
+        "question": "أحمد يقرأ كثيراً اليوم.",
+        "tokens": ["heute", "Ahmed", "viel.", "liest"],
+        "correctAnswer": "Ahmed liest heute viel.",
+        "explanationAr": "الفعل في المركز الثاني.",
+        "source": "generated"
+      }
+    ]
+  },
+  "customExercises": [
+    {
+      "type": "multiple_choice",
+      "question": "Du und ich ______ (lesen) zusammen.",
+      "options": ["lesen", "liest", "lese", "lest"],
+      "correctAnswer": "lesen",
+      "explanation": "Du und ich = wir -> lesen."
+    }
+  ]
+}`;
+}
+
 export function generateLernstudioPrompt(config: PromptGenConfig): string {
+  if (config.setMode === 'auto') {
+    return generateUniversalSmartLernstudioPrompt(config.teacherName);
+  }
   const effectiveMode: 'vocab' | 'verb' | 'grammar' | 'mixed' =
     config.setMode || (config.includeVerbConjugation ? 'verb' : 'vocab');
 

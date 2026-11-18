@@ -200,8 +200,19 @@ async function runAll() {
       );
     });
 
-    // 4. External AI prompt generation & JSON validation (vocab / verb / grammar / mixed)
-    await runCase('04. External AI prompt & JSON parser support grammar, mixed, short_answer & empty items', () => {
+    // 4. External AI prompt generation & JSON validation (vocab / verb / grammar / mixed / universal auto)
+    await runCase('04. External AI prompt & JSON parser support universal smart prompt, grammar, mixed, short_answer & empty items', () => {
+      const smartPrompt = generateLernstudioPrompt({
+        topic: '',
+        level: 'A1',
+        difficulty: 'medium',
+        itemCount: 'auto',
+        setMode: 'auto'
+      });
+      assert.ok(smartPrompt.includes('نوع السيت المطلوب؟'));
+      assert.ok(smartPrompt.includes('دا جريد كام؟'));
+      assert.ok(smartPrompt.includes('vocab | verb_group | grammar | mixed'));
+
       const grammarPrompt = generateLernstudioPrompt({
         topic: 'Modalverben im Präsens',
         level: 'A1',

@@ -25,6 +25,15 @@ import {
   resolveLinkedOnlineHomeworkForLesson,
   resolveStudentPersonalOnlineHomeworkResult
 } from '../utils/lessonHomeworkLinkUtils';
+import {
+  sanitizeGrainSummaryForParentReport,
+  isGrainRecordingUrl,
+  normalizeZoomMeetingUrl,
+  classifyGrainRecordingShareAccess,
+  getLessonRecordingShareClassification,
+  sortLessonsNewestFirst,
+  buildMultiLessonParentReportData
+} from '../services/grainService';
 
 export { isLikelyFemaleStudent } from '../utils/genderUtils';
 export { resolveTaughtTodayTopic, resolveStudentReportAttendance, resolveReportHomework, resolvePreviousHomeworkStatusText } from '../utils/lessonUtils';
@@ -298,6 +307,33 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   const [isManualEdited, setIsManualEdited] = useState<boolean>(false);
   const [reportStyle, setReportStyle] = useState<'egyptian' | 'standard' | 'concise' | 'student'>('egyptian');
   const [styleSeed, setStyleSeed] = useState<number>(0);
+
+  // Rule 4: Teacher review & approval for Grain summary before including in parent report
+  const rawGrainCandidateSummary =
+    lesson.grainMeta?.approvedParentReportSummaryAr ||
+    lesson.grainMeta?.approvedSummary ||
+    lesson.report?.grainMeta?.approvedParentReportSummaryAr ||
+    lesson.report?.grainMeta?.approvedSummary ||
+    '';
+
+  const sanitizedGrainSummaryCandidate = useMemo(() => {
+    if (!rawGrainCandidateSummary) return '';
+    return sanitizeGrainSummaryForParentReport({
+      rawSummaryText: rawGrainCandidateSummary,
+      targetStudent: activeStudent,
+      allGroupStudents,
+      language: reportLanguage === 'de' ? 'de' : reportLanguage === 'en' ? 'en' : 'ar'
+    });
+  }, [rawGrainCandidateSummary, activeStudent, allGroupStudents, reportLanguage]);
+
+  const [grainDraftSummaryText, setGrainDraftSummaryText] = useState<string>(sanitizedGrainSummaryCandidate);
+  const [grainSummaryApprovedForReport, setGrainSummaryApprovedForReport] = useState<boolean>(false);
+  const [grainSummaryDismissed, setGrainSummaryDismissed] = useState<boolean>(false);
+
+  useEffect(() => {
+    setGrainDraftSummaryText(sanitizedGrainSummaryCandidate);
+    setGrainSummaryApprovedForReport(false);
+  }, [sanitizedGrainSummaryCandidate, activeStudent?.id]);
   const [recordingLink, setRecordingLink] = useState<string>(
     lesson.report?.recordingLink || lesson.recordingLink || ''
   );
@@ -308,6 +344,66 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
     Boolean(lesson.report?.recordingLink2 || lesson.recordingLink2)
   );
   const [autoSavedNotice, setAutoSavedNotice] = useState<boolean>(false);
+  const [teacherVerifiedPublicSlot1, setTeacherVerifiedPublicSlot1] = useState<boolean>(
+    Boolean(
+      lesson.grainMeta?.shareAccessClassification === 'public_access_verified' ||
+      lesson.report?.grainMeta?.shareAccessClassification === 'public_access_verified'
+    )
+  );
+  const [teacherVerifiedPublicSlot2, setTeacherVerifiedPublicSlot2] = useState<boolean>(
+    Boolean(
+      lesson.grainMeta?.shareAccessClassificationPart2 === 'public_access_verified' ||
+      lesson.report?.grainMeta?.shareAccessClassificationPart2 === 'public_access_verified'
+    )
+  );
+
+  // Part 11: Multi-Lesson Selection State (Sorted Newest first -> Oldest last)
+  const [showMultiLessonSelector, setShowMultiLessonSelector] = useState<boolean>(false);
+  const [selectedMultiLessonIds, setSelectedMultiLessonIds] = useState<string[]>([lesson.id]);
+  const [multiLessonSearchQuery, setMultiLessonSearchQuery] = useState<string>('');
+  const [multiLessonRecordingFilter, setMultiLessonRecordingFilter] = useState<'all' | 'with_recording' | 'without_recording'>('all');
+
+  const candidateStudentOrGroupLessons = useMemo(() => {
+    const allList = lessons || [];
+    const filtered = allList.filter((l) => {
+      if (l.id === lesson.id) return true;
+      if (lesson.groupId && l.groupId === lesson.groupId) return true;
+      if (activeStudent?.id && (l.studentId === activeStudent.id || l.attendance?.[activeStudent.id] || l.report?.studentAttendance?.[activeStudent.id])) {
+        return true;
+      }
+      if (lesson.studentId && l.studentId === lesson.studentId) return true;
+      return false;
+    });
+    return sortLessonsNewestFirst(filtered);
+  }, [lessons, lesson.id, lesson.groupId, lesson.studentId, activeStudent?.id]);
+
+  const filteredMultiLessons = useMemo(() => {
+    const q = multiLessonSearchQuery.trim().toLowerCase();
+    return candidateStudentOrGroupLessons.filter((l) => {
+      const hasRec = Boolean(
+        (l.recordingLink || l.report?.recordingLink || l.recordingLink2 || l.report?.recordingLink2 || l.grainMeta?.recordingUrl)?.trim()
+      );
+      if (multiLessonRecordingFilter === 'with_recording' && !hasRec) return false;
+      if (multiLessonRecordingFilter === 'without_recording' && hasRec) return false;
+      if (!q) return true;
+      const topic = resolveTaughtTodayTopic(l, l.report).text || l.title || '';
+      const hay = `${l.date || ''} ${l.time || ''} ${topic} ${l.groupName || ''} ${l.studentName || ''}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [candidateStudentOrGroupLessons, multiLessonSearchQuery, multiLessonRecordingFilter]);
+
+  const multiLessonReportResult = useMemo(() => {
+    if (selectedMultiLessonIds.length <= 1) return null;
+    const picked = candidateStudentOrGroupLessons.filter((l) => selectedMultiLessonIds.includes(l.id));
+    if (picked.length <= 1) return null;
+    return buildMultiLessonParentReportData({
+      lessons: picked,
+      targetStudent: activeTab === 'individual' ? activeStudent : null,
+      allGroupStudents,
+      language: reportLanguage === 'de' ? 'de' : reportLanguage === 'en' ? 'en' : 'ar'
+    });
+  }, [selectedMultiLessonIds, candidateStudentOrGroupLessons, activeTab, activeStudent, allGroupStudents, reportLanguage]);
+
   const [showAbsentNamesInGroupReport, setShowAbsentNamesInGroupReport] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('dl_show_absent_names_in_group_report');
@@ -463,10 +559,75 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
     return () => clearTimeout(timer);
   }, [recordingLink, recordingLink2, persistRecordings, lesson.recordingLink, lesson.report?.recordingLink, lesson.recordingLink2, lesson.report?.recordingLink2]);
 
-  // Helper to format recording link(s) for the Arabic report
+  // Part 2 (FIX-1): Verify whether a recording link is safe and publicly accessible for parents
+  const evaluateParentRecordingSlot = React.useCallback(
+    (rawUrl: string, slot: 'recordingLink' | 'recordingLink2') => {
+      const trimmed = rawUrl.trim();
+      if (!trimmed) {
+        return {
+          allowedForParent: false,
+          classification: 'link_unavailable' as const,
+          isZoomLink: false,
+          isGrainLink: false,
+          url: ''
+        };
+      }
+      if (normalizeZoomMeetingUrl(trimmed) !== null) {
+        return {
+          allowedForParent: false,
+          classification: 'link_unavailable' as const,
+          isZoomLink: true,
+          isGrainLink: false,
+          url: trimmed
+        };
+      }
+      if (isGrainRecordingUrl(trimmed)) {
+        const teacherVerified = slot === 'recordingLink2' ? teacherVerifiedPublicSlot2 : teacherVerifiedPublicSlot1;
+        const baseClass = getLessonRecordingShareClassification(
+          {
+            ...lesson,
+            recordingLink: slot === 'recordingLink' ? trimmed : lesson.recordingLink,
+            recordingLink2: slot === 'recordingLink2' ? trimmed : lesson.recordingLink2
+          },
+          slot
+        );
+        const effectiveClass = teacherVerified
+          ? 'public_access_verified'
+          : baseClass === 'public_access_verified'
+          ? 'public_access_verified'
+          : classifyGrainRecordingShareAccess({
+              recordingUrl: trimmed,
+              public_url: trimmed.includes('/share/') ? trimmed : null,
+              share_state: teacherVerified ? 'public' : undefined,
+              teacherVerifiedPublic: teacherVerified
+            }).classification;
+        return {
+          allowedForParent: effectiveClass === 'public_access_verified',
+          classification: effectiveClass,
+          isZoomLink: false,
+          isGrainLink: true,
+          url: trimmed
+        };
+      }
+      // External non-Grain / non-Zoom link (e.g., YouTube/Drive explicitly pasted by teacher)
+      const isForbiddenApiOrRaw = /\/_\/public-api\/|\/transcript|\.mp4($|\?)|\.webm($|\?)/i.test(trimmed);
+      return {
+        allowedForParent: !isForbiddenApiOrRaw,
+        classification: isForbiddenApiOrRaw ? ('link_unavailable' as const) : ('public_access_verified' as const),
+        isZoomLink: false,
+        isGrainLink: false,
+        url: trimmed
+      };
+    },
+    [lesson, teacherVerifiedPublicSlot1, teacherVerifiedPublicSlot2]
+  );
+
+  // Helper to format recording link(s) for the Arabic report (strictly excluding non-public Grain or Zoom links)
   const formatRecordingsArabic = (link1: string, link2: string): string => {
-    const l1 = link1.trim();
-    const l2 = link2.trim();
+    const eval1 = evaluateParentRecordingSlot(link1, 'recordingLink');
+    const eval2 = evaluateParentRecordingSlot(link2, 'recordingLink2');
+    const l1 = eval1.allowedForParent ? eval1.url : '';
+    const l2 = eval2.allowedForParent ? eval2.url : '';
     if (l1 && l2) {
       return `\n\n🎥 تسجيلات الحصة (جزئين):\n• الجزء الأول: ${l1}\n• الجزء الثاني: ${l2}`;
     }
@@ -481,8 +642,10 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
 
   const formatRecordingsByLang = (link1: string, link2: string, lang: 'ar' | 'en' | 'de'): string => {
     if (lang === 'ar') return formatRecordingsArabic(link1, link2);
-    const l1 = link1.trim();
-    const l2 = link2.trim();
+    const eval1 = evaluateParentRecordingSlot(link1, 'recordingLink');
+    const eval2 = evaluateParentRecordingSlot(link2, 'recordingLink2');
+    const l1 = eval1.allowedForParent ? eval1.url : '';
+    const l2 = eval2.allowedForParent ? eval2.url : '';
     if (lang === 'de') {
       if (l1 && l2) {
         return `\n\n🎥 Unterrichtsaufnahmen (2 Teile):\n• Teil 1: ${l1}\n• Teil 2: ${l2}`;
@@ -808,6 +971,31 @@ ${topicBlock}${hwBlock}${prevHwBlock}${recordingSection}
   // Auto-generate report based on student data or bulk mode
   useEffect(() => {
     if (isManualEdited) return;
+
+    // Part 11: Multi-lesson combined parent report mode
+    if (multiLessonReportResult && multiLessonReportResult.entries.length > 1) {
+      const teacherArName = getTeacherArabicName(profile, 'المعلم');
+      const hasPrefix = /^(أ\.|أ\/|أستاذ|الأستاذ|د\.|د\/|دكتور|م\.|م\/|مهندس)/.test(teacherArName);
+      const teacherSig = hasPrefix ? teacherArName : `أ. ${teacherArName}`;
+      const studentDisplayName =
+        reportLanguage === 'de' || reportLanguage === 'en'
+          ? activeStudent?.certificateName || activeStudent?.displayNameEn || activeStudent?.nameEn || activeStudent?.name || lesson.studentName || associatedGroup?.name || lesson.title
+          : activeStudent?.displayNameAr || activeStudent?.nameAr || activeStudent?.name || lesson.studentName || associatedGroup?.name || lesson.title;
+      const header =
+        reportLanguage === 'en'
+          ? `${getTimeBasedGreeting('en')}\n📊 Combined Multi-Lesson Report for: *${studentDisplayName}* 🇩🇪`
+          : reportLanguage === 'de'
+          ? `${getTimeBasedGreeting('de')}\n📊 Kombinierter Unterrichtsbericht für: *${studentDisplayName}* 🇩🇪`
+          : `السلام عليكم ورحمة الله وبركاته 👋\n📊 تقرير مجمع للحصص لـ *${studentDisplayName}* 🇩🇪:`;
+      const footer =
+        reportLanguage === 'en'
+          ? `Thank you,\n${profile.displayName || teacherSig} - German Language Teacher 🇩🇪`
+          : reportLanguage === 'de'
+          ? `Vielen Dank,\n${profile.displayName || teacherSig} - Deutschlehrer 🇩🇪`
+          : `مع تحيات: *${teacherSig}* 🇩🇪`;
+      setFinalGeneratedText(`${header}\n\n${multiLessonReportResult.formattedReportText}\n\n${footer}`);
+      return;
+    }
 
     if (activeTab === 'bulk') {
       setFinalGeneratedText(getBulkReportText());
@@ -1253,7 +1441,10 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
     taughtTodayInfo,
     homeworkInfo,
     currentOnlineHwInfo,
-    prevStudentOnlineResult
+    prevStudentOnlineResult,
+    teacherVerifiedPublicSlot1,
+    teacherVerifiedPublicSlot2,
+    multiLessonReportResult
   ]);
 
   const handleCopyText = () => {
@@ -1992,6 +2183,68 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
                     </button>
                   </div>
                 )}
+                {(() => {
+                  const slot1Eval = evaluateParentRecordingSlot(recordingLink, 'recordingLink');
+                  if (!recordingLink.trim()) return null;
+                  if (slot1Eval.isZoomLink) {
+                    return (
+                      <div className="text-[10px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/50 rounded-lg px-2 py-1 flex items-center justify-between gap-2">
+                        <span>
+                          {_t(
+                            '⚠️ رابط Zoom لا يُرسل كرابط تسجيل لولي الأمر. استخدم رابط مشاركة Grain العام فقط.',
+                            '⚠️ Zoom meeting URLs are excluded from parent reports. Use a public Grain recording link.',
+                            '⚠️ Zoom-Links werden nicht als Aufnahme an Eltern gesendet.'
+                          )}
+                        </span>
+                      </div>
+                    );
+                  }
+                  if (slot1Eval.isGrainLink) {
+                    return (
+                      <div className={`text-[10px] font-bold rounded-lg px-2 py-1 border flex items-center justify-between flex-wrap gap-2 ${
+                        slot1Eval.allowedForParent
+                          ? 'bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-300'
+                          : 'bg-amber-50/80 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/50 text-amber-800 dark:text-amber-300'
+                      }`}>
+                        <span>
+                          {slot1Eval.allowedForParent
+                            ? _t(
+                                '✓ رابط Grain عام ومؤكد (يفتح لولي الأمر مباشرة بدون حساب Grain)',
+                                '✓ Public Grain link verified (opens for parents without Grain login)',
+                                '✓ Öffentlicher Grain-Link bestätigt (ohne Anmeldung zugänglich)'
+                              )
+                            : _t(
+                                `⚠️ حالة الوصول (${slot1Eval.classification}): مستبعد من التقرير حتى تأكيد أنه عام لولي الأمر بدون تسجيل دخول.`,
+                                `⚠️ Share state (${slot1Eval.classification}): Excluded from parent report until verified public.`,
+                                `⚠️ Status (${slot1Eval.classification}): Vom Elternbericht ausgeschlossen, bis öffentlich bestätigt.`
+                              )}
+                        </span>
+                        <label className="inline-flex items-center gap-1 cursor-pointer select-none font-black underline">
+                          <input
+                            type="checkbox"
+                            checked={slot1Eval.allowedForParent}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setTeacherVerifiedPublicSlot1(checked);
+                              setIsManualEdited(false);
+                              if (lesson.id && updateLesson && lesson.grainMeta) {
+                                updateLesson(lesson.id, {
+                                  grainMeta: {
+                                    ...lesson.grainMeta,
+                                    shareAccessClassification: checked ? 'public_access_verified' : 'workspace_only'
+                                  }
+                                });
+                              }
+                            }}
+                            className="rounded border-surface-border text-primary"
+                          />
+                          <span>{_t('تأكيد أنه عام لولي الأمر', 'Confirm Public Access', 'Öffentlich bestätigen')}</span>
+                        </label>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
             </div>
 
@@ -2052,7 +2305,218 @@ ${topicBlock}${hwBlock}${recordingSection}${evalSection}${perfSection}${cleanStu
                 </div>
               </div>
             )}
+
+            {/* Part 11: Multi-Lesson Parent Report Selector (Sorted Newest first -> Oldest last) */}
+            {candidateStudentOrGroupLessons.length > 1 && (
+              <div className="pt-2 border-t border-surface-border/70 space-y-2">
+                <div className="flex items-center justify-between flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowMultiLessonSelector((prev) => !prev)}
+                    className="text-[11px] font-black text-primary hover:underline flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <BookOpen className="w-3.5 h-3.5" />
+                    <span>
+                      {_t(
+                        `📚 دمج عدة حصص في تقرير واحد (${selectedMultiLessonIds.length} مختارة - الأحدث للأقدم)`,
+                        `📚 Combine Multiple Lessons (${selectedMultiLessonIds.length} selected - Newest first)`,
+                        `📚 Mehrere Stunden kombinieren (${selectedMultiLessonIds.length} ausgewählt - Neueste zuerst)`
+                      )}
+                    </span>
+                  </button>
+                  {selectedMultiLessonIds.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedMultiLessonIds([lesson.id]);
+                        setIsManualEdited(false);
+                      }}
+                      className="text-[10px] font-bold text-rose-600 hover:underline cursor-pointer"
+                    >
+                      {_t('إرجاع للحصة الحالية فقط', 'Reset to Current Lesson', 'Nur aktuelle Stunde')}
+                    </button>
+                  )}
+                </div>
+
+                {showMultiLessonSelector && (
+                  <div className="p-2 rounded-xl bg-surface-hover/60 border border-surface-border space-y-2">
+                    <div className="flex items-center justify-between flex-wrap gap-1.5">
+                      <input
+                        type="text"
+                        value={multiLessonSearchQuery}
+                        onChange={(e) => setMultiLessonSearchQuery(e.target.value)}
+                        placeholder={_t('بحث بالتاريخ أو عنوان الدرس...', 'Search by date or topic...', 'Suche nach Datum oder Thema...')}
+                        className="flex-1 min-w-[140px] px-2 py-1 rounded-lg bg-surface border border-surface-border text-[11px]"
+                      />
+                      <select
+                        value={multiLessonRecordingFilter}
+                        onChange={(e) => setMultiLessonRecordingFilter(e.target.value as any)}
+                        className="px-2 py-1 rounded-lg bg-surface border border-surface-border text-[10px] font-bold"
+                      >
+                        <option value="all">{_t('كل الحصص', 'All Lessons', 'Alle Stunden')}</option>
+                        <option value="with_recording">{_t('بتسجيل فقط', 'With Recording', 'Mit Aufnahme')}</option>
+                        <option value="without_recording">{_t('بدون تسجيل', 'Without Recording', 'Ohne Aufnahme')}</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedMultiLessonIds(filteredMultiLessons.map((l) => l.id));
+                          setIsManualEdited(false);
+                        }}
+                        className="px-2 py-1 rounded-lg bg-primary/10 text-primary text-[10px] font-black cursor-pointer"
+                      >
+                        {_t('تحديد الكل', 'Select All', 'Alle')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedMultiLessonIds([lesson.id]);
+                          setIsManualEdited(false);
+                        }}
+                        className="px-2 py-1 rounded-lg bg-slate-200/70 dark:bg-slate-800 text-text-muted text-[10px] font-bold cursor-pointer"
+                      >
+                        {_t('إلغاء التحديد', 'Deselect', 'Auswahl aufheben')}
+                      </button>
+                    </div>
+
+                    <div className="max-h-40 overflow-y-auto divide-y divide-surface-border/50 border border-surface-border rounded-lg bg-surface">
+                      {filteredMultiLessons.map((item) => {
+                        const isChecked = selectedMultiLessonIds.includes(item.id);
+                        const itemTopic = resolveTaughtTodayTopic(item, item.report).text || item.title || _t('حصة ألماني', 'German Lesson', 'Deutschstunde');
+                        const itemRecUrl = (item.recordingLink || item.report?.recordingLink || item.grainMeta?.recordingUrl || '').trim();
+                        const itemShareClass = getLessonRecordingShareClassification(item, 'recordingLink');
+                        return (
+                          <label
+                            key={item.id}
+                            className={`flex items-center justify-between gap-2 px-2.5 py-1.5 text-[11px] cursor-pointer hover:bg-surface-hover/70 ${
+                              isChecked ? 'bg-primary-soft/30 font-bold' : ''
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  const checked = e.target.checked;
+                                  setSelectedMultiLessonIds((prev) => {
+                                    if (checked) return Array.from(new Set([...prev, item.id]));
+                                    const next = prev.filter((id) => id !== item.id);
+                                    return next.length > 0 ? next : [lesson.id];
+                                  });
+                                  setIsManualEdited(false);
+                                }}
+                                className="rounded border-surface-border text-primary"
+                              />
+                              <span className="font-mono text-[10px] text-primary shrink-0">{item.date}</span>
+                              {item.time && <span className="font-mono text-[10px] text-text-muted shrink-0">{item.time}</span>}
+                              <span className="truncate text-text-main">{itemTopic}</span>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              {itemRecUrl ? (
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[9px] font-black ${
+                                    itemShareClass === 'public_access_verified'
+                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                      : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                  }`}
+                                >
+                                  {itemShareClass === 'public_access_verified'
+                                    ? _t('🎥 عام ✓', '🎥 Public ✓', '🎥 Öffentlich ✓')
+                                    : _t(`🔒 ${itemShareClass}`, `🔒 ${itemShareClass}`, `🔒 ${itemShareClass}`)}
+                                </span>
+                              ) : (
+                                <span className="text-[9px] text-text-muted">{_t('بدون تسجيل', 'No rec', 'Keine Aufn.')}</span>
+                              )}
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+
+                    {multiLessonReportResult && multiLessonReportResult.excludedNonPublicCount > 0 && (
+                      <div className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-lg px-2 py-1">
+                        {_t(
+                          `⚠️ تم استبعاد (${multiLessonReportResult.excludedNonPublicCount}) رابط تسجيل غير عام من التقرير المجمع لحماية تجربة ولي الأمر.`,
+                          `⚠️ Excluded (${multiLessonReportResult.excludedNonPublicCount}) non-public recording link(s) from the combined report.`,
+                          `⚠️ (${multiLessonReportResult.excludedNonPublicCount}) nicht-öffentliche Aufnahmelinks wurden ausgeschlossen.`
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
+
+          {/* Rule 4: Teacher Review & Approval for Grain Lesson Summary (Never sent automatically) */}
+          {sanitizedGrainSummaryCandidate && !grainSummaryDismissed && (
+            <div className="p-2.5 sm:p-3 rounded-xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800/60 space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-1.5">
+                <div className="flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                  <span className="text-xs font-black text-purple-900 dark:text-purple-200">
+                    {_t(
+                      'مسودة ملخص الحصة من Grain (تحتاج موافقة المعلم قبل الإضافة للتقرير)',
+                      'Grain Summary Draft (Requires Teacher Approval Before Adding to Report)',
+                      'Grain-Zusammenfassung (Erfordert Bestätigung der Lehrkraft)'
+                    )}
+                  </span>
+                </div>
+                {grainSummaryApprovedForReport && (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                    {_t('تم الاعتماد والإدراج ✓', 'Approved & Inserted ✓', 'Bestätigt & eingefügt ✓')}
+                  </span>
+                )}
+              </div>
+              <textarea
+                value={grainDraftSummaryText}
+                onChange={(e) => setGrainDraftSummaryText(e.target.value)}
+                rows={2}
+                className="w-full p-2 rounded-lg border border-purple-200 dark:border-purple-800 bg-surface text-xs text-text-main"
+              />
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <span className="text-[10px] text-slate-500">
+                  {_t(
+                    'تم إخفاء أسماء طلاب المجموعة الآخرين تلقائياً لحماية الخصوصية.',
+                    'Other group students’ names are automatically redacted for privacy.',
+                    'Namen anderer Gruppenschüler wurden aus Datenschutzgründen entfernt.'
+                  )}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cleanApproved = sanitizeGrainSummaryForParentReport({
+                        rawSummaryText: grainDraftSummaryText,
+                        targetStudent: activeStudent,
+                        allGroupStudents,
+                        language: reportLanguage === 'de' ? 'de' : reportLanguage === 'en' ? 'en' : 'ar'
+                      });
+                      setGrainDraftSummaryText(cleanApproved);
+                      setGrainSummaryApprovedForReport(true);
+                      setFinalGeneratedText((prev) =>
+                        prev.includes(cleanApproved) ? prev : `${prev.trim()}\n\n📌 ${cleanApproved}`
+                      );
+                      setIsManualEdited(true);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-black flex items-center gap-1 cursor-pointer"
+                  >
+                    <Check className="w-3 h-3" />
+                    <span>
+                      {_t('اعتماد وإدراج في التقرير', 'Approve & Insert into Report', 'Bestätigen & einfügen')}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGrainSummaryDismissed(true)}
+                    className="px-2 py-1 rounded-lg bg-surface hover:bg-rose-50 text-slate-600 hover:text-rose-600 border border-surface-border text-[10px] font-bold cursor-pointer"
+                  >
+                    {_t('تجاهل', 'Dismiss', 'Verwerfen')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Preview & Editor Textarea */}
           <div className="space-y-1.5">

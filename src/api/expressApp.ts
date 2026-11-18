@@ -29,6 +29,7 @@ import {
   invalidateServerAssignmentCache,
   resetAdminFirestoreForTesting
 } from '../server/firebaseAdmin';
+import { registerGrainServerRoutes } from '../server/grainServerProxy';
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
@@ -49,7 +50,7 @@ app.use((req, res, next) => {
     }
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Owner-Uid');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Owner-Uid, X-Grain-Session-Token');
   if (req.method === 'OPTIONS') {
     res.status(204).end();
     return;
@@ -2559,6 +2560,10 @@ app.post('/api/lernstudio/extract-grammar', async (req, res) => {
   }
 });
 
+// Register authenticated server-side Grain Personal API proxy routes
+registerGrainServerRoutes(app, verifyFirebaseIdToken);
+
 export default app;
+
 
 

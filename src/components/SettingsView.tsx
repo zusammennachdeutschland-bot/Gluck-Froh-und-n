@@ -6,7 +6,7 @@ import {
   HardDrive, Download, Upload, Trash2, AlertTriangle, MessageSquare, ChevronRight,
   ArrowLeft, ArrowRight, Calendar, ShieldAlert, ShieldCheck, Info, Copy, Save, Phone, ExternalLink,
   BookOpen, FileText, Bell, CheckSquare, XCircle, Award, Sparkles, Star, Plus, Pencil, RotateCcw, Heart,
-  Target, Zap, Smartphone, Lock, Shield, Share2, Layers, CheckCircle, Palette, FolderOpen, Key, Cloud
+  Target, Zap, Smartphone, Lock, Shield, Share2, Layers, CheckCircle, Palette, FolderOpen, Key, Cloud, Video
 } from 'lucide-react';
 import { NotificationSettingsSection } from './NotificationSettingsSection';
 import { SmartBackupCenter } from './SmartBackupCenter';
@@ -19,6 +19,7 @@ import { CustomColorPickerModal } from './CustomColorPickerModal';
 import { ContactsUnificationModal } from './ContactsUnificationModal';
 import { DownloadedFilesSection } from './DownloadedFilesSection';
 import { GoogleCloudSyncCard } from './GoogleCloudSyncCard';
+import { GrainSettingsCard } from './GrainSettingsCard';
 import { isBackupFileSizeValid } from '../utils/backupEngine';
 import { AndroidKeystoreSection } from './AndroidKeystoreSection';
 import { getActiveCloudUser, getLastCloudSyncTime } from '../services/firebaseWorkspaceSync';
@@ -27,6 +28,7 @@ import { TeacherCrestLogo } from '../shared/components/TeacherCrestLogo';
 
 type SettingsCategory = 
   | 'downloaded_files'
+  | 'grain'
   | 'language'
   | 'notifications'
   | 'profile'
@@ -317,6 +319,14 @@ export const SettingsView: React.FC = () => {
 
   const categoryCards = [
     {
+      id: 'grain' as SettingsCategory,
+      title: _t('ربط Grain للتسجيلات', 'Grain Integration', 'Grain-Integration'),
+      description: _t('ربط تسجيلات Grain ومطابقة الحصص بأمان عبر Personal API Token', 'Connect Grain recordings & lesson matching via Personal API Token', 'Grain-Aufnahmen & Lektionsabgleich über Personal API Token'),
+      icon: Video,
+      color: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20 dark:border-purple-500/30',
+      badge: 'Personal API v2'
+    },
+    {
       id: 'downloaded_files' as SettingsCategory,
       title: _t('الملفات المحملة', 'Downloaded Files', 'Heruntergeladene Dateien'),
       description: _t('أرشيف جميع الملفات والشهادات والتقارير وأوراق العمل المحفوظة والمطبوعة والمرسلة واتساب مع فلترة ذكية', 'All generated, printed, and WhatsApp-shared files & certificates with filtering', 'Alle erstellten, gedruckten und geteilten Dateien mit Filter'),
@@ -548,9 +558,24 @@ export const SettingsView: React.FC = () => {
         {activeCategory === null ? (
           <div className="hidden lg:flex flex-col gap-3.5 animate-fade-in">
             <GoogleCloudSyncCard />
+            <GrainSettingsCard />
           </div>
         ) : (
           <div className="animate-fade-in bg-surface rounded-xl border border-surface-border shadow-2xs p-3.5 sm:p-4 min-h-[50vh]">
+            {/* ==========================================
+                SUBPAGE: GRAIN INTEGRATION
+            ========================================== */}
+            {activeCategory === 'grain' && (
+              <div className="space-y-3.5 animate-scale-up">
+                {renderSubPageHeader(
+                  _t('ربط Grain للتسجيلات 🎥', 'Grain Recording Integration 🎥', 'Grain-Aufnahme-Integration 🎥'),
+                  _t('إعداد مفتاح Grain Personal API Token وفحص الصلاحيات ومطابقة تسجيلات الحصص بأمان', 'Configure Grain Personal API Token, inspect account capabilities, and safely match lesson recordings', 'Grain Personal API Token konfigurieren und Aufnahmen sicher abgleichen'),
+                  Video
+                )}
+                <GrainSettingsCard />
+              </div>
+            )}
+
             {/* ==========================================
                 SUBPAGE: DOWNLOADED FILES (الملفات المحملة)
             ========================================== */}

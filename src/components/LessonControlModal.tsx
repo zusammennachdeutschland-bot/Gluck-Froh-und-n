@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { storage } from '../services/storageService';
-import { Lesson, Student, AttendanceStatus, HomeworkStatus, PaymentStatus, LessonReport, StudentSessionPerformance } from '../types';
+import { Lesson, Student, AttendanceStatus, HomeworkStatus, PaymentStatus, LessonReport, StudentSessionPerformance, GrainLessonMetadata } from '../types';
 import { 
   X, Play, Pause, Square, Video, MapPin, Send, Phone, CheckCircle2, Check,
   Clock, AlertCircle, Sparkles, FileText, Award, DollarSign, ExternalLink, Navigation,
@@ -14,6 +14,7 @@ import { ArabicParentReportModal } from './ArabicParentReportModal';
 import { LessonReminderModal } from './LessonReminderModal';
 import { HomeworkFollowUpModal } from './HomeworkFollowUpModal';
 import { GroupProfileModal } from './GroupProfileModal';
+import { GrainLessonMatcherPanel } from './GrainLessonMatcherPanel';
 import { LernstudioHomeworkModal } from '../shared/components/LernstudioHomeworkModal';
 import { useSyncedHomeworkData } from '../hooks/useSyncedHomeworkData';
 import { resolveLinkedOnlineHomeworkForLesson } from '../utils/lessonHomeworkLinkUtils';
@@ -83,6 +84,8 @@ export const LessonControlModal: React.FC = () => {
   const [lessonRecordingLink, setLessonRecordingLink] = useState('');
   const [lessonRecordingLink2, setLessonRecordingLink2] = useState('');
   const [showRecordingLink2, setShowRecordingLink2] = useState(false);
+  const [lessonZoomMeetingLink, setLessonZoomMeetingLink] = useState('');
+  const [lessonGrainMeta, setLessonGrainMeta] = useState<GrainLessonMetadata | undefined>(undefined);
   const [studentHomeworkDone, setStudentHomeworkDone] = useState<Record<string, 'yes' | 'no' | 'none'>>({});
   const [studentDictationGrade, setStudentDictationGrade] = useState<Record<string, number>>({});
   const [studentExamGrade, setStudentExamGrade] = useState<Record<string, number>>({});
@@ -233,6 +236,8 @@ export const LessonControlModal: React.FC = () => {
       );
       setLessonRecordingLink(selectedLesson.report.recordingLink || selectedLesson.recordingLink || '');
       setLessonRecordingLink2(selectedLesson.report.recordingLink2 || selectedLesson.recordingLink2 || '');
+      setLessonZoomMeetingLink(selectedLesson.report.zoomMeetingLink || selectedLesson.zoomMeetingLink || '');
+      setLessonGrainMeta(selectedLesson.report.grainMeta || selectedLesson.grainMeta);
       if (selectedLesson.report?.recordingLink2 || selectedLesson.recordingLink2) {
         setShowRecordingLink2(true);
       }
@@ -309,6 +314,8 @@ export const LessonControlModal: React.FC = () => {
       setLessonPreviousHomework(detectedPreviousHomework || '');
       setLessonRecordingLink(selectedLesson.recordingLink || '');
       setLessonRecordingLink2(selectedLesson.recordingLink2 || '');
+      setLessonZoomMeetingLink(selectedLesson.zoomMeetingLink || '');
+      setLessonGrainMeta(selectedLesson.grainMeta);
       setShowRecordingLink2(!!selectedLesson.recordingLink2);
       setStudentHomeworkDone({});
       setStudentDictationGrade({});
@@ -868,6 +875,8 @@ export const LessonControlModal: React.FC = () => {
       previousHomeworkDescription: (lessonPreviousHomework || detectedPreviousHomework || '').trim() || undefined,
       recordingLink: lessonRecordingLink.trim() || undefined,
       recordingLink2: lessonRecordingLink2.trim() || undefined,
+      zoomMeetingLink: lessonZoomMeetingLink.trim() || undefined,
+      grainMeta: lessonGrainMeta,
       studentHomeworkDone: isSingleStudentAbsent ? {} : finalStudentHomeworkDone,
       studentDictationGrade: isSingleStudentAbsent ? {} : finalStudentDictationGrade,
       studentExamGrade: isSingleStudentAbsent ? {} : finalStudentExamGrade,
@@ -919,6 +928,8 @@ export const LessonControlModal: React.FC = () => {
       ...(reportData.studentPayments ? { studentPayments: reportData.studentPayments as any } : {}),
       recordingLink: lessonRecordingLink.trim() || undefined,
       recordingLink2: lessonRecordingLink2.trim() || undefined,
+      zoomMeetingLink: lessonZoomMeetingLink.trim() || undefined,
+      grainMeta: lessonGrainMeta,
       report: reportData
     });
 
@@ -1971,6 +1982,54 @@ export const LessonControlModal: React.FC = () => {
                           </div>
                         </div>
                       )}
+
+                      {/* Grain Assistant: Zoom Link Verification, Recording Matcher & Educational Drafts */}
+                      <GrainLessonMatcherPanel
+                        selectedLesson={selectedLesson}
+                        lessons={lessons}
+                        groups={groups}
+                        students={students}
+                        lessonRecordingLink={lessonRecordingLink}
+                        lessonRecordingLink2={lessonRecordingLink2}
+                        lessonZoomMeetingLink={lessonZoomMeetingLink}
+                        grainMeta={lessonGrainMeta}
+                        onChangeZoomMeetingLink={setLessonZoomMeetingLink}
+                        onApplyConfirmedMatch={({ targetSlot, recordingUrl, updatedGrainMeta, targetLessonId }) => {
+                          if (targetLessonId === selectedLesson.id) {
+                            if (targetSlot === 'part2') {
+                              setShowRecordingLink2(true);
+                              setLessonRecordingLink2(recordingUrl);
+                            } else {
+                              setLessonRecordingLink(recordingUrl);
+                            }
+                            setLessonGrainMeta(updatedGrainMeta);
+                            updateLesson(selectedLesson.id, {
+                              ...(targetSlot === 'part2' ? { recordingLink2: recordingUrl } : { recordingLink: recordingUrl }),
+                              zoomMeetingLink: lessonZoomMeetingLink.trim() || undefined,
+                              grainMeta: updatedGrainMeta
+                            });
+                          } else {
+                            // Teacher explicitly chose another candidate lesson
+                            updateLesson(targetLessonId, {
+                              ...(targetSlot === 'part2' ? { recordingLink2: recordingUrl } : { recordingLink: recordingUrl }),
+                              grainMeta: updatedGrainMeta
+                            });
+                          }
+                        }}
+                        onApplyApprovedEducationalSummary={({ summaryTextAr, updatedGrainMeta }) => {
+                          setLessonWhatWasTaught((prev) =>
+                            prev.trim() ? `${prev.trim()}\n${summaryTextAr}` : summaryTextAr
+                          );
+                          setLessonGrainMeta(updatedGrainMeta);
+                          updateLesson(selectedLesson.id, {
+                            grainMeta: updatedGrainMeta
+                          });
+                        }}
+                        onApplyApprovedHomework={(homeworkText) => {
+                          setLessonNextHomework(homeworkText);
+                        }}
+                        _t={_t}
+                      />
                     </div>
 
                     {/* Individual Students Performance and Scores */}

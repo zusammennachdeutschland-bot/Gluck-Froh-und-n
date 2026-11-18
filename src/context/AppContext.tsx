@@ -89,6 +89,7 @@ import { Share } from '@capacitor/share';
 import { validateAndSanitizeBackupPayload, hasBackupSection, MAX_BACKUP_FILE_SIZE_BYTES, isBackupFileSizeValid } from '../utils/backupEngine';
 import { syncAllWidgetsToNative } from '../services/widgetService';
 import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesService';
+import { loadGrainGroupLearningRecords, saveGrainGroupLearningRecords, sanitizeGrainGroupLearningRecord } from '../services/grainService';
 
 export const DEFAULT_BOTTOM_NAV_ORDER = [
   'home',
@@ -96,6 +97,7 @@ export const DEFAULT_BOTTOM_NAV_ORDER = [
   'students',
   'payments',
   'lernstudio',
+  'grainRecordings',
   'hod',
   'history',
   'reports',
@@ -126,8 +128,8 @@ interface AppContextType {
   setAccentColor: (color: AccentColor) => void;
   t: (key: TranslationKey) => string;
   _t: (ar: string, en: string, de?: string) => string;
-  activeTab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio';
-  setActiveTab: (tab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio') => void;
+  activeTab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio' | 'grainRecordings';
+  setActiveTab: (tab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio' | 'grainRecordings') => void;
 
   // Lernstudio Sets
   lernstudioSets: LernstudioSet[];
@@ -770,10 +772,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     storage.setItem('dl_quick_todos', todos);
   }, [todos]);
 
-  const [activeTab, setActiveTabState] = useState<'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio'>('home');
+  const [activeTab, setActiveTabState] = useState<'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio' | 'grainRecordings'>('home');
 
-  const setActiveTab = useCallback((tab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio') => {
-    const validTabs = ['home', 'schedule', 'students', 'history', 'payments', 'finance', 'reports', 'settings', 'freeTime', 'certificates', 'schoolSchedule', 'hod', 'lernstudio'];
+  const setActiveTab = useCallback((tab: 'home' | 'schedule' | 'students' | 'history' | 'payments' | 'finance' | 'reports' | 'settings' | 'freeTime' | 'certificates' | 'schoolSchedule' | 'hod' | 'lernstudio' | 'grainRecordings') => {
+    const validTabs = ['home', 'schedule', 'students', 'history', 'payments', 'finance', 'reports', 'settings', 'freeTime', 'certificates', 'schoolSchedule', 'hod', 'lernstudio', 'grainRecordings'];
     if (validTabs.includes(tab)) {
       setActiveTabState(tab);
     } else {
@@ -3536,6 +3538,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       }
       return l;
     }));
+    // Mark any Grain group learning records for this group as obsolete without reassigning
+    try {
+      const records = loadGrainGroupLearningRecords();
+      if (records.some((r) => r.groupId === id && !r.obsoleteGroup)) {
+        saveGrainGroupLearningRecords(
+          records.map((r) => (r.groupId === id ? { ...r, obsoleteGroup: true } : r))
+        );
+      }
+    } catch {}
+
     refreshCalendarAndDashboard();
   };
 
@@ -3594,6 +3606,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
 
     setGroups(prev => prev.map(g => g.id === id ? wrapDeletion(g) : g));
+    try {
+      const records = loadGrainGroupLearningRecords();
+      if (records.some((r) => r.groupId === id && !r.obsoleteGroup)) {
+        saveGrainGroupLearningRecords(
+          records.map((r) => (r.groupId === id ? { ...r, obsoleteGroup: true } : r))
+        );
+      }
+    } catch {}
     await updateFullStudentsStorage(all => all.map(s => s.groupId === id ? wrapDeletion(s) : s));
     await updateFullLessonsStorage(all => all.map(l => l.groupId === id ? wrapDeletion(l) : l));
     await updateFullPaymentsStorage(all => all.map(p => (p.groupId === id || groupStudentIds.has(p.studentId)) ? wrapDeletion(p) : p));
@@ -6847,6 +6867,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       lernstudioSets,
       homeworkAssignments: hwAssignments,
       homeworkSubmissions: hwSubmissions,
+      grainGroupLearningRecords: await loadGrainGroupLearningRecords(),
       pickerNames,
       recentlyDeleted: recDeleted,
       dismissedDashboardLessons: dismissedLessons,
@@ -7375,6 +7396,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         writeSyncedPickerNames(combined, true);
         setPickerNamesVersion(v => v + 1);
       }
+      if (hasBackupSection(parsed, 'grainGroupLearningRecords') && Array.isArray((data as any).grainGroupLearningRecords)) {
+        const localLearning = await loadGrainGroupLearningRecords();
+        const incomingLearning = ((data as any).grainGroupLearningRecords as any[])
+          .map((r) => sanitizeGrainGroupLearningRecord(r))
+          .filter(Boolean);
+        const mergedLearning = mergeEntities(localLearning as any[], incomingLearning as any[], {
+          entityTypeName: 'grainGroupLearningRecords',
+          purgedRecords: activePurged
+        }).merged;
+        await saveGrainGroupLearningRecords(mergedLearning as any[]);
+      }
 
       // Reconcile and safeguard synchronization metadata
       const reconciledState = await applyRestoreSyncSafeguards(
@@ -7561,6 +7593,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       financeNotifications,
       goldHoldings,
       lernstudioSets,
+      grainGroupLearningRecords: await loadGrainGroupLearningRecords(),
       recentlyDeleted: recentlyDeletedRef.current || recentlyDeleted,
       dismissedDashboardLessons: dismissedDashboardLessonIds,
       syncQueue: [],

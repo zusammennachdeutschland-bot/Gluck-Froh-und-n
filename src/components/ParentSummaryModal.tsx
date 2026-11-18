@@ -1,13 +1,21 @@
 import React, { useState, useMemo } from 'react';
 import { Lesson, Student, TeacherProfile } from '../types';
 import { useApp } from '../context/AppContext';
-import { X, Copy, Check, MessageSquare, Phone, Send, Share2, Sparkles, Home, AtSign } from 'lucide-react';
+import { X, Copy, Check, MessageSquare, Phone, Send, Share2, Sparkles, Home, AtSign, BookOpen } from 'lucide-react';
 import { ArabicParentReportModal } from './ArabicParentReportModal';
 import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { getTeacherEnglishName, getTeacherArabicName } from '../utils/teacherUtils';
-import { calculateSequentialSessionNumber, resolveLessonCycleNumber } from '../utils/lessonUtils';
+import { calculateSequentialSessionNumber, resolveLessonCycleNumber, resolveTaughtTodayTopic } from '../utils/lessonUtils';
 import { getTimeBasedGreeting } from '../utils/greetingUtils';
+import {
+  sanitizeGrainSummaryForParentReport,
+  isGrainRecordingUrl,
+  normalizeZoomMeetingUrl,
+  getLessonRecordingShareClassification,
+  sortLessonsNewestFirst,
+  buildMultiLessonParentReportData
+} from '../services/grainService';
 
 interface ParentSummaryModalProps {
   lesson: Lesson;
@@ -27,6 +35,9 @@ export const ParentSummaryModal: React.FC<ParentSummaryModalProps> = ({
   const { groups, students, lessons, reportLanguage, reportT, _t } = useApp();
   const [copied, setCopied] = useState(false);
   const [showArabicModal, setShowArabicModal] = useState(false);
+  const [showMultiLessonSelector, setShowMultiLessonSelector] = useState(false);
+  const [selectedMultiLessonIds, setSelectedMultiLessonIds] = useState<string[]>([lesson.id]);
+  const [multiLessonSearchQuery, setMultiLessonSearchQuery] = useState('');
 
   const activeStudent = student || 
     students.find(s => (lesson.studentId && s.id === lesson.studentId) || (lesson.studentName && s.name && s.name.trim().toLowerCase() === lesson.studentName.trim().toLowerCase())) || 
@@ -61,11 +72,88 @@ export const ParentSummaryModal: React.FC<ParentSummaryModalProps> = ({
   // Dynamically compute exact session number excluding cancelled lessons
   const currentSessionNumber = cycleResolution.sessionNumber >= 1 ? cycleResolution.sessionNumber : 1;
 
+  // Rule 4: Teacher review & approval for Grain summary (never included automatically)
+  const allGroupStudents = useMemo(() => {
+    return lesson.groupId ? students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === lesson.groupId) : [];
+  }, [lesson.groupId, students]);
+
+  const candidateLessonsNewestFirst = useMemo(() => {
+    const allList = lessons || [];
+    const filtered = allList.filter((l) => {
+      if (l.id === lesson.id) return true;
+      if (lesson.groupId && l.groupId === lesson.groupId) return true;
+      if (activeStudent?.id && (l.studentId === activeStudent.id || l.attendance?.[activeStudent.id] || l.report?.studentAttendance?.[activeStudent.id])) {
+        return true;
+      }
+      return false;
+    });
+    return sortLessonsNewestFirst(filtered);
+  }, [lessons, lesson.id, lesson.groupId, activeStudent?.id]);
+
+  const filteredMultiLessons = useMemo(() => {
+    const q = multiLessonSearchQuery.trim().toLowerCase();
+    if (!q) return candidateLessonsNewestFirst;
+    return candidateLessonsNewestFirst.filter((l) => {
+      const topic = resolveTaughtTodayTopic(l, l.report).text || l.title || '';
+      return `${l.date || ''} ${l.time || ''} ${topic}`.toLowerCase().includes(q);
+    });
+  }, [candidateLessonsNewestFirst, multiLessonSearchQuery]);
+
+  const multiLessonReportResult = useMemo(() => {
+    if (selectedMultiLessonIds.length <= 1) return null;
+    const picked = candidateLessonsNewestFirst.filter((l) => selectedMultiLessonIds.includes(l.id));
+    if (picked.length <= 1) return null;
+    return buildMultiLessonParentReportData({
+      lessons: picked,
+      targetStudent: activeStudent || null,
+      allGroupStudents,
+      language: reportLanguage === 'de' ? 'de' : reportLanguage === 'en' ? 'en' : 'ar'
+    });
+  }, [selectedMultiLessonIds, candidateLessonsNewestFirst, activeStudent, allGroupStudents, reportLanguage]);
+
+  const rawGrainCandidate =
+    lesson.grainMeta?.approvedParentReportSummaryAr ||
+    lesson.grainMeta?.approvedSummary ||
+    lesson.report?.grainMeta?.approvedParentReportSummaryAr ||
+    lesson.report?.grainMeta?.approvedSummary ||
+    '';
+
+  const initialSanitizedGrain = useMemo(() => {
+    if (!rawGrainCandidate) return '';
+    return sanitizeGrainSummaryForParentReport({
+      rawSummaryText: rawGrainCandidate,
+      targetStudent: activeStudent,
+      allGroupStudents,
+      language: reportLanguage === 'de' ? 'de' : reportLanguage === 'en' ? 'en' : 'ar'
+    });
+  }, [rawGrainCandidate, activeStudent, allGroupStudents, reportLanguage]);
+
+  const [editableGrainSummary, setEditableGrainSummary] = useState(initialSanitizedGrain);
+  const [approvedGrainSummaryText, setApprovedGrainSummaryText] = useState<string | null>(null);
+  const [dismissedGrainSummary, setDismissedGrainSummary] = useState(false);
+
+  // Part 2 (FIX-1): Only include verified public Grain links (never Zoom meeting URLs or non-public links)
+  const getSafeParentLink = (rawUrl: string | undefined, slot: 'recordingLink' | 'recordingLink2'): string => {
+    const trimmed = (rawUrl || '').trim();
+    if (!trimmed) return '';
+    if (normalizeZoomMeetingUrl(trimmed) !== null) return '';
+    if (/\/_\/public-api\/|\/transcript|\.mp4($|\?)|\.webm($|\?)/i.test(trimmed)) return '';
+    if (isGrainRecordingUrl(trimmed)) {
+      const cls = getLessonRecordingShareClassification(lesson, slot);
+      return cls === 'public_access_verified' ? trimmed : '';
+    }
+    return trimmed;
+  };
+
   // Generate multilingual educational lesson summary message
   const generateSummaryText = () => {
+    if (multiLessonReportResult && multiLessonReportResult.entries.length > 1) {
+      return multiLessonReportResult.formattedReportText;
+    }
+
     const perfFeedback = report?.studentPerformance?.[activeStudent?.id || '']?.generatedFeedback?.detailed || '';
-    const recLink1 = report?.recordingLink || lesson.recordingLink;
-    const recLink2 = report?.recordingLink2 || lesson.recordingLink2;
+    const recLink1 = getSafeParentLink(report?.recordingLink || lesson.recordingLink, 'recordingLink');
+    const recLink2 = getSafeParentLink(report?.recordingLink2 || lesson.recordingLink2, 'recordingLink2');
     
     const totalCycleCount = cycleResolution.totalCycleSessions;
     const isPerLessonGroup = cycleResolution.isPerLesson;
@@ -178,7 +266,10 @@ ${getTeacherEnglishName(profile, 'Lehrer/in')}
 Glück fröhlich und froh 🇩🇪`;
   };
 
-  const summaryText = generateSummaryText();
+  const baseSummaryText = generateSummaryText();
+  const summaryText = approvedGrainSummaryText
+    ? `${baseSummaryText}\n\n📌 ${approvedGrainSummaryText}`
+    : baseSummaryText;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(summaryText);
@@ -232,6 +323,154 @@ Glück fröhlich und froh 🇩🇪`;
 
         {/* Modal Content */}
         <div className="p-3.5 sm:p-5 space-y-3 sm:space-y-4 max-h-[70vh] overflow-y-auto">
+          {/* Rule 4: Teacher Review & Approval for Grain Lesson Summary */}
+          {initialSanitizedGrain && !dismissedGrainSummary && (
+            <div className="p-2.5 rounded-xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800/60 space-y-2">
+              <div className="flex items-center justify-between gap-1.5">
+                <span className="text-[11px] font-black text-purple-900 dark:text-purple-200 flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                  <span>
+                    {reportT(
+                      'مسودة ملخص الحصة من Grain (بموافقة المعلم فقط)',
+                      'Grain Summary Draft (Teacher Approval Required)',
+                      'Grain-Zusammenfassung (Lehrkraft-Bestätigung erforderlich)'
+                    )}
+                  </span>
+                </span>
+              </div>
+              <textarea
+                rows={2}
+                value={editableGrainSummary}
+                onChange={(e) => setEditableGrainSummary(e.target.value)}
+                className="w-full p-2 rounded-lg border border-purple-200 dark:border-purple-800 bg-surface text-xs text-text-main"
+              />
+              <div className="flex justify-end gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const clean = sanitizeGrainSummaryForParentReport({
+                      rawSummaryText: editableGrainSummary,
+                      targetStudent: activeStudent,
+                      allGroupStudents,
+                      language: reportLanguage === 'de' ? 'de' : reportLanguage === 'en' ? 'en' : 'ar'
+                    });
+                    setEditableGrainSummary(clean);
+                    setApprovedGrainSummaryText(clean);
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-black flex items-center gap-1 cursor-pointer"
+                >
+                  <Check className="w-3 h-3" />
+                  <span>{reportT('اعتماد وإدراج', 'Approve & Include', 'Bestätigen & einfügen')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setApprovedGrainSummaryText(null);
+                    setDismissedGrainSummary(true);
+                  }}
+                  className="px-2 py-1 rounded-lg bg-surface hover:bg-rose-50 text-slate-600 hover:text-rose-600 border border-surface-border text-[10px] font-bold cursor-pointer"
+                >
+                  {reportT('تجاهل', 'Dismiss', 'Verwerfen')}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Part 11: Multi-Lesson Selector (Newest first -> Oldest last) */}
+          {candidateLessonsNewestFirst.length > 1 && (
+            <div className="p-2.5 rounded-xl bg-surface-hover/50 border border-surface-border space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setShowMultiLessonSelector((prev) => !prev)}
+                  className="text-xs font-black text-primary hover:underline flex items-center gap-1.5 cursor-pointer"
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                  <span>
+                    {reportT(
+                      `دمج عدة حصص (${selectedMultiLessonIds.length} مختارة - الأحدث للأقدم)`,
+                      `Combine Multiple Lessons (${selectedMultiLessonIds.length} selected - Newest first)`,
+                      `Mehrere Stunden (${selectedMultiLessonIds.length} ausgewählt - Neueste zuerst)`
+                    )}
+                  </span>
+                </button>
+                {selectedMultiLessonIds.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMultiLessonIds([lesson.id])}
+                    className="text-[10px] font-bold text-rose-600 hover:underline cursor-pointer"
+                  >
+                    {reportT('إعادة تعيين', 'Reset', 'Zurücksetzen')}
+                  </button>
+                )}
+              </div>
+
+              {showMultiLessonSelector && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      value={multiLessonSearchQuery}
+                      onChange={(e) => setMultiLessonSearchQuery(e.target.value)}
+                      placeholder={reportT('بحث بالتاريخ أو الموضوع...', 'Search date or topic...', 'Datum oder Thema suchen...')}
+                      className="flex-1 px-2 py-1 rounded-lg bg-surface border border-surface-border text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setSelectedMultiLessonIds(filteredMultiLessons.map((l) => l.id))}
+                      className="px-2 py-1 rounded-lg bg-primary/10 text-primary text-[10px] font-black cursor-pointer"
+                    >
+                      {reportT('الكل', 'All', 'Alle')}
+                    </button>
+                  </div>
+                  <div className="max-h-36 overflow-y-auto divide-y divide-surface-border/50 border border-surface-border rounded-lg bg-surface">
+                    {filteredMultiLessons.map((item) => {
+                      const isChecked = selectedMultiLessonIds.includes(item.id);
+                      const topic = resolveTaughtTodayTopic(item, item.report).text || item.title;
+                      const shareClass = getLessonRecordingShareClassification(item, 'recordingLink');
+                      return (
+                        <label
+                          key={item.id}
+                          className={`flex items-center justify-between gap-2 px-2.5 py-1.5 text-xs cursor-pointer ${
+                            isChecked ? 'bg-primary-soft/30 font-bold' : ''
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setSelectedMultiLessonIds((prev) => {
+                                  if (checked) return Array.from(new Set([...prev, item.id]));
+                                  const next = prev.filter((id) => id !== item.id);
+                                  return next.length > 0 ? next : [lesson.id];
+                                });
+                              }}
+                              className="rounded border-surface-border text-primary"
+                            />
+                            <span className="font-mono text-[10px] text-primary shrink-0">{item.date}</span>
+                            {item.time && <span className="font-mono text-[10px] text-text-muted shrink-0">{item.time}</span>}
+                            <span className="truncate text-text-main">{topic}</span>
+                          </div>
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-black shrink-0 ${
+                              shareClass === 'public_access_verified'
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                            }`}
+                          >
+                            {shareClass === 'public_access_verified' ? '🎥 Public ✓' : shareClass}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Formatted Text Preview */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">

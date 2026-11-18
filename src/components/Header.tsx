@@ -4,7 +4,7 @@ import { Lesson } from '../types';
 import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
 import { isPendingStatus, pickAuthoritativeLesson, normalizeTime } from '../utils/lessonUtils';
 import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
-import { Bell, CheckCircle2, Clock, Trash2, Award, History, BarChart2, Settings, Menu, Sparkles, BookOpen, Layers, X, Users, Gamepad2, SlidersHorizontal } from 'lucide-react';
+import { Bell, CheckCircle2, Clock, Trash2, Award, History, BarChart2, Settings, Menu, Sparkles, BookOpen, Layers, X, Users, Gamepad2, Video, SlidersHorizontal } from 'lucide-react';
 import { NotificationsModal } from './NotificationsModal';
 import { motion, AnimatePresence } from 'motion/react';
 import { SyncHeaderButton } from './sync/SyncHeaderButton';
@@ -418,6 +418,7 @@ export const Header: React.FC = () => {
                      : activeTab === 'schoolSchedule' ? _t('المدرسة', 'School', 'Schule')
                      : activeTab === 'hod' ? _t('القسم', 'HOD', 'Fachleiter')
                      : activeTab === 'lernstudio' ? 'Lernstudio 🇩🇪'
+                     : activeTab === 'grainRecordings' ? _t('تسجيلات الحصص (Grain)', 'Grain Recordings', 'Grain-Aufzeichnungen')
                      : activeTab}
                   </h1>
                 </>
@@ -560,6 +561,7 @@ export const Header: React.FC = () => {
                       students: { label: t('nav_students') || (language === 'ar' ? 'الطلاب والمجموعات' : language === 'de' ? 'Schüler' : 'Students'), icon: Users },
                       payments: { label: t('nav_payments') || (language === 'ar' ? 'المدفوعات والمالية' : language === 'de' ? 'Zahlungen' : 'Payments'), icon: BarChart2 },
                       lernstudio: { label: 'Glück Lernstudio 🇩🇪', icon: Gamepad2 },
+                      grainRecordings: { label: _t('تسجيلات الحصص (Grain)', 'Grain Recordings', 'Grain-Aufzeichnungen'), icon: Video },
                       hod: { label: _t('إدارة القسم (HOD)', 'HOD Hub', 'Fachleiter Hub'), icon: Layers },
                       history: { label: t('nav_history') || (language === 'ar' ? 'سجل الحصص' : language === 'de' ? 'Sitzungen' : 'History'), icon: History },
                       reports: { label: t('nav_reports') || (language === 'ar' ? 'التقارير' : language === 'de' ? 'Berichte' : 'Reports'), icon: BarChart2 },

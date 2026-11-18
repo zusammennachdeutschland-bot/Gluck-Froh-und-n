@@ -8,6 +8,7 @@ import {
   TeacherSettingsRecord
 } from '../../types';
 import { createProtocolHeader } from './protocolNegotiator';
+import { sanitizeEntityForGrainPrivacy } from '../grainService';
 
 function parseRecordTimestampMs(record: any): number {
   if (!record || typeof record !== 'object') return 0;
@@ -70,7 +71,7 @@ export function buildOutboundDelta(
     });
 
     if (filteredItems.length > 0) {
-      (records as any)[key] = filteredItems;
+      (records as any)[key] = filteredItems.map((item) => sanitizeEntityForGrainPrivacy(item));
       totalCount += filteredItems.length;
     }
   }

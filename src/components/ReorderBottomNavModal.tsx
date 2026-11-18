@@ -2,7 +2,7 @@ import React from 'react';
 import { useApp } from '../context/AppContext';
 import { 
   Home, Calendar, Users, Wallet, BarChart2, Settings, 
-  History, Award, Clock, BookOpen, Layers, Gamepad2,
+  History, Award, Clock, BookOpen, Layers, Gamepad2, Video,
   SlidersHorizontal, ArrowUp, ArrowDown, RotateCcw, X, Check, Zap, ArrowUpToLine, ArrowDownToLine
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -49,6 +49,11 @@ export const ReorderBottomNavModal: React.FC<ReorderBottomNavModalProps> = ({ is
       label: language === 'ar' ? 'استوديو التعلم (Lernstudio)' : language === 'de' ? 'Lernstudio' : 'Lernstudio', 
       icon: Gamepad2,
       colorClass: 'text-fuchsia-500 bg-fuchsia-500/10'
+    },
+    grainRecordings: {
+      label: language === 'ar' ? 'تسجيلات الحصص (Grain Recordings)' : language === 'de' ? 'Grain-Aufzeichnungen' : 'Grain Recordings',
+      icon: Video,
+      colorClass: 'text-indigo-500 bg-indigo-500/10'
     },
     hod: { 
       label: language === 'ar' ? 'إدارة القسم (HOD)' : language === 'de' ? 'Fachleiter Hub' : 'HOD Hub', 

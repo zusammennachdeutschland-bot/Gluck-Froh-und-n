@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import { 
   Home, Calendar, Users, Wallet, BarChart2, Settings, 
   Zap, History, Play, Clock, Award, BookOpen, Layers, 
-  Gamepad2, SlidersHorizontal, Plus
+  Gamepad2, Video, SlidersHorizontal, Plus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { calculateDuePaymentCycles } from '../utils/paymentUtils';
@@ -63,6 +63,10 @@ export const BottomNav: React.FC = () => {
     lernstudio: { 
       label: 'Lernstudio', 
       icon: Gamepad2 
+    },
+    grainRecordings: {
+      label: _t('التسجيلات', 'Recordings', 'Aufzeichnungen'),
+      icon: Video
     },
     hod: { 
       label: _t('القسم', 'HOD', 'Fachleiter'), 

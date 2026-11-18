@@ -49,6 +49,7 @@ import {
   mergeTeacherSettings
 } from './sync/mergeEngine';
 import { RecentlyDeletedData } from '../types';
+import { sanitizeEntityForGrainPrivacy } from './grainService';
 
 export {
   signInTeacherWithGoogle,
@@ -1389,7 +1390,7 @@ function splitStringIntoChunks(str: string, maxChars: number): string[] {
   return chunks;
 }
 
-function partitionBackupPayload(fullData: any, ownerUid?: string): Record<Exclude<WorkspaceCategoryKey, 'delta_log'>, any> {
+export function partitionBackupPayload(fullData: any, ownerUid?: string): Record<Exclude<WorkspaceCategoryKey, 'delta_log'>, any> {
   const filterHomeworkForOwner = (items: any[]) => {
     if (!Array.isArray(items)) return [];
     if (!ownerUid) return items;
@@ -1397,7 +1398,7 @@ function partitionBackupPayload(fullData: any, ownerUid?: string): Record<Exclud
       .filter((rec: any) => rec && (!rec.ownerUid || String(rec.ownerUid).trim() === '' || String(rec.ownerUid).trim() === ownerUid))
       .map((rec: any) => ({ ...rec, ownerUid }));
   };
-  return {
+  return sanitizeEntityForGrainPrivacy({
     core_crm: {
       groups: fullData.groups || [],
       students: fullData.students || [],
@@ -1443,7 +1444,7 @@ function partitionBackupPayload(fullData: any, ownerUid?: string): Record<Exclud
       homeworkSubmissions: filterHomeworkForOwner(fullData.homeworkSubmissions || []),
       pickerNames: fullData.pickerNames || []
     }
-  };
+  });
 }
 
 const lastUploadedChunkCache = new Map<string, string>();
@@ -1563,14 +1564,14 @@ export function mergeDeltaPayloads(existingDelta: any, incomingDelta: any): any 
         ...(typeof incomingDelta.opId === 'string' && incomingDelta.opId ? [incomingDelta.opId] : [])
       ])
     ).slice(-200);
-    return {
+    return sanitizeEntityForGrainPrivacy({
       ...incomingDelta,
       isCloudDelta: true,
       appliedOpIds: opIds
-    };
+    });
   }
   if (!incomingDelta || typeof incomingDelta !== 'object' || Object.keys(incomingDelta).length === 0) {
-    return existingDelta;
+    return sanitizeEntityForGrainPrivacy(existingDelta);
   }
 
   const existingOpIds: string[] = Array.isArray(existingDelta.appliedOpIds)
@@ -1623,7 +1624,7 @@ export function mergeDeltaPayloads(existingDelta: any, incomingDelta: any): any 
   baseClone.appliedOpIds = combinedOpIds;
   baseClone.operations = Array.from(opsById.values()).slice(-100);
 
-  return baseClone;
+  return sanitizeEntityForGrainPrivacy(baseClone);
 }
 
 /**

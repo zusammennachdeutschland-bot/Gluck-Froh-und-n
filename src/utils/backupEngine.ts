@@ -5,7 +5,7 @@ import {
   WeeklyPlanStatusRecord, StageReportRecord, StageFollowUpRecord, Complaint, StudentActionPlan,
   Teacher, ParentComplaint, HodGermanStudent, AICertificateBackground, SchoolNote,
   FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment,
-  RecentlyDeletedData, PurgedRecordTombstone
+  RecentlyDeletedData, PurgedRecordTombstone, GrainGroupLearningRecord
 } from '../types';
 import { LernstudioSet } from '../types/lernstudio';
 import { normalizeLernstudioSet, stripHeavyGrammarMediaForSync } from '../shared/grammarEngine';
@@ -19,6 +19,7 @@ import {
   enforcePurgedTombstonesOnWorkspace,
   WorkspaceMutableState
 } from '../services/sync/mergeEngine';
+import { sanitizeEntityForGrainPrivacy, sanitizeGrainLessonMetadata, sanitizeGrainGroupLearningRecord } from '../services/grainService';
 
 export const MAX_BACKUP_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25MB max backup file size (#14)
 
@@ -517,7 +518,8 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     { key: 'financeCategories', label: 'financeCategories' },
     { key: 'financeTransactions', label: 'financeTransactions' },
     { key: 'financeRecurring', label: 'financeRecurring' },
-    { key: 'financeInstallments', label: 'financeInstallments' }
+    { key: 'financeInstallments', label: 'financeInstallments' },
+    { key: 'grainGroupLearningRecords', label: 'grainGroupLearningRecords' }
   ];
 
   for (const col of collectionsToCheck) {
@@ -663,21 +665,25 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
 
     let report = l.report;
     if (report && typeof report === 'object') {
-      report = {
+      report = sanitizeEntityForGrainPrivacy({
         ...report,
         quizScore: sanitizeOptionalNumber(report.quizScore),
         examScore: sanitizeOptionalNumber(report.examScore),
         dictationScore: sanitizeOptionalNumber(report.dictationScore),
         arabicExamScore: sanitizeOptionalNumber(report.arabicExamScore),
         recordingLink: typeof report.recordingLink === 'string' ? report.recordingLink.trim() : undefined,
-        recordingLink2: typeof report.recordingLink2 === 'string' ? report.recordingLink2.trim() : undefined
-      };
+        recordingLink2: typeof report.recordingLink2 === 'string' ? report.recordingLink2.trim() : undefined,
+        zoomMeetingLink: typeof report.zoomMeetingLink === 'string' ? report.zoomMeetingLink.trim() : undefined,
+        grainMeta: sanitizeGrainLessonMetadata(report.grainMeta)
+      });
     }
 
     const rec1 = typeof l.recordingLink === 'string' ? l.recordingLink.trim() : (report?.recordingLink || undefined);
     const rec2 = typeof l.recordingLink2 === 'string' ? l.recordingLink2.trim() : (report?.recordingLink2 || undefined);
+    const zoomLink = typeof l.zoomMeetingLink === 'string' ? l.zoomMeetingLink.trim() : (report?.zoomMeetingLink || undefined);
+    const cleanGrainMeta = sanitizeGrainLessonMetadata(l.grainMeta || report?.grainMeta);
 
-    sanitizedLessons.push({
+    sanitizedLessons.push(sanitizeEntityForGrainPrivacy({
       ...l,
       id,
       date,
@@ -689,8 +695,10 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
       price: sanitizeOptionalNumber(l.price),
       recordingLink: rec1,
       recordingLink2: rec2,
+      ...(zoomLink ? { zoomMeetingLink: zoomLink } : {}),
+      ...(cleanGrainMeta ? { grainMeta: cleanGrainMeta } : {}),
       report
-    });
+    }));
   }
 
   // Sanitize Payments
@@ -1150,6 +1158,18 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     );
   }
 
+  const rawGrainLearning: any[] = Array.isArray(data.grainGroupLearningRecords) ? data.grainGroupLearningRecords : [];
+  const sanitizedGrainLearning: GrainGroupLearningRecord[] = [];
+  for (const item of rawGrainLearning) {
+    const clean = sanitizeGrainGroupLearningRecord(item);
+    if (clean) {
+      if (!validGroupIds.has(clean.groupId) && rawGroups.length > 0) {
+        clean.obsoleteGroup = true;
+      }
+      sanitizedGrainLearning.push(clean);
+    }
+  }
+
   const sanitizedPayloadData = {
     ...data,
     students: sanitizedStudents,
@@ -1170,6 +1190,7 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     financeTransactions: sanitizedFinanceTransactions,
     financeRecurring: sanitizedFinanceRecurring,
     financeInstallments: sanitizedFinanceInstallments,
+    grainGroupLearningRecords: sanitizedGrainLearning,
     schoolSettings: sanitizedSchool,
     profile: sanitizedProfile,
     recentlyDeleted: sanitizedRecentlyDeleted,
@@ -1201,11 +1222,13 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
         : undefined
   };
 
+  const cleanPayloadData = sanitizeEntityForGrainPrivacy(sanitizedPayloadData);
+
   return {
     isValid: true,
     version,
-    data: sanitizedPayloadData,
-    sanitizedData: sanitizedPayloadData
+    data: cleanPayloadData,
+    sanitizedData: cleanPayloadData
   };
 }
 
@@ -1792,7 +1815,8 @@ export function mergeBackupPayloadIntoWorkspace(
       'financeNotifications',
       'goldHoldings',
       'homeworkAssignments',
-      'homeworkSubmissions'
+      'homeworkSubmissions',
+      'grainGroupLearningRecords'
     ];
 
     for (const colKey of otherCollections) {

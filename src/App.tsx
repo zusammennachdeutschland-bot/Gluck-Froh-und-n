@@ -30,6 +30,7 @@ import { CertificateCenter } from './components/certificates/CertificateCenter';
 import { SchoolScheduleView } from './components/SchoolScheduleView';
 import { HodHubView } from './components/HodHubView';
 import { LernstudioView } from './components/lernstudio/LernstudioView';
+import { GrainRecordingsLibraryView } from './components/GrainRecordingsLibraryView';
 import { BackupModal } from './components/BackupModal';
 import { AddFinanceTransactionModal } from './components/finance/modals/AddFinanceTransactionModal';
 
@@ -605,6 +606,7 @@ function MainApp() {
                   language={language}
                 />
               )}
+              {activeTab === 'grainRecordings' && <GrainRecordingsLibraryView />}
             </React.Suspense>
 
             {/* Generous Clearance Spacer for Floating BottomNav */}
@@ -660,6 +662,7 @@ function MainApp() {
                         language={language}
                       />
                     )}
+                    {activeTab === 'grainRecordings' && <GrainRecordingsLibraryView />}
                   </React.Suspense>
                 </motion.div>
               </AnimatePresence>
