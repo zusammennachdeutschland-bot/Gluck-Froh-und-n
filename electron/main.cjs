@@ -42,6 +42,29 @@ function isEncryptionSupported() {
   }
 }
 
+function normalizeElectronGrainTokenInput(rawInput) {
+  let clean = String(rawInput || '')
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF\u00A0]/g, '')
+    .trim();
+
+  if (
+    (clean.startsWith('"') && clean.endsWith('"')) ||
+    (clean.startsWith("'") && clean.endsWith("'")) ||
+    (clean.startsWith('`') && clean.endsWith('`'))
+  ) {
+    clean = clean.slice(1, -1).trim();
+  }
+
+  clean = clean.replace(/^(?:authorization\s*:\s*)?bearer\s+/i, '').trim();
+
+  const patMatch = clean.match(/(grain_[a-z0-9_]*_[A-Za-z0-9._~+/=-]{6,})/i);
+  if (patMatch && patMatch[1]) {
+    return patMatch[1];
+  }
+
+  return clean.replace(/\s+/g, '');
+}
+
 function loadDecryptedElectronGrainToken() {
   if (!isEncryptionSupported()) return null;
   try {
@@ -50,7 +73,8 @@ function loadDecryptedElectronGrainToken() {
     const rawBuf = fs.readFileSync(vaultPath);
     if (!rawBuf || rawBuf.length === 0) return null;
     const decrypted = safeStorage.decryptString(rawBuf);
-    return typeof decrypted === 'string' && decrypted.trim().length >= 10 ? decrypted.trim() : null;
+    const normalized = normalizeElectronGrainTokenInput(decrypted);
+    return normalized.length >= 8 ? normalized : null;
   } catch {
     return null;
   }
@@ -62,8 +86,8 @@ function saveEncryptedElectronGrainToken(rawToken) {
     err.code = 'SECURE_STORAGE_UNAVAILABLE';
     throw err;
   }
-  const clean = String(rawToken || '').trim();
-  if (clean.length < 10) {
+  const clean = normalizeElectronGrainTokenInput(rawToken);
+  if (!clean || clean.length < 8 || !/^[A-Za-z0-9._~+/=:-]+$/.test(clean)) {
     const err = new Error('Invalid Grain Personal Access Token format.');
     err.code = 'INVALID_TOKEN_FORMAT';
     throw err;

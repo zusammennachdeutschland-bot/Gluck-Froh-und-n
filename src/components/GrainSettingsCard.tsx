@@ -24,7 +24,7 @@ import {
 } from '../services/grainService';
 
 export const GrainSettingsCard: React.FC = () => {
-  const { lessons, groups, students, language, _t, triggerToast, setActiveTab } = useApp();
+  const { lessons, groups, students, updateLesson, language, _t, triggerToast, setActiveTab } = useApp();
   const [meta, setMeta] = useState<GrainIntegrationMetaState>(() => loadGrainIntegrationMeta());
   const [tokenInput, setTokenInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -111,15 +111,17 @@ export const GrainSettingsCard: React.FC = () => {
       const res = await syncGrainRecordingsIncrementally({
         lessons: lessons || [],
         groups: groups || [],
-        students: students || []
+        students: students || [],
+        onUpdateLesson: updateLesson
       });
       const updated = loadGrainIntegrationMeta();
       setMeta(updated);
       if (res.success) {
+        const autoCount = res.autoMatchedLessonIds?.length || 0;
         const msg = _t(
-          `تمت المزامنة: إجمالي ${res.recordings.length} تسجيل (${res.newCount} جديد)`,
-          `Synced: ${res.recordings.length} total recordings (${res.newCount} new)`,
-          `Synchronisiert: ${res.recordings.length} Aufnahmen (${res.newCount} neu)`
+          `تمت المزامنة: إجمالي ${res.recordings.length} تسجيل (${res.newCount} جديد${autoCount > 0 ? `، ${autoCount} حصة تمت مطابقتها تلقائياً` : ''})`,
+          `Synced: ${res.recordings.length} total recordings (${res.newCount} new${autoCount > 0 ? `, ${autoCount} lessons auto-matched` : ''})`,
+          `Synchronisiert: ${res.recordings.length} Aufnahmen (${res.newCount} neu${autoCount > 0 ? `, ${autoCount} automatisch zugeordnet` : ''})`
         );
         setSyncSummaryMsg(msg);
         triggerToast(msg);

@@ -50,7 +50,7 @@ app.use((req, res, next) => {
     }
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Owner-Uid, X-Grain-Session-Token');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Owner-Uid, X-Grain-Session-Token, X-Grain-Local-Client');
   if (req.method === 'OPTIONS') {
     res.status(204).end();
     return;

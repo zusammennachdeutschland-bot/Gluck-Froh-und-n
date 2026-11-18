@@ -1483,6 +1483,7 @@ export type GrainShareAccessClassification =
   | 'link_unavailable';
 
 export type GrainMatchStatus =
+  | 'automatically_matched'
   | 'strong_match'
   | 'suggested_match'
   | 'needs_confirmation'
@@ -1490,6 +1491,20 @@ export type GrainMatchStatus =
   | 'unmatched'
   | 'already_linked'
   | 'inaccessible';
+
+export type GrainWorkflowStatusBadge =
+  | 'automatically_matched'
+  | 'part1_detected'
+  | 'part2_detected'
+  | 'lesson_content_extracted'
+  | 'transcript_unavailable'
+  | 'needs_teacher_confirmation';
+
+export interface GrainPart2DetectionConfig {
+  expectedGapMinutes: number; // default 40
+  minGapMinutes: number; // default 32 (supports 40, 41, 42 and reasonable Zoom reconnect variation)
+  maxGapMinutes: number; // default 52
+}
 
 export type GrainZoomLinkVerificationStatus =
   | 'verified_match'
@@ -1514,6 +1529,11 @@ export interface GrainMatchEvidence {
   matchedStudentIds?: string[];
   matchedGroupId?: string;
   learnedGroupMatchBoost?: number;
+  learnedRecurringRuleId?: string;
+  scheduleChangedRequiresConfirmation?: boolean;
+  detectedPartSlot?: 'part1' | 'part2';
+  pairedRecordingId?: string;
+  part2StartGapMinutes?: number;
   reasons: string[];
 }
 
@@ -1531,6 +1551,8 @@ export interface GrainLessonMatchCandidate {
   evidence: GrainMatchEvidence;
   existingRecordingLink?: string;
   existingRecordingLink2?: string;
+  canAutoAssign?: boolean;
+  recommendedSlot?: 'recordingLink' | 'recordingLink2';
 }
 
 export interface GrainDiscoveredRecording {
@@ -1559,19 +1581,25 @@ export interface GrainDiscoveredRecording {
   matchReasons: string[];
   evidence?: GrainMatchEvidence;
   candidates: GrainLessonMatchCandidate[];
+  detectedPartSlot?: 'part1' | 'part2';
+  pairedRecordingId?: string;
+  part2StartGapMinutes?: number;
+  learnedRecurringRuleId?: string;
+  workflowStatuses?: GrainWorkflowStatusBadge[];
   lastSyncedAt: string;
   importedAt?: string;
   removedFromLibrary?: boolean;
 }
 
 /**
- * Part 10: Smart Group Learning Record (`GrainGroupLearningRecord`).
+ * Smart Group & Recurring Lesson Learning Record (`GrainGroupLearningRecord`).
  * Keyed by stable `groupId` (`group.id`), never relying on group name as primary ID.
  * Survives group renames and marks deleted groups as obsolete (`obsoleteGroup: true`).
  */
 export interface GrainGroupLearningCorrectionEntry {
   correctedAt: string;
   previousSuggestedGroupId?: string;
+  previousSuggestedLessonId?: string;
   chosenGroupId: string;
   chosenLessonId: string;
 }
@@ -1584,13 +1612,20 @@ export interface GrainGroupLearningRecord {
   studentIds: string[];
   recordingDate: string; // YYYY-MM-DD
   recordingDayOfWeek: number; // 0 (Sunday) to 6 (Saturday)
+  lessonWeekday?: number; // 0 (Sunday) to 6 (Saturday) from scheduled lesson.date
   recordingStartTime: string; // HH:MM
+  lessonScheduledStartTime?: string; // HH:MM from lesson.time
   recordingDuration: number; // minutes
+  lessonScheduledDuration?: number; // minutes
+  scheduleRecurrence?: ScheduleRecurrence; // 'weekly' | 'biweekly_a' | 'biweekly_b'
   normalizedTitle: string;
   participantSignatures: string[]; // Normalized participant tokens (compact, non-sensitive)
   matchingEvidence: string[];
   teacherConfirmed: boolean;
   confirmedAt: string;
+  updatedAt?: string;
+  ruleEnabled?: boolean; // Default true; allows teacher to disable/enable a learned recurring rule
+  part2GapToleranceMinutes?: GrainPart2DetectionConfig;
   obsoleteGroup?: boolean;
   correctionHistory?: GrainGroupLearningCorrectionEntry[];
 }
@@ -1650,6 +1685,66 @@ export interface GrainEducationalDraft {
 }
 
 /**
+ * Structured German Lesson Content automatically extracted from Grain (Requirement 4 & 5).
+ * Contains the 7 required educational sections, source recording references, and teacher-edit tracking.
+ * Never contains raw full transcripts.
+ */
+export interface GrainExtractedVocabularyEntry {
+  german: string;
+  article?: 'der' | 'die' | 'das' | '' | string;
+  arabic?: string;
+  meaning?: string;
+  example?: string;
+}
+
+export interface GrainExtractedGrammarEntry {
+  topic: string;
+  explanationDe: string;
+  explanation?: string;
+  explanationAr?: string;
+  examples?: string[];
+}
+
+export interface GrainExtractedLessonContentCore {
+  themaDerStunde: string; // Thema der Stunde — lesson topic
+  behandelteInhalte: string[]; // Behandelte Inhalte — what was covered
+  neueWoerterUndRedemittel: GrainExtractedVocabularyEntry[]; // Neue Wörter und Redemittel — new vocabulary and expressions
+  grammatik: GrainExtractedGrammarEntry[]; // Grammatik — grammar explained
+  beispiele: string[]; // Beispiele — important examples used during the lesson
+  uebungenUndAktivitaeten: string[]; // Übungen und Aktivitäten — exercises and activities completed
+  offenePunkte: string[]; // Offene Punkte — topics that may need further explanation
+  formattedLessonSummaryDe: string;
+  formattedSummaryDe?: string;
+  formattedSummaryAr?: string;
+}
+
+export interface GrainExtractedPendingUpdate extends GrainExtractedLessonContentCore {
+  sourceRecordingIds: string[];
+  sourceContentFingerprint: string;
+  extractedAt: string;
+}
+
+export interface GrainExtractedLessonContent extends GrainExtractedLessonContentCore {
+  sourceRecordingIds: string[];
+  part1RecordingId?: string;
+  part2RecordingId?: string;
+  partCount: 1 | 2;
+  sourceContentFingerprint: string;
+  extractedAt: string;
+  origin: 'ai_extracted' | 'deterministic_transcript' | 'teacher_edited' | 'teacher_written';
+  transcriptStatus:
+    | 'complete'
+    | 'partial_transcript'
+    | 'transcript_unavailable'
+    | 'extracted'
+    | 'partial_part1_only'
+    | 'partial_part2_only';
+  teacherEdited?: boolean;
+  teacherEditedAt?: string;
+  pendingUpdatedExtraction?: GrainExtractedPendingUpdate;
+}
+
+/**
  * Compact Grain metadata stored on a confirmed Lesson (`lesson.grainMeta`).
  * Strictly excludes API tokens, raw transcripts, and unreviewed private AI data.
  */
@@ -1659,8 +1754,11 @@ export interface GrainLessonMetadata {
   recordingTitle: string;
   recordingTitlePart2?: string;
   startTimestamp: string;
+  startTimestampPart2?: string;
   endTimestamp?: string;
+  endTimestampPart2?: string;
   durationMinutes: number;
+  durationMinutesPart2?: number;
   recordingUrl: string;
   recordingUrlPart2?: string;
   shareAccessClassification?: GrainShareAccessClassification;
@@ -1668,8 +1766,13 @@ export interface GrainLessonMetadata {
   groupId?: string;
   source: string;
   matchingStatus: 'confirmed';
+  matchedAutomatically?: boolean;
+  learnedRecurringRuleId?: string;
+  part2StartGapMinutes?: number;
   confirmedLessonId: string;
   lastSyncedAt: string;
+  workflowStatuses?: GrainWorkflowStatusBadge[];
+  extractedLessonContent?: GrainExtractedLessonContent;
   approvedSummary?: string;
   approvedSummaryEn?: string;
   approvedSummaryDe?: string;
@@ -1682,5 +1785,6 @@ export interface GrainLessonMetadata {
   approvedParentReportSummaryDe?: string;
   supplementaryParticipantsObserved?: string[]; // Informational only — never alters attendance (Rule 2)
 }
+
 
 

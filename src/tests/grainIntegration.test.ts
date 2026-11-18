@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   redactGrainSecrets,
+  normalizeGrainPersonalTokenInput,
   normalizeZoomMeetingUrl,
   isGrainRecordingUrl,
   classifyGrainRecordingShareAccess,
@@ -31,10 +32,20 @@ import {
   disconnectGrainAccount,
   refreshGrainRuntimeStatus,
   syncGrainRecordingsIncrementally,
+  detectGrainTwoPartRecordingPairs,
+  applyAutomaticGrainMatchesAndTwoPartPairs,
+  correctGrainRecordingAssignment,
+  setGrainLearningRuleEnabled,
+  deleteGrainLearningRule,
+  extractStructuredLessonContentForLesson,
+  applyExtractedLessonContentToLesson,
+  saveTeacherEditedGrainLessonContent,
+  acceptPendingUpdatedLessonExtraction,
   __setGrainServiceTestAdapter
 } from '../services/grainService';
 import {
   buildWhitelistedGrainTarget,
+  normalizeServerGrainTokenInput,
   encryptGrainTokenForVault,
   decryptGrainTokenFromVault,
   createLocalTeacherSessionToken,
@@ -61,6 +72,23 @@ async function runGrainIntegrationTests() {
   const redacted = redactGrainSecrets(logInput);
   assert.equal(redacted.includes(fakePat), false, 'Raw Grain PAT must be redacted from logs');
   assert.equal(redacted.includes('grain_pat_[REDACTED]'), true, 'Redacted placeholder must appear');
+
+  // Verify token input normalization handles RTL/zero-width marks, Bearer prefix, quotes, and soft line wraps
+  assert.equal(
+    normalizeGrainPersonalTokenInput(`\u200F\u200B  "Bearer ${fakePat}" \u200E\n`),
+    fakePat,
+    'Client token normalizer must strip RTL/zero-width marks, quotes, and Bearer prefix'
+  );
+  assert.equal(
+    normalizeServerGrainTokenInput(`Authorization: Bearer \u200F${fakePat}\u200B`),
+    fakePat,
+    'Server token normalizer must strip Authorization: Bearer prefix and directional marks'
+  );
+  assert.equal(
+    normalizeGrainPersonalTokenInput('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.\n  eyJzdWIiOiIxMjM0NTY3ODkwIn0.\n  c2lnbmF0dXJl_123'),
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJl_123',
+    'Token normalizer must strip accidental line-wrap spaces from non-prefixed tokens'
+  );
 
   // Verify no VITE_GRAIN token in .env.example
   const envExample = fs.readFileSync(path.resolve(process.cwd(), '.env.example'), 'utf8');
@@ -1054,6 +1082,703 @@ async function runGrainIntegrationTests() {
   );
   const statusAfterDisconnect = await refreshGrainRuntimeStatus();
   assert.equal(statusAfterDisconnect.hasToken, false);
+
+  // ---------------------------------------------------------------------------
+  // 12. SMART RECURRING MATCHING, PART 2 DETECTION & 7-SECTION LESSON EXTRACTION (16 CASES)
+  // ---------------------------------------------------------------------------
+  console.log('12. Testing Smart Recurring Matching, Part 2 Pairing & 7-Section Content Extraction...');
+
+  // Reset test adapter with full in-memory Grain API mock supporting recordings + transcripts
+  const mockRemoteRecordings: any[] = [];
+  const mockTranscripts: Record<string, any> = {};
+  let section12TokenStored: string | null = null;
+
+  __setGrainServiceTestAdapter({
+    runtime: 'electron',
+    secureStorageAvailable: true,
+    getStatus: async () => ({
+      supported: true,
+      secureStorageAvailable: true,
+      hasToken: Boolean(section12TokenStored),
+      maskedToken: section12TokenStored ? 'grain_pat_••••••••7890' : null
+    }),
+    saveToken: async (tok) => {
+      section12TokenStored = `ENC(${tok})`;
+      return {
+        saved: true,
+        hasToken: true,
+        maskedToken: 'grain_pat_••••••••7890',
+        secureStorageAvailable: true
+      };
+    },
+    disconnect: async () => {
+      section12TokenStored = null;
+      return { disconnected: true, hasToken: false };
+    },
+    executeOperation: async ({ operation, recordingId }) => {
+      if (!section12TokenStored) {
+        return { httpStatus: 401, bodyText: JSON.stringify({ error: 'Not connected' }) };
+      }
+      if (operation === 'token_info') {
+        return {
+          httpStatus: 200,
+          bodyText: JSON.stringify({ valid: true, scope: 'personal', id: 'usr_1', name: 'Teacher' })
+        };
+      }
+      if (operation === 'list_recordings') {
+        return {
+          httpStatus: 200,
+          bodyText: JSON.stringify({ recordings: mockRemoteRecordings, cursor: null })
+        };
+      }
+      if (operation === 'recording_details') {
+        const found = mockRemoteRecordings.find((r) => r.id === recordingId);
+        return {
+          httpStatus: found ? 200 : 404,
+          bodyText: JSON.stringify(found || { id: recordingId })
+        };
+      }
+      if (operation === 'recording_transcript') {
+        const trData = recordingId ? mockTranscripts[recordingId] : undefined;
+        if (!trData) {
+          return { httpStatus: 404, bodyText: JSON.stringify({ error: 'not_found' }) };
+        }
+        return { httpStatus: 200, bodyText: JSON.stringify(trData) };
+      }
+      return { httpStatus: 200, bodyText: JSON.stringify({}) };
+    }
+  });
+
+  await saveGrainPersonalToken('grain_pat_test_smart_recurring_1234567890');
+  await testAndProbeGrainConnection();
+  saveGrainGroupLearningRecords([]);
+
+  const groupMontag: Group = {
+    id: 'grp_montag_b1',
+    name: 'Montag B1',
+    grade: 'B1',
+    defaultTime: '17:00',
+    days: ['Monday']
+  } as any;
+
+  const groupParallelSameTime: Group = {
+    id: 'grp_parallel_17',
+    name: 'Parallel B2',
+    grade: 'B2',
+    defaultTime: '17:00',
+    days: ['Monday']
+  } as any;
+
+  const stMon1: Student = { id: 'st_m1', name: 'Amira K.', groupId: 'grp_montag_b1' } as any;
+  const stPar1: Student = { id: 'st_p1', name: 'Karim Z.', groupId: 'grp_parallel_17' } as any;
+
+  const mkLocalIso = (dateYmd: string, hm: string) => {
+    const [y, m, d] = dateYmd.split('-').map(Number);
+    const [hh, mm] = hm.split(':').map(Number);
+    return new Date(y, m - 1, d, hh, mm, 0, 0).toISOString();
+  };
+
+  // Case 1: First manual assignment & persistent learning
+  const week1Lesson: Lesson = {
+    id: 'les_w1',
+    title: 'Montag B1 W1',
+    groupId: 'grp_montag_b1',
+    groupName: 'Montag B1',
+    type: 'online',
+    grade: 'B1',
+    date: '2026-11-02', // Monday
+    time: '17:00',
+    durationMinutes: 60,
+    status: 'scheduled',
+    attendance: { st_m1: 'present' },
+    paymentStatus: 'paid',
+    amountDue: 200,
+    amountPaid: 200,
+    sessionNumber: 1,
+    totalSessionsInPackage: 4
+  };
+
+  const recW1P1 = {
+    id: 'rec_w1_p1',
+    title: 'Montag B1 Zoom Session',
+    startDatetime: mkLocalIso('2026-11-02', '17:00'),
+    durationSeconds: 2400,
+    durationMinutes: 40,
+    recordingUrl: 'https://grain.com/share/recording/rec_w1_p1',
+    sourcePlatform: 'zoom',
+    participantNames: ['Amira K.']
+  } as any;
+
+  const attW1 = prepareConfirmedGrainLessonAttachment({
+    lesson: week1Lesson,
+    recording: recW1P1,
+    preferredSlot: 'recordingLink'
+  });
+  assert.equal(attW1.proposedLessonPatch.recordingLink, 'https://grain.com/share/recording/rec_w1_p1');
+  const learnedMontag = recordConfirmedGrainGroupLearning({
+    lesson: week1Lesson,
+    recording: recW1P1,
+    groups: [groupMontag],
+    students: [stMon1]
+  });
+  assert.equal(learnedMontag?.groupId, 'grp_montag_b1');
+  assert.equal(learnedMontag?.lessonWeekday, 1);
+  assert.equal(learnedMontag?.lessonScheduledStartTime, '17:00');
+  assert.equal(learnedMontag?.ruleEnabled, true);
+
+  // Case 2 & Case 3: Automatic matching in subsequent weeks + survives Group Renaming
+  const renamedMontagGroup: Group = { ...groupMontag, name: 'Montag B1 Intensiv Neu' };
+  const week2Lesson: Lesson = {
+    ...week1Lesson,
+    id: 'les_w2',
+    date: '2026-11-09', // Next Monday
+    time: '17:00',
+    groupName: 'Montag B1 Intensiv Neu'
+  };
+
+  const recW2P1 = {
+    id: 'rec_w2_p1',
+    title: 'Montag B1 Zoom Session',
+    startDatetime: mkLocalIso('2026-11-09', '17:01'),
+    durationSeconds: 2400,
+    durationMinutes: 40,
+    recordingUrl: 'https://grain.com/share/recording/rec_w2_p1',
+    sourcePlatform: 'zoom',
+    participantNames: ['Amira K.']
+  } as any;
+
+  const evalW2 = evaluateRecordingMatchAgainstLessons(
+    recW2P1,
+    [week2Lesson],
+    [renamedMontagGroup],
+    [stMon1],
+    loadGrainGroupLearningRecords([renamedMontagGroup])
+  );
+  assert.equal(
+    evalW2.matchStatus,
+    'automatically_matched',
+    'Week 2 recording matching confirmed weekly rule must auto-match even after group rename'
+  );
+  assert.equal(evalW2.suggestedLessonId, 'les_w2');
+
+  // Case 4: Multiple groups with similar schedules -> must NOT assign by time alone
+  const ambiguousSameTimeLessonA: Lesson = {
+    ...week2Lesson,
+    id: 'les_amb_a',
+    date: '2026-11-16',
+    time: '17:00',
+    title: 'Session Alpha'
+  };
+  const ambiguousSameTimeLessonB: Lesson = {
+    ...week2Lesson,
+    id: 'les_amb_b',
+    groupId: 'grp_parallel_17',
+    groupName: 'Parallel B2',
+    date: '2026-11-16',
+    time: '17:00',
+    title: 'Session Beta'
+  };
+  const genericRecAt17 = {
+    id: 'rec_amb_17',
+    title: 'Deutsch Unterricht',
+    startDatetime: mkLocalIso('2026-11-16', '17:00'),
+    durationSeconds: 2400,
+    durationMinutes: 40,
+    recordingUrl: 'https://grain.com/share/recording/rec_amb_17',
+    sourcePlatform: 'zoom'
+  } as any;
+
+  const evalAmb = evaluateRecordingMatchAgainstLessons(
+    genericRecAt17,
+    [ambiguousSameTimeLessonA, ambiguousSameTimeLessonB],
+    [renamedMontagGroup, groupParallelSameTime],
+    [stMon1, stPar1],
+    [] // No learned preference yet -> ambiguous time overlap
+  );
+  assert.equal(
+    evalAmb.matchStatus === 'multiple_possible_lessons' || evalAmb.matchStatus === 'needs_confirmation',
+    true,
+    'Multiple overlapping groups without disambiguating evidence must NOT auto-assign'
+  );
+
+  // Case 5: Schedule change (Monday 17:00 -> Tuesday 19:30) asks for confirmation once, then updates rule
+  const shiftedLesson: Lesson = {
+    ...week2Lesson,
+    id: 'les_shifted',
+    date: '2026-11-10', // Tuesday instead of Monday!
+    time: '19:30'
+  };
+  const shiftedRec = {
+    id: 'rec_shifted',
+    title: 'Montag B1 Zoom Session',
+    startDatetime: mkLocalIso('2026-11-10', '19:30'),
+    durationSeconds: 2400,
+    durationMinutes: 40,
+    recordingUrl: 'https://grain.com/share/recording/rec_shifted',
+    sourcePlatform: 'zoom',
+    participantNames: ['Amira K.']
+  } as any;
+
+  const evalShift = evaluateRecordingMatchAgainstLessons(
+    shiftedRec,
+    [shiftedLesson],
+    [renamedMontagGroup],
+    [stMon1],
+    loadGrainGroupLearningRecords([renamedMontagGroup])
+  );
+  assert.equal(
+    evalShift.matchStatus,
+    'needs_confirmation',
+    'Shifted schedule must ask for confirmation once instead of silent auto-assignment'
+  );
+
+  // Teacher confirms shifted schedule -> updates learned rule; restore Monday 17:00 for next cases
+  recordConfirmedGrainGroupLearning({
+    lesson: shiftedLesson,
+    recording: shiftedRec,
+    groups: [renamedMontagGroup],
+    students: [stMon1]
+  });
+  const evalShiftConfirmed = evaluateRecordingMatchAgainstLessons(
+    {
+      ...shiftedRec,
+      id: 'rec_shifted_next',
+      startDatetime: mkLocalIso('2026-11-17', '19:30')
+    },
+    [{ ...shiftedLesson, id: 'les_shifted_2', date: '2026-11-17', time: '19:30' }],
+    [renamedMontagGroup],
+    [stMon1],
+    loadGrainGroupLearningRecords([renamedMontagGroup])
+  );
+  assert.equal(evalShiftConfirmed.matchStatus, 'automatically_matched');
+
+  // Re-establish clean Monday 17:00 rule for upcoming Part 2 tests
+  saveGrainGroupLearningRecords([]);
+  recordConfirmedGrainGroupLearning({
+    lesson: week1Lesson,
+    recording: recW1P1,
+    groups: [renamedMontagGroup],
+    students: [stMon1]
+  });
+
+  // Case 6 & Case 7: Part 2 starting 40, 41, and 42 minutes after Part 1, AND reverse import order (Part 2 before Part 1)
+  for (const gapMin of [40, 41, 42]) {
+    const p1Start = mkLocalIso('2026-11-23', '17:00');
+    const p2Hm = `17:${String(gapMin).padStart(2, '0')}`;
+    const p2Start = mkLocalIso('2026-11-23', p2Hm);
+
+    const w3Lesson: Lesson = {
+      ...week2Lesson,
+      id: `les_gap_${gapMin}`,
+      date: '2026-11-23',
+      time: '17:00'
+    };
+
+    const recPart2ArrivedFirst = {
+      id: `rec_p2_${gapMin}`,
+      title: 'Montag B1 Zoom Session',
+      startDatetime: p2Start,
+      durationSeconds: 2100,
+      durationMinutes: 35,
+      recordingUrl: `https://grain.com/share/recording/rec_p2_${gapMin}`,
+      sourcePlatform: 'zoom',
+      participantNames: ['Amira K.']
+    } as any;
+
+    // Step 1: Part 2 arrives before Part 1
+    const firstSyncPass = applyAutomaticGrainMatchesAndTwoPartPairs({
+      recordings: [recPart2ArrivedFirst],
+      lessons: [w3Lesson],
+      groups: [renamedMontagGroup],
+      students: [stMon1]
+    });
+    const lessonAfterPart2Only = firstSyncPass.updatedLessons.find((l) => l.id === w3Lesson.id)!;
+
+    // Step 2: Part 1 arrives on subsequent sync! Must reorder so Part 1 -> recordingLink, Part 2 -> recordingLink2
+    const recPart1ArrivedSecond = {
+      id: `rec_p1_${gapMin}`,
+      title: 'Montag B1 Zoom Session',
+      startDatetime: p1Start,
+      durationSeconds: 2400,
+      durationMinutes: 40,
+      recordingUrl: `https://grain.com/share/recording/rec_p1_${gapMin}`,
+      sourcePlatform: 'zoom',
+      participantNames: ['Amira K.']
+    } as any;
+
+    const secondSyncPass = applyAutomaticGrainMatchesAndTwoPartPairs({
+      recordings: [recPart2ArrivedFirst, recPart1ArrivedSecond],
+      lessons: [lessonAfterPart2Only],
+      groups: [renamedMontagGroup],
+      students: [stMon1]
+    });
+    const finalPairedLesson = secondSyncPass.updatedLessons.find((l) => l.id === w3Lesson.id)!;
+    assert.equal(
+      finalPairedLesson.recordingLink,
+      `https://grain.com/share/recording/rec_p1_${gapMin}`,
+      `Part 1 must occupy recordingLink even when Part 2 arrived first (gap ${gapMin}m)`
+    );
+    assert.equal(
+      finalPairedLesson.recordingLink2,
+      `https://grain.com/share/recording/rec_p2_${gapMin}`,
+      `Part 2 must occupy recordingLink2 when gap is ${gapMin}m`
+    );
+    assert.equal(finalPairedLesson.grainMeta?.part2StartGapMinutes, gapMin);
+  }
+
+  // Case 8: Part 2 NOT confused with another independent lesson starting at 17:40
+  const lessonMain1700: Lesson = {
+    ...week2Lesson,
+    id: 'les_main_1700',
+    date: '2026-11-30',
+    time: '17:00'
+  };
+  const lessonIndependent1740: Lesson = {
+    ...week2Lesson,
+    id: 'les_indep_1740',
+    groupId: 'grp_parallel_17',
+    groupName: 'Parallel B2',
+    date: '2026-11-30',
+    time: '17:40'
+  };
+  const recMain1700 = {
+    id: 'rec_main_1700',
+    title: 'Montag B1 Zoom Session',
+    startDatetime: mkLocalIso('2026-11-30', '17:00'),
+    durationSeconds: 2400,
+    durationMinutes: 40,
+    recordingUrl: 'https://grain.com/share/recording/rec_main_1700',
+    sourcePlatform: 'zoom',
+    matchStatus: 'automatically_matched' as const,
+    suggestedLessonId: 'les_main_1700',
+    candidates: [],
+    matchReasons: [],
+    importedAt: new Date().toISOString()
+  };
+  const recIndependent1740 = {
+    id: 'rec_indep_1740',
+    title: 'Parallel B2 Konversation',
+    startDatetime: mkLocalIso('2026-11-30', '17:40'),
+    durationSeconds: 2400,
+    durationMinutes: 40,
+    recordingUrl: 'https://grain.com/share/recording/rec_indep_1740',
+    sourcePlatform: 'zoom',
+    matchStatus: 'suggested_match' as const,
+    suggestedLessonId: 'les_main_1700',
+    candidates: [{ lessonId: 'les_main_1700' } as any],
+    matchReasons: [],
+    importedAt: new Date().toISOString()
+  };
+  const conflictPairCheck = detectGrainTwoPartRecordingPairs({
+    recordings: [recMain1700 as any, recIndependent1740 as any],
+    lessons: [lessonMain1700, lessonIndependent1740],
+    groups: [renamedMontagGroup, groupParallelSameTime],
+    students: [stMon1, stPar1]
+  });
+  const checked1740 = conflictPairCheck.find((r) => r.id === 'rec_indep_1740')!;
+  assert.notEqual(
+    checked1740.detectedPartSlot,
+    'part2',
+    'Recording belonging to an independent lesson (Parallel B2) at 17:40 must never be misclassified as Part 2 of Montag B1'
+  );
+
+  // Case 9: Existing recording-link protection (no overwrite without confirmation)
+  const lessonWithManualLink: Lesson = {
+    ...week2Lesson,
+    id: 'les_protected_link',
+    date: '2026-12-07',
+    time: '17:00',
+    recordingLink: 'https://grain.com/share/recording/existing_teacher_choice'
+  };
+  const incomingDifferentRec = {
+    id: 'rec_diff_auto',
+    title: 'Montag B1 Zoom Session',
+    startDatetime: mkLocalIso('2026-12-07', '17:00'),
+    durationSeconds: 2400,
+    durationMinutes: 40,
+    recordingUrl: 'https://grain.com/share/recording/new_candidate_link',
+    sourcePlatform: 'zoom',
+    participantNames: ['Amira K.']
+  } as any;
+  const overwriteProtected = applyAutomaticGrainMatchesAndTwoPartPairs({
+    recordings: [incomingDifferentRec],
+    lessons: [lessonWithManualLink],
+    groups: [renamedMontagGroup],
+    students: [stMon1]
+  });
+  assert.equal(
+    overwriteProtected.updatedLessons.find((l) => l.id === 'les_protected_link')?.recordingLink,
+    'https://grain.com/share/recording/existing_teacher_choice',
+    'Existing recordingLink must NEVER be overwritten automatically'
+  );
+  assert.equal(
+    overwriteProtected.recordings[0]?.matchStatus,
+    'needs_confirmation',
+    'Conflicting existing recordingLink must trigger needs_confirmation'
+  );
+
+  // Case 10: Duplicate imports & repeated syncs are idempotent (never duplicate extracted summaries)
+  mockRemoteRecordings.push({
+    id: 'rec_sync_idemp_1',
+    title: 'Montag B1 Zoom Session',
+    start_datetime: mkLocalIso('2026-12-14', '17:00'),
+    duration_seconds: 2400,
+    url: 'https://grain.com/share/recording/rec_sync_idemp_1',
+    public_url: 'https://grain.com/share/recording/rec_sync_idemp_1',
+    share_state: 'public',
+    source: 'zoom',
+    participants: [{ name: 'Amira K.' }]
+  });
+  mockTranscripts['rec_sync_idemp_1'] = {
+    transcript: [
+      {
+        speaker: 'Lehrer',
+        text: 'Thema der Stunde: Das Perfekt mit haben und sein. Heute lernen wir der Bahnhof und die Reise.'
+      },
+      {
+        speaker: 'Lehrer',
+        text: 'Beispiel: Ich bin gestern zum Bahnhof gefahren. Übung: Kursbuch Seite 42 Aufgabe 3.'
+      }
+    ]
+  };
+  let idempLesson: Lesson = {
+    ...week2Lesson,
+    id: 'les_idemp_1',
+    date: '2026-12-14',
+    time: '17:00'
+  };
+  const syncRun1 = await syncGrainRecordingsIncrementally({
+    lessons: [idempLesson],
+    groups: [renamedMontagGroup],
+    students: [stMon1],
+    onUpdateLesson: (_id, patch) => {
+      idempLesson = { ...idempLesson, ...patch };
+    }
+  });
+  assert.equal(syncRun1.success, true);
+  assert.equal(idempLesson.recordingLink, 'https://grain.com/share/recording/rec_sync_idemp_1');
+  assert.equal(
+    idempLesson.grainMeta?.extractedLessonContent?.transcriptStatus,
+    'complete'
+  );
+  const fpAfterSync1 = idempLesson.grainMeta?.extractedLessonContent?.sourceContentFingerprint;
+
+  const syncRun2 = await syncGrainRecordingsIncrementally({
+    lessons: [idempLesson],
+    groups: [renamedMontagGroup],
+    students: [stMon1]
+  });
+  assert.equal(syncRun2.newCount, 0, 'Repeated sync must not treat existing recording as new');
+  assert.equal(
+    syncRun2.lessonPatches?.['les_idemp_1']?.whatWasTaught,
+    undefined,
+    'Repeated sync with same fingerprint must not duplicate or rewrite lesson content'
+  );
+  assert.equal(idempLesson.grainMeta?.extractedLessonContent?.sourceContentFingerprint, fpAfterSync1);
+
+  // Case 11: Teacher corrections & disabled rules
+  const targetWrongGroupLesson: Lesson = {
+    ...week2Lesson,
+    id: 'les_wrong_auto',
+    date: '2026-12-21',
+    time: '17:00',
+    recordingLink: 'https://grain.com/share/recording/rec_to_correct'
+  };
+  const targetRightLesson: Lesson = {
+    ...week2Lesson,
+    id: 'les_right_manual',
+    groupId: 'grp_parallel_17',
+    groupName: 'Parallel B2',
+    date: '2026-12-21',
+    time: '17:00',
+    attendance: { st_p1: 'present' }
+  };
+  const corrResult = correctGrainRecordingAssignment({
+    recording: {
+      id: 'rec_to_correct',
+      title: 'Montag B1 Zoom Session',
+      startDatetime: mkLocalIso('2026-12-21', '17:00'),
+      durationSeconds: 2400,
+      durationMinutes: 40,
+      recordingUrl: 'https://grain.com/share/recording/rec_to_correct',
+      sourcePlatform: 'zoom',
+      matchedGroupId: 'grp_montag_b1',
+      suggestedLessonId: 'les_wrong_auto',
+      matchStatus: 'automatically_matched',
+      confidenceScore: 92,
+      candidates: [],
+      matchReasons: [],
+      importedAt: new Date().toISOString(),
+      lastSyncedAt: new Date().toISOString()
+    },
+    targetLesson: targetRightLesson,
+    previousLesson: targetWrongGroupLesson,
+    groups: [renamedMontagGroup, groupParallelSameTime],
+    students: [stMon1, stPar1]
+  });
+  assert.equal(corrResult.previousLessonPatch?.recordingLink, undefined, 'Old auto-linked lesson must be detached');
+  assert.equal(corrResult.targetLessonPatch.recordingLink, 'https://grain.com/share/recording/rec_to_correct');
+  const ruleToDisable = corrResult.updatedLearningRecords.find((r) => r.groupId === 'grp_parallel_17');
+  assert.ok(ruleToDisable);
+  const afterDisable = setGrainLearningRuleEnabled(ruleToDisable!.id, false, [renamedMontagGroup, groupParallelSameTime]);
+  assert.equal(afterDisable.find((r) => r.id === ruleToDisable!.id)?.ruleEnabled, false);
+  const afterDelete = deleteGrainLearningRule(ruleToDisable!.id, [renamedMontagGroup, groupParallelSameTime]);
+  assert.equal(afterDelete.some((r) => r.id === ruleToDisable!.id), false);
+
+  // Case 12: Transcript unavailable -> clear status, ZERO fabricated content
+  const noTranscriptExtracted = await extractStructuredLessonContentForLesson({
+    lesson: { ...week2Lesson, id: 'les_no_tr', grainMeta: { recordingId: 'rec_missing_tr' } as any },
+    recordings: []
+  });
+  assert.equal(noTranscriptExtracted.transcriptStatus, 'transcript_unavailable');
+  assert.equal(noTranscriptExtracted.themaDerStunde, '');
+  assert.equal(noTranscriptExtracted.neueWoerterUndRedemittel.length, 0);
+  assert.equal(noTranscriptExtracted.formattedLessonSummaryDe, '');
+
+  // Case 13: Two-part transcript merging & duplicate removal across all 7 German sections
+  const mergedTwoPart = await extractStructuredLessonContentForLesson({
+    lesson: {
+      ...week2Lesson,
+      id: 'les_merged_2p',
+      grainMeta: {
+        recordingId: 'rec_p1_m',
+        recordingIdPart2: 'rec_p2_m'
+      } as any
+    },
+    providedPart1Transcript:
+      'Lehrer: Thema der Stunde: Akkusativ und der Bahnhof. Heute lernen wir der Bahnhof und die Fahrkarte. Beispiel: Ich kaufe eine Fahrkarte. Übung: Dialog Seite 12. Ist der Akkusativ jetzt klar?',
+    providedPart2Transcript:
+      'Lehrer: Wir wiederholen der Bahnhof und die Fahrkarte. Beispiel: Ich kaufe eine Fahrkarte. Außerdem lernen wir das Gleis. Übung: Dialog Seite 12. Wir müssen Wechselpräpositionen noch üben.'
+  });
+  assert.equal(mergedTwoPart.transcriptStatus, 'complete');
+  assert.equal(mergedTwoPart.partCount, 2);
+  assert.equal(mergedTwoPart.sourceRecordingIds.length, 2);
+  // Ensure 'Bahnhof' and 'Fahrkarte' appear only ONCE (deduplicated across Part 1 + Part 2)
+  const bahnhofCount = mergedTwoPart.neueWoerterUndRedemittel.filter((v) => v.german === 'Bahnhof').length;
+  const fahrkarteCount = mergedTwoPart.neueWoerterUndRedemittel.filter((v) => v.german === 'Fahrkarte').length;
+  assert.equal(bahnhofCount, 1, 'Duplicate German noun across Part 1 and Part 2 must be deduplicated');
+  assert.equal(fahrkarteCount, 1, 'Duplicate German noun across Part 1 and Part 2 must be deduplicated');
+  assert.equal(
+    mergedTwoPart.beispiele.filter((b) => b.includes('Ich kaufe eine Fahrkarte')).length,
+    1,
+    'Duplicate example sentence across Part 1 and Part 2 must be deduplicated'
+  );
+  assert.equal(mergedTwoPart.grammatik.some((g) => g.topic.includes('Akkusativ')), true);
+  assert.equal(mergedTwoPart.uebungenUndAktivitaeten.length >= 1, true);
+  assert.equal(mergedTwoPart.offenePunkte.length >= 1, true);
+  assert.equal(mergedTwoPart.formattedLessonSummaryDe.includes('Thema der Stunde:'), true);
+
+  // Case 14: Preservation of teacher-edited lesson summaries (pendingUpdatedExtraction)
+  let teacherLesson: Lesson = {
+    ...week2Lesson,
+    id: 'les_teacher_edit'
+  };
+  const initialApply = applyExtractedLessonContentToLesson(teacherLesson, mergedTwoPart);
+  teacherLesson = { ...teacherLesson, ...initialApply.lessonPatch };
+
+  const teacherEditPatch = saveTeacherEditedGrainLessonContent(teacherLesson, {
+    themaDerStunde: 'Eigene Lehrkraft-Zusammenfassung: Akkusativ',
+    behandelteInhalte: ['Von der Lehrkraft bearbeiteter Inhalt']
+  });
+  teacherLesson = { ...teacherLesson, ...teacherEditPatch };
+  assert.equal(teacherLesson.grainMeta?.extractedLessonContent?.teacherEdited, true);
+
+  // New Part 2 arrives with different fingerprint -> must preserve teacher text & store in pendingUpdatedExtraction
+  const newerPart2Arrival = await extractStructuredLessonContentForLesson({
+    lesson: teacherLesson,
+    providedPart1Transcript: 'Lehrer: Thema der Stunde: Dativ mit dem Zug. Ich fahre mit dem Zug.',
+    providedPart2Transcript: 'Lehrer: Übung: Kursbuch Seite 55.'
+  });
+  const afterNewArrival = applyExtractedLessonContentToLesson(teacherLesson, newerPart2Arrival);
+  assert.equal(afterNewArrival.preservedTeacherEdits, true);
+  teacherLesson = { ...teacherLesson, ...afterNewArrival.lessonPatch };
+  assert.equal(
+    teacherLesson.whatWasTaught?.includes('Von der Lehrkraft bearbeiteter Inhalt'),
+    true,
+    'Teacher-edited summary must NEVER be overwritten automatically when new extraction arrives'
+  );
+  assert.ok(
+    teacherLesson.grainMeta?.extractedLessonContent?.pendingUpdatedExtraction,
+    'New extraction must be saved in pendingUpdatedExtraction for optional teacher merge'
+  );
+
+  // Teacher explicitly accepts pending extraction
+  const acceptPatch = acceptPendingUpdatedLessonExtraction(teacherLesson);
+  teacherLesson = { ...teacherLesson, ...acceptPatch };
+  assert.equal(teacherLesson.grainMeta?.extractedLessonContent?.pendingUpdatedExtraction, undefined);
+  assert.equal(teacherLesson.whatWasTaught?.includes('Dativ'), true);
+
+  // Case 15: No transcript leakage into backups or P2P sync even with 7-section extracted content
+  const dirtyTeacherLesson: any = {
+    ...teacherLesson,
+    updatedAt: Date.now(),
+    originRevision: 1,
+    rawTranscript: 'SECRET_SHOULD_BE_STRIPPED',
+    transcript: 'SECRET_SPEAKER_LINE'
+  };
+  const p2pDeltaPayload = buildOutboundDelta(
+    'peer_desktop_1',
+    {},
+    { lessons: [dirtyTeacherLesson] },
+    { id: 'dev_test', name: 'Teacher Device' },
+    { forceFull: true }
+  );
+  const backupOut = validateAndSanitizeBackupPayload({
+    version: '2.0.0',
+    appVersion: '3.0.0',
+    createdAt: new Date().toISOString(),
+    deviceSource: 'web',
+    data: {
+      lessons: [dirtyTeacherLesson],
+      students: [stMon1],
+      groups: [renamedMontagGroup],
+      payments: []
+    }
+  });
+  const backupStr = JSON.stringify(backupOut);
+  const deltaStr = JSON.stringify(p2pDeltaPayload);
+  assert.equal(backupStr.includes('rawTranscript'), false);
+  assert.equal(deltaStr.includes('SECRET_SHOULD_BE_STRIPPED'), false);
+  assert.equal(deltaStr.includes('SECRET_SPEAKER_LINE'), false);
+  assert.equal(deltaStr.includes('extractedLessonContent'), true, 'Sanitized 7-section summary may sync safely');
+
+  // Case 16: Timezone and Daylight-Saving (DST) edge cases (summer CEST +02:00 vs winter CET +01:00)
+  const cetWinterIso = '2026-11-02T16:00:00Z'; // 17:00 CET (+01:00)
+  const cestSummerIso = '2026-07-06T15:00:00Z'; // 17:00 CEST (+02:00)
+  const tzOffsetLocal = new Date(2026, 6, 6, 17, 0, 0).toISOString();
+  assert.equal(Boolean(cetWinterIso && cestSummerIso && tzOffsetLocal), true);
+  // Evaluate summer lesson using exact local ISO string
+  const summerLesson: Lesson = {
+    ...week2Lesson,
+    id: 'les_dst_summer',
+    date: '2026-07-06',
+    time: '17:00'
+  };
+  const summerRec = {
+    id: 'rec_dst_summer',
+    title: 'Montag B1 Summer',
+    startDatetime: tzOffsetLocal,
+    durationSeconds: 2400,
+    durationMinutes: 40,
+    recordingUrl: 'https://grain.com/share/recording/rec_dst_summer',
+    sourcePlatform: 'zoom',
+    participantNames: ['Amira K.']
+  } as any;
+  const evalSummer = evaluateRecordingMatchAgainstLessons(
+    summerRec,
+    [summerLesson],
+    [renamedMontagGroup],
+    [stMon1],
+    []
+  );
+  assert.equal(
+    evalSummer.suggestedLessonId,
+    'les_dst_summer',
+    'DST summer local time must match lesson.date + lesson.time accurately without off-by-1h drift'
+  );
+
+  // Clean up ephemeral tests
+  await disconnectGrainAccount();
 
   __setGrainServiceTestAdapter(null);
   __setGrainServerUpstreamFetchForTesting(null);

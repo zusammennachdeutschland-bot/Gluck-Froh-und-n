@@ -2028,6 +2028,24 @@ export const LessonControlModal: React.FC = () => {
                         onApplyApprovedHomework={(homeworkText) => {
                           setLessonNextHomework(homeworkText);
                         }}
+                        onUpdateLesson={(lessonId, patch) => {
+                          updateLesson(lessonId, patch);
+                          if (lessonId === selectedLesson.id) {
+                            if (patch.recordingLink !== undefined) {
+                              setLessonRecordingLink(patch.recordingLink || '');
+                            }
+                            if (patch.recordingLink2 !== undefined) {
+                              if (patch.recordingLink2) setShowRecordingLink2(true);
+                              setLessonRecordingLink2(patch.recordingLink2 || '');
+                            }
+                            if (patch.grainMeta !== undefined) {
+                              setLessonGrainMeta(patch.grainMeta);
+                            }
+                            if (typeof patch.whatWasTaught === 'string' && patch.whatWasTaught.trim()) {
+                              setLessonWhatWasTaught(patch.whatWasTaught);
+                            }
+                          }
+                        }}
                         _t={_t}
                       />
                     </div>

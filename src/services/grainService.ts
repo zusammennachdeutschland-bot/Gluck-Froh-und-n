@@ -3,6 +3,10 @@ import {
   GrainCapabilityState,
   GrainDiscoveredRecording,
   GrainEducationalDraft,
+  GrainExtractedGrammarEntry,
+  GrainExtractedLessonContent,
+  GrainExtractedLessonContentCore,
+  GrainExtractedVocabularyEntry,
   GrainGrammarSuggestion,
   GrainGroupLearningCorrectionEntry,
   GrainGroupLearningRecord,
@@ -11,9 +15,11 @@ import {
   GrainLessonMetadata,
   GrainMatchEvidence,
   GrainMatchStatus,
+  GrainPart2DetectionConfig,
   GrainShareAccessClassification,
   GrainStudentFollowUpSuggestion,
   GrainVocabularySuggestion,
+  GrainWorkflowStatusBadge,
   GrainZoomLinkVerificationStatus,
   Group,
   Lesson,
@@ -100,6 +106,7 @@ interface EphemeralTranscriptEntry {
 const ephemeralTranscriptCache = new Map<string, EphemeralTranscriptEntry>();
 let inMemoryGroupLearningRecordsFallback: GrainGroupLearningRecord[] = [];
 let inMemoryRemovedLibraryIdsFallback = new Set<string>();
+let inMemoryDiscoveredRecordingsFallback: GrainDiscoveredRecording[] = [];
 
 export function clearEphemeralTranscriptCache(): void {
   ephemeralTranscriptCache.clear();
@@ -330,15 +337,21 @@ export function restoreRemovedGrainLibraryEntries(): GrainDiscoveredRecording[] 
 }
 
 export function loadDiscoveredGrainRecordings(options?: { includeRemoved?: boolean }): GrainDiscoveredRecording[] {
+  const removedSet = new Set(loadRemovedGrainLibraryIds());
   if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
-    return [];
+    const validMem = inMemoryDiscoveredRecordingsFallback
+      .filter((r) => r && typeof r.id === 'string' && typeof r.recordingUrl === 'string')
+      .map((r) => ({
+        ...r,
+        removedFromLibrary: Boolean(r.removedFromLibrary || removedSet.has(r.id))
+      }));
+    return options?.includeRemoved ? validMem : validMem.filter((r) => !r.removedFromLibrary);
   }
   try {
     const raw = localStorage.getItem(GRAIN_LOCAL_DISCOVERED_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    const removedSet = new Set(loadRemovedGrainLibraryIds());
     const valid = parsed
       .filter((r) => r && typeof r.id === 'string' && typeof r.recordingUrl === 'string')
       .map((r) => ({
@@ -352,15 +365,15 @@ export function loadDiscoveredGrainRecordings(options?: { includeRemoved?: boole
 }
 
 export function saveDiscoveredGrainRecordings(recordings: GrainDiscoveredRecording[]): void {
+  const trimmed = recordings.slice(0, 200).map((r) => ({
+    ...r,
+    aiSummaryExcerpt: r.aiSummaryExcerpt ? r.aiSummaryExcerpt.slice(0, 450) : undefined
+  }));
+  inMemoryDiscoveredRecordingsFallback = trimmed;
   if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
     return;
   }
   try {
-    // Keep at most 200 recent discovered recording metadata entries locally
-    const trimmed = recordings.slice(0, 200).map((r) => ({
-      ...r,
-      aiSummaryExcerpt: r.aiSummaryExcerpt ? r.aiSummaryExcerpt.slice(0, 450) : undefined
-    }));
     localStorage.setItem(GRAIN_LOCAL_DISCOVERED_KEY, JSON.stringify(trimmed));
   } catch {
     // Ignore storage quota errors
@@ -369,7 +382,8 @@ export function saveDiscoveredGrainRecordings(recordings: GrainDiscoveredRecordi
 
 async function buildWebProxyAuthHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
+    'X-Grain-Local-Client': 'glueck-web'
   };
   try {
     const currentUser = auth?.currentUser;
@@ -394,7 +408,10 @@ async function buildWebProxyAuthHeaders(): Promise<Record<string, string>> {
     try {
       const res = await fetch('/api/grain/session', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Grain-Local-Client': 'glueck-web'
+        },
         body: JSON.stringify({ deviceId: 'web_teacher' })
       });
       if (res.ok) {
@@ -489,14 +506,38 @@ export async function refreshGrainRuntimeStatus(): Promise<GrainIntegrationMetaS
   return loadGrainIntegrationMeta();
 }
 
+/**
+ * Normalizes a user-pasted Grain Personal Access Token:
+ * - Removes invisible Unicode zero-width and RTL/LTR directional marks common on Arabic/mobile clipboards
+ * - Strips optional "Authorization:" / "Bearer " prefixes and surrounding quotes
+ * - Extracts embedded `grain_pat_...` token if present, or strips accidental line-wrap spaces
+ */
+export function normalizeGrainPersonalTokenInput(rawInput: unknown): string {
+  let str = String(rawInput ?? '')
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF\u00A0]/g, '')
+    .trim();
+
+  str = str.replace(/^["'`]+|["'`]+$/g, '').trim();
+  str = str.replace(/^Authorization\s*:\s*/i, '').trim();
+  str = str.replace(/^Bearer\s+/i, '').trim();
+  str = str.replace(/^["'`]+|["'`]+$/g, '').trim();
+
+  const patMatch = str.match(/grain_pat_[A-Za-z0-9._~+/=-]+/i);
+  if (patMatch && patMatch[0]) {
+    return patMatch[0];
+  }
+
+  return str.replace(/\s+/g, '');
+}
+
 export async function saveGrainPersonalToken(rawToken: string): Promise<{
   success: boolean;
   state: GrainIntegrationMetaState;
   error?: string;
   errorCode?: string;
 }> {
-  const cleanToken = String(rawToken || '').trim();
-  if (!cleanToken || cleanToken.length < 10 || /\s/.test(cleanToken)) {
+  const cleanToken = normalizeGrainPersonalTokenInput(rawToken);
+  if (!cleanToken || cleanToken.length < 6) {
     const state = saveGrainIntegrationMeta({
       lastError: 'Invalid Grain Personal Access Token format.',
       lastErrorCode: 'INVALID_TOKEN_FORMAT'
@@ -632,6 +673,7 @@ export async function disconnectGrainAccount(): Promise<GrainIntegrationMetaStat
     // Proceed with local cleanup even if remote disconnect fails
   }
 
+  inMemoryDiscoveredRecordingsFallback = [];
   if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
     try {
       localStorage.removeItem(GRAIN_LOCAL_DISCOVERED_KEY);
@@ -1773,8 +1815,36 @@ export function getLessonRecordingShareClassification(
 }
 
 // ==========================================
-// PART 10: SMART GROUP LEARNING ENGINE (`GrainGroupLearningRecord`)
+// PART 10: SMART RECURRING LESSON & GROUP LEARNING ENGINE (`GrainGroupLearningRecord`)
 // ==========================================
+
+export const DEFAULT_PART2_DETECTION_CONFIG: GrainPart2DetectionConfig = {
+  expectedGapMinutes: 40,
+  minGapMinutes: 32,
+  maxGapMinutes: 52
+};
+
+export function normalizePart2DetectionConfig(
+  raw?: Partial<GrainPart2DetectionConfig> | null
+): GrainPart2DetectionConfig {
+  const expected = Number(raw?.expectedGapMinutes);
+  const min = Number(raw?.minGapMinutes);
+  const max = Number(raw?.maxGapMinutes);
+  const expectedGapMinutes = Number.isFinite(expected) && expected >= 15 && expected <= 90 ? expected : 40;
+  const minGapMinutes =
+    Number.isFinite(min) && min >= 10 && min <= expectedGapMinutes
+      ? min
+      : Math.max(20, expectedGapMinutes - 8);
+  const maxGapMinutes =
+    Number.isFinite(max) && max >= expectedGapMinutes && max <= 120
+      ? max
+      : Math.min(90, expectedGapMinutes + 12);
+  return {
+    expectedGapMinutes,
+    minGapMinutes,
+    maxGapMinutes
+  };
+}
 
 export function sanitizeGrainGroupLearningRecord(raw: any, activeGroups?: Group[]): GrainGroupLearningRecord | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -1801,10 +1871,28 @@ export function sanitizeGrainGroupLearningRecord(raw: any, activeGroups?: Group[
           ...(typeof c.previousSuggestedGroupId === 'string' && c.previousSuggestedGroupId
             ? { previousSuggestedGroupId: c.previousSuggestedGroupId.slice(0, 128) }
             : {}),
+          ...(typeof c.previousSuggestedLessonId === 'string' && c.previousSuggestedLessonId
+            ? { previousSuggestedLessonId: c.previousSuggestedLessonId.slice(0, 128) }
+            : {}),
           chosenGroupId: String(c.chosenGroupId).slice(0, 128),
           chosenLessonId: String(c.chosenLessonId || lessonId).slice(0, 128)
         }))
     : undefined;
+
+  const recDayOfWeek = Number.isFinite(Number(raw.recordingDayOfWeek)) ? Number(raw.recordingDayOfWeek) : 0;
+  const lessonWeekday = Number.isFinite(Number(raw.lessonWeekday)) ? Number(raw.lessonWeekday) : recDayOfWeek;
+  const recStartTime = String(raw.recordingStartTime || '00:00').slice(0, 8);
+  const lessonScheduledStartTime =
+    typeof raw.lessonScheduledStartTime === 'string' && raw.lessonScheduledStartTime.trim()
+      ? raw.lessonScheduledStartTime.trim().slice(0, 8)
+      : recStartTime;
+
+  const scheduleRecurrence =
+    raw.scheduleRecurrence === 'weekly' ||
+    raw.scheduleRecurrence === 'biweekly_a' ||
+    raw.scheduleRecurrence === 'biweekly_b'
+      ? raw.scheduleRecurrence
+      : undefined;
 
   return {
     id: redactGrainSecrets(id).slice(0, 128),
@@ -1815,9 +1903,15 @@ export function sanitizeGrainGroupLearningRecord(raw: any, activeGroups?: Group[
       ? raw.studentIds.map((s: any) => String(s || '').trim().slice(0, 128)).filter(Boolean).slice(0, 50)
       : [],
     recordingDate: String(raw.recordingDate || '').slice(0, 10),
-    recordingDayOfWeek: Number.isFinite(Number(raw.recordingDayOfWeek)) ? Number(raw.recordingDayOfWeek) : 0,
-    recordingStartTime: String(raw.recordingStartTime || '00:00').slice(0, 8),
+    recordingDayOfWeek: recDayOfWeek,
+    lessonWeekday,
+    recordingStartTime: recStartTime,
+    lessonScheduledStartTime,
     recordingDuration: Math.max(1, Number(raw.recordingDuration) || 60),
+    ...(Number.isFinite(Number(raw.lessonScheduledDuration)) && Number(raw.lessonScheduledDuration) > 0
+      ? { lessonScheduledDuration: Math.max(15, Number(raw.lessonScheduledDuration)) }
+      : {}),
+    ...(scheduleRecurrence ? { scheduleRecurrence } : {}),
     normalizedTitle: redactGrainSecrets(String(raw.normalizedTitle || '')).slice(0, 160),
     participantSignatures: Array.isArray(raw.participantSignatures)
       ? raw.participantSignatures.map((p: any) => normalizeNameForComparison(String(p || '')).slice(0, 60)).filter(Boolean).slice(0, 25)
@@ -1827,6 +1921,11 @@ export function sanitizeGrainGroupLearningRecord(raw: any, activeGroups?: Group[
       : [],
     teacherConfirmed: Boolean(raw.teacherConfirmed),
     confirmedAt: String(raw.confirmedAt || new Date().toISOString()),
+    ...(typeof raw.updatedAt === 'string' && raw.updatedAt ? { updatedAt: String(raw.updatedAt) } : {}),
+    ruleEnabled: raw.ruleEnabled !== false,
+    ...(raw.part2GapToleranceMinutes
+      ? { part2GapToleranceMinutes: normalizePart2DetectionConfig(raw.part2GapToleranceMinutes) }
+      : {}),
     ...(obsoleteGroup ? { obsoleteGroup: true } : {}),
     ...(correctionHistory && correctionHistory.length > 0 ? { correctionHistory } : {})
   };
@@ -1871,6 +1970,35 @@ export function saveGrainGroupLearningRecords(records: GrainGroupLearningRecord[
   return sanitized;
 }
 
+export function setGrainLearningRuleEnabled(
+  ruleId: string,
+  enabled: boolean,
+  activeGroups?: Group[]
+): GrainGroupLearningRecord[] {
+  const cleanId = String(ruleId || '').trim();
+  const current = loadGrainGroupLearningRecords(activeGroups);
+  const updated = current.map((r) =>
+    r.id === cleanId
+      ? {
+          ...r,
+          ruleEnabled: Boolean(enabled),
+          updatedAt: new Date().toISOString()
+        }
+      : r
+  );
+  return saveGrainGroupLearningRecords(updated, activeGroups);
+}
+
+export function deleteGrainLearningRule(
+  ruleId: string,
+  activeGroups?: Group[]
+): GrainGroupLearningRecord[] {
+  const cleanId = String(ruleId || '').trim();
+  const current = loadGrainGroupLearningRecords(activeGroups);
+  const filtered = current.filter((r) => r.id !== cleanId);
+  return saveGrainGroupLearningRecords(filtered, activeGroups);
+}
+
 export function __resetGrainGroupLearningForTesting(): void {
   inMemoryGroupLearningRecordsFallback = [];
   inMemoryRemovedLibraryIdsFallback.clear();
@@ -1885,11 +2013,14 @@ export function __resetGrainGroupLearningForTesting(): void {
 }
 
 /**
- * Part 10.2 & 10.4 & 10.5: Records a teacher-confirmed recording-to-lesson/group match into
- * `GrainGroupLearningRecord` keyed by stable `group.id`.
- * - If the teacher chose a different lesson/group than suggested (`previousSuggestedGroupId !== lesson.groupId`),
- *   records a correction in `correctionHistory` so future matches prefer the teacher-confirmed group!
- * - Survives group name changes because `groupId` (`group.id`) is the primary key.
+ * Requirement 1 & 2 & 6: First-Time Manual Assignment = Permanent Recurring Learning.
+ * Records a teacher-confirmed recording-to-lesson/group match into `GrainGroupLearningRecord`
+ * keyed by stable `group.id`, recurring weekday, local scheduled start time, and student IDs.
+ * - If the teacher corrects a previous suggestion or automatic match (`previousSuggestedGroupId !== lesson.groupId`),
+ *   records a correction in `correctionHistory` on both the new record and any conflicting rule for the old group
+ *   so the same mistake is never repeated.
+ * - If the teacher confirms a lesson after a recurring schedule change, updates the learned schedule for `group.id`.
+ * - Survives group name changes because `groupId` (`group.id`) is the primary identity.
  */
 export function recordConfirmedGrainGroupLearning(options: {
   recording: GrainDiscoveredRecording;
@@ -1897,12 +2028,15 @@ export function recordConfirmedGrainGroupLearning(options: {
   groups: Group[];
   students: Student[];
   previousSuggestedGroupId?: string;
+  previousSuggestedLessonId?: string;
+  part2GapToleranceMinutes?: Partial<GrainPart2DetectionConfig>;
 }): GrainGroupLearningRecord | null {
   const { recording, lesson, groups, students } = options;
   const groupId = String(lesson.groupId || '').trim();
   if (!groupId) return null;
 
-  const groupExists = (groups || []).some((g) => g && !g.deleted && g.id === groupId);
+  const groupObj = (groups || []).find((g) => g && !g.deleted && g.id === groupId);
+  const groupExists = Boolean(groupObj);
   const groupStudents = (students || []).filter(
     (s) => s && !s.deleted && (s.groupId === groupId || (lesson.studentId && s.id === lesson.studentId))
   );
@@ -1910,13 +2044,30 @@ export function recordConfirmedGrainGroupLearning(options: {
 
   const recTime = formatLocalYmdAndTimeFromIso(recording.startDatetime);
   const dt = new Date(recording.startDatetime);
-  const dayOfWeek = !isNaN(dt.getTime()) ? dt.getDay() : 0;
+  const recDayOfWeek = !isNaN(dt.getTime()) ? dt.getDay() : 0;
+
+  const lessonParsed = parseLessonDateTimeMinutes(lesson.date, lesson.time);
+  const lessonWeekday = lessonParsed.valid
+    ? new Date(
+        Number(lesson.date.slice(0, 4)),
+        Number(lesson.date.slice(5, 7)) - 1,
+        Number(lesson.date.slice(8, 10))
+      ).getDay()
+    : recDayOfWeek;
+  const lessonScheduledStartTime = lessonParsed.valid
+    ? `${String(Math.floor(lessonParsed.minutesOfDay / 60)).padStart(2, '0')}:${String(
+        lessonParsed.minutesOfDay % 60
+      ).padStart(2, '0')}`
+    : recTime.valid
+    ? recTime.timeHm
+    : lesson.time || '00:00';
 
   const existingRecords = loadGrainGroupLearningRecords(groups);
   const existingIdx = existingRecords.findIndex((r) => r.grainRecordingId === recording.id);
   const prevSuggestedGroupId =
     options.previousSuggestedGroupId ||
     recording.matchedGroupId ||
+    recording.candidates?.[0]?.groupId ||
     (recording.suggestedLessonId
       ? (groups || []).find((g) => g.name === recording.candidates?.[0]?.groupName)?.id
       : undefined);
@@ -1929,6 +2080,7 @@ export function recordConfirmedGrainGroupLearning(options: {
     nextCorrections.push({
       correctedAt: nowIso,
       previousSuggestedGroupId: prevSuggestedGroupId,
+      ...(options.previousSuggestedLessonId ? { previousSuggestedLessonId: options.previousSuggestedLessonId } : {}),
       chosenGroupId: groupId,
       chosenLessonId: lesson.id
     });
@@ -1941,9 +2093,13 @@ export function recordConfirmedGrainGroupLearning(options: {
     groupId,
     studentIds,
     recordingDate: recTime.valid ? recTime.dateYmd : lesson.date,
-    recordingDayOfWeek: dayOfWeek,
-    recordingStartTime: recTime.valid ? recTime.timeHm : lesson.time,
+    recordingDayOfWeek: recDayOfWeek,
+    lessonWeekday,
+    recordingStartTime: recTime.valid ? recTime.timeHm : lessonScheduledStartTime,
+    lessonScheduledStartTime,
     recordingDuration: recording.durationMinutes || lesson.durationMinutes || 60,
+    lessonScheduledDuration: Math.max(15, Number(lesson.durationMinutes || groupObj?.lessonDurationMinutes || 60)),
+    scheduleRecurrence: lesson.scheduleRecurrence || groupObj?.scheduleRecurrence || 'weekly',
     normalizedTitle: normalizeNameForComparison(recording.title),
     participantSignatures: (recording.participantNames || [])
       .map(normalizeNameForComparison)
@@ -1952,14 +2108,53 @@ export function recordConfirmedGrainGroupLearning(options: {
     matchingEvidence: (recording.matchReasons || []).slice(0, 8),
     teacherConfirmed: true,
     confirmedAt: nowIso,
+    updatedAt: nowIso,
+    ruleEnabled: true,
+    part2GapToleranceMinutes: normalizePart2DetectionConfig(options.part2GapToleranceMinutes),
     ...(groupExists ? {} : { obsoleteGroup: true }),
     ...(nextCorrections.length > 0 ? { correctionHistory: nextCorrections } : {})
   };
 
-  const nextList = [...existingRecords];
-  if (existingIdx >= 0) {
-    nextList[existingIdx] = newRecord;
-  } else {
+  // Update existing records:
+  // 1) If teacher confirmed a schedule change for this groupId, update older active rules for the same groupId
+  //    so the new recurring schedule is learned without stale schedule-change warnings.
+  // 2) If teacher corrected away from prevSuggestedGroupId at this time slot, append the correction entry
+  //    to any matching rule of prevSuggestedGroupId.
+  const nextList = existingRecords.map((item) => {
+    if (item.grainRecordingId === recording.id) {
+      return newRecord;
+    }
+    if (item.groupId === groupId && !item.obsoleteGroup && item.ruleEnabled !== false) {
+      return {
+        ...item,
+        lessonWeekday,
+        recordingDayOfWeek: recDayOfWeek,
+        lessonScheduledStartTime,
+        recordingStartTime: recTime.valid ? recTime.timeHm : lessonScheduledStartTime,
+        studentIds: studentIds.length > 0 ? studentIds : item.studentIds,
+        updatedAt: nowIso
+      };
+    }
+    if (prevSuggestedGroupId && item.groupId === prevSuggestedGroupId) {
+      const itemHistory = item.correctionHistory || [];
+      return {
+        ...item,
+        correctionHistory: [
+          ...itemHistory,
+          {
+            correctedAt: nowIso,
+            previousSuggestedGroupId: prevSuggestedGroupId,
+            chosenGroupId: groupId,
+            chosenLessonId: lesson.id
+          }
+        ].slice(-15),
+        updatedAt: nowIso
+      };
+    }
+    return item;
+  });
+
+  if (existingIdx < 0) {
     nextList.unshift(newRecord);
   }
 
@@ -1967,60 +2162,150 @@ export function recordConfirmedGrainGroupLearning(options: {
   return newRecord;
 }
 
+function parseTimeHmToMinutes(timeHm?: string | null): number | null {
+  if (!timeHm || typeof timeHm !== 'string') return null;
+  const parsed = parseLessonDateTimeMinutes('2026-01-01', timeHm);
+  return parsed.valid ? parsed.minutesOfDay : null;
+}
+
 /**
- * Evaluates Smart Group Learning history for a candidate group (`group.id`) on a given recording.
- * - Checks active (non-obsolete) teacher-confirmed learning records for `group.id`.
- * - Compares day-of-week + start-time window, recurring participant signatures, and normalized title patterns.
- * - Penalizes a group if the teacher previously corrected away from it (`previousSuggestedGroupId === groupId`) at that time slot.
- * - Never matches or boosts deleted/obsolete groups (`obsoleteGroup: true`).
+ * Evaluates Smart Recurring Group Learning history for a candidate group (`group.id`) on a given recording and lesson.
+ * - Only uses active (`teacherConfirmed && !obsoleteGroup && ruleEnabled !== false`) learning records.
+ * - Compares recurring weekday + start-time window (including Part 2 offset window), recurring participant signatures, and title patterns.
+ * - Detects if a group's recurring schedule has changed (`scheduleChangedRequiresConfirmation: true`) so Glück asks for confirmation once instead of silently learning an uncertain schedule change.
+ * - Penalizes and blocks auto-assignment for a group if the teacher previously corrected away from it at that weekday/time slot.
  */
 export function evaluateGroupLearningBoostForCandidate(options: {
   groupId: string;
   recordingDayOfWeek: number;
   recordingMinutesOfDay: number;
   recordingDurationMinutes: number;
+  lessonWeekday?: number;
+  lessonMinutesOfDay?: number;
   normalizedTitle: string;
   normalizedParticipants: string[];
   learningRecords: GrainGroupLearningRecord[];
   activeGroups: Group[];
-}): { boostPoints: number; reasons: string[] } {
+}): {
+  boostPoints: number;
+  learnedRecurringRuleId?: string;
+  scheduleChangedRequiresConfirmation: boolean;
+  wasCorrectedAway: boolean;
+  reasons: string[];
+} {
   const {
     groupId,
     recordingDayOfWeek,
     recordingMinutesOfDay,
     recordingDurationMinutes,
+    lessonWeekday = recordingDayOfWeek,
+    lessonMinutesOfDay = recordingMinutesOfDay,
     normalizedTitle,
     normalizedParticipants,
     learningRecords,
     activeGroups
   } = options;
 
-  if (!groupId) return { boostPoints: 0, reasons: [] };
+  if (!groupId) {
+    return {
+      boostPoints: 0,
+      scheduleChangedRequiresConfirmation: false,
+      wasCorrectedAway: false,
+      reasons: []
+    };
+  }
   const isGroupActive = activeGroups.some((g) => g && !g.deleted && g.status !== 'archived' && g.id === groupId);
   if (!isGroupActive) {
-    return { boostPoints: 0, reasons: [] };
+    return {
+      boostPoints: 0,
+      scheduleChangedRequiresConfirmation: false,
+      wasCorrectedAway: false,
+      reasons: []
+    };
   }
 
   let boost = 0;
   const reasons: string[] = [];
+  let learnedRecurringRuleId: string | undefined;
+  let scheduleChangedRequiresConfirmation = false;
 
+  // Check correction history first: did the teacher explicitly reassign this weekday/time slot away from groupId?
+  const correctedAwayRecords = learningRecords.filter((r) => {
+    const rDay = r.lessonWeekday ?? r.recordingDayOfWeek;
+    if (rDay !== recordingDayOfWeek && rDay !== lessonWeekday) return false;
+    const learnedMin =
+      parseTimeHmToMinutes(r.lessonScheduledStartTime) ??
+      parseTimeHmToMinutes(r.recordingStartTime) ??
+      0;
+    if (Math.abs(learnedMin - recordingMinutesOfDay) > 55 && Math.abs(learnedMin - lessonMinutesOfDay) > 55) {
+      return false;
+    }
+    return (r.correctionHistory || []).some(
+      (c) => c.previousSuggestedGroupId === groupId && c.chosenGroupId !== groupId
+    );
+  });
+
+  // Check if teacher later re-confirmed this group at this slot after the correction
   const confirmedForGroup = learningRecords.filter(
-    (r) => r.teacherConfirmed && !r.obsoleteGroup && r.groupId === groupId
+    (r) => r.teacherConfirmed && !r.obsoleteGroup && r.ruleEnabled !== false && r.groupId === groupId
   );
 
-  if (confirmedForGroup.length > 0) {
-    // 1. Check Day-of-Week + Start-Time slot alignment with previous teacher confirmations for this group.id
+  const latestConfirmationMs = confirmedForGroup.reduce((max, r) => {
+    const t = Date.parse(r.updatedAt || r.confirmedAt || '');
+    return Number.isFinite(t) && t > max ? t : max;
+  }, 0);
+
+  const latestCorrectionAwayMs = correctedAwayRecords.reduce((max, r) => {
+    for (const c of r.correctionHistory || []) {
+      if (c.previousSuggestedGroupId === groupId && c.chosenGroupId !== groupId) {
+        const t = Date.parse(c.correctedAt || '');
+        if (Number.isFinite(t) && t > max) max = t;
+      }
+    }
+    return max;
+  }, 0);
+
+  const wasCorrectedAway =
+    correctedAwayRecords.length > 0 && latestCorrectionAwayMs >= latestConfirmationMs;
+
+  if (confirmedForGroup.length > 0 && !wasCorrectedAway) {
+    // 1. Check Recurring Weekday + Start-Time slot alignment with previous teacher confirmations for this group.id
     const timeSlotMatches = confirmedForGroup.filter((r) => {
-      if (r.recordingDayOfWeek !== recordingDayOfWeek) return false;
-      const [hh, mm] = String(r.recordingStartTime || '00:00').split(':').map(Number);
-      if (!Number.isFinite(hh) || !Number.isFinite(mm)) return false;
-      const learnedMin = hh * 60 + mm;
-      return Math.abs(learnedMin - recordingMinutesOfDay) <= 35;
+      const learnedWeekday = r.lessonWeekday ?? r.recordingDayOfWeek;
+      if (learnedWeekday !== lessonWeekday && r.recordingDayOfWeek !== recordingDayOfWeek) {
+        return false;
+      }
+      const learnedLessonMin =
+        parseTimeHmToMinutes(r.lessonScheduledStartTime) ??
+        parseTimeHmToMinutes(r.recordingStartTime);
+      const learnedRecMin = parseTimeHmToMinutes(r.recordingStartTime) ?? learnedLessonMin;
+      if (learnedLessonMin === null || learnedRecMin === null) return false;
+
+      const part2Cfg = normalizePart2DetectionConfig(r.part2GapToleranceMinutes);
+      const matchesLessonTime = Math.abs(learnedLessonMin - lessonMinutesOfDay) <= 25;
+      const matchesRecPart1Time = Math.abs(learnedRecMin - recordingMinutesOfDay) <= 30;
+      const recGapFromLearnedStart = recordingMinutesOfDay - learnedLessonMin;
+      const matchesRecPart2Time =
+        recGapFromLearnedStart >= part2Cfg.minGapMinutes &&
+        recGapFromLearnedStart <= part2Cfg.maxGapMinutes;
+
+      return matchesLessonTime && (matchesRecPart1Time || matchesRecPart2Time);
     });
 
     if (timeSlotMatches.length > 0) {
-      boost += 14;
-      reasons.push(`Smart Group Learning: matches confirmed schedule slot for this group (${timeSlotMatches.length} prior confirmation(s))`);
+      learnedRecurringRuleId = timeSlotMatches[0].id;
+      boost += 18;
+      reasons.push(
+        `Smart Recurring Rule: matches confirmed weekly slot for group (${timeSlotMatches.length} prior confirmation(s))`
+      );
+    } else {
+      // This group has active learned recurring rules, but this lesson's weekday or start time shifted (> 25m or different weekday).
+      // Requirement 2: "If a recurring schedule changes, do not silently learn the new schedule from an uncertain match. Ask for confirmation once, then update the learned rule."
+      scheduleChangedRequiresConfirmation = true;
+      boost += 4;
+      reasons.push(
+        'Recurring schedule changed from previously learned weekday/time slot — teacher confirmation required once to update rule'
+      );
     }
 
     // 2. Check recurring participant signatures confirmed for this group.id
@@ -2033,13 +2318,18 @@ export function evaluateGroupLearningBoostForCandidate(options: {
       }
       let sigOverlap = 0;
       for (const p of normalizedParticipants) {
-        if (learnedParticipants.has(p) || Array.from(learnedParticipants).some((lp) => lp.includes(p) || p.includes(lp))) {
+        if (
+          learnedParticipants.has(p) ||
+          Array.from(learnedParticipants).some((lp) => lp.includes(p) || p.includes(lp))
+        ) {
           sigOverlap++;
         }
       }
       if (sigOverlap > 0) {
         boost += Math.min(8, sigOverlap * 4);
-        reasons.push(`Smart Group Learning: ${sigOverlap} participant(s) match previously confirmed group sessions`);
+        reasons.push(
+          `Smart Group Learning: ${sigOverlap} participant(s) match previously confirmed group sessions`
+        );
       }
     }
 
@@ -2053,41 +2343,40 @@ export function evaluateGroupLearningBoostForCandidate(options: {
       );
       if (titleMatched) {
         boost += 6;
-        reasons.push('Smart Group Learning: recording title pattern matches prior confirmed sessions for this group');
+        reasons.push(
+          'Smart Group Learning: recording title pattern matches prior confirmed sessions for this group'
+        );
       }
     }
 
     // 4. Duration similarity with learned group duration
-    const durMatched = confirmedForGroup.some((r) => Math.abs((r.recordingDuration || 60) - recordingDurationMinutes) <= 15);
+    const durMatched = confirmedForGroup.some(
+      (r) => Math.abs((r.recordingDuration || 60) - recordingDurationMinutes) <= 15
+    );
     if (durMatched && boost > 0) {
       boost += 2;
     }
   }
 
-  // 5. Check correction history across all records: if teacher explicitly corrected AWAY from this groupId at this day/time slot, penalize it
-  const correctedAwayCount = learningRecords.filter((r) => {
-    if (r.recordingDayOfWeek !== recordingDayOfWeek) return false;
-    const [hh, mm] = String(r.recordingStartTime || '00:00').split(':').map(Number);
-    const learnedMin = (Number.isFinite(hh) ? hh : 0) * 60 + (Number.isFinite(mm) ? mm : 0);
-    if (Math.abs(learnedMin - recordingMinutesOfDay) > 45) return false;
-    return (r.correctionHistory || []).some(
-      (c) => c.previousSuggestedGroupId === groupId && c.chosenGroupId !== groupId
+  if (wasCorrectedAway) {
+    boost -= Math.min(24, correctedAwayRecords.length * 14);
+    learnedRecurringRuleId = undefined;
+    reasons.push(
+      'Smart Group Learning: teacher previously corrected and reassigned this time slot to another group'
     );
-  }).length;
-
-  if (correctedAwayCount > 0) {
-    boost -= Math.min(18, correctedAwayCount * 10);
-    reasons.push('Smart Group Learning: teacher previously reassigned this time slot to another group');
   }
 
   return {
-    boostPoints: Math.max(-18, Math.min(24, boost)),
+    boostPoints: Math.max(-24, Math.min(26, boost)),
+    learnedRecurringRuleId,
+    scheduleChangedRequiresConfirmation,
+    wasCorrectedAway,
     reasons
   };
 }
 
 // ==========================================
-// PART 9: SMART LESSON MATCHING WITHOUT REQUIRED ZOOM LINKS
+// PART 9: SMART LESSON MATCHING & AUTOMATIC RECURRING ASSIGNMENT
 // ==========================================
 
 /**
@@ -2141,11 +2430,12 @@ function parseLessonDateTimeMinutes(dateStr: string, timeStr?: string): {
   valid: boolean;
   dateYmd: string;
   minutesOfDay: number;
+  weekday: number;
   epochMsLocal: number;
 } {
   const cleanDate = String(dateStr || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate)) {
-    return { valid: false, dateYmd: '', minutesOfDay: 0, epochMsLocal: 0 };
+    return { valid: false, dateYmd: '', minutesOfDay: 0, weekday: 0, epochMsLocal: 0 };
   }
 
   let hours = 0;
@@ -2166,6 +2456,7 @@ function parseLessonDateTimeMinutes(dateStr: string, timeStr?: string): {
     valid: !isNaN(dt.getTime()),
     dateYmd: cleanDate,
     minutesOfDay: hours * 60 + minutes,
+    weekday: !isNaN(dt.getTime()) ? dt.getDay() : 0,
     epochMsLocal: dt.getTime()
   };
 }
@@ -2179,6 +2470,7 @@ function formatLocalYmdAndTimeFromIso(isoStr: string): {
   epochMs: number;
   utcDateYmd: string;
   utcMinutesOfDay: number;
+  utcDayOfWeek: number;
 } {
   const dt = new Date(isoStr);
   if (isNaN(dt.getTime())) {
@@ -2190,7 +2482,8 @@ function formatLocalYmdAndTimeFromIso(isoStr: string): {
       dayOfWeek: 0,
       epochMs: 0,
       utcDateYmd: '',
-      utcMinutesOfDay: 0
+      utcMinutesOfDay: 0,
+      utcDayOfWeek: 0
     };
   }
   const yyyy = dt.getFullYear();
@@ -2211,7 +2504,8 @@ function formatLocalYmdAndTimeFromIso(isoStr: string): {
     dayOfWeek: dt.getDay(),
     epochMs: dt.getTime(),
     utcDateYmd: `${utcY}-${utcM}-${utcD}`,
-    utcMinutesOfDay: dt.getUTCHours() * 60 + dt.getUTCMinutes()
+    utcMinutesOfDay: dt.getUTCHours() * 60 + dt.getUTCMinutes(),
+    utcDayOfWeek: dt.getUTCDay()
   };
 }
 
@@ -2224,20 +2518,13 @@ function normalizeNameForComparison(name?: string | null): string {
 }
 
 /**
- * Part 9 & Part 10: Evaluates a single Grain recording against all candidate Glück lessons.
- * - Zoom meeting link is optional supporting evidence — NEVER required!
- * - Primary matching evidence:
- *   1. Lesson date & Lesson start time vs Recording start time
- *   2. Existing Glück student-to-group relationship (`student.groupId === lesson.groupId`)
- *   3. Grain participant/student identity when aligned with date/time/group
- *   4. Smart Group Learning history (`GrainGroupLearningRecord` keyed by stable `group.id`)
- * - Secondary evidence:
- *   1. Recording title & calendar metadata
- *   2. Zoom meeting URL (if available)
- *   3. Recording duration (including split segments)
- * - Safety rules:
- *   - Never infer attendance from participants.
- *   - Never assign based on student name alone when date/time or group conflicts.
+ * Evaluates a single Grain recording against all candidate Glück lessons.
+ * - Uses confirmed recurring group rules (`GrainGroupLearningRecord` keyed by stable `group.id`),
+ *   weekday, start time, student-group relationships, duration, title, and participants.
+ * - Never assigns a recording based on a student's name alone when date/time conflicts.
+ * - Never assigns based on time alone if multiple lessons or groups could match (`multiple_possible_lessons`).
+ * - If a recurring schedule changes, asks for confirmation once (`needs_confirmation`) instead of silently learning the new schedule.
+ * - If the match is strong, unambiguous, and backed by an active confirmed recurring rule, marks it `'automatically_matched'`.
  */
 export function evaluateRecordingMatchAgainstLessons(
   recording: {
@@ -2257,14 +2544,19 @@ export function evaluateRecordingMatchAgainstLessons(
     aiSummaryExcerpt?: string;
     importedAt?: string;
     removedFromLibrary?: boolean;
+    detectedPartSlot?: 'part1' | 'part2';
+    pairedRecordingId?: string;
+    part2StartGapMinutes?: number;
   },
   lessons: Lesson[],
   groups: Group[],
   students: Student[],
-  explicitLearningRecords?: GrainGroupLearningRecord[]
+  explicitLearningRecords?: GrainGroupLearningRecord[],
+  part2ConfigInput?: Partial<GrainPart2DetectionConfig>
 ): GrainDiscoveredRecording {
   const durationMinutes = Math.max(1, Math.round((recording.durationSeconds || 0) / 60));
   const cleanRecUrl = String(recording.recordingUrl || '').trim();
+  const part2Config = normalizePart2DetectionConfig(part2ConfigInput);
 
   const shareInfo = classifyGrainRecordingShareAccess({
     recordingUrl: cleanRecUrl,
@@ -2283,6 +2575,7 @@ export function evaluateRecordingMatchAgainstLessons(
       confidenceScore: 0,
       matchReasons: ['Recording URL is missing or inaccessible in Grain.'],
       candidates: [],
+      workflowStatuses: ['needs_teacher_confirmation'],
       lastSyncedAt: new Date().toISOString()
     };
   }
@@ -2316,25 +2609,34 @@ export function evaluateRecordingMatchAgainstLessons(
     const lessonTime = parseLessonDateTimeMinutes(lesson.date, lesson.time);
     if (!lessonTime.valid || !recTime.valid) continue;
 
-    // Account for local date/time as well as timezone offsets up to ±3 hours around midnight
+    // Account for local date/time as well as timezone / DST offsets
     const epochDiffMinutes = Math.round(Math.abs(recTime.epochMs - lessonTime.epochMsLocal) / 60000);
     const sameLocalDate = recTime.dateYmd === lessonTime.dateYmd;
     const sameUtcDate = recTime.utcDateYmd === lessonTime.dateYmd;
     const localClockDiff = Math.abs(recTime.minutesOfDay - lessonTime.minutesOfDay);
     const utcClockDiff = Math.abs(recTime.utcMinutesOfDay - lessonTime.minutesOfDay);
 
+    // Handle DST / timezone 60-minute shift when ISO string has explicit UTC offset
     const effectiveTimeDeltaMinutes = sameLocalDate
-      ? localClockDiff
+      ? Math.min(localClockDiff, epochDiffMinutes)
       : sameUtcDate
       ? Math.min(epochDiffMinutes, utcClockDiff)
       : epochDiffMinutes;
 
+    const signedMinutesFromLessonStart = sameLocalDate
+      ? recTime.minutesOfDay - lessonTime.minutesOfDay
+      : Math.round((recTime.epochMs - lessonTime.epochMsLocal) / 60000);
+
     const lessonDuration = Math.max(15, Number(lesson.durationMinutes || lesson.duration || 60));
+    const isWithinPart2OffsetWindow =
+      signedMinutesFromLessonStart >= part2Config.minGapMinutes &&
+      signedMinutesFromLessonStart <= part2Config.maxGapMinutes;
+
     const isDateAndTimeAligned =
       (sameLocalDate || sameUtcDate || epochDiffMinutes <= 180) &&
-      effectiveTimeDeltaMinutes <= Math.max(75, lessonDuration + 20);
+      (effectiveTimeDeltaMinutes <= Math.max(75, lessonDuration + 20) || isWithinPart2OffsetWindow);
 
-    // Rule 1 & Part 9.3: Never assign a recording based on student/participant name or title alone when date/time conflicts!
+    // Never assign a recording based on student/participant name or title alone when date/time conflicts!
     if (!isDateAndTimeAligned) {
       continue;
     }
@@ -2364,13 +2666,18 @@ export function evaluateRecordingMatchAgainstLessons(
     let score = 0;
     const reasons: string[] = [];
 
-    // 1. Primary Evidence: Lesson Date & Start Time alignment (up to 64 points — strong match possible without Zoom link!)
+    // 1. Primary Evidence: Lesson Date & Start Time alignment (or Part 2 ~40m offset alignment)
     if (effectiveTimeDeltaMinutes <= 10) {
       score += 64;
       reasons.push(`Exact date & start time match (${lesson.date} ${lesson.time}, Δ ${effectiveTimeDeltaMinutes}m)`);
     } else if (effectiveTimeDeltaMinutes <= 25) {
       score += 52;
       reasons.push(`Date & close start time match (${lesson.date} ${lesson.time}, Δ ${effectiveTimeDeltaMinutes}m)`);
+    } else if (isWithinPart2OffsetWindow) {
+      score += 54;
+      reasons.push(
+        `Date & Part 2 start-time offset match (+${signedMinutesFromLessonStart}m after ${lesson.time})`
+      );
     } else if (effectiveTimeDeltaMinutes <= 50) {
       score += 36;
       reasons.push(`Date & overlapping session window (${lesson.date} ${lesson.time}, Δ ${effectiveTimeDeltaMinutes}m)`);
@@ -2412,21 +2719,30 @@ export function evaluateRecordingMatchAgainstLessons(
       }
     }
 
-    // 3. Primary/Learned Evidence: Smart Group Learning History (Part 10 — keyed by stable group.id)
+    // 3. Primary/Learned Evidence: Smart Recurring Group Learning History (keyed by stable group.id)
     let learnedGroupMatchBoost = 0;
+    let learnedRecurringRuleId: string | undefined;
+    let scheduleChangedRequiresConfirmation = false;
+    let wasCorrectedAway = false;
+
     if (lesson.groupId) {
       const learnedEval = evaluateGroupLearningBoostForCandidate({
         groupId: lesson.groupId,
-        recordingDayOfWeek: recTime.dayOfWeek,
-        recordingMinutesOfDay: recTime.minutesOfDay,
+        recordingDayOfWeek: sameLocalDate ? recTime.dayOfWeek : lessonTime.weekday,
+        recordingMinutesOfDay: sameLocalDate ? recTime.minutesOfDay : lessonTime.minutesOfDay + signedMinutesFromLessonStart,
         recordingDurationMinutes: durationMinutes,
+        lessonWeekday: lessonTime.weekday,
+        lessonMinutesOfDay: lessonTime.minutesOfDay,
         normalizedTitle: normRecTitle,
         normalizedParticipants: normParticipants,
         learningRecords,
         activeGroups
       });
       learnedGroupMatchBoost = learnedEval.boostPoints;
-      if (learnedGroupMatchBoost !== 0) {
+      learnedRecurringRuleId = learnedEval.learnedRecurringRuleId;
+      scheduleChangedRequiresConfirmation = learnedEval.scheduleChangedRequiresConfirmation;
+      wasCorrectedAway = learnedEval.wasCorrectedAway;
+      if (learnedGroupMatchBoost !== 0 || learnedEval.reasons.length > 0) {
         score += learnedGroupMatchBoost;
         reasons.push(...learnedEval.reasons);
       }
@@ -2434,12 +2750,14 @@ export function evaluateRecordingMatchAgainstLessons(
 
     // 4. Secondary Evidence: Duration consistency (up to 14 points)
     const durationDiff = Math.abs(durationMinutes - lessonDuration);
-    const isLikelySplitPart = Math.abs(durationMinutes - Math.round(lessonDuration / 2)) <= 12;
+    const isLikelySplitPart =
+      Math.abs(durationMinutes - Math.round(lessonDuration / 2)) <= 15 ||
+      (durationMinutes >= 25 && durationMinutes <= 45);
     if (durationDiff <= 15) {
       score += 14;
       reasons.push(`Duration matches lesson (${durationMinutes}m vs ${lessonDuration}m)`);
     } else if (isLikelySplitPart) {
-      score += 10;
+      score += 12;
       reasons.push(`Duration matches multi-part session segment (${durationMinutes}m of ${lessonDuration}m)`);
     } else if (durationDiff <= 30) {
       score += 6;
@@ -2474,6 +2792,8 @@ export function evaluateRecordingMatchAgainstLessons(
     }
 
     const clampedScore = Math.max(0, Math.min(100, score));
+    const detectedPartSlot: 'part1' | 'part2' =
+      recording.detectedPartSlot || (isWithinPart2OffsetWindow && effectiveTimeDeltaMinutes > 25 ? 'part2' : 'part1');
 
     const evidence: GrainMatchEvidence = {
       lessonDateMatch: sameLocalDate || sameUtcDate,
@@ -2492,8 +2812,26 @@ export function evaluateRecordingMatchAgainstLessons(
       matchedStudentIds: matchedStudentIds.length > 0 ? matchedStudentIds : undefined,
       matchedGroupId: lesson.groupId || undefined,
       learnedGroupMatchBoost: learnedGroupMatchBoost !== 0 ? learnedGroupMatchBoost : undefined,
+      learnedRecurringRuleId,
+      scheduleChangedRequiresConfirmation: scheduleChangedRequiresConfirmation || undefined,
+      detectedPartSlot,
+      pairedRecordingId: recording.pairedRecordingId,
+      part2StartGapMinutes: recording.part2StartGapMinutes,
       reasons
     };
+
+    const existingR1 = (lesson.recordingLink || lesson.report?.recordingLink || '').trim() || undefined;
+    const existingR2 = (lesson.recordingLink2 || lesson.report?.recordingLink2 || '').trim() || undefined;
+    const recommendedSlot: 'recordingLink' | 'recordingLink2' =
+      detectedPartSlot === 'part2' ? 'recordingLink2' : 'recordingLink';
+
+    const canAutoAssign = Boolean(
+      learnedRecurringRuleId &&
+        !scheduleChangedRequiresConfirmation &&
+        !wasCorrectedAway &&
+        clampedScore >= 78 &&
+        zoomLinkStatus !== 'mismatch'
+    );
 
     candidates.push({
       lessonId: lesson.id,
@@ -2507,8 +2845,10 @@ export function evaluateRecordingMatchAgainstLessons(
       lessonDurationMinutes: lessonDuration,
       confidenceScore: clampedScore,
       evidence,
-      existingRecordingLink: (lesson.recordingLink || lesson.report?.recordingLink || '').trim() || undefined,
-      existingRecordingLink2: (lesson.recordingLink2 || lesson.report?.recordingLink2 || '').trim() || undefined
+      existingRecordingLink: existingR1,
+      existingRecordingLink2: existingR2,
+      canAutoAssign,
+      recommendedSlot
     });
   }
 
@@ -2517,6 +2857,21 @@ export function evaluateRecordingMatchAgainstLessons(
   if (alreadyLinkedLesson) {
     const linkedGroup = activeGroups.find((g) => g.id === alreadyLinkedLesson.groupId);
     const topCandidate = candidates.find((c) => c.lessonId === alreadyLinkedLesson.id) || candidates[0];
+    const isLinkedInPart2 =
+      (alreadyLinkedLesson.recordingLink2 || alreadyLinkedLesson.report?.recordingLink2 || '').trim() === cleanRecUrl ||
+      alreadyLinkedLesson.grainMeta?.recordingIdPart2 === recording.id;
+    const partSlot: 'part1' | 'part2' = isLinkedInPart2 ? 'part2' : 'part1';
+    const statuses: GrainWorkflowStatusBadge[] = [
+      ...(alreadyLinkedLesson.grainMeta?.matchedAutomatically ? (['automatically_matched'] as const) : []),
+      partSlot === 'part2' ? 'part2_detected' : 'part1_detected'
+    ];
+    if (alreadyLinkedLesson.grainMeta?.extractedLessonContent) {
+      if (alreadyLinkedLesson.grainMeta.extractedLessonContent.transcriptStatus === 'transcript_unavailable') {
+        statuses.push('transcript_unavailable');
+      } else {
+        statuses.push('lesson_content_extracted');
+      }
+    }
     return {
       ...recording,
       durationMinutes,
@@ -2533,6 +2888,8 @@ export function evaluateRecordingMatchAgainstLessons(
       ],
       evidence: topCandidate?.evidence,
       candidates,
+      detectedPartSlot: partSlot,
+      workflowStatuses: statuses,
       lastSyncedAt: new Date().toISOString()
     };
   }
@@ -2546,15 +2903,16 @@ export function evaluateRecordingMatchAgainstLessons(
       confidenceScore: 0,
       matchReasons: ['No scheduled lesson matched the recording date and time window.'],
       candidates: [],
+      workflowStatuses: ['needs_teacher_confirmation'],
       lastSyncedAt: new Date().toISOString()
     };
   }
 
-  // Check if multiple lessons on the same date/time window have close scores
+  // Requirement 2: Never assign based on time alone if multiple lessons or groups could match!
   if (
     candidates.length >= 2 &&
     candidates[1].confidenceScore >= 45 &&
-    Math.abs(candidates[0].confidenceScore - candidates[1].confidenceScore) <= 12
+    Math.abs(candidates[0].confidenceScore - candidates[1].confidenceScore) <= 14
   ) {
     return {
       ...recording,
@@ -2571,12 +2929,61 @@ export function evaluateRecordingMatchAgainstLessons(
         ...candidates[0].evidence.reasons
       ],
       evidence: candidates[0].evidence,
-      candidates,
+      candidates: candidates.map((c) => ({ ...c, canAutoAssign: false })),
+      workflowStatuses: ['needs_teacher_confirmation'],
       lastSyncedAt: new Date().toISOString()
     };
   }
 
   const best = candidates[0];
+
+  // Requirement 2: If a recurring schedule changes, do NOT silently auto-assign; ask for confirmation once!
+  if (best.evidence.scheduleChangedRequiresConfirmation) {
+    return {
+      ...recording,
+      durationMinutes,
+      shareAccessClassification: effectiveShareClassification,
+      matchStatus: 'needs_confirmation',
+      suggestedLessonId: best.lessonId,
+      matchedGroupId: best.groupId,
+      matchedGroupName: best.groupName,
+      matchedStudentIds: best.evidence.matchedStudentIds,
+      confidenceScore: best.confidenceScore,
+      matchReasons: best.evidence.reasons,
+      evidence: best.evidence,
+      candidates: candidates.map((c) => ({ ...c, canAutoAssign: false })),
+      detectedPartSlot: best.evidence.detectedPartSlot || 'part1',
+      workflowStatuses: ['needs_teacher_confirmation'],
+      lastSyncedAt: new Date().toISOString()
+    };
+  }
+
+  // Requirement 2: If backed by an active confirmed recurring rule and strong & unambiguous, mark 'automatically_matched'
+  if (best.canAutoAssign && best.evidence.learnedRecurringRuleId) {
+    const partSlot = best.evidence.detectedPartSlot || 'part1';
+    return {
+      ...recording,
+      durationMinutes,
+      shareAccessClassification: effectiveShareClassification,
+      matchStatus: 'automatically_matched',
+      suggestedLessonId: best.lessonId,
+      matchedGroupId: best.groupId,
+      matchedGroupName: best.groupName,
+      matchedStudentIds: best.evidence.matchedStudentIds,
+      confidenceScore: best.confidenceScore,
+      matchReasons: best.evidence.reasons,
+      evidence: best.evidence,
+      candidates,
+      detectedPartSlot: partSlot,
+      learnedRecurringRuleId: best.evidence.learnedRecurringRuleId,
+      workflowStatuses: [
+        'automatically_matched',
+        partSlot === 'part2' ? 'part2_detected' : 'part1_detected'
+      ],
+      lastSyncedAt: new Date().toISOString()
+    };
+  }
+
   const status: GrainMatchStatus =
     best.confidenceScore >= 75
       ? 'strong_match'
@@ -2597,15 +3004,1463 @@ export function evaluateRecordingMatchAgainstLessons(
     matchReasons: best.evidence.reasons,
     evidence: best.evidence,
     candidates,
+    detectedPartSlot: best.evidence.detectedPartSlot || 'part1',
+    workflowStatuses: [
+      best.evidence.detectedPartSlot === 'part2' ? 'part2_detected' : 'part1_detected',
+      'needs_teacher_confirmation'
+    ],
     lastSyncedAt: new Date().toISOString()
   };
 }
 
 /**
- * Incremental synchronization of Grain recordings (Section 7 & Part 8).
+ * Requirement 3: Automatic Second-Part Detection (`detectGrainTwoPartRecordingPairs`).
+ * - Identifies Part 1 and Part 2 pairs belonging to the same lesson, date, and group.
+ * - Expected start-time difference: ~40 minutes (accepts 40, 41, 42 minutes and configurable `[minGapMinutes, maxGapMinutes]`).
+ * - Supports recordings imported in either order (Part 1 before Part 2, or Part 2 before Part 1).
+ * - Checks all other lessons on that date to avoid confusing Part 2 with another independent lesson starting ~40 minutes later.
+ * - Marks ambiguous second recordings as `'needs_confirmation'` (`'needs_teacher_confirmation'`) instead of auto-assigning.
+ */
+export function detectGrainTwoPartRecordingPairs(options: {
+  recordings: GrainDiscoveredRecording[];
+  lessons: Lesson[];
+  groups: Group[];
+  students: Student[];
+  learningRecords?: GrainGroupLearningRecord[];
+  part2Config?: Partial<GrainPart2DetectionConfig>;
+}): GrainDiscoveredRecording[] {
+  const { recordings, lessons, groups } = options;
+  const cfg = normalizePart2DetectionConfig(options.part2Config);
+  const activeLessons = (lessons || []).filter((l) => l && !l.deleted && l.status !== 'cancelled');
+  const activeGroups = (groups || []).filter((g) => g && !g.deleted);
+
+  const byId = new Map<string, GrainDiscoveredRecording>();
+  for (const r of recordings || []) {
+    byId.set(r.id, {
+      ...r,
+      workflowStatuses: Array.isArray(r.workflowStatuses) ? [...r.workflowStatuses] : []
+    });
+  }
+
+  // Group recordings by candidate/confirmed lessonId
+  for (const lesson of activeLessons) {
+    const lessonTime = parseLessonDateTimeMinutes(lesson.date, lesson.time);
+    if (!lessonTime.valid) continue;
+
+    // Collect all recordings that either are already linked to this lesson or have this lesson as top candidate on the same date
+    const lessonRecordings: GrainDiscoveredRecording[] = [];
+    for (const rec of byId.values()) {
+      if (rec.removedFromLibrary) continue;
+      const isLinkedToLesson = rec.confirmedLessonId === lesson.id;
+      const isTopCandidateForLesson =
+        !rec.confirmedLessonId &&
+        rec.suggestedLessonId === lesson.id &&
+        rec.candidates.some((c) => c.lessonId === lesson.id);
+
+      if (isLinkedToLesson || isTopCandidateForLesson) {
+        lessonRecordings.push(rec);
+      }
+    }
+
+    // Also check if the lesson already has Part 1 stored in `lesson.grainMeta` (even if only Part 2 is in the current batch)
+    const existingPart1Id = lesson.grainMeta?.recordingId;
+    const existingPart1Timestamp = lesson.grainMeta?.startTimestamp;
+
+    // Sort chronologically by start timestamp so order of import (Part 2 before Part 1 or vice-versa) does not matter!
+    lessonRecordings.sort((a, b) => {
+      const msA = Date.parse(a.startDatetime || '');
+      const msB = Date.parse(b.startDatetime || '');
+      if (Number.isFinite(msA) && Number.isFinite(msB) && msA !== msB) {
+        return msA - msB;
+      }
+      return String(a.startDatetime || '').localeCompare(String(b.startDatetime || ''));
+    });
+
+    // Helper: check if another independent lesson starts near `part2Rec`'s start time
+    const checkIndependentLessonConflictAtPart2Time = (part2Rec: GrainDiscoveredRecording): {
+      belongsToAnotherLesson: boolean;
+      ambiguousWithAnotherLesson: boolean;
+      conflictingLessonId?: string;
+    } => {
+      const p2Time = formatLocalYmdAndTimeFromIso(part2Rec.startDatetime);
+      if (!p2Time.valid) return { belongsToAnotherLesson: false, ambiguousWithAnotherLesson: false };
+
+      const normP2Title = normalizeNameForComparison(`${part2Rec.title} ${part2Rec.calendarEventTitle || ''}`);
+      const lessonGroup = activeGroups.find((g) => g.id === lesson.groupId);
+      const normLessonGroupName = normalizeNameForComparison(lessonGroup?.name || lesson.groupName);
+
+      for (const other of activeLessons) {
+        if (other.id === lesson.id) continue;
+        if (other.date !== lesson.date && other.date !== p2Time.dateYmd && other.date !== p2Time.utcDateYmd) {
+          continue;
+        }
+        const otherTime = parseLessonDateTimeMinutes(other.date, other.time);
+        if (!otherTime.valid) continue;
+
+        const diffToOtherStart =
+          other.date === p2Time.dateYmd
+            ? Math.abs(p2Time.minutesOfDay - otherTime.minutesOfDay)
+            : Math.round(Math.abs(p2Time.epochMs - otherTime.epochMsLocal) / 60000);
+
+        if (diffToOtherStart <= 18) {
+          const otherGroup = activeGroups.find((g) => g.id === other.groupId);
+          const normOtherGroupName = normalizeNameForComparison(otherGroup?.name || other.groupName);
+          const normOtherTitle = normalizeNameForComparison(other.title);
+
+          // Does part2Rec's title explicitly match the other lesson's group/title?
+          const matchesOtherTitle = Boolean(
+            (normOtherGroupName && normOtherGroupName.length >= 3 && normP2Title.includes(normOtherGroupName)) ||
+              (normOtherTitle && normOtherTitle.length >= 3 && normP2Title.includes(normOtherTitle))
+          );
+          const matchesTargetLessonTitle = Boolean(
+            normLessonGroupName && normLessonGroupName.length >= 3 && normP2Title.includes(normLessonGroupName)
+          );
+
+          if (matchesOtherTitle && !matchesTargetLessonTitle) {
+            return {
+              belongsToAnotherLesson: true,
+              ambiguousWithAnotherLesson: false,
+              conflictingLessonId: other.id
+            };
+          }
+
+          if (!matchesTargetLessonTitle) {
+            return {
+              belongsToAnotherLesson: false,
+              ambiguousWithAnotherLesson: true,
+              conflictingLessonId: other.id
+            };
+          }
+        }
+      }
+
+      return { belongsToAnotherLesson: false, ambiguousWithAnotherLesson: false };
+    };
+
+    if (lessonRecordings.length >= 2) {
+      // Find a pair (earlier, later) separated by [cfg.minGapMinutes, cfg.maxGapMinutes] (e.g. 40, 41, 42 minutes)
+      for (let i = 0; i < lessonRecordings.length; i++) {
+        for (let j = i + 1; j < lessonRecordings.length; j++) {
+          const earlier = byId.get(lessonRecordings[i].id)!;
+          const later = byId.get(lessonRecordings[j].id)!;
+
+          const ms1 = Date.parse(earlier.startDatetime);
+          const ms2 = Date.parse(later.startDatetime);
+          if (!Number.isFinite(ms1) || !Number.isFinite(ms2)) continue;
+
+          const gapMinutes = Math.round((ms2 - ms1) / 60000);
+          if (gapMinutes < cfg.minGapMinutes || gapMinutes > cfg.maxGapMinutes) {
+            continue;
+          }
+
+          // Check Zoom ID consistency if both have Zoom meeting URLs
+          const z1 = normalizeZoomMeetingUrl(earlier.zoomMeetingUrl);
+          const z2 = normalizeZoomMeetingUrl(later.zoomMeetingUrl);
+          if (z1?.meetingId && z2?.meetingId && z1.meetingId !== z2.meetingId) {
+            continue;
+          }
+
+          // Check if later recording actually belongs to another independent lesson starting at ~17:40
+          const conflictCheck = checkIndependentLessonConflictAtPart2Time(later);
+          if (conflictCheck.belongsToAnotherLesson) {
+            continue;
+          }
+
+          const earlierStatuses = new Set<GrainWorkflowStatusBadge>(earlier.workflowStatuses || []);
+          earlierStatuses.add('part1_detected');
+
+          const laterStatuses = new Set<GrainWorkflowStatusBadge>(later.workflowStatuses || []);
+          laterStatuses.add('part2_detected');
+
+          let nextLaterMatchStatus: GrainMatchStatus = later.matchStatus;
+          if (conflictCheck.ambiguousWithAnotherLesson) {
+            nextLaterMatchStatus = 'needs_confirmation';
+            laterStatuses.delete('automatically_matched');
+            laterStatuses.add('needs_teacher_confirmation');
+          } else if (
+            later.matchStatus !== 'already_linked' &&
+            (earlier.matchStatus === 'already_linked' || earlier.matchStatus === 'automatically_matched')
+          ) {
+            nextLaterMatchStatus = 'automatically_matched';
+            laterStatuses.delete('needs_teacher_confirmation');
+            laterStatuses.add('automatically_matched');
+          }
+
+          byId.set(earlier.id, {
+            ...earlier,
+            detectedPartSlot: 'part1',
+            pairedRecordingId: later.id,
+            part2StartGapMinutes: gapMinutes,
+            workflowStatuses: Array.from(earlierStatuses),
+            matchReasons: Array.from(
+              new Set([
+                ...earlier.matchReasons,
+                `Part 1 of two-part lesson (paired with Part 2 starting +${gapMinutes}m later)`
+              ])
+            )
+          });
+
+          byId.set(later.id, {
+            ...later,
+            detectedPartSlot: 'part2',
+            pairedRecordingId: earlier.id,
+            part2StartGapMinutes: gapMinutes,
+            suggestedLessonId: lesson.id,
+            matchedGroupId: lesson.groupId || later.matchedGroupId,
+            matchedGroupName: lesson.groupName || later.matchedGroupName,
+            matchStatus: nextLaterMatchStatus,
+            workflowStatuses: Array.from(laterStatuses),
+            matchReasons: Array.from(
+              new Set([
+                ...later.matchReasons,
+                conflictCheck.ambiguousWithAnotherLesson
+                  ? `Potential Part 2 (+${gapMinutes}m after Part 1), but overlaps another scheduled lesson — teacher confirmation required`
+                  : `Part 2 detected (+${gapMinutes}m after Part 1 on ${lesson.date})`
+              ])
+            )
+          });
+        }
+      }
+    } else if (lessonRecordings.length === 1 && existingPart1Id && existingPart1Timestamp) {
+      // Lesson already had Part 1 linked from an earlier sync, and only Part 2 is in this sync
+      const rec = byId.get(lessonRecordings[0].id)!;
+      if (rec.id !== existingPart1Id) {
+        const ms1 = Date.parse(existingPart1Timestamp);
+        const ms2 = Date.parse(rec.startDatetime);
+        if (Number.isFinite(ms1) && Number.isFinite(ms2)) {
+          const gapMinutes = Math.round((ms2 - ms1) / 60000);
+          if (gapMinutes >= cfg.minGapMinutes && gapMinutes <= cfg.maxGapMinutes) {
+            const conflictCheck = checkIndependentLessonConflictAtPart2Time(rec);
+            if (!conflictCheck.belongsToAnotherLesson) {
+              const statuses = new Set<GrainWorkflowStatusBadge>(rec.workflowStatuses || []);
+              statuses.add('part2_detected');
+              let nextStatus: GrainMatchStatus = rec.matchStatus;
+              if (conflictCheck.ambiguousWithAnotherLesson) {
+                nextStatus = 'needs_confirmation';
+                statuses.delete('automatically_matched');
+                statuses.add('needs_teacher_confirmation');
+              } else if (rec.matchStatus !== 'already_linked') {
+                nextStatus = 'automatically_matched';
+                statuses.delete('needs_teacher_confirmation');
+                statuses.add('automatically_matched');
+              }
+              byId.set(rec.id, {
+                ...rec,
+                detectedPartSlot: 'part2',
+                pairedRecordingId: existingPart1Id,
+                part2StartGapMinutes: gapMinutes,
+                suggestedLessonId: lesson.id,
+                matchedGroupId: lesson.groupId || rec.matchedGroupId,
+                matchStatus: nextStatus,
+                workflowStatuses: Array.from(statuses),
+                matchReasons: Array.from(
+                  new Set([
+                    ...rec.matchReasons,
+                    `Part 2 detected (+${gapMinutes}m after confirmed Part 1 on ${lesson.date})`
+                  ])
+                )
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return Array.from(byId.values());
+}
+
+// ==========================================
+// REQUIREMENT 4 & 5: AUTOMATIC 7-SECTION GERMAN LESSON CONTENT EXTRACTION
+// ==========================================
+
+const EXTENDED_GERMAN_GRAMMAR_PATTERNS: Array<{
+  id: string;
+  pattern: RegExp;
+  topic: string;
+  explanationDe: string;
+  explanationAr: string;
+}> = [
+  {
+    id: 'akkusativ',
+    pattern: /\b(akkusativ|den\s+[A-ZÄÖÜ]\w+|einen\s+[A-ZÄÖÜ]\w+|keinen\s+[A-ZÄÖÜ]\w+)\b/i,
+    topic: 'Akkusativ (Bestimmter und unbestimmter Artikel)',
+    explanationDe: 'Maskuline Nomen verändern im Akkusativ den Artikel: der → den, ein → einen, kein → keinen.',
+    explanationAr: 'تحويل أداة التعريف المذكرة der إلى den والنكرة ein إلى einen في حالة المفعول به.'
+  },
+  {
+    id: 'dativ',
+    pattern: /\b(dativ|mit\s+dem\b|mit\s+der\b|zu\s+dem\b|zum\b|zur\b|bei\s+dem\b|nach\s+dem\b|helfen|danken|gefallen)\b/i,
+    topic: 'Dativ (Artikel, Präpositionen und Dativverben)',
+    explanationDe: 'Dativ nach Präpositionen (mit, nach, bei, zu, von) und Dativverben (helfen, danken, gefallen): der/das → dem, die → der.',
+    explanationAr: 'استخدام حالة الجر (Dativ) مع حروف الجر وأفعال المفعول غير المباشر.'
+  },
+  {
+    id: 'trennbare_verben',
+    pattern: /\b(trennbar\w*\s+verb\w*|aufstehen|steh\w*\s+.*\s+auf|einkaufen|kauf\w*\s+.*\s+ein|anrufen|ruf\w*\s+.*\s+an|fernsehen|mitkommen|zurückkommen)\b/i,
+    topic: 'Trennbare Verben im Hauptsatz',
+    explanationDe: 'Das konjugierte Verb steht auf Position 2, das trennbare Präfix steht am Satzende.',
+    explanationAr: 'انفصال المقطع الأمامي للفعل ووضعه في نهاية الجملة الخبرية.'
+  },
+  {
+    id: 'modalverben',
+    pattern: /\b(modalverb\w*|können|kannst|kann|müssen|musst|muss|wollen|willst|will|sollen|dürfen|darfst|darf|möchten|möchte)\b/i,
+    topic: 'Modalverben mit Infinitiv am Satzende',
+    explanationDe: 'Das Modalverb steht konjugiert auf Position 2, das Vollverb steht im Infinitiv am Satzende.',
+    explanationAr: 'تصريف الفعل الناقص في الموقع الثاني ووضع الفعل الأساسي في المصدر آخر الجملة.'
+  },
+  {
+    id: 'perfekt',
+    pattern: /\b(perfekt|partizip\s+ii|partizip\s+2|ge[a-zäöüß]{3,14}(?:t|en)\b)/i,
+    topic: 'Das Perfekt (Hilfsverb haben/sein + Partizip II)',
+    explanationDe: 'Perfekt zur Beschreibung vergangener Ereignisse: haben oder sein auf Position 2 + Partizip II am Satzende.',
+    explanationAr: 'صيغة الماضي التام باستخدام الفعل المساعد haben أو sein والتصريف الثالث في نهاية الجملة.'
+  },
+  {
+    id: 'wechselpraepositionen',
+    pattern: /\b(wechselpräposition\w*|wohin\b|in\s+den\b|auf\s+den\b|an\s+den\b|in\s+dem\b|auf\s+dem\b|an\s+dem\b)\b/i,
+    topic: 'Wechselpräpositionen (Wo? + Dativ / Wohin? + Akkusativ)',
+    explanationDe: 'Bei Ortsangaben (Wo?) steht der Dativ, bei Richtungsangaben (Wohin?) steht der Akkusativ.',
+    explanationAr: 'حروف الجر المشتركة: استخدام Dativ مع السكون (Wo?) وAkkusativ مع الحركة (Wohin?).'
+  },
+  {
+    id: 'nebensaetze',
+    pattern: /\b(nebensatz|nebensätze|weil\b|dass\b|wenn\b|obwohl\b|verb\s+am\s+ende)\b/i,
+    topic: 'Nebensätze mit Konjunktionen (weil, dass, wenn)',
+    explanationDe: 'Im Nebensatz mit weil, dass oder wenn steht das konjugierte Verb ganz am Ende.',
+    explanationAr: 'الجمل الفرعية في الألمانية مع الروابط (weil, dass, wenn) ووضع الفعل المصرف في آخر الجملة.'
+  },
+  {
+    id: 'imperativ',
+    pattern: /\b(imperativ|befehlsform|bitte\s+les\w*|bitte\s+schreib\w*|sprechen\s+sie|lies\b|sprich\b|gib\b)\b/i,
+    topic: 'Der Imperativ (Aufforderungssätze)',
+    explanationDe: 'Imperativformen für du, ihr und Sie steht das Verb auf Position 1.',
+    explanationAr: 'صيغة الأمر في اللغة الألمانية مع الضمائر (du, ihr, Sie).'
+  },
+  {
+    id: 'praeteritum',
+    pattern: /\b(präteritum|war\b|waren\b|hatte\b|hatten\b|konnte\b|musste\b|wollte\b)\b/i,
+    topic: 'Präteritum von sein, haben und Modalverben',
+    explanationDe: 'Verwendung von war, hatte und Modalverben im Präteritum.',
+    explanationAr: 'الماضي البسيط (Präteritum) مع أفعال الكينونة والتملك والأفعال الناقصة.'
+  }
+];
+
+function normalizeGermanDedupKey(value: string): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/^(der|die|das)\s+/i, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+/**
+ * Computes a deterministic fingerprint from recording IDs and normalized source content
+ * so repeated syncs do not re-run or duplicate extraction unless Part 2 or a new transcript arrives.
+ */
+export function computeGrainLessonSourceFingerprint(
+  items: Array<{ recordingId: string; text: string }>
+): string {
+  const canonical = items
+    .map((i) => `${String(i.recordingId || '').trim()}:${String(i.text || '').trim().replace(/\s+/g, ' ')}`)
+    .join('||');
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  for (let i = 0; i < canonical.length; i++) {
+    const ch = canonical.charCodeAt(i);
+    h1 ^= ch;
+    h1 = Math.imul(h1, 0x01000193);
+    h2 ^= ch + (i & 0xff);
+    h2 = Math.imul(h2, 0x85ebca6b);
+  }
+  return `gfp_${items.map((x) => x.recordingId).join('_')}_${(h1 >>> 0).toString(16)}${(h2 >>> 0).toString(16)}`;
+}
+
+/**
+ * Deduplicates all 7 German lesson summary sections when merging Part 1 and Part 2.
+ */
+export function deduplicateGermanExtractedContent(
+  core: GrainExtractedLessonContentCore
+): GrainExtractedLessonContentCore {
+  const dedupStrings = (list: string[], maxItems: number): string[] => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of list || []) {
+      const cleaned = redactGrainSecrets(String(raw || '').trim());
+      if (!cleaned) continue;
+      const key = normalizeGermanDedupKey(cleaned);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(cleaned);
+      if (out.length >= maxItems) break;
+    }
+    return out;
+  };
+
+  const vocabSeen = new Set<string>();
+  const dedupVocab: GrainExtractedVocabularyEntry[] = [];
+  for (const item of core.neueWoerterUndRedemittel || []) {
+    if (!item || typeof item !== 'object') continue;
+    const rawGerman = redactGrainSecrets(String(item.german || '').trim());
+    if (!rawGerman) continue;
+    // Strip leading article if already provided in item.article
+    const articleMatch = /^(der|die|das)\s+(.+)$/i.exec(rawGerman);
+    const article = (item.article || (articleMatch ? articleMatch[1].toLowerCase() : undefined)) as
+      | 'der'
+      | 'die'
+      | 'das'
+      | undefined;
+    const baseGerman = articleMatch ? articleMatch[2].trim() : rawGerman;
+    const key = `${article || ''}:${normalizeGermanDedupKey(baseGerman)}`;
+    if (!normalizeGermanDedupKey(baseGerman) || vocabSeen.has(key)) continue;
+    vocabSeen.add(key);
+    dedupVocab.push({
+      german: baseGerman.slice(0, 100),
+      ...(article && ['der', 'die', 'das'].includes(article) ? { article } : {}),
+      ...(item.arabic ? { arabic: redactGrainSecrets(String(item.arabic).trim()).slice(0, 120) } : {}),
+      ...(item.example ? { example: redactGrainSecrets(String(item.example).trim()).slice(0, 200) } : {})
+    });
+    if (dedupVocab.length >= 25) break;
+  }
+
+  const grammarSeen = new Set<string>();
+  const dedupGrammar: GrainExtractedGrammarEntry[] = [];
+  for (const g of core.grammatik || []) {
+    if (!g || typeof g !== 'object') continue;
+    const topic = redactGrainSecrets(String(g.topic || '').trim());
+    if (!topic) continue;
+    const key = normalizeGermanDedupKey(topic);
+    if (!key || grammarSeen.has(key)) continue;
+    grammarSeen.add(key);
+    dedupGrammar.push({
+      topic: topic.slice(0, 140),
+      explanationDe: redactGrainSecrets(String(g.explanationDe || topic).trim()).slice(0, 260),
+      ...(g.explanationAr ? { explanationAr: redactGrainSecrets(String(g.explanationAr).trim()).slice(0, 260) } : {})
+    });
+    if (dedupGrammar.length >= 12) break;
+  }
+
+  const cleanedCore: Omit<GrainExtractedLessonContentCore, 'formattedLessonSummaryDe'> = {
+    themaDerStunde: redactGrainSecrets(String(core.themaDerStunde || '').trim()).slice(0, 220),
+    behandelteInhalte: dedupStrings(core.behandelteInhalte || [], 12),
+    neueWoerterUndRedemittel: dedupVocab,
+    grammatik: dedupGrammar,
+    beispiele: dedupStrings(core.beispiele || [], 12),
+    uebungenUndAktivitaeten: dedupStrings(core.uebungenUndAktivitaeten || [], 10),
+    offenePunkte: dedupStrings(core.offenePunkte || [], 10)
+  };
+
+  return {
+    ...cleanedCore,
+    formattedLessonSummaryDe: formatExtractedLessonContentSummary(cleanedCore)
+  };
+}
+
+/**
+ * Formats the 7 German sections into a structured internal summary string for `lesson.whatWasTaught`.
+ */
+export function formatExtractedLessonContentSummary(
+  core: Omit<GrainExtractedLessonContentCore, 'formattedLessonSummaryDe'>
+): string {
+  if (!core.themaDerStunde && core.behandelteInhalte.length === 0 && core.neueWoerterUndRedemittel.length === 0 && core.grammatik.length === 0) {
+    return '';
+  }
+
+  const sections: string[] = [];
+  if (core.themaDerStunde) {
+    sections.push(`Thema der Stunde: ${core.themaDerStunde}`);
+  }
+  if (core.behandelteInhalte.length > 0) {
+    sections.push(`Behandelte Inhalte:\n${core.behandelteInhalte.map((i) => `• ${i}`).join('\n')}`);
+  }
+  if (core.neueWoerterUndRedemittel.length > 0) {
+    const vocabLines = core.neueWoerterUndRedemittel.map((v) => {
+      const term = v.article ? `${v.article} ${v.german}` : v.german;
+      const ar = v.arabic ? ` (${v.arabic})` : '';
+      const ex = v.example ? ` — z.B. „${v.example}“` : '';
+      return `• ${term}${ar}${ex}`;
+    });
+    sections.push(`Neue Wörter und Redemittel:\n${vocabLines.join('\n')}`);
+  }
+  if (core.grammatik.length > 0) {
+    const gramLines = core.grammatik.map((g) => `• ${g.topic}: ${g.explanationDe}`);
+    sections.push(`Grammatik:\n${gramLines.join('\n')}`);
+  }
+  if (core.beispiele.length > 0) {
+    sections.push(`Beispiele:\n${core.beispiele.map((b) => `• „${b}“`).join('\n')}`);
+  }
+  if (core.uebungenUndAktivitaeten.length > 0) {
+    sections.push(`Übungen und Aktivitäten:\n${core.uebungenUndAktivitaeten.map((u) => `• ${u}`).join('\n')}`);
+  }
+  if (core.offenePunkte.length > 0) {
+    sections.push(`Offene Punkte:\n${core.offenePunkte.map((o) => `• ${o}`).join('\n')}`);
+  }
+  return sections.join('\n\n');
+}
+
+/**
+ * Deterministic pedagogical extractor for German lessons from Part 1 + Part 2 transcripts/summaries.
+ * Preserves authentic German words, articles, grammar topics, examples, exercises, and open questions
+ * without inventing unsupported content.
+ */
+export function extractStructuredGermanLessonContentDeterministically(options: {
+  lessonTitle?: string;
+  part1Text: string;
+  part2Text?: string;
+}): GrainExtractedLessonContentCore {
+  const p1 = redactGrainSecrets(String(options.part1Text || '').trim());
+  const p2 = redactGrainSecrets(String(options.part2Text || '').trim());
+  const combined = [p1, p2].filter(Boolean).join('\n');
+
+  if (!combined) {
+    return {
+      themaDerStunde: '',
+      behandelteInhalte: [],
+      neueWoerterUndRedemittel: [],
+      grammatik: [],
+      beispiele: [],
+      uebungenUndAktivitaeten: [],
+      offenePunkte: [],
+      formattedLessonSummaryDe: ''
+    };
+  }
+
+  // Strip speaker prefixes ("Speaker: ") for clean sentence analysis
+  const rawLines = combined
+    .split(/\n+/)
+    .map((line) => line.replace(/^[A-Za-zÄÖÜäöüß\u0600-\u06FF0-9_.\-\s]{1,28}:\s+/, '').trim())
+    .filter(Boolean);
+
+  const allSentences: string[] = [];
+  for (const line of rawLines) {
+    const parts = line
+      .split(/(?<=[.!?؟])\s+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length >= 4);
+    allSentences.push(...parts);
+  }
+
+  // 1. Detect Grammar topics explicitly present in the transcript
+  const grammatik: GrainExtractedGrammarEntry[] = [];
+  for (const rule of EXTENDED_GERMAN_GRAMMAR_PATTERNS) {
+    if (rule.pattern.test(combined)) {
+      grammatik.push({
+        topic: rule.topic,
+        explanationDe: rule.explanationDe,
+        explanationAr: rule.explanationAr
+      });
+    }
+  }
+
+  // 2. Extract authentic German vocabulary with articles (der/die/das + Noun) and explicit Redemittel
+  const STOP_NOUNS = new Set([
+    'Thema',
+    'Stunde',
+    'Seite',
+    'Übung',
+    'Aufgabe',
+    'Frage',
+    'Antwort',
+    'Beispiel',
+    'Satz',
+    'Teil',
+    'Tag',
+    'Name'
+  ]);
+  const neueWoerterUndRedemittel: GrainExtractedVocabularyEntry[] = [];
+  const articleNounRegex = /\b(der|die|das)\s+([A-ZÄÖÜ][a-zäöüß]{2,24})\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = articleNounRegex.exec(combined)) !== null) {
+    const article = m[1].toLowerCase() as 'der' | 'die' | 'das';
+    const noun = m[2];
+    if (STOP_NOUNS.has(noun)) continue;
+
+    // Look for an authentic sentence in allSentences containing this article + noun
+    const matchingSentence = allSentences.find((s) =>
+      new RegExp(`\\b(?:der|die|das|den|dem|einen|einem|eine)\\s+${noun}\\b`, 'i').test(s)
+    );
+
+    // Check if an explicit translation or meaning is mentioned near the noun (e.g. "der Bahnhof (محطة القطار)" or "bedeutet ...")
+    let arabicMeaning: string | undefined;
+    if (matchingSentence) {
+      const arMatch = /([\u0600-\u06FF][\u0600-\u06FF\s،]{2,40})/.exec(matchingSentence);
+      if (arMatch) {
+        arabicMeaning = arMatch[1].trim();
+      }
+    }
+
+    neueWoerterUndRedemittel.push({
+      german: noun,
+      article,
+      ...(arabicMeaning ? { arabic: arabicMeaning } : {}),
+      ...(matchingSentence ? { example: matchingSentence.slice(0, 160) } : {})
+    });
+  }
+
+  // Also extract explicitly introduced Redemittel / expressions (e.g., quotes „...“ or "Redemittel: ...")
+  const quoteRegex = /[„"«]([^„"»\n]{6,95})[“"»]/g;
+  while ((m = quoteRegex.exec(combined)) !== null) {
+    const phrase = m[1].trim();
+    if (/[A-Za-zÄÖÜäöüß]{3,}/.test(phrase)) {
+      neueWoerterUndRedemittel.push({
+        german: phrase
+      });
+    }
+  }
+
+  // 3. Extract explicit Thema der Stunde
+  let themaDerStunde = '';
+  const explicitTopicMatch =
+    /(?:thema(?:\s+der\s+stunde|\s+heute)?|heute\s+(?:lernen|besprechen|behandeln|machen)\s+wir|wir\s+sprechen\s+heute\s+über|درس\s+اليوم|موضوع\s+الحصة)[:\s\-]+([^\n.!?]{4,110})/i.exec(
+      combined
+    );
+  if (explicitTopicMatch) {
+    themaDerStunde = explicitTopicMatch[1].trim();
+  } else if (grammatik.length > 0 && neueWoerterUndRedemittel.length > 0) {
+    const topVocab = neueWoerterUndRedemittel
+      .slice(0, 2)
+      .map((v) => (v.article ? `${v.article} ${v.german}` : v.german))
+      .join(', ');
+    themaDerStunde = `${grammatik[0].topic} & Wortschatz (${topVocab})`;
+  } else if (grammatik.length > 0) {
+    themaDerStunde = grammatik.map((g) => g.topic).slice(0, 2).join(' / ');
+  } else if (options.lessonTitle && options.lessonTitle.trim()) {
+    themaDerStunde = `${options.lessonTitle.trim()}: ${ (allSentences[0] || '').slice(0, 80) }`.replace(/:\s*$/, '');
+  } else {
+    themaDerStunde = (allSentences[0] || '').slice(0, 110);
+  }
+
+  // 4. Extract Behandelte Inhalte (what was covered across Part 1 and Part 2)
+  const behandelteInhalte: string[] = [];
+  for (const s of allSentences) {
+    if (
+      /\b(heute|thema|lernen|besprechen|wiederholen|erklären|wortschatz|grammatik|dialog|text|teil\s*1|teil\s*2)\b/i.test(
+        s
+      )
+    ) {
+      behandelteInhalte.push(s.slice(0, 180));
+    }
+  }
+  if (grammatik.length > 0) {
+    for (const g of grammatik) {
+      behandelteInhalte.push(`Grammatikschwerpunkt: ${g.topic}`);
+    }
+  }
+  if (behandelteInhalte.length === 0 && allSentences.length > 0) {
+    behandelteInhalte.push(...allSentences.slice(0, 4).map((s) => s.slice(0, 180)));
+  }
+
+  // 5. Extract Beispiele (important German example sentences used during the lesson)
+  const beispiele: string[] = [];
+  for (const s of allSentences) {
+    if (
+      /\b(beispiel|zum\s+beispiel|z\.?\s*b\.?|satz|ich\s+kaufe|ich\s+fahre|ich\s+gehe|ich\s+habe|ich\s+bin|ich\s+stehe|ich\s+muss|ich\s+kann|wir\s+gehen|er\s+hat)\b/i.test(
+        s
+      )
+    ) {
+      const cleanedExample = s
+        .replace(/^(?:zum\s+beispiel|beispiel|z\.?\s*b\.?)[:\s,\-]*/i, '')
+        .trim();
+      if (cleanedExample.length >= 6) {
+        beispiele.push(cleanedExample.slice(0, 180));
+      }
+    }
+  }
+  for (const v of neueWoerterUndRedemittel) {
+    if (v.example && beispiele.length < 10) {
+      beispiele.push(v.example);
+    }
+  }
+
+  // 6. Extract Übungen und Aktivitäten (exercises and activities completed)
+  const uebungenUndAktivitaeten: string[] = [];
+  for (const s of allSentences) {
+    if (
+      /\b(übung\w*|aufgabe\w*|seite\s*\d+|dialog\w*|rollenspiel\w*|lesen|vorlesen|hören|schreiben|ergänzen|beantworten|kursbuch|arbeitsbuch|hausaufgabe\w*)\b/i.test(
+        s
+      )
+    ) {
+      uebungenUndAktivitaeten.push(s.slice(0, 180));
+    }
+  }
+
+  // 7. Extract Offene Punkte (topics needing further explanation, questions, or next-lesson review)
+  const offenePunkte: string[] = [];
+  for (const s of allSentences) {
+    if (
+      /\b(nächst\w*\s+(?:mal|stunde|woche)|noch\s+unklar|schwierig\w*|wiederholen\s+wir|offen\w*\s+punkt\w*|frage\w*\s+zu|nicht\s+ganz\s+klar|müssen\s+wir\s+noch\s+üben|مراجعة|غير\s+واضح|الحصة\s+القادمة)\b/i.test(
+        s
+      ) ||
+      s.endsWith('?')
+    ) {
+      offenePunkte.push(s.slice(0, 180));
+    }
+  }
+
+  return deduplicateGermanExtractedContent({
+    themaDerStunde,
+    behandelteInhalte,
+    neueWoerterUndRedemittel,
+    grammatik,
+    beispiele,
+    uebungenUndAktivitaeten,
+    offenePunkte,
+    formattedLessonSummaryDe: ''
+  });
+}
+
+/**
+ * Extracts structured 7-section German lesson content for a lesson from its matched Part 1 and (optional) Part 2
+ * Grain recordings.
+ * - Combines Part 1 and Part 2 into one coherent summary and removes duplicates.
+ * - If transcript and educational summary are unavailable, returns `transcriptStatus: 'transcript_unavailable'`
+ *   without generating fabricated content.
+ */
+export async function extractStructuredLessonContentForLesson(options: {
+  lesson: Lesson;
+  recordings?: GrainDiscoveredRecording[];
+  providedPart1Transcript?: string;
+  providedPart2Transcript?: string;
+  useServerGemini?: boolean;
+}): Promise<GrainExtractedLessonContent> {
+  const { lesson } = options;
+  const discovered = options.recordings || loadDiscoveredGrainRecordings({ includeRemoved: true });
+
+  const part1Id =
+    lesson.grainMeta?.recordingId ||
+    discovered.find(
+      (r) =>
+        (r.confirmedLessonId === lesson.id || r.suggestedLessonId === lesson.id) &&
+        r.detectedPartSlot !== 'part2'
+    )?.id ||
+    '';
+
+  const part2Id =
+    lesson.grainMeta?.recordingIdPart2 ||
+    discovered.find(
+      (r) =>
+        (r.confirmedLessonId === lesson.id || r.suggestedLessonId === lesson.id) &&
+        r.detectedPartSlot === 'part2' &&
+        r.id !== part1Id
+    )?.id ||
+    '';
+
+  const sourceRecordingIds = [part1Id, part2Id].filter(Boolean);
+  const nowIso = new Date().toISOString();
+
+  const fetchSourceTextForRecording = async (
+    recId: string,
+    providedText?: string
+  ): Promise<{ text: string; fromTranscript: boolean }> => {
+    if (typeof providedText === 'string') {
+      const trimmed = providedText.trim();
+      return { text: trimmed, fromTranscript: trimmed.length > 0 };
+    }
+    if (!recId) return { text: '', fromTranscript: false };
+
+    // 1. Try ephemeral transcript first
+    const tr = await getTranscriptEphemerally(recId);
+    if (tr.available && tr.plainText.trim()) {
+      return { text: tr.plainText.trim(), fromTranscript: true };
+    }
+
+    // 2. Fallback to Grain recording details AI summary / template sections if transcript endpoint is restricted
+    const detailRes = await executeScopedGrainOperation({
+      operation: 'recording_details',
+      recordingId: recId,
+      payload: {
+        include: {
+          ai_summary: true,
+          ai_template_sections: { format: 'json' }
+        }
+      }
+    });
+    const detailData = detailRes.ok ? detailRes.data : null;
+    const summaryText = extractGrainAiSummaryText(detailData?.ai_summary);
+    const sections: string[] = [];
+    if (Array.isArray(detailData?.ai_template_sections)) {
+      for (const sec of detailData.ai_template_sections) {
+        if (sec && typeof sec === 'object') {
+          const t = String(sec.title || sec.name || '').trim();
+          const c = String(sec.content || sec.text || sec.body || '').trim();
+          if (t && c) sections.push(`${t}: ${c}`);
+        }
+      }
+    }
+    const cachedRec = discovered.find((r) => r.id === recId);
+    const combinedFallback = [summaryText, ...sections, cachedRec?.aiSummaryExcerpt || '']
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .join('\n');
+
+    return { text: combinedFallback, fromTranscript: false };
+  };
+
+  const part1Source = await fetchSourceTextForRecording(part1Id, options.providedPart1Transcript);
+  const part2Source = part2Id
+    ? await fetchSourceTextForRecording(part2Id, options.providedPart2Transcript)
+    : typeof options.providedPart2Transcript === 'string' && options.providedPart2Transcript.trim()
+    ? { text: options.providedPart2Transcript.trim(), fromTranscript: true }
+    : { text: '', fromTranscript: false };
+
+  const hasPart1Text = part1Source.text.length > 0;
+  const hasPart2Text = part2Source.text.length > 0;
+
+  // Requirement 4: If transcript/content is unavailable, show a clear status and DO NOT generate fabricated content!
+  if (!hasPart1Text && !hasPart2Text) {
+    return {
+      themaDerStunde: '',
+      behandelteInhalte: [],
+      neueWoerterUndRedemittel: [],
+      grammatik: [],
+      beispiele: [],
+      uebungenUndAktivitaeten: [],
+      offenePunkte: [],
+      formattedLessonSummaryDe: '',
+      sourceRecordingIds,
+      sourceContentFingerprint: computeGrainLessonSourceFingerprint(
+        sourceRecordingIds.map((id) => ({ recordingId: id, text: '' }))
+      ),
+      extractedAt: nowIso,
+      origin: 'ai_extracted',
+      transcriptStatus: 'transcript_unavailable',
+      partCount: part2Id ? 2 : 1,
+      teacherEdited: false
+    };
+  }
+
+  const fingerprint = computeGrainLessonSourceFingerprint([
+    ...(part1Id || hasPart1Text ? [{ recordingId: part1Id || 'part1', text: part1Source.text }] : []),
+    ...(part2Id || hasPart2Text ? [{ recordingId: part2Id || 'part2', text: part2Source.text }] : [])
+  ]);
+
+  let extractedCore: GrainExtractedLessonContentCore | null = null;
+
+  // Optional server-side Gemini extraction when running in browser web runtime
+  if (
+    options.useServerGemini &&
+    typeof window !== 'undefined' &&
+    typeof fetch === 'function'
+  ) {
+    try {
+      const resp = await fetch('/api/grain/extract-lesson-content', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Glueck-Grain-Proxy': '1'
+        },
+        body: JSON.stringify({
+          lessonTitle: lesson.title || lesson.groupName || 'Deutschunterricht',
+          part1Transcript: part1Source.text,
+          part2Transcript: part2Source.text || undefined
+        })
+      });
+      if (resp.ok) {
+        const json = await resp.json();
+        if (json?.ok && json?.extracted) {
+          extractedCore = deduplicateGermanExtractedContent({
+            themaDerStunde: json.extracted.themaDerStunde || '',
+            behandelteInhalte: Array.isArray(json.extracted.behandelteInhalte)
+              ? json.extracted.behandelteInhalte
+              : [],
+            neueWoerterUndRedemittel: Array.isArray(json.extracted.neueWoerterUndRedemittel)
+              ? json.extracted.neueWoerterUndRedemittel
+              : [],
+            grammatik: Array.isArray(json.extracted.grammatik) ? json.extracted.grammatik : [],
+            beispiele: Array.isArray(json.extracted.beispiele) ? json.extracted.beispiele : [],
+            uebungenUndAktivitaeten: Array.isArray(json.extracted.uebungenUndAktivitaeten)
+              ? json.extracted.uebungenUndAktivitaeten
+              : [],
+            offenePunkte: Array.isArray(json.extracted.offenePunkte)
+              ? json.extracted.offenePunkte
+              : [],
+            formattedLessonSummaryDe: ''
+          });
+        }
+      }
+    } catch {
+      // Fallback to deterministic pedagogical extractor below
+    }
+  }
+
+  if (!extractedCore) {
+    extractedCore = extractStructuredGermanLessonContentDeterministically({
+      lessonTitle: lesson.title || lesson.groupName,
+      part1Text: part1Source.text,
+      part2Text: part2Source.text
+    });
+  }
+
+  const transcriptStatus: GrainExtractedLessonContent['transcriptStatus'] =
+    part2Id && (!hasPart1Text || !hasPart2Text) ? 'partial_transcript' : 'complete';
+
+  return {
+    ...extractedCore,
+    sourceRecordingIds,
+    sourceContentFingerprint: fingerprint,
+    extractedAt: nowIso,
+    origin: 'ai_extracted',
+    transcriptStatus,
+    partCount: hasPart1Text && hasPart2Text ? 2 : 1,
+    teacherEdited: false
+  };
+}
+
+/**
+ * Requirement 5: Automatic Saving Inside Glück (`applyExtractedLessonContentToLesson`).
+ * - Saves extracted lesson content inside `lesson.grainMeta.extractedLessonContent` and internal `lesson.whatWasTaught`.
+ * - Avoids duplicate work on repeated syncs via `sourceContentFingerprint`.
+ * - Reprocesses automatically when Part 2 or a newly completed transcript arrives.
+ * - Preserves teacher edits: if the teacher already edited the lesson summary (`teacherEdited: true` or manually written `lesson.whatWasTaught`),
+ *   never overwrites the teacher's text; stores the new extraction in `pendingUpdatedExtraction` instead.
+ * - Never auto-publishes to parent reports, homework, grades, certificates, or Lernstudio.
+ */
+export function applyExtractedLessonContentToLesson(
+  lesson: Lesson,
+  extracted: GrainExtractedLessonContent
+): {
+  updated: boolean;
+  preservedTeacherEdits: boolean;
+  lessonPatch: Partial<Lesson>;
+} {
+  const existingMeta = lesson.grainMeta;
+  const existingExtracted = existingMeta?.extractedLessonContent;
+  const currentStatuses = new Set<GrainWorkflowStatusBadge>(existingMeta?.workflowStatuses || []);
+
+  if (extracted.transcriptStatus === 'transcript_unavailable') {
+    currentStatuses.add('transcript_unavailable');
+    const nextExtracted: GrainExtractedLessonContent = existingExtracted && existingExtracted.transcriptStatus !== 'transcript_unavailable'
+      ? existingExtracted
+      : extracted;
+
+    const nextMeta: GrainLessonMetadata = {
+      ...(existingMeta || {
+        recordingId: extracted.sourceRecordingIds[0] || 'unlinked',
+        recordingTitle: lesson.title || 'Grain Recording',
+        startTimestamp: new Date().toISOString(),
+        durationMinutes: lesson.duration || 60,
+        recordingUrl: lesson.recordingLink || 'https://grain.com/app/recordings/unlinked',
+        source: 'zoom',
+        matchingStatus: 'confirmed',
+        confirmedLessonId: lesson.id,
+        lastSyncedAt: new Date().toISOString()
+      }),
+      extractedLessonContent: nextExtracted,
+      workflowStatuses: Array.from(currentStatuses)
+    };
+
+    const patch: Partial<Lesson> = {
+      grainMeta: nextMeta,
+      ...(lesson.report ? { report: { ...lesson.report, grainMeta: nextMeta } } : {})
+    };
+    assertLessonAttendanceUnchanged(lesson, patch);
+    return {
+      updated: true,
+      preservedTeacherEdits: Boolean(existingExtracted?.teacherEdited),
+      lessonPatch: patch
+    };
+  }
+
+  // Idempotency guard: if identical source fingerprint was already processed, do not duplicate
+  if (
+    existingExtracted &&
+    existingExtracted.sourceContentFingerprint === extracted.sourceContentFingerprint &&
+    existingExtracted.transcriptStatus === extracted.transcriptStatus
+  ) {
+    return {
+      updated: false,
+      preservedTeacherEdits: Boolean(existingExtracted.teacherEdited),
+      lessonPatch: {}
+    };
+  }
+
+  currentStatuses.delete('transcript_unavailable');
+  currentStatuses.add('lesson_content_extracted');
+
+  const existingWhatWasTaught = String(lesson.whatWasTaught || '').trim();
+  const previousAutoFormatted = String(existingExtracted?.formattedLessonSummaryDe || '').trim();
+  const hasTeacherEditedSummary =
+    Boolean(existingExtracted?.teacherEdited) ||
+    existingExtracted?.origin === 'teacher_edited' ||
+    Boolean(existingWhatWasTaught && existingWhatWasTaught !== previousAutoFormatted);
+
+  if (hasTeacherEditedSummary) {
+    // Preserve teacher's edited summary and store the newly arrived extraction in `pendingUpdatedExtraction`
+    const preservedContent: GrainExtractedLessonContent = existingExtracted
+      ? {
+          ...existingExtracted,
+          teacherEdited: true,
+          origin: 'teacher_edited',
+          pendingUpdatedExtraction: {
+            themaDerStunde: extracted.themaDerStunde,
+            behandelteInhalte: extracted.behandelteInhalte,
+            neueWoerterUndRedemittel: extracted.neueWoerterUndRedemittel,
+            grammatik: extracted.grammatik,
+            beispiele: extracted.beispiele,
+            uebungenUndAktivitaeten: extracted.uebungenUndAktivitaeten,
+            offenePunkte: extracted.offenePunkte,
+            formattedLessonSummaryDe: extracted.formattedLessonSummaryDe,
+            sourceRecordingIds: extracted.sourceRecordingIds,
+            sourceContentFingerprint: extracted.sourceContentFingerprint,
+            extractedAt: extracted.extractedAt
+          }
+        }
+      : {
+          ...extracted,
+          formattedLessonSummaryDe: existingWhatWasTaught,
+          teacherEdited: true,
+          origin: 'teacher_edited',
+          teacherEditedAt: new Date().toISOString(),
+          pendingUpdatedExtraction: {
+            themaDerStunde: extracted.themaDerStunde,
+            behandelteInhalte: extracted.behandelteInhalte,
+            neueWoerterUndRedemittel: extracted.neueWoerterUndRedemittel,
+            grammatik: extracted.grammatik,
+            beispiele: extracted.beispiele,
+            uebungenUndAktivitaeten: extracted.uebungenUndAktivitaeten,
+            offenePunkte: extracted.offenePunkte,
+            formattedLessonSummaryDe: extracted.formattedLessonSummaryDe,
+            sourceRecordingIds: extracted.sourceRecordingIds,
+            sourceContentFingerprint: extracted.sourceContentFingerprint,
+            extractedAt: extracted.extractedAt
+          }
+        };
+
+    const nextMeta: GrainLessonMetadata = {
+      ...(existingMeta || {
+        recordingId: extracted.sourceRecordingIds[0] || 'unlinked',
+        recordingTitle: lesson.title || 'Grain Recording',
+        startTimestamp: new Date().toISOString(),
+        durationMinutes: lesson.duration || 60,
+        recordingUrl: lesson.recordingLink || 'https://grain.com/app/recordings/unlinked',
+        source: 'zoom',
+        matchingStatus: 'confirmed',
+        confirmedLessonId: lesson.id,
+        lastSyncedAt: new Date().toISOString()
+      }),
+      extractedLessonContent: preservedContent,
+      workflowStatuses: Array.from(currentStatuses)
+    };
+
+    const patch: Partial<Lesson> = {
+      grainMeta: nextMeta,
+      ...(lesson.report ? { report: { ...lesson.report, grainMeta: nextMeta } } : {})
+    };
+    assertLessonAttendanceUnchanged(lesson, patch);
+    return {
+      updated: true,
+      preservedTeacherEdits: true,
+      lessonPatch: patch
+    };
+  }
+
+  // Not teacher-edited: save extracted 7-section summary into lesson.grainMeta and internal lesson.whatWasTaught
+  const nextMeta: GrainLessonMetadata = {
+    ...(existingMeta || {
+      recordingId: extracted.sourceRecordingIds[0] || 'unlinked',
+      recordingTitle: lesson.title || 'Grain Recording',
+      startTimestamp: new Date().toISOString(),
+      durationMinutes: lesson.duration || 60,
+      recordingUrl: lesson.recordingLink || 'https://grain.com/app/recordings/unlinked',
+      source: 'zoom',
+      matchingStatus: 'confirmed',
+      confirmedLessonId: lesson.id,
+      lastSyncedAt: new Date().toISOString()
+    }),
+    extractedLessonContent: extracted,
+    workflowStatuses: Array.from(currentStatuses)
+  };
+
+  const patch: Partial<Lesson> = {
+    whatWasTaught: extracted.formattedLessonSummaryDe,
+    ...(!lesson.topic && extracted.themaDerStunde ? { topic: extracted.themaDerStunde } : {}),
+    grainMeta: nextMeta,
+    ...(lesson.report
+      ? {
+          report: {
+            ...lesson.report,
+            grainMeta: nextMeta
+          }
+        }
+      : {})
+  };
+
+  assertLessonAttendanceUnchanged(lesson, patch);
+  return {
+    updated: true,
+    preservedTeacherEdits: false,
+    lessonPatch: patch
+  };
+}
+
+/**
+ * Requirement 5: Teacher editing of extracted lesson content.
+ * Marks the content as `'teacher_edited'` (`teacherEdited: true`) so future syncs never overwrite it.
+ */
+export function saveTeacherEditedGrainLessonContent(
+  lesson: Lesson,
+  edited: Partial<GrainExtractedLessonContentCore> & { customFormattedSummary?: string }
+): Partial<Lesson> {
+  const existing = lesson.grainMeta?.extractedLessonContent;
+  const baseCore: GrainExtractedLessonContentCore = {
+    themaDerStunde:
+      edited.themaDerStunde !== undefined
+        ? edited.themaDerStunde
+        : existing?.themaDerStunde || lesson.topic || '',
+    behandelteInhalte:
+      edited.behandelteInhalte !== undefined
+        ? edited.behandelteInhalte
+        : existing?.behandelteInhalte || [],
+    neueWoerterUndRedemittel:
+      edited.neueWoerterUndRedemittel !== undefined
+        ? edited.neueWoerterUndRedemittel
+        : existing?.neueWoerterUndRedemittel || [],
+    grammatik: edited.grammatik !== undefined ? edited.grammatik : existing?.grammatik || [],
+    beispiele: edited.beispiele !== undefined ? edited.beispiele : existing?.beispiele || [],
+    uebungenUndAktivitaeten:
+      edited.uebungenUndAktivitaeten !== undefined
+        ? edited.uebungenUndAktivitaeten
+        : existing?.uebungenUndAktivitaeten || [],
+    offenePunkte:
+      edited.offenePunkte !== undefined ? edited.offenePunkte : existing?.offenePunkte || [],
+    formattedLessonSummaryDe: ''
+  };
+
+  const deduped = deduplicateGermanExtractedContent(baseCore);
+  const finalFormatted =
+    typeof edited.customFormattedSummary === 'string' && edited.customFormattedSummary.trim()
+      ? redactGrainSecrets(edited.customFormattedSummary.trim())
+      : deduped.formattedLessonSummaryDe;
+
+  const nowIso = new Date().toISOString();
+  const nextExtracted: GrainExtractedLessonContent = {
+    ...deduped,
+    formattedLessonSummaryDe: finalFormatted,
+    sourceRecordingIds: existing?.sourceRecordingIds || [lesson.grainMeta?.recordingId || ''].filter(Boolean),
+    sourceContentFingerprint: existing?.sourceContentFingerprint || `teacher_edit_${nowIso}`,
+    extractedAt: existing?.extractedAt || nowIso,
+    origin: 'teacher_edited',
+    transcriptStatus: existing?.transcriptStatus || 'complete',
+    partCount: existing?.partCount || (lesson.grainMeta?.recordingIdPart2 ? 2 : 1),
+    teacherEdited: true,
+    teacherEditedAt: nowIso,
+    pendingUpdatedExtraction: undefined
+  };
+
+  const nextMeta: GrainLessonMetadata = {
+    ...(lesson.grainMeta || {
+      recordingId: 'teacher_edited',
+      recordingTitle: lesson.title || 'Lesson',
+      startTimestamp: nowIso,
+      durationMinutes: lesson.duration || 60,
+      recordingUrl: lesson.recordingLink || 'https://grain.com/app/recordings/manual',
+      source: 'zoom',
+      matchingStatus: 'confirmed',
+      confirmedLessonId: lesson.id,
+      lastSyncedAt: nowIso
+    }),
+    extractedLessonContent: nextExtracted
+  };
+
+  const patch: Partial<Lesson> = {
+    whatWasTaught: finalFormatted,
+    ...(deduped.themaDerStunde ? { topic: deduped.themaDerStunde } : {}),
+    grainMeta: nextMeta,
+    ...(lesson.report ? { report: { ...lesson.report, grainMeta: nextMeta } } : {})
+  };
+
+  assertLessonAttendanceUnchanged(lesson, patch);
+  return patch;
+}
+
+/**
+ * Allows the teacher to accept or merge a `pendingUpdatedExtraction` (for example after Part 2 arrives)
+ * while retaining teacher-approved control.
+ */
+export function acceptPendingUpdatedLessonExtraction(lesson: Lesson): Partial<Lesson> {
+  const existing = lesson.grainMeta?.extractedLessonContent;
+  const pending = existing?.pendingUpdatedExtraction;
+  if (!existing || !pending) return {};
+
+  const nowIso = new Date().toISOString();
+  const nextExtracted: GrainExtractedLessonContent = {
+    ...pending,
+    origin: 'teacher_edited',
+    transcriptStatus: 'complete',
+    partCount: pending.sourceRecordingIds.length >= 2 ? 2 : 1,
+    teacherEdited: true,
+    teacherEditedAt: nowIso,
+    pendingUpdatedExtraction: undefined
+  };
+
+  const nextMeta: GrainLessonMetadata = {
+    ...lesson.grainMeta!,
+    extractedLessonContent: nextExtracted
+  };
+
+  const patch: Partial<Lesson> = {
+    whatWasTaught: pending.formattedLessonSummaryDe,
+    ...(pending.themaDerStunde ? { topic: pending.themaDerStunde } : {}),
+    grainMeta: nextMeta,
+    ...(lesson.report ? { report: { ...lesson.report, grainMeta: nextMeta } } : {})
+  };
+  assertLessonAttendanceUnchanged(lesson, patch);
+  return patch;
+}
+
+/**
+ * Applies automatic matching and two-part pairing across discovered recordings and lessons:
+ * - Automatically attaches unambiguous `'automatically_matched'` Part 1 (`recordingLink`) and Part 2 (`recordingLink2`) links.
+ * - Handles reverse import order (if Part 2 arrived in an earlier sync and was temporarily placed in `recordingLink`,
+ *   and Part 1 arrives ~40-42m earlier on the same date/lesson with `recordingLink2` empty, shifts Part 2 to `recordingLink2`
+ *   and places Part 1 in `recordingLink`).
+ * - Never overwrites an unrelated existing recording link without explicit teacher confirmation (marks recording `'needs_confirmation'`).
+ */
+export function applyAutomaticGrainMatchesAndTwoPartPairs(options: {
+  recordings: GrainDiscoveredRecording[];
+  lessons: Lesson[];
+  groups: Group[];
+  students: Student[];
+  learningRecords?: GrainGroupLearningRecord[];
+  part2Config?: Partial<GrainPart2DetectionConfig>;
+}): {
+  recordings: GrainDiscoveredRecording[];
+  updatedLessons: Lesson[];
+  lessonPatches: Record<string, Partial<Lesson>>;
+} {
+  const cfg = normalizePart2DetectionConfig(options.part2Config);
+  const learningRecords =
+    options.learningRecords ||
+    loadGrainGroupLearningRecords((options.groups || []).filter((g) => g && !g.deleted));
+
+  // Step 1: Evaluate all recordings against current lessons
+  const evaluated = (options.recordings || []).map((rec) =>
+    evaluateRecordingMatchAgainstLessons(
+      rec,
+      options.lessons,
+      options.groups,
+      options.students,
+      learningRecords
+    )
+  );
+
+  // Step 2: Detect two-part pairs (~40-42 min gap, same date & lesson, independent-lesson conflict check)
+  const pairedRecordings = detectGrainTwoPartRecordingPairs({
+    recordings: evaluated,
+    lessons: options.lessons,
+    groups: options.groups,
+    students: options.students,
+    learningRecords,
+    part2Config: cfg
+  });
+
+  const recById = new Map<string, GrainDiscoveredRecording>();
+  for (const r of pairedRecordings) {
+    recById.set(r.id, { ...r });
+  }
+
+  const lessonById = new Map<string, Lesson>();
+  for (const l of options.lessons || []) {
+    if (l) lessonById.set(l.id, { ...l });
+  }
+
+  const lessonPatches: Record<string, Partial<Lesson>> = {};
+
+  // Group candidate automatic recordings by target lesson
+  for (const lesson of options.lessons || []) {
+    if (!lesson || lesson.deleted || lesson.status === 'cancelled') continue;
+
+    let workingLesson = lessonById.get(lesson.id)!;
+    let lessonModified = false;
+
+    const autoRecordingsForLesson = Array.from(recById.values())
+      .filter(
+        (r) =>
+          !r.removedFromLibrary &&
+          (r.confirmedLessonId === lesson.id ||
+            (r.suggestedLessonId === lesson.id && r.matchStatus === 'automatically_matched'))
+      )
+      .sort((a, b) => {
+        const msA = Date.parse(a.startDatetime || '');
+        const msB = Date.parse(b.startDatetime || '');
+        if (Number.isFinite(msA) && Number.isFinite(msB) && msA !== msB) return msA - msB;
+        return String(a.startDatetime || '').localeCompare(String(b.startDatetime || ''));
+      });
+
+    if (autoRecordingsForLesson.length === 0) continue;
+
+    // Check reverse arrival order case:
+    // If workingLesson currently has a single Grain recording in `recordingLink` that actually starts ~40-42m AFTER
+    // a newly arrived recording in `autoRecordingsForLesson` on the same date, and `recordingLink2` is empty,
+    // shift the later recording to `recordingLink2` and put the earlier recording in `recordingLink`!
+    if (autoRecordingsForLesson.length >= 2) {
+      const firstRec = autoRecordingsForLesson[0];
+      const secondRec = autoRecordingsForLesson[1];
+      const ms1 = Date.parse(firstRec.startDatetime);
+      const ms2 = Date.parse(secondRec.startDatetime);
+      const gap = Number.isFinite(ms1) && Number.isFinite(ms2) ? Math.round((ms2 - ms1) / 60000) : -1;
+
+      const curR1 = (workingLesson.recordingLink || workingLesson.report?.recordingLink || '').trim();
+      const curR2 = (workingLesson.recordingLink2 || workingLesson.report?.recordingLink2 || '').trim();
+
+      if (
+        gap >= cfg.minGapMinutes &&
+        gap <= cfg.maxGapMinutes &&
+        curR1 === secondRec.recordingUrl.trim() &&
+        (!curR2 || curR2 === firstRec.recordingUrl.trim())
+      ) {
+        // Reorder so Part 1 is in recordingLink and Part 2 is in recordingLink2
+        const share1 = firstRec.shareAccessClassification || 'unknown';
+        const share2 = secondRec.shareAccessClassification || 'unknown';
+        const statuses = Array.from(
+          new Set<GrainWorkflowStatusBadge>([
+            ...(workingLesson.grainMeta?.workflowStatuses || []),
+            'automatically_matched',
+            'part1_detected',
+            'part2_detected'
+          ])
+        );
+        const reorderedMeta: GrainLessonMetadata = {
+          ...(workingLesson.grainMeta || {
+            source: firstRec.sourcePlatform || 'zoom',
+            matchingStatus: 'confirmed',
+            confirmedLessonId: workingLesson.id,
+            lastSyncedAt: new Date().toISOString()
+          }),
+          recordingId: firstRec.id,
+          recordingTitle: firstRec.title,
+          startTimestamp: firstRec.startDatetime,
+          endTimestamp: firstRec.endDatetime,
+          durationMinutes: firstRec.durationMinutes,
+          recordingUrl: firstRec.recordingUrl.trim(),
+          shareAccessClassification: share1,
+          recordingIdPart2: secondRec.id,
+          recordingTitlePart2: secondRec.title,
+          startTimestampPart2: secondRec.startDatetime,
+          endTimestampPart2: secondRec.endDatetime,
+          durationMinutesPart2: secondRec.durationMinutes,
+          recordingUrlPart2: secondRec.recordingUrl.trim(),
+          shareAccessClassificationPart2: share2,
+          part2StartGapMinutes: gap,
+          matchedAutomatically: true,
+          learnedRecurringRuleId:
+            firstRec.learnedRecurringRuleId ||
+            secondRec.learnedRecurringRuleId ||
+            workingLesson.grainMeta?.learnedRecurringRuleId,
+          workflowStatuses: statuses,
+          groupId: workingLesson.groupId || workingLesson.grainMeta?.groupId,
+          matchingStatus: 'confirmed',
+          confirmedLessonId: workingLesson.id,
+          lastSyncedAt: new Date().toISOString()
+        };
+
+        const reorderPatch: Partial<Lesson> = {
+          recordingLink: firstRec.recordingUrl.trim(),
+          recordingLink2: secondRec.recordingUrl.trim(),
+          grainMeta: reorderedMeta,
+          ...(workingLesson.report
+            ? {
+                report: {
+                  ...workingLesson.report,
+                  recordingLink: firstRec.recordingUrl.trim(),
+                  recordingLink2: secondRec.recordingUrl.trim(),
+                  grainMeta: reorderedMeta
+                }
+              }
+            : {})
+        };
+        assertLessonAttendanceUnchanged(workingLesson, reorderPatch);
+        workingLesson = { ...workingLesson, ...reorderPatch };
+        lessonPatches[workingLesson.id] = { ...(lessonPatches[workingLesson.id] || {}), ...reorderPatch };
+        lessonModified = true;
+
+        recById.set(firstRec.id, {
+          ...firstRec,
+          confirmedLessonId: workingLesson.id,
+          detectedPartSlot: 'part1',
+          pairedRecordingId: secondRec.id,
+          part2StartGapMinutes: gap
+        });
+        recById.set(secondRec.id, {
+          ...secondRec,
+          confirmedLessonId: workingLesson.id,
+          detectedPartSlot: 'part2',
+          pairedRecordingId: firstRec.id,
+          part2StartGapMinutes: gap
+        });
+      }
+    }
+
+    for (const rec of autoRecordingsForLesson) {
+      const currentRec = recById.get(rec.id)!;
+      if (currentRec.confirmedLessonId === workingLesson.id) {
+        continue;
+      }
+
+      const preferredSlot: 'recordingLink' | 'recordingLink2' =
+        currentRec.detectedPartSlot === 'part2' ? 'recordingLink2' : 'recordingLink';
+
+      const attachment = prepareConfirmedGrainLessonAttachment({
+        lesson: workingLesson,
+        recording: currentRec,
+        preferredSlot,
+        allowOverwrite: false,
+        matchedAutomatically: true
+      });
+
+      if (attachment.requiresOverwriteConfirmation) {
+        // Requirement 3: Never overwrite an existing recording link without explicit confirmation!
+        const updatedStatuses = new Set<GrainWorkflowStatusBadge>(currentRec.workflowStatuses || []);
+        updatedStatuses.delete('automatically_matched');
+        updatedStatuses.add('needs_teacher_confirmation');
+        recById.set(currentRec.id, {
+          ...currentRec,
+          matchStatus: 'needs_confirmation',
+          workflowStatuses: Array.from(updatedStatuses),
+          matchReasons: [
+            `Target slot (${attachment.targetSlot}) already contains an existing recording link. Teacher confirmation required before overwriting.`,
+            ...currentRec.matchReasons
+          ]
+        });
+        continue;
+      }
+
+      workingLesson = { ...workingLesson, ...attachment.proposedLessonPatch };
+      lessonPatches[workingLesson.id] = {
+        ...(lessonPatches[workingLesson.id] || {}),
+        ...attachment.proposedLessonPatch
+      };
+      lessonModified = true;
+
+      const updatedStatuses = new Set<GrainWorkflowStatusBadge>(currentRec.workflowStatuses || []);
+      updatedStatuses.add('automatically_matched');
+      updatedStatuses.add(attachment.targetSlot === 'recordingLink2' ? 'part2_detected' : 'part1_detected');
+      recById.set(currentRec.id, {
+        ...currentRec,
+        confirmedLessonId: workingLesson.id,
+        matchStatus: 'automatically_matched',
+        workflowStatuses: Array.from(updatedStatuses)
+      });
+    }
+
+    if (lessonModified) {
+      lessonById.set(workingLesson.id, workingLesson);
+    }
+  }
+
+  return {
+    recordings: Array.from(recById.values()),
+    updatedLessons: Array.from(lessonById.values()),
+    lessonPatches
+  };
+}
+
+/**
+ * Incremental synchronization of Grain recordings (Section 7 & Smart Recurring Matching Upgrade).
  * Retrieves recordings since last successful sync (or optional date filter),
  * handles pagination, deduplicates by recording ID, classifies public share access,
- * and matches against lessons using Smart Group Learning.
+ * matches against lessons using Smart Group Learning, detects Part 1 / Part 2 pairs,
+ * automatically links unambiguous recurring lessons, and extracts 7-section German lesson content.
  */
 export async function syncGrainRecordingsIncrementally(options: {
   lessons: Lesson[];
@@ -2615,10 +4470,15 @@ export async function syncGrainRecordingsIncrementally(options: {
   beforeDatetime?: string;
   titleSearch?: string;
   maxPages?: number;
+  part2Config?: Partial<GrainPart2DetectionConfig>;
+  autoExtractContent?: boolean;
+  onUpdateLesson?: (lessonId: string, patch: Partial<Lesson>) => void;
 }): Promise<{
   success: boolean;
   recordings: GrainDiscoveredRecording[];
   newCount: number;
+  lessonPatches?: Record<string, Partial<Lesson>>;
+  autoMatchedLessonIds?: string[];
   error?: string;
   errorCode?: string;
 }> {
@@ -2806,20 +4666,54 @@ export async function syncGrainRecordingsIncrementally(options: {
     existingById.set(id, evaluated);
   }
 
-  // Re-evaluate existing cached recordings against current lessons & groups
-  const mergedList = Array.from(existingById.values())
-    .map((rec) => ({
-      ...evaluateRecordingMatchAgainstLessons(
-        rec,
-        options.lessons,
-        options.groups,
-        options.students,
-        learningRecords
-      ),
-      importedAt: rec.importedAt || nowIso,
-      removedFromLibrary: Boolean(rec.removedFromLibrary || removedSet.has(rec.id))
-    }))
-    .sort((a, b) => (b.startDatetime || '').localeCompare(a.startDatetime || ''));
+  // Apply automatic recurring matching and Part 1 + Part 2 pairing across all recordings
+  const preAutoList = Array.from(existingById.values()).map((rec) => ({
+    ...rec,
+    importedAt: rec.importedAt || nowIso,
+    removedFromLibrary: Boolean(rec.removedFromLibrary || removedSet.has(rec.id))
+  }));
+
+  const autoApplied = applyAutomaticGrainMatchesAndTwoPartPairs({
+    recordings: preAutoList,
+    lessons: options.lessons,
+    groups: options.groups,
+    students: options.students,
+    learningRecords,
+    part2Config: options.part2Config
+  });
+
+  const finalLessonPatches: Record<string, Partial<Lesson>> = { ...autoApplied.lessonPatches };
+  const autoMatchedLessonIds = Object.keys(autoApplied.lessonPatches);
+
+  // Requirement 4 & 5: Automatically extract 7-section German lesson content for auto-matched lessons
+  if (options.autoExtractContent !== false && autoMatchedLessonIds.length > 0) {
+    for (const lessonId of autoMatchedLessonIds) {
+      const updatedLesson = autoApplied.updatedLessons.find((l) => l.id === lessonId);
+      if (!updatedLesson) continue;
+      const extracted = await extractStructuredLessonContentForLesson({
+        lesson: updatedLesson,
+        recordings: autoApplied.recordings
+      });
+      const applied = applyExtractedLessonContentToLesson(updatedLesson, extracted);
+      if (applied.updated) {
+        finalLessonPatches[lessonId] = {
+          ...(finalLessonPatches[lessonId] || {}),
+          ...applied.lessonPatch
+        };
+      }
+    }
+  }
+
+  // Notify caller (e.g. AppContext updateLesson) of any automatic lesson updates
+  if (typeof options.onUpdateLesson === 'function') {
+    for (const [lessonId, patch] of Object.entries(finalLessonPatches)) {
+      options.onUpdateLesson(lessonId, patch);
+    }
+  }
+
+  const mergedList = autoApplied.recordings.sort((a, b) =>
+    (b.startDatetime || '').localeCompare(a.startDatetime || '')
+  );
 
   saveDiscoveredGrainRecordings(mergedList);
   saveGrainIntegrationMeta({
@@ -2832,7 +4726,9 @@ export async function syncGrainRecordingsIncrementally(options: {
   return {
     success: true,
     recordings: mergedList.filter((r) => !r.removedFromLibrary),
-    newCount
+    newCount,
+    lessonPatches: finalLessonPatches,
+    autoMatchedLessonIds
   };
 }
 
@@ -2870,18 +4766,25 @@ export interface ConfirmGrainMatchResult {
 }
 
 /**
- * Prepares a teacher-confirmed recording link attachment for a specific Glück lesson.
+ * Prepares a teacher-confirmed or automatic recurring recording link attachment for a specific Glück lesson.
  * Rule 2: Never modifies attendance.
  * Rule 5: Returns a proposed patch; requires explicit teacher confirmation if overwriting an existing link.
- * Part 2: Preserves `shareAccessClassification` on `lesson.grainMeta`.
+ * Part 2: Preserves `shareAccessClassification` and Part 1/Part 2 timestamps on `lesson.grainMeta`.
  */
 export function prepareConfirmedGrainLessonAttachment(options: {
   lesson: Lesson;
   recording: GrainDiscoveredRecording;
   preferredSlot?: 'auto' | 'recordingLink' | 'recordingLink2';
   allowOverwrite?: boolean;
+  matchedAutomatically?: boolean;
 }): ConfirmGrainMatchResult {
-  const { lesson, recording, preferredSlot = 'auto', allowOverwrite = false } = options;
+  const {
+    lesson,
+    recording,
+    preferredSlot = 'auto',
+    allowOverwrite = false,
+    matchedAutomatically = false
+  } = options;
   const currentR1 = (lesson.recordingLink || lesson.report?.recordingLink || '').trim();
   const currentR2 = (lesson.recordingLink2 || lesson.report?.recordingLink2 || '').trim();
   const newUrl = recording.recordingUrl.trim();
@@ -2891,6 +4794,8 @@ export function prepareConfirmedGrainLessonAttachment(options: {
     targetSlot = 'recordingLink2';
   } else if (preferredSlot === 'recordingLink') {
     targetSlot = 'recordingLink';
+  } else if (recording.detectedPartSlot === 'part2' && currentR1 && currentR1 !== newUrl) {
+    targetSlot = 'recordingLink2';
   } else {
     if (!currentR1 || currentR1 === newUrl) {
       targetSlot = 'recordingLink';
@@ -2910,6 +4815,29 @@ export function prepareConfirmedGrainLessonAttachment(options: {
       recordingUrl: newUrl,
       share_state: recording.rawShareState
     }).classification;
+
+  const statuses = new Set<GrainWorkflowStatusBadge>(lesson.grainMeta?.workflowStatuses || []);
+  statuses.delete('needs_teacher_confirmation');
+  if (matchedAutomatically || recording.matchStatus === 'automatically_matched') {
+    statuses.add('automatically_matched');
+  }
+  statuses.add(targetSlot === 'recordingLink2' ? 'part2_detected' : 'part1_detected');
+
+  // Compute gap minutes if attaching either part when the paired timestamp exists
+  let computedGapMinutes = recording.part2StartGapMinutes ?? lesson.grainMeta?.part2StartGapMinutes;
+  if (targetSlot === 'recordingLink2' && lesson.grainMeta?.startTimestamp) {
+    const ms1 = Date.parse(lesson.grainMeta.startTimestamp);
+    const ms2 = Date.parse(recording.startDatetime);
+    if (Number.isFinite(ms1) && Number.isFinite(ms2)) {
+      computedGapMinutes = Math.round((ms2 - ms1) / 60000);
+    }
+  } else if (targetSlot === 'recordingLink' && lesson.grainMeta?.startTimestampPart2) {
+    const ms1 = Date.parse(recording.startDatetime);
+    const ms2 = Date.parse(lesson.grainMeta.startTimestampPart2);
+    if (Number.isFinite(ms1) && Number.isFinite(ms2) && ms2 > ms1) {
+      computedGapMinutes = Math.round((ms2 - ms1) / 60000);
+    }
+  }
 
   const nextGrainMeta: GrainLessonMetadata = {
     ...(lesson.grainMeta || {
@@ -2939,11 +4867,21 @@ export function prepareConfirmedGrainLessonAttachment(options: {
       : {
           recordingIdPart2: recording.id,
           recordingTitlePart2: recording.title,
+          startTimestampPart2: recording.startDatetime,
+          endTimestampPart2: recording.endDatetime,
+          durationMinutesPart2: recording.durationMinutes,
           recordingUrlPart2: newUrl,
           shareAccessClassificationPart2: shareClass
         }),
+    ...(typeof computedGapMinutes === 'number' ? { part2StartGapMinutes: computedGapMinutes } : {}),
     groupId: lesson.groupId || lesson.grainMeta?.groupId,
     matchingStatus: 'confirmed',
+    matchedAutomatically: Boolean(matchedAutomatically || lesson.grainMeta?.matchedAutomatically),
+    learnedRecurringRuleId:
+      recording.learnedRecurringRuleId ||
+      recording.evidence?.learnedRecurringRuleId ||
+      lesson.grainMeta?.learnedRecurringRuleId,
+    workflowStatuses: Array.from(statuses),
     confirmedLessonId: lesson.id,
     lastSyncedAt: new Date().toISOString(),
     supplementaryParticipantsObserved: recording.participantNames
@@ -2978,6 +4916,131 @@ export function prepareConfirmedGrainLessonAttachment(options: {
     existingUrlInTargetSlot: hasConflict ? existingUrlInSlot : undefined,
     targetSlot,
     proposedLessonPatch
+  };
+}
+
+/**
+ * Requirement 6 & Test 11: Handles a teacher correction when a recording is reassigned
+ * from a suggested or previously auto-matched lesson/group to a teacher-chosen lesson/group.
+ * - Detaches the recording from `previousLesson` if it was linked there.
+ * - Attaches the recording to `targetLesson`.
+ * - Records permanent recurring group learning AND penalizes the rejected group/lesson so the mistake is not repeated.
+ */
+export function correctGrainRecordingAssignment(options: {
+  recording: GrainDiscoveredRecording;
+  targetLesson: Lesson;
+  previousLesson?: Lesson | null;
+  groups: Group[];
+  students: Student[];
+  preferredSlot?: 'auto' | 'recordingLink' | 'recordingLink2';
+  allowOverwrite?: boolean;
+}): {
+  requiresOverwriteConfirmation: boolean;
+  targetSlot: 'recordingLink' | 'recordingLink2';
+  targetLessonPatch: Partial<Lesson>;
+  previousLessonPatch?: Partial<Lesson>;
+  updatedLearningRecords: GrainGroupLearningRecord[];
+} {
+  const {
+    recording,
+    targetLesson,
+    previousLesson,
+    groups,
+    students,
+    preferredSlot = 'auto',
+    allowOverwrite = false
+  } = options;
+
+  const attachment = prepareConfirmedGrainLessonAttachment({
+    lesson: targetLesson,
+    recording,
+    preferredSlot,
+    allowOverwrite,
+    matchedAutomatically: false
+  });
+
+  let previousLessonPatch: Partial<Lesson> | undefined;
+  if (previousLesson && previousLesson.id !== targetLesson.id) {
+    const recUrl = recording.recordingUrl.trim();
+    const prevR1 = (previousLesson.recordingLink || previousLesson.report?.recordingLink || '').trim();
+    const prevR2 = (previousLesson.recordingLink2 || previousLesson.report?.recordingLink2 || '').trim();
+    if (prevR1 === recUrl || prevR2 === recUrl) {
+      const nextPrevR1 = prevR1 === recUrl ? undefined : prevR1 || undefined;
+      const nextPrevR2 = prevR2 === recUrl ? undefined : prevR2 || undefined;
+      const nextPrevMeta =
+        prevR1 === recUrl && !nextPrevR2
+          ? undefined
+          : previousLesson.grainMeta
+          ? {
+              ...previousLesson.grainMeta,
+              ...(prevR2 === recUrl
+                ? {
+                    recordingIdPart2: undefined,
+                    recordingTitlePart2: undefined,
+                    recordingUrlPart2: undefined,
+                    startTimestampPart2: undefined,
+                    endTimestampPart2: undefined,
+                    durationMinutesPart2: undefined,
+                    shareAccessClassificationPart2: undefined,
+                    part2StartGapMinutes: undefined
+                  }
+                : {})
+            }
+          : undefined;
+      previousLessonPatch = {
+        recordingLink: nextPrevR1,
+        recordingLink2: nextPrevR2,
+        grainMeta: nextPrevMeta,
+        ...(previousLesson.report
+          ? {
+              report: {
+                ...previousLesson.report,
+                recordingLink: nextPrevR1,
+                recordingLink2: nextPrevR2,
+                grainMeta: nextPrevMeta
+              }
+            }
+          : {})
+      };
+      assertLessonAttendanceUnchanged(previousLesson, previousLessonPatch);
+    }
+  }
+
+  let updatedLearningRecords = loadGrainGroupLearningRecords(
+    (groups || []).filter((g) => g && !g.deleted)
+  );
+
+  if (!attachment.requiresOverwriteConfirmation) {
+    const rejectedGroupId =
+      previousLesson?.groupId ||
+      (recording.matchedGroupId && recording.matchedGroupId !== targetLesson.groupId
+        ? recording.matchedGroupId
+        : undefined);
+    const rejectedLessonId =
+      previousLesson?.id ||
+      (recording.suggestedLessonId && recording.suggestedLessonId !== targetLesson.id
+        ? recording.suggestedLessonId
+        : undefined);
+
+    recordConfirmedGrainGroupLearning({
+      lesson: targetLesson,
+      groups,
+      recording,
+      students,
+      previousSuggestedGroupId: rejectedGroupId,
+      previousSuggestedLessonId: rejectedLessonId
+    });
+    updatedLearningRecords = loadGrainGroupLearningRecords(
+      (groups || []).filter((g) => g && !g.deleted)
+    );
+  }
+
+  return {
+    requiresOverwriteConfirmation: attachment.requiresOverwriteConfirmation,
+    targetSlot: attachment.targetSlot,
+    targetLessonPatch: attachment.proposedLessonPatch,
+    previousLessonPatch,
+    updatedLearningRecords
   };
 }
 
@@ -3688,16 +5751,16 @@ export function buildLernstudioDraftFromGrainEducationalDraft(
     items: vocabItems,
     ...(hasGrammar
       ? {
-          grammarContent: {
-            lessonTitle: options.title || draft.mainLearningObjectives[0] || 'Grammatik',
-            grammarTopic: draft.grammar[0]?.topic || 'Grammatik',
-            explanationAr: draft.grammar.map((g) => g.explanationAr).join('\n'),
-            rules: grammarRules,
-            examples: grammarExamples,
-            exercises,
-            origin: 'teacher_created'
-          }
-        }
+           grammarContent: {
+             lessonTitle: options.title || draft.mainLearningObjectives[0] || 'Grammatik',
+             grammarTopic: draft.grammar[0]?.topic || 'Grammatik',
+             explanationAr: draft.grammar.map((g) => g.explanationAr).join('\n'),
+             rules: grammarRules,
+             examples: grammarExamples,
+             exercises,
+             origin: 'teacher_created'
+           }
+         }
       : {})
   });
 }
@@ -3727,6 +5790,93 @@ const VALID_SHARE_CLASSIFICATIONS = new Set<GrainShareAccessClassification>([
   'link_unavailable'
 ]);
 
+const VALID_WORKFLOW_STATUSES = new Set<GrainWorkflowStatusBadge>([
+  'automatically_matched',
+  'part1_detected',
+  'part2_detected',
+  'lesson_content_extracted',
+  'transcript_unavailable',
+  'needs_teacher_confirmation'
+]);
+
+function sanitizeExtractedLessonContent(raw: any): GrainExtractedLessonContent | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const core = deduplicateGermanExtractedContent({
+    themaDerStunde: String(raw.themaDerStunde || ''),
+    behandelteInhalte: Array.isArray(raw.behandelteInhalte) ? raw.behandelteInhalte : [],
+    neueWoerterUndRedemittel: Array.isArray(raw.neueWoerterUndRedemittel) ? raw.neueWoerterUndRedemittel : [],
+    grammatik: Array.isArray(raw.grammatik) ? raw.grammatik : [],
+    beispiele: Array.isArray(raw.beispiele) ? raw.beispiele : [],
+    uebungenUndAktivitaeten: Array.isArray(raw.uebungenUndAktivitaeten) ? raw.uebungenUndAktivitaeten : [],
+    offenePunkte: Array.isArray(raw.offenePunkte) ? raw.offenePunkte : [],
+    formattedLessonSummaryDe: ''
+  });
+
+  const formatted =
+    typeof raw.formattedLessonSummaryDe === 'string' && raw.formattedLessonSummaryDe.trim()
+      ? redactGrainSecrets(raw.formattedLessonSummaryDe.trim()).slice(0, 3500)
+      : core.formattedLessonSummaryDe;
+
+  let cleanPending: GrainExtractedLessonContent['pendingUpdatedExtraction'] | undefined;
+  if (raw.pendingUpdatedExtraction && typeof raw.pendingUpdatedExtraction === 'object') {
+    const pCore = deduplicateGermanExtractedContent({
+      themaDerStunde: String(raw.pendingUpdatedExtraction.themaDerStunde || ''),
+      behandelteInhalte: Array.isArray(raw.pendingUpdatedExtraction.behandelteInhalte)
+        ? raw.pendingUpdatedExtraction.behandelteInhalte
+        : [],
+      neueWoerterUndRedemittel: Array.isArray(raw.pendingUpdatedExtraction.neueWoerterUndRedemittel)
+        ? raw.pendingUpdatedExtraction.neueWoerterUndRedemittel
+        : [],
+      grammatik: Array.isArray(raw.pendingUpdatedExtraction.grammatik)
+        ? raw.pendingUpdatedExtraction.grammatik
+        : [],
+      beispiele: Array.isArray(raw.pendingUpdatedExtraction.beispiele)
+        ? raw.pendingUpdatedExtraction.beispiele
+        : [],
+      uebungenUndAktivitaeten: Array.isArray(raw.pendingUpdatedExtraction.uebungenUndAktivitaeten)
+        ? raw.pendingUpdatedExtraction.uebungenUndAktivitaeten
+        : [],
+      offenePunkte: Array.isArray(raw.pendingUpdatedExtraction.offenePunkte)
+        ? raw.pendingUpdatedExtraction.offenePunkte
+        : [],
+      formattedLessonSummaryDe: ''
+    });
+    cleanPending = {
+      ...pCore,
+      sourceRecordingIds: Array.isArray(raw.pendingUpdatedExtraction.sourceRecordingIds)
+        ? raw.pendingUpdatedExtraction.sourceRecordingIds
+            .map((id: any) => redactGrainSecrets(String(id || '').trim()).slice(0, 128))
+            .filter(Boolean)
+            .slice(0, 4)
+        : [],
+      sourceContentFingerprint: String(raw.pendingUpdatedExtraction.sourceContentFingerprint || '').slice(0, 180),
+      extractedAt: String(raw.pendingUpdatedExtraction.extractedAt || new Date().toISOString())
+    };
+  }
+
+  return {
+    ...core,
+    formattedLessonSummaryDe: formatted,
+    sourceRecordingIds: Array.isArray(raw.sourceRecordingIds)
+      ? raw.sourceRecordingIds
+          .map((id: any) => redactGrainSecrets(String(id || '').trim()).slice(0, 128))
+          .filter(Boolean)
+          .slice(0, 4)
+      : [],
+    sourceContentFingerprint: String(raw.sourceContentFingerprint || '').slice(0, 180),
+    extractedAt: String(raw.extractedAt || new Date().toISOString()),
+    origin: raw.origin === 'teacher_edited' ? 'teacher_edited' : 'ai_extracted',
+    transcriptStatus:
+      raw.transcriptStatus === 'transcript_unavailable' || raw.transcriptStatus === 'partial_transcript'
+        ? raw.transcriptStatus
+        : 'complete',
+    partCount: raw.partCount === 2 ? 2 : 1,
+    teacherEdited: Boolean(raw.teacherEdited || raw.origin === 'teacher_edited'),
+    ...(typeof raw.teacherEditedAt === 'string' ? { teacherEditedAt: raw.teacherEditedAt } : {}),
+    ...(cleanPending ? { pendingUpdatedExtraction: cleanPending } : {})
+  };
+}
+
 /**
  * Sanitizes a `GrainLessonMetadata` object before persisting, syncing (P2P/Firebase), or exporting to backup.
  * Ensures zero tokens, zero raw transcripts, and bounded compact strings.
@@ -3737,6 +5887,11 @@ export function sanitizeGrainLessonMetadata(meta: any): GrainLessonMetadata | un
   const recordingUrl = String(meta.recordingUrl || '').trim();
   if (!recordingId || !recordingUrl) return undefined;
 
+  const cleanExtracted = sanitizeExtractedLessonContent(meta.extractedLessonContent);
+  const cleanWorkflowStatuses = Array.isArray(meta.workflowStatuses)
+    ? meta.workflowStatuses.filter((s: any): s is GrainWorkflowStatusBadge => VALID_WORKFLOW_STATUSES.has(s))
+    : undefined;
+
   return {
     recordingId: redactGrainSecrets(recordingId).slice(0, 128),
     ...(meta.recordingIdPart2 ? { recordingIdPart2: redactGrainSecrets(meta.recordingIdPart2).slice(0, 128) } : {}),
@@ -3744,7 +5899,15 @@ export function sanitizeGrainLessonMetadata(meta: any): GrainLessonMetadata | un
     ...(meta.recordingTitlePart2 ? { recordingTitlePart2: redactGrainSecrets(meta.recordingTitlePart2).slice(0, 200) } : {}),
     startTimestamp: String(meta.startTimestamp || ''),
     ...(meta.endTimestamp ? { endTimestamp: String(meta.endTimestamp) } : {}),
+    ...(meta.startTimestampPart2 ? { startTimestampPart2: String(meta.startTimestampPart2) } : {}),
+    ...(meta.endTimestampPart2 ? { endTimestampPart2: String(meta.endTimestampPart2) } : {}),
     durationMinutes: Math.max(0, Number(meta.durationMinutes) || 0),
+    ...(typeof meta.durationMinutesPart2 === 'number'
+      ? { durationMinutesPart2: Math.max(0, Number(meta.durationMinutesPart2) || 0) }
+      : {}),
+    ...(typeof meta.part2StartGapMinutes === 'number'
+      ? { part2StartGapMinutes: Math.round(Number(meta.part2StartGapMinutes)) }
+      : {}),
     recordingUrl: redactGrainSecrets(recordingUrl).slice(0, 500),
     ...(meta.recordingUrlPart2 ? { recordingUrlPart2: redactGrainSecrets(meta.recordingUrlPart2).slice(0, 500) } : {}),
     ...(VALID_SHARE_CLASSIFICATIONS.has(meta.shareAccessClassification)
@@ -3758,6 +5921,13 @@ export function sanitizeGrainLessonMetadata(meta: any): GrainLessonMetadata | un
       : {}),
     source: String(meta.source || 'zoom').slice(0, 32),
     matchingStatus: 'confirmed',
+    ...(typeof meta.matchedAutomatically === 'boolean' ? { matchedAutomatically: meta.matchedAutomatically } : {}),
+    ...(typeof meta.learnedRecurringRuleId === 'string' && meta.learnedRecurringRuleId.trim()
+      ? { learnedRecurringRuleId: redactGrainSecrets(meta.learnedRecurringRuleId.trim()).slice(0, 128) }
+      : {}),
+    ...(cleanWorkflowStatuses && cleanWorkflowStatuses.length > 0
+      ? { workflowStatuses: cleanWorkflowStatuses }
+      : {}),
     confirmedLessonId: String(meta.confirmedLessonId || '').slice(0, 128),
     lastSyncedAt: String(meta.lastSyncedAt || new Date().toISOString()),
     ...(typeof meta.approvedSummary === 'string' && meta.approvedSummary.trim()
@@ -3797,6 +5967,7 @@ export function sanitizeGrainLessonMetadata(meta: any): GrainLessonMetadata | un
     ...(typeof meta.approvedParentReportSummaryDe === 'string' && meta.approvedParentReportSummaryDe.trim()
       ? { approvedParentReportSummaryDe: redactGrainSecrets(meta.approvedParentReportSummaryDe.trim()).slice(0, 450) }
       : {}),
+    ...(cleanExtracted ? { extractedLessonContent: cleanExtracted } : {}),
     ...(Array.isArray(meta.supplementaryParticipantsObserved)
       ? {
           supplementaryParticipantsObserved: meta.supplementaryParticipantsObserved
@@ -3844,4 +6015,5 @@ export function sanitizeEntityForGrainPrivacy<T>(record: T): T {
   }
   return clone as T;
 }
+
 

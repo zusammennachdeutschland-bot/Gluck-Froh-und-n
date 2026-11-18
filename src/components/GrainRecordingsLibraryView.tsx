@@ -28,22 +28,29 @@ import {
   GrainEducationalDraft,
   GrainShareAccessClassification,
   GrainGroupLearningRecord,
-  GrainMatchStatus
+  GrainMatchStatus,
+  GrainWorkflowStatusBadge
 } from '../types';
 import {
   loadDiscoveredGrainRecordings,
   saveDiscoveredGrainRecordings,
   syncGrainRecordingsIncrementally,
   evaluateRecordingMatchAgainstLessons,
+  detectGrainTwoPartRecordingPairs,
   prepareConfirmedGrainLessonAttachment,
+  correctGrainRecordingAssignment,
   recordConfirmedGrainGroupLearning,
   loadGrainGroupLearningRecords,
+  setGrainLearningRuleEnabled,
+  deleteGrainLearningRule,
   removeGrainRecordingFromLocalLibrary,
   restoreRemovedGrainLibraryEntries,
   generateEducationalDraftForRecording,
   buildLernstudioDraftFromGrainEducationalDraft,
   loadGrainIntegrationMeta,
-  classifyGrainRecordingShareAccess
+  classifyGrainRecordingShareAccess,
+  extractStructuredLessonContentForLesson,
+  applyExtractedLessonContentToLesson
 } from '../services/grainService';
 
 export const GrainRecordingsLibraryView: React.FC = () => {
@@ -65,6 +72,7 @@ export const GrainRecordingsLibraryView: React.FC = () => {
 
   const [recordings, setRecordings] = useState<GrainDiscoveredRecording[]>([]);
   const [learningRecords, setLearningRecords] = useState<GrainGroupLearningRecord[]>([]);
+  const [showLearnedRulesPanel, setShowLearnedRulesPanel] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [hasConnectedToken, setHasConnectedToken] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -109,12 +117,29 @@ export const GrainRecordingsLibraryView: React.FC = () => {
     refreshLocalLibrary();
   }, [refreshLocalLibrary]);
 
-  // Evaluate matches for all recordings using the upgraded non-Zoom-dependent matching engine + Smart Group Learning
+  // Evaluate matches and two-part pairs for all recordings using Smart Recurring Lesson Matching
   const evaluatedRecordings = useMemo(() => {
-    return recordings.map((rec) =>
+    const evaluated = recordings.map((rec) =>
       evaluateRecordingMatchAgainstLessons(rec, lessons, groups, students, learningRecords)
     );
+    return detectGrainTwoPartRecordingPairs({
+      recordings: evaluated,
+      lessons,
+      groups,
+      students,
+      learningRecords
+    });
   }, [recordings, lessons, groups, students, learningRecords]);
+
+  const handleToggleLearnedRule = (ruleId: string, enabled: boolean) => {
+    const updated = setGrainLearningRuleEnabled(ruleId, enabled, groups);
+    setLearningRecords(updated);
+  };
+
+  const handleDeleteLearnedRule = (ruleId: string) => {
+    const updated = deleteGrainLearningRule(ruleId, groups);
+    setLearningRecords(updated);
+  };
 
   const handleSyncFromGrain = async (forceFull: boolean = false) => {
     setIsSyncing(true);
@@ -125,7 +150,8 @@ export const GrainRecordingsLibraryView: React.FC = () => {
         lessons: lessons || [],
         groups: groups || [],
         students: students || [],
-        maxPages: forceFull ? 5 : 2
+        maxPages: forceFull ? 5 : 2,
+        onUpdateLesson: updateLesson
       });
       if (!result.success) {
         setSyncError(
@@ -138,11 +164,12 @@ export const GrainRecordingsLibraryView: React.FC = () => {
         );
       } else {
         refreshLocalLibrary();
+        const autoCount = result.autoMatchedLessonIds?.length || 0;
         setSyncMessage(
           tr(
-            `تمت مزامنة المكتبة (${result.recordings.length} تسجيلاً متاحاً، ${result.newCount} جديد).`,
-            `Library synced (${result.recordings.length} recordings available, ${result.newCount} new).`,
-            `Bibliothek synchronisiert (${result.recordings.length} Aufzeichnungen, ${result.newCount} neu).`
+            `تمت مزامنة المكتبة (${result.recordings.length} تسجيلاً متاحاً، ${result.newCount} جديد${autoCount > 0 ? `، ${autoCount} حصة تمت مطابقتها واستخراج محتواها تلقائياً` : ''}).`,
+            `Library synced (${result.recordings.length} recordings, ${result.newCount} new${autoCount > 0 ? `, ${autoCount} lessons auto-matched & extracted` : ''}).`,
+            `Bibliothek synchronisiert (${result.recordings.length} Aufzeichnungen, ${result.newCount} neu${autoCount > 0 ? `, ${autoCount} automatisch zugeordnet` : ''}).`
           )
         );
       }
@@ -153,32 +180,36 @@ export const GrainRecordingsLibraryView: React.FC = () => {
     }
   };
 
-  const handleConfirmMatch = (rec: GrainDiscoveredRecording, targetLessonId: string) => {
+  const handleConfirmMatch = async (rec: GrainDiscoveredRecording, targetLessonId: string) => {
     const targetLesson = lessons.find((l) => l.id === targetLessonId);
     if (!targetLesson) return;
 
-    const topCandidate = rec.candidates?.[0];
-    const previousSuggestedGroupId = topCandidate?.groupId || rec.matchedGroupId;
+    const previousLesson = rec.confirmedLessonId
+      ? lessons.find((l) => l.id === rec.confirmedLessonId) || null
+      : null;
 
-    // 1. Prepare confirmed lesson attachment (preserves existing attendance & non-Grain links)
-    const prepared = prepareConfirmedGrainLessonAttachment({
-      lesson: targetLesson,
+    // 1. Prepare confirmed lesson attachment or teacher correction (preserves attendance & learns recurring rule)
+    const corrected = correctGrainRecordingAssignment({
       recording: rec,
+      targetLesson,
+      previousLesson,
+      groups,
+      students,
       preferredSlot: 'auto',
       allowOverwrite: true
     });
-    updateLesson(targetLesson.id, prepared.proposedLessonPatch);
 
-    // 2. Persist Smart Group Learning record keyed by actual group.id (with correction tracking if teacher overrode suggested group)
-    recordConfirmedGrainGroupLearning({
-      recording: rec,
-      lesson: targetLesson,
-      groups,
-      students,
-      previousSuggestedGroupId
-    });
+    if (corrected.previousLessonPatch && previousLesson) {
+      updateLesson(previousLesson.id, corrected.previousLessonPatch);
+    }
 
-    // 3. Mark recording as linked in local discovered cache
+    let workingLesson: Lesson = {
+      ...targetLesson,
+      ...corrected.targetLessonPatch
+    };
+    updateLesson(targetLesson.id, corrected.targetLessonPatch);
+
+    // 2. Mark recording as linked in local discovered cache
     const shareClass =
       rec.shareAccessClassification ||
       classifyGrainRecordingShareAccess({
@@ -199,13 +230,32 @@ export const GrainRecordingsLibraryView: React.FC = () => {
         : item
     );
     saveDiscoveredGrainRecordings(updatedList);
+
+    // 3. Automatically extract and save 7-section German lesson content
+    try {
+      const extracted = await extractStructuredLessonContentForLesson({
+        lesson: workingLesson,
+        recordings: updatedList,
+        useServerGemini: true
+      });
+      const applied = applyExtractedLessonContentToLesson(workingLesson, extracted);
+      if (applied.updated) {
+        updateLesson(targetLesson.id, {
+          ...corrected.targetLessonPatch,
+          ...applied.lessonPatch
+        });
+      }
+    } catch {
+      // Handled gracefully
+    }
+
     refreshLocalLibrary();
     setSelectedRecordingForMatch(null);
     setSyncMessage(
       tr(
-        `تم ربط التسجيل بالحصة وحفظ تعلم المجموعة (${targetLesson.groupName || targetLesson.date}) بنجاح.`,
-        `Recording linked to lesson and group learning saved (${targetLesson.groupName || targetLesson.date}).`,
-        `Aufzeichnung verknüpft und Gruppen-Lernmuster gespeichert (${targetLesson.groupName || targetLesson.date}).`
+        `تم ربط التسجيل بالحصة وحفظ نمط الحصة المتكررة (${targetLesson.groupName || targetLesson.date}) واستخراج محتوى الحصة بنجاح.`,
+        `Recording linked, recurring rule learned (${targetLesson.groupName || targetLesson.date}) & lesson content extracted.`,
+        `Aufzeichnung verknüpft, Serienmuster gelernt (${targetLesson.groupName || targetLesson.date}) & Inhalt extrahiert.`
       )
     );
   };
@@ -459,6 +509,67 @@ export const GrainRecordingsLibraryView: React.FC = () => {
     }
   };
 
+  const renderWorkflowBadge = (badge: GrainWorkflowStatusBadge) => {
+    switch (badge) {
+      case 'automatically_matched':
+        return (
+          <span
+            key={badge}
+            className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+          >
+            {tr('مطابقة تلقائية', 'Automatically matched', 'Automatisch zugeordnet')}
+          </span>
+        );
+      case 'part1_detected':
+        return (
+          <span
+            key={badge}
+            className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-sky-500/15 text-sky-700 dark:text-sky-300"
+          >
+            {tr('الجزء 1', 'Part 1 detected', 'Teil 1 erkannt')}
+          </span>
+        );
+      case 'part2_detected':
+        return (
+          <span
+            key={badge}
+            className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-500/15 text-indigo-700 dark:text-indigo-300"
+          >
+            {tr('الجزء 2 (+40د)', 'Part 2 detected', 'Teil 2 erkannt')}
+          </span>
+        );
+      case 'lesson_content_extracted':
+        return (
+          <span
+            key={badge}
+            className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-500/15 text-purple-700 dark:text-purple-300"
+          >
+            {tr('تم استخراج المحتوى', 'Lesson content extracted', 'Inhalt extrahiert')}
+          </span>
+        );
+      case 'transcript_unavailable':
+        return (
+          <span
+            key={badge}
+            className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300"
+          >
+            {tr('النص غير متاح', 'Transcript unavailable', 'Transkript nicht verfügbar')}
+          </span>
+        );
+      case 'needs_teacher_confirmation':
+        return (
+          <span
+            key={badge}
+            className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300"
+          >
+            {tr('يحتاج تأكيد المعلم', 'Needs teacher confirmation', 'Bestätigung nötig')}
+          </span>
+        );
+      default:
+        return null;
+    }
+  };
+
   const renderMatchStatusBadge = (status: GrainMatchStatus) => {
     switch (status) {
       case 'already_linked':
@@ -466,6 +577,13 @@ export const GrainRecordingsLibraryView: React.FC = () => {
           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
             <CheckCircle2 className="w-2.5 h-2.5" />
             {tr('مرتبط بحصة ✓', 'Linked ✓', 'Verknüpft ✓')}
+          </span>
+        );
+      case 'automatically_matched':
+        return (
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+            <CheckCircle2 className="w-2.5 h-2.5" />
+            {tr('مطابقة تلقائية ✓', 'Automatically matched', 'Automatisch zugeordnet')}
           </span>
         );
       case 'strong_match':
@@ -489,7 +607,7 @@ export const GrainRecordingsLibraryView: React.FC = () => {
       case 'needs_confirmation':
         return (
           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300">
-            {tr('يحتاج تأكيد المعلم', 'Needs Confirmation', 'Bestätigung nötig')}
+            {tr('يحتاج تأكيد المعلم', 'Needs teacher confirmation', 'Bestätigung nötig')}
           </span>
         );
       case 'inaccessible':
@@ -513,6 +631,8 @@ export const GrainRecordingsLibraryView: React.FC = () => {
     if (isNaN(d.getTime())) return iso.slice(11, 16) || '—';
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
+
+  const weekdayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   return (
     <div className="space-y-3">
@@ -688,19 +808,92 @@ export const GrainRecordingsLibraryView: React.FC = () => {
           </select>
         </div>
 
-        {/* Smart Group Learning Summary Strip */}
+        {/* Requirement 6: Smart Recurring Learning Rules Strip & Simple Review/Disable UI */}
         {learningRecords.length > 0 && (
-          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-text-muted">
-            <span className="font-bold text-indigo-600 dark:text-indigo-400">
-              {tr('ذاكرة تعلم المجموعات النشطة:', 'Smart Group Learning Memory:', 'Aktives Gruppen-Lernmuster:')}
-            </span>
-            <span>
-              {tr(
-                `${learningRecords.filter((r) => !r.obsoleteGroup).length} ارتباطات مؤكدة بمعرف المجموعة الثابت (group.id)`,
-                `${learningRecords.filter((r) => !r.obsoleteGroup).length} teacher-confirmed associations by stable group.id`,
-                `${learningRecords.filter((r) => !r.obsoleteGroup).length} bestätigte Zuordnungen über stabile group.id`
-              )}
-            </span>
+          <div className="mt-2 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-1.5 text-[10px] text-text-muted">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-bold text-indigo-600 dark:text-indigo-400">
+                  {tr(
+                    'قواعد المطابقة المتكررة المتعلّمة:',
+                    'Learned Recurring Matching Rules:',
+                    'Gelernte Serien-Zuordnungsregeln:'
+                  )}
+                </span>
+                <span>
+                  {tr(
+                    `${learningRecords.filter((r) => !r.obsoleteGroup && r.ruleEnabled !== false).length} قاعدة نشطة بمعرف المجموعة الثابت (group.id)`,
+                    `${learningRecords.filter((r) => !r.obsoleteGroup && r.ruleEnabled !== false).length} active rules by stable group.id`,
+                    `${learningRecords.filter((r) => !r.obsoleteGroup && r.ruleEnabled !== false).length} aktive Regeln über stabile group.id`
+                  )}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowLearnedRulesPanel((prev) => !prev)}
+                className="font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+              >
+                {showLearnedRulesPanel
+                  ? tr('إخفاء القواعد المتعلّمة', 'Hide Learned Rules', 'Regeln ausblenden')
+                  : tr('مراجعة / تعطيل القواعد المتعلّمة', 'Review / Disable Learned Rules', 'Regeln prüfen / deaktivieren')}
+              </button>
+            </div>
+
+            {showLearnedRulesPanel && (
+              <div className="p-2.5 rounded-xl bg-background/70 border border-surface-border space-y-1.5 max-h-44 overflow-y-auto">
+                {learningRecords.map((rule) => {
+                  const grp = groups.find((g) => g.id === rule.groupId);
+                  const isEnabled = rule.ruleEnabled !== false;
+                  const weekdayStr =
+                    typeof rule.lessonWeekday === 'number'
+                      ? weekdayLabels[rule.lessonWeekday] || ''
+                      : typeof rule.recordingDayOfWeek === 'number'
+                      ? weekdayLabels[rule.recordingDayOfWeek] || ''
+                      : '';
+                  return (
+                    <div
+                      key={rule.id}
+                      className="flex items-center justify-between gap-2 p-1.5 rounded-lg border border-surface-border bg-surface text-[11px]"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-bold text-text-main truncate">
+                          {grp ? grp.name : rule.groupNameSnapshot}
+                          <span className="ms-1.5 text-[10px] font-normal text-text-muted">
+                            ({weekdayStr} {rule.lessonScheduledStartTime || rule.recordingStartTime || ''})
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-text-muted truncate">
+                          {rule.recordingTitle}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleLearnedRule(rule.id, !isEnabled)}
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
+                            isEnabled
+                              ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                              : 'bg-slate-500/15 text-slate-600 dark:text-slate-400'
+                          }`}
+                        >
+                          {isEnabled
+                            ? tr('مفعّلة ✓', 'Enabled ✓', 'Aktiv ✓')
+                            : tr('معطّلة', 'Disabled', 'Deaktiviert')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteLearnedRule(rule.id)}
+                          className="p-1 rounded text-rose-600 hover:bg-rose-500/10 cursor-pointer"
+                          title={tr('حذف القاعدة', 'Delete Rule', 'Regel löschen')}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -799,7 +992,15 @@ export const GrainRecordingsLibraryView: React.FC = () => {
 
                       {/* Matching Status */}
                       <td className="py-2 px-2 whitespace-nowrap">
-                        <div>{renderMatchStatusBadge(rec.matchStatus)}</div>
+                        <div className="flex flex-wrap items-center gap-1">
+                          {renderMatchStatusBadge(rec.matchStatus)}
+                          {Array.from(
+                            new Set<GrainWorkflowStatusBadge>([
+                              ...(rec.workflowStatuses || []),
+                              ...(linkedLesson?.grainMeta?.workflowStatuses || [])
+                            ])
+                          ).map((b) => renderWorkflowBadge(b))}
+                        </div>
                         {rec.matchStatus !== 'already_linked' && topCandidate && (
                           <div className="text-[10px] text-text-muted mt-0.5">
                             {tr('درجة الثقة:', 'Score:', 'Score:')} {topCandidate.confidenceScore}%

@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from 'express';
+import { GoogleGenAI, Type } from '@google/genai';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -194,8 +195,26 @@ function persistVaultToDisk(): void {
 
 loadVaultFromDisk();
 
+export function normalizeServerGrainTokenInput(rawInput: unknown): string {
+  let str = String(rawInput ?? '')
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF\u00A0]/g, '')
+    .trim();
+
+  str = str.replace(/^["'`]+|["'`]+$/g, '').trim();
+  str = str.replace(/^Authorization\s*:\s*/i, '').trim();
+  str = str.replace(/^Bearer\s+/i, '').trim();
+  str = str.replace(/^["'`]+|["'`]+$/g, '').trim();
+
+  const patMatch = str.match(/grain_pat_[A-Za-z0-9._~+/=-]+/i);
+  if (patMatch && patMatch[0]) {
+    return patMatch[0];
+  }
+
+  return str.replace(/\s+/g, '');
+}
+
 export function maskGrainTokenString(token: string): string {
-  const clean = String(token || '').trim();
+  const clean = normalizeServerGrainTokenInput(token);
   if (clean.length <= 12) return 'grain_pat_••••';
   return `grain_pat_••••••••${clean.slice(-4)}`;
 }
@@ -371,6 +390,25 @@ export function isStrictLoopbackRequest(req: Request): boolean {
   return true;
 }
 
+function isTrustedPreviewContainerRequest(req: Request): boolean {
+  const clientHeader = String(req.headers['x-grain-local-client'] || '').trim();
+  if (clientHeader !== 'glueck-web') return false;
+  const originHeader = String(req.headers.origin || req.headers.referer || '').trim();
+  if (!originHeader) return true;
+  try {
+    const parsed = new URL(originHeader);
+    const hn = parsed.hostname.toLowerCase();
+    return (
+      hn === 'localhost' ||
+      hn === '127.0.0.1' ||
+      hn === '[::1]' ||
+      hn.endsWith('.run.app')
+    );
+  } catch {
+    return false;
+  }
+}
+
 export type VerifyFirebaseIdTokenFn = (
   idToken: string
 ) => Promise<{ isValid: boolean; payload?: { sub: string; email?: string }; error?: string }>;
@@ -429,7 +467,7 @@ async function resolveAuthenticatedGrainUser(
 
   const localSessionToken = String(req.headers['x-grain-session-token'] || '').trim();
   if (localSessionToken) {
-    if (!isStrictLoopbackRequest(req)) {
+    if (!isStrictLoopbackRequest(req) && !isTrustedPreviewContainerRequest(req)) {
       return {
         authenticated: false,
         status: 403,
@@ -906,10 +944,10 @@ export function registerGrainServerRoutes(
   app: Express,
   verifyFirebaseIdToken: VerifyFirebaseIdTokenFn
 ): void {
-  // 1. Issue a local loopback teacher session token (only when accessed from verified loopback socket)
+  // 1. Issue a local loopback teacher session token (only when accessed from verified loopback socket or trusted preview container)
   app.post('/api/grain/session', (req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    if (!isStrictLoopbackRequest(req)) {
+    if (!isStrictLoopbackRequest(req) && !isTrustedPreviewContainerRequest(req)) {
       return res.status(403).json({
         error: 'Local session tokens can only be issued to direct loopback connections. Use Firebase Bearer auth on remote hosts.',
         code: 'FORBIDDEN_REMOTE_SESSION'
@@ -989,8 +1027,8 @@ export function registerGrainServerRoutes(
       });
     }
 
-    const rawToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
-    if (!rawToken || rawToken.length < 10 || /\s/.test(rawToken)) {
+    const rawToken = normalizeServerGrainTokenInput(req.body?.token);
+    if (!rawToken || rawToken.length < 6) {
       return res.status(400).json({
         saved: false,
         error: 'Invalid Grain Personal Access Token format.',
@@ -1086,5 +1124,167 @@ export function registerGrainServerRoutes(
       bodyText: upstreamResult.bodyText
     });
   });
+
+  // 6. Server-side Gemini AI extraction of structured German lesson content from Grain transcript/summary
+  // Processes Part 1 and optional Part 2 ephemerally in memory — never persists or logs transcripts.
+  app.post('/api/grain/extract-lesson-content', async (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    const authResult = await resolveAuthenticatedGrainUser(req, verifyFirebaseIdToken);
+    if (!authResult.authenticated || !authResult.uid) {
+      return res.status(authResult.status || 401).json({
+        error: authResult.error || 'Unauthorized',
+        code: 'UNAUTHORIZED'
+      });
+    }
+
+    const part1Text = typeof req.body?.part1Text === 'string' ? req.body.part1Text.trim() : '';
+    const part2Text = typeof req.body?.part2Text === 'string' ? req.body.part2Text.trim() : '';
+    const part1Title = typeof req.body?.part1Title === 'string' ? req.body.part1Title.trim() : '';
+    const part2Title = typeof req.body?.part2Title === 'string' ? req.body.part2Title.trim() : '';
+    const lessonLevel = typeof req.body?.level === 'string' ? req.body.level.trim() : '';
+
+    if (!part1Text && !part2Text) {
+      return res.status(422).json({
+        success: false,
+        code: 'TRANSCRIPT_UNAVAILABLE',
+        error: 'Transcript and educational content are unavailable for this recording.'
+      });
+    }
+
+    const apiKey = String(process.env.GEMINI_API_KEY || '').trim();
+    if (!apiKey) {
+      return res.status(503).json({
+        success: false,
+        code: 'GEMINI_KEY_UNAVAILABLE',
+        error: 'Server Gemini API key is not configured.'
+      });
+    }
+
+    const responseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        themaDerStunde: {
+          type: Type.STRING,
+          description: 'Thema der Stunde — concise German lesson topic supported by the recording.'
+        },
+        behandelteInhalte: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: 'Behandelte Inhalte — deduplicated list of what was actually taught/covered.'
+        },
+        neueWoerterUndRedemittel: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              german: { type: Type.STRING },
+              article: { type: Type.STRING },
+              meaning: { type: Type.STRING },
+              example: { type: Type.STRING }
+            },
+            required: ['german']
+          },
+          description: 'Neue Wörter und Redemittel — deduplicated German vocabulary and expressions actually taught.'
+        },
+        grammatik: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              topic: { type: Type.STRING },
+              explanation: { type: Type.STRING },
+              examples: { type: Type.ARRAY, items: { type: Type.STRING } }
+            },
+            required: ['topic', 'explanation']
+          },
+          description: 'Grammatik — grammar rules and explanations actually covered in the lesson.'
+        },
+        beispiele: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: 'Beispiele — authentic German example sentences used during the lesson.'
+        },
+        uebungenUndAktivitaeten: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: 'Übungen und Aktivitäten — exercises and classroom activities completed.'
+        },
+        offenePunkte: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: 'Offene Punkte — topics or questions that may need further explanation.'
+        }
+      },
+      required: [
+        'themaDerStunde',
+        'behandelteInhalte',
+        'neueWoerterUndRedemittel',
+        'grammatik',
+        'beispiele',
+        'uebungenUndAktivitaeten',
+        'offenePunkte'
+      ]
+    };
+
+    const promptSegments: string[] = [
+      'Analyze the following German lesson transcript/educational content from Grain.',
+      part1Title ? `Part 1 Recording Title: ${part1Title}` : '',
+      part2Title ? `Part 2 Recording Title: ${part2Title}` : '',
+      lessonLevel ? `Class / Level: ${lessonLevel}` : '',
+      'Extract a structured German lesson summary containing the 7 required sections.',
+      'STRICT RULES:',
+      '1. Combine Part 1 and Part 2 (if present) into ONE coherent lesson summary.',
+      '2. Remove duplicate topics, grammar points, examples, and vocabulary between Part 1 and Part 2.',
+      '3. Preserve the actual educational meaning and exact German words, articles (der/die/das), and example sentences used.',
+      '4. Do NOT invent explanations, vocabulary, grammar rules, or activities that are not supported by the provided recording text.',
+      '5. If a section (such as Offene Punkte or Übungen) has no explicit evidence in the text, return an empty array [] for that section.',
+      part1Text ? `\n--- PART 1 CONTENT ---\n${part1Text.slice(0, 28000)}` : '',
+      part2Text ? `\n--- PART 2 CONTENT ---\n${part2Text.slice(0, 28000)}` : ''
+    ].filter(Boolean);
+
+    try {
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build'
+          }
+        }
+      });
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: promptSegments.join('\n'),
+        config: {
+          systemInstruction:
+            'You are a careful German (DaF/DaZ) teaching assistant. Extract only authentic educational content explicitly supported by the lesson transcript. Never invent unsupported vocabulary or activities.',
+          responseMimeType: 'application/json',
+          responseSchema
+        }
+      });
+
+      const rawJson = (response.text || '').trim();
+      if (!rawJson) {
+        return res.status(502).json({
+          success: false,
+          code: 'EMPTY_AI_RESPONSE',
+          error: 'Gemini returned an empty response.'
+        });
+      }
+
+      const parsed = JSON.parse(rawJson);
+      return res.status(200).json({
+        success: true,
+        extracted: parsed
+      });
+    } catch (err: any) {
+      return res.status(502).json({
+        success: false,
+        code: 'AI_EXTRACTION_FAILED',
+        error: String(err?.message || 'Failed to process transcript with Gemini.')
+      });
+    }
+  });
 }
+
 

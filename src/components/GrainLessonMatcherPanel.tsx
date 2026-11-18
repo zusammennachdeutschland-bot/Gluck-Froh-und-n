@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   RefreshCw, CheckCircle2, AlertTriangle, ExternalLink, Sparkles,
-  Check, X, BookOpen, ShieldCheck, Link2, Layers, ChevronDown, ChevronUp
+  Check, X, BookOpen, ShieldCheck, Link2, Layers, ChevronDown, ChevronUp, Edit3
 } from 'lucide-react';
 import {
   Lesson,
@@ -9,7 +9,8 @@ import {
   Student,
   GrainDiscoveredRecording,
   GrainLessonMetadata,
-  GrainEducationalDraft
+  GrainEducationalDraft,
+  GrainWorkflowStatusBadge
 } from '../types';
 import {
   loadGrainIntegrationMeta,
@@ -20,7 +21,12 @@ import {
   recordConfirmedGrainGroupLearning,
   generateEducationalDraftForRecording,
   buildLernstudioDraftFromGrainEducationalDraft,
-  isGrainRecordingUrl
+  isGrainRecordingUrl,
+  extractStructuredLessonContentForLesson,
+  applyExtractedLessonContentToLesson,
+  saveTeacherEditedGrainLessonContent,
+  acceptPendingUpdatedLessonExtraction,
+  detectGrainTwoPartRecordingPairs
 } from '../services/grainService';
 import { storage } from '../services/storageService';
 
@@ -45,6 +51,7 @@ interface GrainLessonMatcherPanelProps {
     updatedGrainMeta: GrainLessonMetadata;
   }) => void;
   onApplyApprovedHomework: (homeworkText: string) => void;
+  onUpdateLesson?: (lessonId: string, patch: Partial<Lesson>) => void;
   _t: (ar: string, en: string, de?: string) => string;
   triggerToast?: (msg: string) => void;
 }
@@ -62,12 +69,14 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
   onApplyConfirmedMatch,
   onApplyApprovedEducationalSummary,
   onApplyApprovedHomework,
+  onUpdateLesson,
   _t,
   triggerToast
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [connected, setConnected] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [extractingContent, setExtractingContent] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [recordings, setRecordings] = useState<GrainDiscoveredRecording[]>([]);
   const [showAllRecordings, setShowAllRecordings] = useState(false);
@@ -79,6 +88,14 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
     existingUrl: string;
     targetLesson: Lesson;
   } | null>(null);
+
+  // 7-Section German Extracted Content Editor State
+  const [isEditingExtractedContent, setIsEditingExtractedContent] = useState(false);
+  const [editThema, setEditThema] = useState('');
+  const [editInhalteText, setEditInhalteText] = useState('');
+  const [editBeispieleText, setEditBeispieleText] = useState('');
+  const [editUebungenText, setEditUebungenText] = useState('');
+  const [editOffenePunkteText, setEditOffenePunkteText] = useState('');
 
   // Educational Draft Review state (Sections 10 & 12)
   const [analyzingRecordingId, setAnalyzingRecordingId] = useState<string | null>(null);
@@ -112,6 +129,11 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
     );
   }, [lessons, selectedLesson.id, lessonRecordingLink, lessonRecordingLink2, lessonZoomMeetingLink, grainMeta]);
 
+  const effectiveSelectedLesson = useMemo(
+    () => effectiveLessons.find((l) => l.id === selectedLesson.id) || selectedLesson,
+    [effectiveLessons, selectedLesson]
+  );
+
   const handleSyncRecordings = async () => {
     setSyncing(true);
     setErrorMessage(null);
@@ -119,7 +141,8 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
       const result = await syncGrainRecordingsIncrementally({
         lessons: effectiveLessons,
         groups,
-        students
+        students,
+        onUpdateLesson
       });
       if (!result.success) {
         setErrorMessage(
@@ -157,6 +180,25 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
     }
   };
 
+  const handleRunLessonContentExtraction = async (lessonToExtract: Lesson, recsList: GrainDiscoveredRecording[]) => {
+    setExtractingContent(true);
+    try {
+      const extracted = await extractStructuredLessonContentForLesson({
+        lesson: lessonToExtract,
+        recordings: recsList,
+        useServerGemini: true
+      });
+      const applied = applyExtractedLessonContentToLesson(lessonToExtract, extracted);
+      if (applied.updated && onUpdateLesson) {
+        onUpdateLesson(lessonToExtract.id, applied.lessonPatch);
+      }
+    } catch {
+      // Handled gracefully by extractor status
+    } finally {
+      setExtractingContent(false);
+    }
+  };
+
   // Filter recordings relevant to this lesson (same date or suggested for this lesson), or all if toggled
   const visibleRecordings = useMemo(() => {
     if (showAllRecordings) return recordings;
@@ -170,12 +212,12 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
     });
   }, [recordings, showAllRecordings, selectedLesson.id, selectedLesson.date]);
 
-  const handleConfirmMatch = (
+  const handleConfirmMatch = async (
     rec: GrainDiscoveredRecording,
     slotOverride?: 'part1' | 'part2',
     forceOverwrite = false
   ) => {
-    const slot = slotOverride || selectedTargetSlot[rec.id] || 'part1';
+    const slot = slotOverride || selectedTargetSlot[rec.id] || (rec.detectedPartSlot === 'part2' ? 'part2' : 'part1');
     const preferredSlot = slot === 'part2' ? 'recordingLink2' : 'recordingLink';
     const targetLessonId = selectedAlternateLessonId[rec.id] || selectedLesson.id;
     const targetLesson = effectiveLessons.find((l) => l.id === targetLessonId) || selectedLesson;
@@ -199,6 +241,11 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
       }
 
       setOverwritePromptRecording(null);
+      let workingLesson: Lesson = {
+        ...targetLesson,
+        ...prepared.proposedLessonPatch
+      };
+
       onApplyConfirmedMatch({
         targetSlot: slot,
         recordingUrl: rec.recordingUrl,
@@ -206,18 +253,65 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
         targetLessonId: targetLesson.id
       });
 
-      // Part 10: Persist Smart Group Learning record keyed by actual group.id
+      // Requirement 1: First-Time Manual Assignment = Permanent Recurring Learning
       recordConfirmedGrainGroupLearning({
         recording: rec,
         lesson: targetLesson,
         groups,
         students,
-        previousSuggestedGroupId: rec.candidates?.[0]?.groupId || rec.matchedGroupId
+        previousSuggestedGroupId: rec.candidates?.[0]?.groupId || rec.matchedGroupId,
+        previousSuggestedLessonId: rec.candidates?.[0]?.lessonId || rec.suggestedLessonId
       });
 
-      // Mark locally as already_linked
-      const nextList = recordings.map((item) =>
-        item.id === rec.id
+      // Requirement 3: When Part 1 is matched, automatically check for an unambiguous Part 2 (~40-42m gap)
+      const pairedList = detectGrainTwoPartRecordingPairs({
+        recordings: recordings.map((item) =>
+          item.id === rec.id
+            ? {
+                ...item,
+                matchStatus: 'already_linked' as const,
+                confirmedLessonId: targetLesson.id,
+                matchedGroupId: targetLesson.groupId || undefined
+              }
+            : item
+        ),
+        lessons: effectiveLessons.map((l) => (l.id === workingLesson.id ? workingLesson : l)),
+        groups,
+        students
+      });
+
+      const pairedPart2 = pairedList.find(
+        (r) =>
+          r.id !== rec.id &&
+          r.pairedRecordingId === rec.id &&
+          r.detectedPartSlot === 'part2' &&
+          r.matchStatus === 'automatically_matched'
+      );
+
+      if (pairedPart2 && !(workingLesson.recordingLink2 || '').trim()) {
+        const part2Prepared = prepareConfirmedGrainLessonAttachment({
+          lesson: workingLesson,
+          recording: pairedPart2,
+          preferredSlot: 'recordingLink2',
+          allowOverwrite: false,
+          matchedAutomatically: true
+        });
+        if (!part2Prepared.requiresOverwriteConfirmation) {
+          workingLesson = {
+            ...workingLesson,
+            ...part2Prepared.proposedLessonPatch
+          };
+          onApplyConfirmedMatch({
+            targetSlot: 'part2',
+            recordingUrl: pairedPart2.recordingUrl,
+            updatedGrainMeta: part2Prepared.proposedLessonPatch.grainMeta!,
+            targetLessonId: targetLesson.id
+          });
+        }
+      }
+
+      const nextList = pairedList.map((item) =>
+        item.id === rec.id || (pairedPart2 && item.id === pairedPart2.id)
           ? {
               ...item,
               matchStatus: 'already_linked' as const,
@@ -229,12 +323,15 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
       setRecordings(nextList);
       saveDiscoveredGrainRecordings(nextList);
 
+      // Requirement 4 & 5: Automatically extract and save 7-section German lesson content
+      await handleRunLessonContentExtraction(workingLesson, nextList);
+
       if (triggerToast) {
         triggerToast(
           _t(
-            'تم تأكيد ربط تسجيل Grain بالحصة بنجاح',
-            'Confirmed Grain recording link for lesson',
-            'Grain-Aufnahme erfolgreich mit Lektion verknüpft'
+            'تم تأكيد ربط تسجيل Grain وحفظ نمط الحصة المتكررة واستخراج المحتوى بنجاح',
+            'Confirmed Grain link, learned recurring pattern & extracted lesson content',
+            'Grain-Aufnahme bestätigt, Serienmuster gelernt & Unterrichtsinhalt extrahiert'
           )
         );
       }
@@ -251,6 +348,59 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
     );
     setRecordings(nextList);
     saveDiscoveredGrainRecordings(nextList);
+  };
+
+  const handleStartEditExtractedContent = () => {
+    const ext = effectiveSelectedLesson.grainMeta?.extractedLessonContent;
+    if (!ext) return;
+    setEditThema(ext.themaDerStunde || '');
+    setEditInhalteText((ext.behandelteInhalte || []).join('\n'));
+    setEditBeispieleText((ext.beispiele || []).join('\n'));
+    setEditUebungenText((ext.uebungenUndAktivitaeten || []).join('\n'));
+    setEditOffenePunkteText((ext.offenePunkte || []).join('\n'));
+    setIsEditingExtractedContent(true);
+  };
+
+  const handleSaveEditedExtractedContent = () => {
+    const patch = saveTeacherEditedGrainLessonContent(effectiveSelectedLesson, {
+      themaDerStunde: editThema.trim(),
+      behandelteInhalte: editInhalteText
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      beispiele: editBeispieleText
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      uebungenUndAktivitaeten: editUebungenText
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      offenePunkte: editOffenePunkteText
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    });
+    if (onUpdateLesson) {
+      onUpdateLesson(effectiveSelectedLesson.id, patch);
+    }
+    setIsEditingExtractedContent(false);
+    if (triggerToast) {
+      triggerToast(
+        _t(
+          'تم حفظ تعديلات المعلم على ملخص الحصة (محمية من الاستبدال التلقائي)',
+          'Saved teacher-edited lesson summary (protected from auto-overwrite)',
+          'Lehrkraft-Bearbeitung gespeichert (vor Überschreiben geschützt)'
+        )
+      );
+    }
+  };
+
+  const handleAcceptPendingUpdatedExtraction = () => {
+    const patch = acceptPendingUpdatedLessonExtraction(effectiveSelectedLesson);
+    if (onUpdateLesson && Object.keys(patch).length > 0) {
+      onUpdateLesson(effectiveSelectedLesson.id, patch);
+    }
   };
 
   const handleAnalyzeRecording = async (rec: GrainDiscoveredRecording) => {
@@ -377,12 +527,79 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
     }
   };
 
+  const renderWorkflowBadge = (badge: GrainWorkflowStatusBadge) => {
+    switch (badge) {
+      case 'automatically_matched':
+        return (
+          <span
+            key={badge}
+            className="px-1.5 py-0.5 rounded-md text-[9px] font-black bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60"
+          >
+            {_t('مطابقة تلقائية ✓', 'Automatically matched', 'Automatisch zugeordnet')}
+          </span>
+        );
+      case 'part1_detected':
+        return (
+          <span
+            key={badge}
+            className="px-1.5 py-0.5 rounded-md text-[9px] font-black bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800/60"
+          >
+            {_t('تم اكتشاف الجزء 1', 'Part 1 detected', 'Teil 1 erkannt')}
+          </span>
+        );
+      case 'part2_detected':
+        return (
+          <span
+            key={badge}
+            className="px-1.5 py-0.5 rounded-md text-[9px] font-black bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60"
+          >
+            {_t('تم اكتشاف الجزء 2 (+40د)', 'Part 2 detected', 'Teil 2 erkannt')}
+          </span>
+        );
+      case 'lesson_content_extracted':
+        return (
+          <span
+            key={badge}
+            className="px-1.5 py-0.5 rounded-md text-[9px] font-black bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60"
+          >
+            {_t('تم استخراج محتوى الحصة ✓', 'Lesson content extracted', 'Unterrichtsinhalt extrahiert')}
+          </span>
+        );
+      case 'transcript_unavailable':
+        return (
+          <span
+            key={badge}
+            className="px-1.5 py-0.5 rounded-md text-[9px] font-black bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60"
+          >
+            {_t('النص غير متاح', 'Transcript unavailable', 'Transkript nicht verfügbar')}
+          </span>
+        );
+      case 'needs_teacher_confirmation':
+        return (
+          <span
+            key={badge}
+            className="px-1.5 py-0.5 rounded-md text-[9px] font-black bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60"
+          >
+            {_t('يحتاج تأكيد المعلم', 'Needs teacher confirmation', 'Bestätigung erforderlich')}
+          </span>
+        );
+      default:
+        return null;
+    }
+  };
+
   const renderMatchStatusBadge = (status: GrainDiscoveredRecording['matchStatus']) => {
     switch (status) {
+      case 'automatically_matched':
+        return (
+          <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60">
+            {_t('تمت المطابقة تلقائياً ✓', 'Automatically matched', 'Automatisch zugeordnet')}
+          </span>
+        );
       case 'strong_match':
         return (
           <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60">
-            {_t('تطابق قوي (يحتاج تأكيدك)', 'Strong match', 'Starke Übereinstimmung')}
+            {_t('تطابق قوي (يحتاج تأكيدك لمرة واحدة)', 'Strong match (Confirm once)', 'Starke Übereinstimmung')}
           </span>
         );
       case 'suggested_match':
@@ -394,7 +611,7 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
       case 'needs_confirmation':
         return (
           <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60">
-            {_t('يحتاج تأكيد المعلم', 'Needs confirmation', 'Bestätigung erforderlich')}
+            {_t('يحتاج تأكيد المعلم', 'Needs teacher confirmation', 'Bestätigung erforderlich')}
           </span>
         );
       case 'multiple_possible_lessons':
@@ -425,12 +642,14 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
   };
 
   const isZoomFieldHoldingGrainUrl = isGrainRecordingUrl(lessonZoomMeetingLink);
+  const extractedContent = effectiveSelectedLesson.grainMeta?.extractedLessonContent;
+  const lessonWorkflowBadges = effectiveSelectedLesson.grainMeta?.workflowStatuses || [];
 
   return (
     <div className="pt-2 border-t border-slate-100 dark:border-surface-border space-y-2">
       {/* Dedicated Zoom Meeting Link Input (Rule 1 separation: Zoom URL != Grain Recording URL) */}
       <div className="space-y-1">
-        <div className="flex items-center justify-between text-[11px] font-bold text-text-muted">
+        <div className="flex items-center justify-between flex-wrap gap-1 text-[11px] font-bold text-text-muted">
           <span className="flex items-center gap-1">
             <Link2 className="w-3 h-3 text-sky-600" />
             <span>
@@ -441,12 +660,15 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
               )}
             </span>
           </span>
-          {grainMeta?.matchingStatus === 'confirmed' && (
-            <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
-              <ShieldCheck className="w-3 h-3" />
-              <span>{_t('مرتبط بـ Grain ✓', 'Grain Confirmed ✓', 'Grain bestätigt ✓')}</span>
-            </span>
-          )}
+          <div className="flex items-center gap-1 flex-wrap">
+            {lessonWorkflowBadges.map((b) => renderWorkflowBadge(b))}
+            {grainMeta?.matchingStatus === 'confirmed' && (
+              <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
+                <ShieldCheck className="w-3 h-3" />
+                <span>{_t('مرتبط بـ Grain ✓', 'Grain Confirmed ✓', 'Grain bestätigt ✓')}</span>
+              </span>
+            )}
+          </div>
         </div>
         <input
           type="url"
@@ -470,6 +692,240 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
         )}
       </div>
 
+      {/* Requirement 4, 5 & 6: Structured 7-Section German Lesson Summary Card */}
+      {extractedContent && (
+        <div className="p-2.5 rounded-xl bg-surface border border-purple-200 dark:border-purple-900/60 space-y-2">
+          <div className="flex items-center justify-between flex-wrap gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+              <span className="text-[11px] font-black text-text-main">
+                {_t(
+                  'محتوى الحصة المستخرج من Grain (7 أقسام تعليمية)',
+                  'Extracted Lesson Content from Grain (7 German Sections)',
+                  'Extrahierter Unterrichtsinhalt aus Grain (7 Abschnitte)'
+                )}
+              </span>
+              <span
+                className={`px-1.5 py-0.5 rounded text-[9px] font-black ${
+                  extractedContent.teacherEdited || extractedContent.origin === 'teacher_edited'
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : 'bg-purple-50 text-purple-700 border border-purple-200'
+                }`}
+              >
+                {extractedContent.teacherEdited || extractedContent.origin === 'teacher_edited'
+                  ? _t('معدّل بواسطة المعلم ✓', 'Teacher-edited ✓', 'Von Lehrkraft bearbeitet ✓')
+                  : _t('مستخرج آلياً من التسجيل', 'AI-extracted', 'Automatisch extrahiert')}
+              </span>
+              {extractedContent.partCount === 2 && (
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  {_t('مدمج (الجزء 1 + الجزء 2)', 'Merged (Part 1 + Part 2)', 'Zusammengeführt (Teil 1 + Teil 2)')}
+                </span>
+              )}
+            </div>
+
+            {extractedContent.transcriptStatus !== 'transcript_unavailable' && !isEditingExtractedContent && (
+              <button
+                type="button"
+                onClick={handleStartEditExtractedContent}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-[10px] font-bold text-text-main cursor-pointer"
+              >
+                <Edit3 className="w-3 h-3" />
+                <span>{_t('تعديل الأقسام', 'Edit Sections', 'Abschnitte bearbeiten')}</span>
+              </button>
+            )}
+          </div>
+
+          {extractedContent.transcriptStatus === 'transcript_unavailable' ? (
+            <div className="p-2 rounded-lg bg-amber-50/70 dark:bg-amber-950/40 border border-amber-200 text-[11px] text-amber-800 dark:text-amber-200">
+              {_t(
+                'النص الكامل (Transcript) غير متاح حالياً من Grain لهذا التسجيل. لم يتم توليد أي محتوى افتراضي.',
+                'Transcript unavailable from Grain for this recording. No fabricated content was generated.',
+                'Transkript in Grain nicht verfügbar. Es wurden keine künstlichen Inhalte erzeugt.'
+              )}
+            </div>
+          ) : isEditingExtractedContent ? (
+            <div className="space-y-2 text-xs">
+              <div>
+                <label className="text-[10px] font-bold text-text-muted block">Thema der Stunde:</label>
+                <input
+                  type="text"
+                  value={editThema}
+                  onChange={(e) => setEditThema(e.target.value)}
+                  className="w-full px-2 py-1 rounded border border-surface-border bg-surface-hover text-xs"
+                  dir="ltr"
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-bold text-text-muted block">
+                    Behandelte Inhalte (1 pro Zeile):
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={editInhalteText}
+                    onChange={(e) => setEditInhalteText(e.target.value)}
+                    className="w-full px-2 py-1 rounded border border-surface-border bg-surface-hover text-xs"
+                    dir="ltr"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-text-muted block">
+                    Beispiele (1 pro Zeile):
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={editBeispieleText}
+                    onChange={(e) => setEditBeispieleText(e.target.value)}
+                    className="w-full px-2 py-1 rounded border border-surface-border bg-surface-hover text-xs"
+                    dir="ltr"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-text-muted block">
+                    Übungen und Aktivitäten (1 pro Zeile):
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={editUebungenText}
+                    onChange={(e) => setEditUebungenText(e.target.value)}
+                    className="w-full px-2 py-1 rounded border border-surface-border bg-surface-hover text-xs"
+                    dir="ltr"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-text-muted block">
+                    Offene Punkte (1 pro Zeile):
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={editOffenePunkteText}
+                    onChange={(e) => setEditOffenePunkteText(e.target.value)}
+                    className="w-full px-2 py-1 rounded border border-surface-border bg-surface-hover text-xs"
+                    dir="ltr"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsEditingExtractedContent(false)}
+                  className="px-2.5 py-1 rounded-lg bg-slate-100 text-[10px] font-bold cursor-pointer"
+                >
+                  {_t('إلغاء', 'Cancel', 'Abbrechen')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveEditedExtractedContent}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-black cursor-pointer"
+                >
+                  {_t('حفظ تعديلات المعلم', 'Save Teacher Edits', 'Lehrkraft-Änderungen speichern')}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-1.5 text-[11px] text-left" dir="ltr">
+              {extractedContent.themaDerStunde && (
+                <div>
+                  <span className="font-black text-purple-800 dark:text-purple-300">
+                    Thema der Stunde:{' '}
+                  </span>
+                  <span className="font-semibold text-text-main">{extractedContent.themaDerStunde}</span>
+                </div>
+              )}
+
+              {extractedContent.behandelteInhalte.length > 0 && (
+                <div>
+                  <span className="font-black text-slate-700 dark:text-slate-300">
+                    Behandelte Inhalte:{' '}
+                  </span>
+                  <span className="text-text-main">
+                    {extractedContent.behandelteInhalte.join(' • ')}
+                  </span>
+                </div>
+              )}
+
+              {extractedContent.neueWoerterUndRedemittel.length > 0 && (
+                <div>
+                  <span className="font-black text-slate-700 dark:text-slate-300 block mb-0.5">
+                    Neue Wörter und Redemittel:
+                  </span>
+                  <div className="flex flex-wrap gap-1">
+                    {extractedContent.neueWoerterUndRedemittel.map((v, idx) => (
+                      <span
+                        key={idx}
+                        className="px-1.5 py-0.5 rounded bg-purple-50 dark:bg-purple-950/50 text-purple-800 dark:text-purple-200 text-[10px] font-bold border border-purple-200/70"
+                      >
+                        {v.article ? `${v.article} ` : ''}
+                        {v.german}
+                        {v.arabic ? ` (${v.arabic})` : ''}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {extractedContent.grammatik.length > 0 && (
+                <div>
+                  <span className="font-black text-slate-700 dark:text-slate-300">Grammatik: </span>
+                  <span className="text-text-main">
+                    {extractedContent.grammatik.map((g) => `${g.topic} (${g.explanationDe})`).join(' | ')}
+                  </span>
+                </div>
+              )}
+
+              {extractedContent.beispiele.length > 0 && (
+                <div>
+                  <span className="font-black text-slate-700 dark:text-slate-300">Beispiele: </span>
+                  <span className="text-text-main italic">
+                    {extractedContent.beispiele.map((b) => `„${b}“`).join(' • ')}
+                  </span>
+                </div>
+              )}
+
+              {extractedContent.uebungenUndAktivitaeten.length > 0 && (
+                <div>
+                  <span className="font-black text-slate-700 dark:text-slate-300">
+                    Übungen und Aktivitäten:{' '}
+                  </span>
+                  <span className="text-text-main">
+                    {extractedContent.uebungenUndAktivitaeten.join(' • ')}
+                  </span>
+                </div>
+              )}
+
+              {extractedContent.offenePunkte.length > 0 && (
+                <div>
+                  <span className="font-black text-amber-700 dark:text-amber-300">
+                    Offene Punkte:{' '}
+                  </span>
+                  <span className="text-text-main">{extractedContent.offenePunkte.join(' • ')}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Pending updated extraction notice when teacher had already edited and Part 2 arrived */}
+          {extractedContent.pendingUpdatedExtraction && (
+            <div className="p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 flex items-center justify-between gap-2 text-[10px]">
+              <span className="font-bold text-indigo-800 dark:text-indigo-200">
+                {_t(
+                  'وصل تحديث جديد لمحتوى الحصة (مثل الجزء 2)، وتم الحفاظ على تعديلاتك الحالية.',
+                  'New recording part content arrived; your teacher edits were preserved.',
+                  'Neuer Aufnahmeteil verfügbar; Ihre Lehrkraft-Bearbeitung wurde geschützt.'
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={handleAcceptPendingUpdatedExtraction}
+                className="px-2 py-1 rounded bg-indigo-600 text-white font-black shrink-0 cursor-pointer"
+              >
+                {_t('دمج التحديث الجديد', 'Apply Updated Extraction', 'Aktualisierung übernehmen')}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Collapsible Grain Smart Assistant Header */}
       <div className="flex items-center justify-between gap-2 pt-1">
         <button
@@ -480,28 +936,45 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
           <Sparkles className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
           <span>
             {_t(
-              'مساعد Grain الذكي (مطابقة التسجيلات ومسودة الشرح والواجب)',
-              'Grain Assistant (Recording Matcher & Lesson Drafts)',
-              'Grain-Assistent (Aufnahme-Abgleich & Entwürfe)'
+              'مساعد Grain الذكي (مطابقة الحصص المتكررة والجزء 2 واستخراج الشرح)',
+              'Grain Assistant (Smart Recurring Matcher, Part 2 & Content Extractor)',
+              'Grain-Assistent (Serien-Abgleich, Teil 2 & Inhaltsextraktion)'
             )}
           </span>
           {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
         </button>
 
         {isExpanded && (
-          <button
-            type="button"
-            onClick={handleSyncRecordings}
-            disabled={syncing}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black bg-purple-600 hover:bg-purple-700 text-white transition-all cursor-pointer disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3 h-3 ${syncing ? 'animate-spin' : ''}`} />
-            <span>
-              {syncing
-                ? _t('جاري الفحص...', 'Syncing...', 'Synchronisiere...')
-                : _t('جلب التسجيلات من Grain', 'Fetch Grain Recordings', 'Aufnahmen abrufen')}
-            </span>
-          </button>
+          <div className="flex items-center gap-1.5">
+            {effectiveSelectedLesson.grainMeta?.recordingId && (
+              <button
+                type="button"
+                onClick={() => handleRunLessonContentExtraction(effectiveSelectedLesson, recordings)}
+                disabled={extractingContent}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black bg-indigo-600 hover:bg-indigo-700 text-white transition-all cursor-pointer disabled:opacity-50"
+              >
+                <BookOpen className="w-3 h-3" />
+                <span>
+                  {extractingContent
+                    ? _t('جاري الاستخراج...', 'Extracting...', 'Extrahiere...')
+                    : _t('تحديث ملخص الحصة (7 أقسام)', 'Extract 7-Section Content', 'Inhalt extrahieren')}
+                </span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleSyncRecordings}
+              disabled={syncing}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black bg-purple-600 hover:bg-purple-700 text-white transition-all cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3 h-3 ${syncing ? 'animate-spin' : ''}`} />
+              <span>
+                {syncing
+                  ? _t('جاري الفحص...', 'Syncing...', 'Synchronisiere...')
+                  : _t('جلب التسجيلات من Grain', 'Fetch Grain Recordings', 'Aufnahmen abrufen')}
+              </span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -511,9 +984,9 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
           <div className="flex items-center justify-between flex-wrap gap-1.5 text-[10px] text-slate-600 dark:text-slate-300">
             <span>
               {_t(
-                'المطابقة تعتمد على التاريخ والوقت ورابط Zoom والمدة (ولا تغيّر غياب أو حضور الطلاب أبداً).',
-                'Matching uses date, time, Zoom URL & duration (and never alters student attendance).',
-                'Abgleich über Datum, Uhrzeit, Zoom-Link & Dauer (ändert niemals die Anwesenheit).'
+                'التعيين اليدوي لأول مرة يعلّم النظام نمط الحصة المتكررة تلقائياً للأسابيع القادمة ويكتشف الجزء 2 (+40-42 دقيقة).',
+                'First manual assignment permanently learns the recurring schedule and auto-detects Part 2 (+40-42 min).',
+                'Die erste manuelle Zuordnung lernt das Serienmuster dauerhaft und erkennt Teil 2 (+40-42 Min.).'
               )}
             </span>
             <button
@@ -589,7 +1062,9 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
               {visibleRecordings.map((rec) => {
                 const candidateForCurrent = rec.candidates.find((c) => c.lessonId === selectedLesson.id);
                 const topCandidate = candidateForCurrent || rec.candidates[0];
-                const slot = selectedTargetSlot[rec.id] || 'part1';
+                const slot =
+                  selectedTargetSlot[rec.id] ||
+                  (rec.detectedPartSlot === 'part2' ? 'part2' : 'part1');
 
                 return (
                   <div
@@ -603,6 +1078,7 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
                             {rec.title}
                           </span>
                           {renderMatchStatusBadge(rec.matchStatus)}
+                          {(rec.workflowStatuses || []).map((b) => renderWorkflowBadge(b))}
                           {topCandidate && (
                             <span className="text-[10px] font-mono font-bold text-slate-500">
                               {topCandidate.confidenceScore}%
@@ -615,6 +1091,11 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
                           <span>
                             ⏱️ {rec.durationMinutes ? `${rec.durationMinutes} min` : '—'}
                           </span>
+                          {typeof rec.part2StartGapMinutes === 'number' && (
+                            <span className="text-indigo-600 dark:text-indigo-400 font-bold">
+                              +{rec.part2StartGapMinutes}m gap
+                            </span>
+                          )}
                           {rec.zoomMeetingUrl && (
                             <span className="text-sky-600 dark:text-sky-400">Zoom source ✓</span>
                           )}
@@ -706,7 +1187,13 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
                           className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black cursor-pointer"
                         >
                           <Check className="w-3 h-3" />
-                          <span>{_t('تأكيد الربط بالحصة', 'Confirm Match', 'Verknüpfung bestätigen')}</span>
+                          <span>
+                            {_t(
+                              'تأكيد الربط وتعلّم النمط',
+                              'Confirm & Learn Pattern',
+                              'Bestätigen & Muster lernen'
+                            )}
+                          </span>
                         </button>
 
                         {rec.matchStatus !== 'unmatched' && rec.matchStatus !== 'already_linked' && (
@@ -731,7 +1218,7 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
                         <span>
                           {analyzingRecordingId === rec.id
                             ? _t('جاري التحليل...', 'Analyzing...', 'Analysiere...')
-                            : _t('مسودة الشرح والواجب و Lernstudio', 'Review Lesson Draft', 'Entwurf prüfen')}
+                            : _t('مسودة ولي الأمر والواجب و Lernstudio', 'Parent/Homework/Lernstudio Draft', 'Eltern-/Hausaufgaben-Entwurf')}
                         </span>
                       </button>
                     </div>
@@ -749,9 +1236,9 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
                   <Sparkles className="w-4 h-4 text-purple-600" />
                   <h5 className="text-xs font-black text-text-main">
                     {_t(
-                      'مراجعة واعتماد مسودة Grain التعليمية (بإشراف المعلم فقط)',
-                      'Teacher Review & Approval: Grain Educational Draft',
-                      'Lehrkraft-Prüfung: Grain-Unterrichtsentwurf'
+                      'مراجعة واعتماد مسودة Grain لتقرير ولي الأمر والواجب و Lernstudio (بإشراف المعلم فقط)',
+                      'Teacher Review & Approval: Parent Report, Homework & Lernstudio Draft',
+                      'Lehrkraft-Prüfung: Elternbericht, Hausaufgabe & Lernstudio-Entwurf'
                     )}
                   </h5>
                 </div>
@@ -769,9 +1256,9 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
                 <label className="text-[11px] font-black text-text-main flex items-center justify-between">
                   <span>
                     {_t(
-                      '1. ملخص ما تم شرحه في الحصة (قابل للتعديل قبل الاعتماد):',
-                      '1. Lesson Summary (Editable before approval):',
-                      '1. Zusammenfassung (vor Bestätigung bearbeitbar):'
+                      '1. ملخص معتمد لتقرير ولي الأمر (قابل للتعديل قبل الاعتماد):',
+                      '1. Approved Parent Report Summary (Editable before approval):',
+                      '1. Zusammenfassung für Elternbericht (vor Bestätigung bearbeitbar):'
                     )}
                   </span>
                 </label>
@@ -793,9 +1280,9 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
                     <CheckCircle2 className="w-3 h-3" />
                     <span>
                       {_t(
-                        'اعتماد وإضافة إلى ملاحظات الحصة وتقرير ولي الأمر',
-                        'Approve & Apply to Lesson Notes',
-                        'Bestätigen & in Notizen übernehmen'
+                        'اعتماد الملخص لتقرير ولي الأمر',
+                        'Approve Summary for Parent Report',
+                        'Für Elternbericht bestätigen'
                       )}
                     </span>
                   </button>
@@ -904,3 +1391,4 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
     </div>
   );
 };
+

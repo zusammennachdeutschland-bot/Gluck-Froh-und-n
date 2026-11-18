@@ -189,6 +189,20 @@ public class GrainSecureBridgePlugin extends Plugin {
         call.resolve(res);
     }
 
+    private String normalizeTokenInput(String rawToken) {
+        if (rawToken == null) return "";
+        String s = rawToken.replaceAll("[\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u206F\\uFEFF\\u00A0]", "").trim();
+        s = s.replaceAll("^[\"'`]+|[\"'`]+$", "").trim();
+        s = s.replaceFirst("(?i)^Authorization\\s*:\\s*", "").trim();
+        s = s.replaceFirst("(?i)^Bearer\\s+", "").trim();
+        s = s.replaceAll("^[\"'`]+|[\"'`]+$", "").trim();
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?i)grain_pat_[A-Za-z0-9._~+/=-]+").matcher(s);
+        if (m.find()) {
+            return m.group(0);
+        }
+        return s.replaceAll("\\s+", "");
+    }
+
     @PluginMethod
     public void saveToken(final PluginCall call) {
         Context context = getContext();
@@ -197,12 +211,12 @@ public class GrainSecureBridgePlugin extends Plugin {
             return;
         }
         String token = call.getString("token", "");
-        if (token == null || token.trim().length() < 10) {
+        String clean = normalizeTokenInput(token);
+        if (clean.length() < 6) {
             call.reject("Invalid Grain Personal Access Token format.", "INVALID_TOKEN_FORMAT");
             return;
         }
         try {
-            String clean = token.trim();
             storeEncryptedToken(context, clean);
             JSObject res = new JSObject();
             res.put("saved", true);
