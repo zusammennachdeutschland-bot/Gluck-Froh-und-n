@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
+  Lesson,
   GrainDiscoveredRecording,
   GrainEducationalDraft,
   GrainShareAccessClassification,
@@ -856,13 +857,13 @@ export const GrainRecordingsLibraryView: React.FC = () => {
                     >
                       <div className="min-w-0">
                         <div className="font-bold text-text-main truncate">
-                          {grp ? grp.name : rule.groupNameSnapshot}
+                          {grp ? grp.name : (rule.groupId || rule.lessonId)}
                           <span className="ms-1.5 text-[10px] font-normal text-text-muted">
                             ({weekdayStr} {rule.lessonScheduledStartTime || rule.recordingStartTime || ''})
                           </span>
                         </div>
                         <div className="text-[10px] text-text-muted truncate">
-                          {rule.recordingTitle}
+                          {rule.normalizedTitle || rule.recordingDate}
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
