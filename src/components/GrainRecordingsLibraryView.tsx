@@ -1006,6 +1006,12 @@ export const GrainRecordingsLibraryView: React.FC = () => {
                             {tr('درجة الثقة:', 'Score:', 'Score:')} {topCandidate.confidenceScore}%
                           </div>
                         )}
+                        {(rec.matchTier || rec.matchedSessionCode) && (
+                          <div className="text-[9.5px] font-mono text-text-muted mt-0.5 truncate" title={rec.matchTier || ''}>
+                            {rec.matchedSessionCode ? `[${rec.matchedSessionCode}] ` : ''}
+                            {rec.matchTier ? rec.matchTier.replace(/_/g, ' ') : ''}
+                          </div>
+                        )}
                       </td>
 
                       {/* Assigned Lesson / Suggested Group */}

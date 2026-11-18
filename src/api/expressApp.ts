@@ -30,6 +30,7 @@ import {
   resetAdminFirestoreForTesting
 } from '../server/firebaseAdmin';
 import { registerGrainServerRoutes } from '../server/grainServerProxy';
+import { registerZoomServerRoutes } from '../server/zoomServerProxy';
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
@@ -50,7 +51,7 @@ app.use((req, res, next) => {
     }
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Owner-Uid, X-Grain-Session-Token, X-Grain-Local-Client');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Owner-Uid, X-Grain-Session-Token, X-Grain-Local-Client, X-Zoom-Session-Token, X-Zoom-Local-Client');
   if (req.method === 'OPTIONS') {
     res.status(204).end();
     return;
@@ -2562,6 +2563,9 @@ app.post('/api/lernstudio/extract-grammar', async (req, res) => {
 
 // Register authenticated server-side Grain Personal API proxy routes
 registerGrainServerRoutes(app, verifyFirebaseIdToken);
+
+// Register authenticated server-side Zoom Server-to-Server OAuth & Meeting proxy routes
+registerZoomServerRoutes(app, verifyFirebaseIdToken);
 
 export default app;
 

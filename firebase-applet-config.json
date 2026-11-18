@@ -1,12 +1,11 @@
 {
-  "projectId": "glueck-c8621",
-  "appId": "1:874458026984:web:f88ecbf0df451173854a5d",
-  "apiKey": "AIzaSyBJVhFLw3NeS1MNHJ9ZnAipuZNwRaoaZ-g",
-  "authDomain": "glueck-c8621.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-remixgluckgerman-fc71e704-09a9-492f-82ad-623b4e7b445e",
-  "storageBucket": "glueck-c8621.firebasestorage.app",
-  "messagingSenderId": "874458026984",
+  "projectId": "gen-lang-client-0651495117",
+  "appId": "1:452022551496:web:9ff78b7d499778ed1b76fd",
+  "apiKey": "AIzaSyDg_wACJt_9DUttUjd3uzRF9EceUvne1Ww",
+  "authDomain": "gen-lang-client-0651495117.firebaseapp.com",
+  "storageBucket": "gen-lang-client-0651495117.firebasestorage.app",
+  "messagingSenderId": "452022551496",
   "measurementId": "",
-  "oAuthClientId": "874458026984-3ai954q2p8ga6h4b2b15is2gdjbi9768.apps.googleusercontent.com",
+  "oAuthClientId": "452022551496-j968jn866l64b3da59j097c3bhv63579.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

@@ -21,10 +21,27 @@ import {
   GrainVocabularySuggestion,
   GrainWorkflowStatusBadge,
   GrainZoomLinkVerificationStatus,
+  GrainMatchTier,
+  GrainConfidenceLevel,
+  GrainRecordingMatch,
+  GroupWeeklySession,
+  ZoomMeetingHistory,
   Group,
   Lesson,
   Student
 } from '../types';
+import {
+  extractNumericZoomMeetingId,
+  normalizeWeekdayIndex,
+  parseStandardizedZoomTopic
+} from './zoomSessionStandardizer';
+import {
+  loadGrainRecordingMatches,
+  loadGroupWeeklySessions,
+  loadZoomMeetingHistory,
+  redactZoomSecrets,
+  saveGrainRecordingMatches
+} from './zoomService';
 import { LernstudioSet, LernstudioItem, GrammarExercise } from '../types/lernstudio';
 import { normalizeLernstudioSet } from '../shared/grammarEngine';
 import { auth } from '../shared/firebaseCloudSync';
@@ -2658,7 +2675,9 @@ export function evaluateRecordingMatchAgainstLessons(
     rawShareState?: string;
     sourcePlatform: string;
     zoomMeetingUrl?: string;
+    zoomMeetingId?: string;
     calendarEventTitle?: string;
+    calendarEventUid?: string;
     participantNames?: string[];
     hasAiSummary?: boolean;
     aiSummaryExcerpt?: string;
@@ -2672,7 +2691,9 @@ export function evaluateRecordingMatchAgainstLessons(
   groups: Group[],
   students: Student[],
   explicitLearningRecords?: GrainGroupLearningRecord[],
-  part2ConfigInput?: Partial<GrainPart2DetectionConfig>
+  part2ConfigInput?: Partial<GrainPart2DetectionConfig>,
+  explicitWeeklySessions?: GroupWeeklySession[],
+  explicitZoomHistory?: ZoomMeetingHistory[]
 ): GrainDiscoveredRecording {
   const durationMinutes = Math.max(1, Math.round((recording.durationSeconds || 0) / 60));
   const cleanRecUrl = String(recording.recordingUrl || '').trim();
@@ -2693,6 +2714,7 @@ export function evaluateRecordingMatchAgainstLessons(
       shareAccessClassification: 'link_unavailable',
       matchStatus: 'inaccessible',
       confidenceScore: 0,
+      confidenceLevel: 'low',
       matchReasons: ['Recording URL is missing or inaccessible in Grain.'],
       candidates: [],
       workflowStatuses: ['needs_teacher_confirmation'],
@@ -2702,6 +2724,8 @@ export function evaluateRecordingMatchAgainstLessons(
 
   const activeGroups = (groups || []).filter((g) => g && !g.deleted);
   const learningRecords = explicitLearningRecords || loadGrainGroupLearningRecords(activeGroups);
+  const weeklySessions = (explicitWeeklySessions || []).filter((s) => s && !s.deleted);
+  const zoomHistory = (explicitZoomHistory || []).filter((h) => h && !h.deleted);
 
   // Check if already linked to any non-deleted lesson
   const activeLessons = (lessons || []).filter((l) => l && !l.deleted && l.status !== 'cancelled');
@@ -2720,6 +2744,14 @@ export function evaluateRecordingMatchAgainstLessons(
 
   const recTime = formatLocalYmdAndTimeFromIso(recording.startDatetime);
   const normalizedGrainZoom = normalizeZoomMeetingUrl(recording.zoomMeetingUrl);
+  const grainZoomMeetingId =
+    extractNumericZoomMeetingId(recording.zoomMeetingId) ||
+    normalizedGrainZoom?.meetingId ||
+    extractNumericZoomMeetingId(recording.zoomMeetingUrl);
+  const parsedStdTopic =
+    parseStandardizedZoomTopic(recording.title) ||
+    parseStandardizedZoomTopic(recording.calendarEventTitle);
+  const cleanRecCalendarUid = String(recording.calendarEventUid || '').trim();
   const normRecTitle = normalizeNameForComparison(`${recording.title} ${recording.calendarEventTitle || ''}`);
   const normParticipants = (recording.participantNames || []).map(normalizeNameForComparison).filter(Boolean);
 
@@ -2762,20 +2794,66 @@ export function evaluateRecordingMatchAgainstLessons(
     }
 
     const group = activeGroups.find((g) => g.id === lesson.groupId);
-    const rawLessonZoom = lesson.zoomMeetingLink || lesson.meetingLink || group?.zoomLink || '';
+    const groupSessions = weeklySessions.filter((s) => s.groupId === lesson.groupId);
+    const matchedActiveSessionBySlot = groupSessions.find(
+      (s) => s.weekday === lessonTime.weekday && Math.abs(Number(s.startTime.slice(0, 2)) * 60 + Number(s.startTime.slice(3, 5)) - lessonTime.minutesOfDay) <= 30
+    );
+
+    const rawLessonZoom =
+      lesson.zoomMeetingLink ||
+      lesson.meetingLink ||
+      matchedActiveSessionBySlot?.zoomJoinUrl ||
+      group?.zoomLink ||
+      '';
     const normalizedLessonZoom = normalizeZoomMeetingUrl(rawLessonZoom);
+    const effectiveLessonZoomId =
+      matchedActiveSessionBySlot?.zoomMeetingId ||
+      normalizedLessonZoom?.meetingId;
+
+    // Tier 1 check: Zoom Meeting ID (active session, lesson/group link, or immutable ZoomMeetingHistory)
+    let matchedFromHistory = false;
+    let matchedZoomSession: GroupWeeklySession | undefined = matchedActiveSessionBySlot;
+    let tier1ZoomIdMatched = false;
+
+    if (grainZoomMeetingId) {
+      const activeSessionMatch = groupSessions.find((s) => s.zoomMeetingId === grainZoomMeetingId);
+      if (activeSessionMatch) {
+        tier1ZoomIdMatched = true;
+        matchedZoomSession = activeSessionMatch;
+      } else if (lesson.groupId) {
+        const historyMatch = zoomHistory.find(
+          (h) =>
+            h.groupId === lesson.groupId &&
+            (h.previousZoomMeetingId === grainZoomMeetingId || h.newZoomMeetingId === grainZoomMeetingId)
+        );
+        if (historyMatch) {
+          tier1ZoomIdMatched = true;
+          matchedFromHistory = true;
+          matchedZoomSession =
+            groupSessions.find((s) => s.id === historyMatch.sessionId) || matchedActiveSessionBySlot;
+        }
+      }
+      if (!tier1ZoomIdMatched && effectiveLessonZoomId && effectiveLessonZoomId === grainZoomMeetingId) {
+        tier1ZoomIdMatched = true;
+      }
+    }
 
     let zoomLinkStatus: GrainZoomLinkVerificationStatus = 'not_exposed_by_grain';
-    if (!normalizedLessonZoom) {
+    if (tier1ZoomIdMatched) {
+      zoomLinkStatus = 'verified_match';
+    } else if (!normalizedLessonZoom && groupSessions.length === 0) {
       zoomLinkStatus = 'missing_on_lesson';
-    } else if (!normalizedGrainZoom) {
+    } else if (!normalizedGrainZoom && !grainZoomMeetingId) {
       zoomLinkStatus = 'not_exposed_by_grain';
     } else {
       const idMatch =
-        normalizedLessonZoom.meetingId &&
-        normalizedGrainZoom.meetingId &&
-        normalizedLessonZoom.meetingId === normalizedGrainZoom.meetingId;
-      const urlMatch = normalizedLessonZoom.canonicalUrl === normalizedGrainZoom.canonicalUrl;
+        effectiveLessonZoomId &&
+        grainZoomMeetingId &&
+        effectiveLessonZoomId === grainZoomMeetingId;
+      const urlMatch =
+        normalizedLessonZoom &&
+        normalizedGrainZoom &&
+        normalizedLessonZoom.canonicalUrl === normalizedGrainZoom.canonicalUrl;
       zoomLinkStatus = idMatch || urlMatch ? 'verified_match' : 'mismatch';
     }
 
@@ -2884,24 +2962,72 @@ export function evaluateRecordingMatchAgainstLessons(
       reasons.push(`Duration reasonably close (${durationMinutes}m vs ${lessonDuration}m)`);
     }
 
-    // 5. Secondary Evidence: Recording Title & Calendar Event Title (up to 10 points)
+    // 5. Tier 2 Standardized Topic Check & Secondary Title Evidence
     const normLessonTitle = normalizeNameForComparison(lesson.title);
     const normGroupName = normalizeNameForComparison(group?.name || lesson.groupName);
     const normStudentName = normalizeNameForComparison(lesson.studentName);
 
+    let standardizedTopicMatched = false;
+    const parsedStdTopicLabel = parsedStdTopic
+      ? `${parsedStdTopic.weekdayName} - ${parsedStdTopic.startTime} - ${parsedStdTopic.groupName}`
+      : '';
+    if (parsedStdTopic && group?.name) {
+      const topicGroupNorm = normalizeNameForComparison(parsedStdTopic.groupName);
+      const exactGroupMatch =
+        topicGroupNorm === normGroupName ||
+        zoomHistory.some(
+          (h) =>
+            h.groupId === group.id &&
+            (normalizeNameForComparison(h.previousTopic) === normalizeNameForComparison(parsedStdTopicLabel) ||
+              normalizeNameForComparison(h.newTopic) === normalizeNameForComparison(parsedStdTopicLabel))
+        );
+      if (exactGroupMatch) {
+        const topicWeekday = normalizeWeekdayIndex(parsedStdTopic.weekdayName);
+        if (topicWeekday === lessonTime.weekday) {
+          standardizedTopicMatched = true;
+        }
+      }
+    }
+
+    // Tier 4 Calendar Event UID Match
+    let calendarUidMatched = false;
+    const matchedCalendarSession = cleanRecCalendarUid
+      ? groupSessions.find((s) => s.calendarEventUid === cleanRecCalendarUid)
+      : undefined;
+    if (matchedCalendarSession) {
+      calendarUidMatched = true;
+      matchedZoomSession = matchedZoomSession || matchedCalendarSession;
+    }
+
     const secondaryTitleMatched = Boolean(
-      (normGroupName && normGroupName.length >= 3 && normRecTitle.includes(normGroupName)) ||
+      standardizedTopicMatched ||
+        (normGroupName && normGroupName.length >= 3 && normRecTitle.includes(normGroupName)) ||
         (normLessonTitle && normLessonTitle.length >= 3 && normRecTitle.includes(normLessonTitle)) ||
         (normStudentName && normStudentName.length >= 3 && normRecTitle.includes(normStudentName))
     );
 
-    if (secondaryTitleMatched) {
+    if (standardizedTopicMatched) {
+      score += 26;
+      reasons.push(`Standardized Zoom title matched ("${parsedStdTopicLabel}")`);
+    } else if (secondaryTitleMatched) {
       score += 10;
       reasons.push('Recording title supports lesson/group name');
     }
 
-    // 6. Optional Secondary Supporting Evidence: Zoom Meeting URL (up to 15 points if present, 0 penalty if absent)
-    if (zoomLinkStatus === 'verified_match') {
+    if (calendarUidMatched) {
+      score += 18;
+      reasons.push(`Calendar Event UID matched (${cleanRecCalendarUid})`);
+    }
+
+    // 6. Tier 1 Zoom Meeting ID Boost / Mismatch Check
+    if (tier1ZoomIdMatched) {
+      score += matchedFromHistory ? 28 : 34;
+      reasons.push(
+        matchedFromHistory
+          ? `Zoom Meeting ID matched via session history (${grainZoomMeetingId})`
+          : `Zoom Meeting ID matched active weekly session (${grainZoomMeetingId})`
+      );
+    } else if (zoomLinkStatus === 'verified_match') {
       score += 15;
       reasons.push(
         `Optional Zoom Meeting ID verified (${normalizedLessonZoom?.meetingId || normalizedLessonZoom?.canonicalUrl})`
@@ -2912,6 +3038,18 @@ export function evaluateRecordingMatchAgainstLessons(
     }
 
     const clampedScore = Math.max(0, Math.min(100, score));
+    const matchTier: GrainMatchTier = tier1ZoomIdMatched
+      ? 'zoom_meeting_id'
+      : standardizedTopicMatched
+      ? 'standardized_topic'
+      : calendarUidMatched
+      ? 'calendar_uid'
+      : effectiveTimeDeltaMinutes <= 25 || isWithinPart2OffsetWindow
+      ? 'date_and_session'
+      : 'metadata_heuristic';
+    const confidenceLevel: GrainConfidenceLevel =
+      clampedScore >= 82 ? 'high' : clampedScore >= 55 ? 'medium' : 'low';
+
     const detectedPartSlot: 'part1' | 'part2' =
       recording.detectedPartSlot || (isWithinPart2OffsetWindow && effectiveTimeDeltaMinutes > 25 ? 'part2' : 'part1');
 
@@ -2922,8 +3060,8 @@ export function evaluateRecordingMatchAgainstLessons(
       timeDeltaMinutes: effectiveTimeDeltaMinutes,
       withinTimeWindow: isDateAndTimeAligned,
       zoomLinkStatus,
-      normalizedLessonZoomId: normalizedLessonZoom?.meetingId || normalizedLessonZoom?.canonicalUrl,
-      normalizedGrainZoomId: normalizedGrainZoom?.meetingId || normalizedGrainZoom?.canonicalUrl,
+      normalizedLessonZoomId: effectiveLessonZoomId || normalizedLessonZoom?.canonicalUrl,
+      normalizedGrainZoomId: grainZoomMeetingId || normalizedGrainZoom?.canonicalUrl,
       durationMinutesRecording: durationMinutes,
       durationMinutesLesson: lessonDuration,
       durationDiffMinutes: durationDiff,
@@ -2937,6 +3075,11 @@ export function evaluateRecordingMatchAgainstLessons(
       detectedPartSlot,
       pairedRecordingId: recording.pairedRecordingId,
       part2StartGapMinutes: recording.part2StartGapMinutes,
+      matchTier,
+      confidenceLevel,
+      matchedSessionId: matchedZoomSession?.id,
+      matchedSessionCode: matchedZoomSession?.sessionCode,
+      matchedFromHistory: matchedFromHistory || undefined,
       reasons
     };
 
@@ -2945,12 +3088,18 @@ export function evaluateRecordingMatchAgainstLessons(
     const recommendedSlot: 'recordingLink' | 'recordingLink2' =
       detectedPartSlot === 'part2' ? 'recordingLink2' : 'recordingLink';
 
+    const hasStrongStandardizedEvidence =
+      ((tier1ZoomIdMatched && Boolean(matchedZoomSession || matchedFromHistory)) ||
+        standardizedTopicMatched ||
+        calendarUidMatched) &&
+      zoomLinkStatus !== 'mismatch' &&
+      clampedScore >= 80;
+
     const canAutoAssign = Boolean(
-      learnedRecurringRuleId &&
-        !scheduleChangedRequiresConfirmation &&
-        !wasCorrectedAway &&
-        clampedScore >= 78 &&
-        zoomLinkStatus !== 'mismatch'
+      !wasCorrectedAway &&
+        zoomLinkStatus !== 'mismatch' &&
+        ((learnedRecurringRuleId && !scheduleChangedRequiresConfirmation && clampedScore >= 78) ||
+          hasStrongStandardizedEvidence)
     );
 
     candidates.push({
@@ -2964,6 +3113,8 @@ export function evaluateRecordingMatchAgainstLessons(
       lessonTime: lesson.time,
       lessonDurationMinutes: lessonDuration,
       confidenceScore: clampedScore,
+      matchTier,
+      confidenceLevel,
       evidence,
       existingRecordingLink: existingR1,
       existingRecordingLink2: existingR2,
@@ -3003,6 +3154,10 @@ export function evaluateRecordingMatchAgainstLessons(
       matchedGroupName: linkedGroup?.name || alreadyLinkedLesson.groupName || undefined,
       matchedStudentIds: topCandidate?.evidence?.matchedStudentIds,
       confidenceScore: 100,
+      matchTier: topCandidate?.matchTier || 'date_and_session',
+      confidenceLevel: 'high',
+      matchedSessionId: topCandidate?.evidence?.matchedSessionId,
+      matchedSessionCode: topCandidate?.evidence?.matchedSessionCode,
       matchReasons: [
         `Already linked to lesson "${alreadyLinkedLesson.title || linkedGroup?.name || alreadyLinkedLesson.groupName}" (${alreadyLinkedLesson.date})`
       ],
@@ -3021,6 +3176,7 @@ export function evaluateRecordingMatchAgainstLessons(
       shareAccessClassification: effectiveShareClassification,
       matchStatus: 'unmatched',
       confidenceScore: 0,
+      confidenceLevel: 'low',
       matchReasons: ['No scheduled lesson matched the recording date and time window.'],
       candidates: [],
       workflowStatuses: ['needs_teacher_confirmation'],
@@ -3044,6 +3200,10 @@ export function evaluateRecordingMatchAgainstLessons(
       matchedGroupName: candidates[0].groupName,
       matchedStudentIds: candidates[0].evidence.matchedStudentIds,
       confidenceScore: candidates[0].confidenceScore,
+      matchTier: candidates[0].matchTier,
+      confidenceLevel: candidates[0].confidenceLevel,
+      matchedSessionId: candidates[0].evidence.matchedSessionId,
+      matchedSessionCode: candidates[0].evidence.matchedSessionCode,
       matchReasons: [
         `Multiple possible lessons (${candidates.length}) overlap this date/time window. Teacher selection required.`,
         ...candidates[0].evidence.reasons
@@ -3069,6 +3229,10 @@ export function evaluateRecordingMatchAgainstLessons(
       matchedGroupName: best.groupName,
       matchedStudentIds: best.evidence.matchedStudentIds,
       confidenceScore: best.confidenceScore,
+      matchTier: best.matchTier,
+      confidenceLevel: best.confidenceLevel,
+      matchedSessionId: best.evidence.matchedSessionId,
+      matchedSessionCode: best.evidence.matchedSessionCode,
       matchReasons: best.evidence.reasons,
       evidence: best.evidence,
       candidates: candidates.map((c) => ({ ...c, canAutoAssign: false })),
@@ -3078,8 +3242,15 @@ export function evaluateRecordingMatchAgainstLessons(
     };
   }
 
-  // Requirement 2: If backed by an active confirmed recurring rule and strong & unambiguous, mark 'automatically_matched'
-  if (best.canAutoAssign && best.evidence.learnedRecurringRuleId) {
+  // Auto-match when backed by active confirmed recurring rule OR strong Tier 1/2/4 standardized identity
+  if (
+    best.canAutoAssign &&
+    (best.evidence.learnedRecurringRuleId ||
+      best.evidence.matchedSessionId ||
+      best.evidence.matchedFromHistory ||
+      best.matchTier === 'standardized_topic' ||
+      best.matchTier === 'calendar_uid')
+  ) {
     const partSlot = best.evidence.detectedPartSlot || 'part1';
     return {
       ...recording,
@@ -3091,6 +3262,10 @@ export function evaluateRecordingMatchAgainstLessons(
       matchedGroupName: best.groupName,
       matchedStudentIds: best.evidence.matchedStudentIds,
       confidenceScore: best.confidenceScore,
+      matchTier: best.matchTier,
+      confidenceLevel: best.confidenceLevel,
+      matchedSessionId: best.evidence.matchedSessionId,
+      matchedSessionCode: best.evidence.matchedSessionCode,
       matchReasons: best.evidence.reasons,
       evidence: best.evidence,
       candidates,
@@ -3121,6 +3296,10 @@ export function evaluateRecordingMatchAgainstLessons(
     matchedGroupName: best.groupName,
     matchedStudentIds: best.evidence.matchedStudentIds,
     confidenceScore: best.confidenceScore,
+    matchTier: best.matchTier,
+    confidenceLevel: best.confidenceLevel,
+    matchedSessionId: best.evidence.matchedSessionId,
+    matchedSessionCode: best.evidence.matchedSessionCode,
     matchReasons: best.evidence.reasons,
     evidence: best.evidence,
     candidates,
@@ -4822,6 +5001,8 @@ export async function syncGrainRecordingsIncrementally(options: {
 
   const activeGroups = (options.groups || []).filter((g) => g && !g.deleted);
   const learningRecords = loadGrainGroupLearningRecords(activeGroups);
+  const weeklySessions = await loadGroupWeeklySessions();
+  const zoomHistory = await loadZoomMeetingHistory();
   const nowIso = new Date().toISOString();
 
   let newCount = 0;
@@ -4864,6 +5045,14 @@ export async function syncGrainRecordingsIncrementally(options: {
       raw.calendar_event?.location ||
       '';
     const verifiedZoom = normalizeZoomMeetingUrl(rawZoomCandidate);
+    const grainCalUid =
+      typeof raw.calendar_event?.ical_uid === 'string'
+        ? raw.calendar_event.ical_uid
+        : typeof raw.calendar_event?.iCalUID === 'string'
+        ? raw.calendar_event.iCalUID
+        : typeof raw.calendar_event?.uid === 'string'
+        ? raw.calendar_event.uid
+        : undefined;
 
     const participantNames = Array.isArray(raw.participants)
       ? raw.participants
@@ -4885,8 +5074,10 @@ export async function syncGrainRecordingsIncrementally(options: {
         rawShareState: shareClassified.rawShareState,
         sourcePlatform: String(raw.source || 'zoom').toLowerCase(),
         zoomMeetingUrl: verifiedZoom?.canonicalUrl,
+        zoomMeetingId: verifiedZoom?.meetingId,
         calendarEventTitle:
           typeof raw.calendar_event?.title === 'string' ? raw.calendar_event.title : undefined,
+        calendarEventUid: grainCalUid,
         participantNames,
         hasAiSummary: Boolean(aiSummaryStr),
         aiSummaryExcerpt: aiSummaryStr ? aiSummaryStr.slice(0, 400) : prevRec?.aiSummaryExcerpt,
@@ -4896,7 +5087,10 @@ export async function syncGrainRecordingsIncrementally(options: {
       options.lessons,
       options.groups,
       options.students,
-      learningRecords
+      learningRecords,
+      options.part2Config,
+      weeklySessions,
+      zoomHistory
     );
 
     existingById.set(id, evaluated);
@@ -4960,6 +5154,46 @@ export async function syncGrainRecordingsIncrementally(options: {
     for (const [lessonId, patch] of Object.entries(finalLessonPatches)) {
       options.onUpdateLesson(lessonId, patch);
     }
+  }
+
+  // Persist sanitized GrainRecordingMatch trace records (metadata-only, zero transcripts/secrets)
+  try {
+    const existingMatches = await loadGrainRecordingMatches();
+    const matchMap = new Map<string, GrainRecordingMatch>();
+    for (const m of existingMatches) {
+      if (m && m.id) matchMap.set(m.id, m);
+    }
+    const nowMs = Date.now();
+    for (const rec of autoApplied.recordings) {
+      const targetLessonId = rec.confirmedLessonId || rec.suggestedLessonId;
+      if (!targetLessonId) continue;
+      const matchId = `grm_${rec.id}`;
+      matchMap.set(matchId, {
+        id: matchId,
+        grainRecordingId: rec.id,
+        grainRecordingTitle: redactGrainSecrets(rec.title).slice(0, 200),
+        grainRecordingUrl: rec.recordingUrl,
+        zoomMeetingId: extractNumericZoomMeetingId(rec.zoomMeetingUrl) || undefined,
+        sessionId: rec.matchedSessionId || rec.evidence?.matchedSessionId,
+        groupId: rec.matchedGroupId,
+        lessonId: targetLessonId,
+        matchTier: rec.matchTier || rec.evidence?.matchTier || 'date_and_session',
+        confidenceScore: rec.confidenceScore || 0,
+        confidenceLevel: rec.confidenceLevel || rec.evidence?.confidenceLevel || 'low',
+        status: rec.confirmedLessonId
+          ? rec.matchStatus === 'automatically_matched'
+            ? 'auto_matched'
+            : 'confirmed'
+          : 'suggested',
+        reasons: (rec.matchReasons || []).slice(0, 6),
+        matchedAt: nowIso,
+        updatedAt: nowMs,
+        deleted: false
+      });
+    }
+    await saveGrainRecordingMatches(Array.from(matchMap.values()));
+  } catch {
+    // Non-fatal match trace persistence
   }
 
   const mergedList = autoApplied.recordings.sort((a, b) =>
@@ -6034,7 +6268,14 @@ const FORBIDDEN_GRAIN_KEYS = new Set([
   'grainToken',
   'grainMasterKey',
   'grainSessionToken',
-  'unreviewedAiAnalysis'
+  'unreviewedAiAnalysis',
+  'startUrl',
+  'start_url',
+  'zoomClientSecret',
+  'clientSecret',
+  'zoomAccessToken',
+  'zoomAccountId',
+  'zak'
 ]);
 
 const VALID_SHARE_CLASSIFICATIONS = new Set<GrainShareAccessClassification>([
@@ -6275,7 +6516,8 @@ export function sanitizeEntityForGrainPrivacy<T>(record: T): T {
       continue;
     }
     if (typeof v === 'string') {
-      clone[k] = v.includes('grain_pat_') ? redactGrainSecrets(v) : v;
+      const cleanedGrain = v.includes('grain_pat_') ? redactGrainSecrets(v) : v;
+      clone[k] = redactZoomSecrets(cleanedGrain);
     } else if (v && typeof v === 'object') {
       clone[k] = sanitizeEntityForGrainPrivacy(v);
     } else {

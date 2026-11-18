@@ -484,7 +484,11 @@ export const ENTITY_COLLECTION_KEYS = [
   'goldHoldings',
   'lernstudioSets',
   'homeworkAssignments',
-  'homeworkSubmissions'
+  'homeworkSubmissions',
+  'groupWeeklySessions',
+  'zoomMeetingRecords',
+  'zoomMeetingHistory',
+  'grainRecordingMatches'
 ] as const;
 
 export const SINGLETON_KEYS = [
@@ -1406,7 +1410,11 @@ export function partitionBackupPayload(fullData: any, ownerUid?: string): Record
       payments: fullData.payments || [],
       certificates: fullData.certificates || [],
       notifications: fullData.notifications || [],
-      prunedLessonIds: fullData.prunedLessonIds || []
+      prunedLessonIds: fullData.prunedLessonIds || [],
+      groupWeeklySessions: fullData.groupWeeklySessions || [],
+      zoomMeetingRecords: fullData.zoomMeetingRecords || [],
+      zoomMeetingHistory: fullData.zoomMeetingHistory || [],
+      grainRecordingMatches: fullData.grainRecordingMatches || []
     },
     finance_gold: {
       financeAccounts: fullData.financeAccounts || [],

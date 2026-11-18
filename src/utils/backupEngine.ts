@@ -519,7 +519,11 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     { key: 'financeTransactions', label: 'financeTransactions' },
     { key: 'financeRecurring', label: 'financeRecurring' },
     { key: 'financeInstallments', label: 'financeInstallments' },
-    { key: 'grainGroupLearningRecords', label: 'grainGroupLearningRecords' }
+    { key: 'grainGroupLearningRecords', label: 'grainGroupLearningRecords' },
+    { key: 'groupWeeklySessions', label: 'groupWeeklySessions' },
+    { key: 'zoomMeetingRecords', label: 'zoomMeetingRecords' },
+    { key: 'zoomMeetingHistory', label: 'zoomMeetingHistory' },
+    { key: 'grainRecordingMatches', label: 'grainRecordingMatches' }
   ];
 
   for (const col of collectionsToCheck) {
@@ -1191,6 +1195,10 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
     financeRecurring: sanitizedFinanceRecurring,
     financeInstallments: sanitizedFinanceInstallments,
     grainGroupLearningRecords: sanitizedGrainLearning,
+    groupWeeklySessions: Array.isArray(data.groupWeeklySessions) ? data.groupWeeklySessions : undefined,
+    zoomMeetingRecords: Array.isArray(data.zoomMeetingRecords) ? data.zoomMeetingRecords : undefined,
+    zoomMeetingHistory: Array.isArray(data.zoomMeetingHistory) ? data.zoomMeetingHistory : undefined,
+    grainRecordingMatches: Array.isArray(data.grainRecordingMatches) ? data.grainRecordingMatches : undefined,
     schoolSettings: sanitizedSchool,
     profile: sanitizedProfile,
     recentlyDeleted: sanitizedRecentlyDeleted,
@@ -1816,7 +1824,11 @@ export function mergeBackupPayloadIntoWorkspace(
       'goldHoldings',
       'homeworkAssignments',
       'homeworkSubmissions',
-      'grainGroupLearningRecords'
+      'grainGroupLearningRecords',
+      'groupWeeklySessions',
+      'zoomMeetingRecords',
+      'zoomMeetingHistory',
+      'grainRecordingMatches'
     ];
 
     for (const colKey of otherCollections) {

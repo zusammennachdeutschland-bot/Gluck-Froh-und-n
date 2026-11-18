@@ -10,7 +10,8 @@ import {
   NotificationSettings, ScheduledNotificationItem, TeacherSettingsRecord, SyncCycleReport, PendingOutboxSummary, SyncHistoryEntry,
   CertificateRecord, HodGermanStudent, Complaint, StudentActionPlan, VisitRecord, SchoolNote,
   FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment, FinanceNotification,
-  TodoItem, PaymentPlanType, AICertificateBackground
+  TodoItem, PaymentPlanType, AICertificateBackground,
+  GroupWeeklySession, ZoomMeetingRecord, ZoomMeetingHistory, GrainRecordingMatch
 } from '../types';
 import { recalculateAllAccountBalances, computeAccountBalance, shouldSettlePendingCycleRecord, splitPaymentAcrossLessons } from '../services/financeService';
 import { 
@@ -90,6 +91,8 @@ import { validateAndSanitizeBackupPayload, hasBackupSection, MAX_BACKUP_FILE_SIZ
 import { syncAllWidgetsToNative } from '../services/widgetService';
 import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesService';
 import { loadGrainGroupLearningRecords, saveGrainGroupLearningRecords, sanitizeGrainGroupLearningRecord } from '../services/grainService';
+import { loadZoomUiMeta, sanitizeZoomRecordForStorage } from '../services/zoomService';
+import { DEFAULT_ZOOM_TIMEZONE, reconcileGroupWeeklySessions } from '../services/zoomSessionStandardizer';
 
 export const DEFAULT_BOTTOM_NAV_ORDER = [
   'home',
@@ -469,6 +472,27 @@ interface AppContextType {
   startHosting: () => Promise<{ip: string, pin: string, port: number}>;
   externalDataVersion: number;
   bumpExternalDataVersion: () => void;
+
+  // Standardized Weekly Zoom Sessions & Grain V2.0 Mapping State
+  groupWeeklySessions: GroupWeeklySession[];
+  setGroupWeeklySessions: React.Dispatch<React.SetStateAction<GroupWeeklySession[]>>;
+  zoomMeetingRecords: ZoomMeetingRecord[];
+  setZoomMeetingRecords: React.Dispatch<React.SetStateAction<ZoomMeetingRecord[]>>;
+  zoomMeetingHistory: ZoomMeetingHistory[];
+  setZoomMeetingHistory: React.Dispatch<React.SetStateAction<ZoomMeetingHistory[]>>;
+  grainRecordingMatches: GrainRecordingMatch[];
+  setGrainRecordingMatches: React.Dispatch<React.SetStateAction<GrainRecordingMatch[]>>;
+  applyZoomWorkspaceSnapshot: (snapshot: {
+    sessions?: GroupWeeklySession[];
+    records?: ZoomMeetingRecord[];
+    history?: ZoomMeetingHistory[];
+    matches?: GrainRecordingMatch[];
+  }) => void;
+  reconcileGroupSessionsState: (group: Group) => {
+    sessions: GroupWeeklySession[];
+    historyEntries: ZoomMeetingHistory[];
+    needsResyncCount: number;
+  };
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -1831,6 +1855,119 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     storage.setItem('gluck_gold_holdings', goldHoldings);
   }, [goldHoldings]);
 
+  // Standardized Weekly Zoom Sessions, Zoom Meeting Records, History & Grain Match Records (V2.0)
+  const [groupWeeklySessions, setGroupWeeklySessions] = useState<GroupWeeklySession[]>(() => {
+    const raw = initialData['glueck_group_weekly_sessions_v1'];
+    return Array.isArray(raw) ? raw.map((x) => sanitizeZoomRecordForStorage(x as GroupWeeklySession)) : [];
+  });
+  const groupWeeklySessionsRef = useRef<GroupWeeklySession[]>(groupWeeklySessions);
+  useEffect(() => {
+    groupWeeklySessionsRef.current = groupWeeklySessions;
+    if (!isInitializedRef.current) return;
+    storage.setItem('glueck_group_weekly_sessions_v1', groupWeeklySessions.map((x) => sanitizeZoomRecordForStorage(x)));
+  }, [groupWeeklySessions]);
+
+  const [zoomMeetingRecords, setZoomMeetingRecords] = useState<ZoomMeetingRecord[]>(() => {
+    const raw = initialData['glueck_zoom_meeting_records_v1'];
+    return Array.isArray(raw) ? raw.map((x) => sanitizeZoomRecordForStorage(x as ZoomMeetingRecord)) : [];
+  });
+  const zoomMeetingRecordsRef = useRef<ZoomMeetingRecord[]>(zoomMeetingRecords);
+  useEffect(() => {
+    zoomMeetingRecordsRef.current = zoomMeetingRecords;
+    if (!isInitializedRef.current) return;
+    storage.setItem('glueck_zoom_meeting_records_v1', zoomMeetingRecords.map((x) => sanitizeZoomRecordForStorage(x)));
+  }, [zoomMeetingRecords]);
+
+  const [zoomMeetingHistory, setZoomMeetingHistory] = useState<ZoomMeetingHistory[]>(() => {
+    const raw = initialData['glueck_zoom_meeting_history_v1'];
+    return Array.isArray(raw) ? raw.map((x) => sanitizeZoomRecordForStorage(x as ZoomMeetingHistory)) : [];
+  });
+  const zoomMeetingHistoryRef = useRef<ZoomMeetingHistory[]>(zoomMeetingHistory);
+  useEffect(() => {
+    zoomMeetingHistoryRef.current = zoomMeetingHistory;
+    if (!isInitializedRef.current) return;
+    storage.setItem('glueck_zoom_meeting_history_v1', zoomMeetingHistory.map((x) => sanitizeZoomRecordForStorage(x)));
+  }, [zoomMeetingHistory]);
+
+  const [grainRecordingMatches, setGrainRecordingMatches] = useState<GrainRecordingMatch[]>(() => {
+    const raw = initialData['glueck_grain_recording_matches_v1'];
+    return Array.isArray(raw) ? raw.map((x) => sanitizeZoomRecordForStorage(x as GrainRecordingMatch)) : [];
+  });
+  useEffect(() => {
+    if (!isInitializedRef.current) return;
+    storage.setItem('glueck_grain_recording_matches_v1', grainRecordingMatches.map((x) => sanitizeZoomRecordForStorage(x)));
+  }, [grainRecordingMatches]);
+
+  const applyZoomWorkspaceSnapshot = useCallback((snapshot: {
+    sessions?: GroupWeeklySession[];
+    records?: ZoomMeetingRecord[];
+    history?: ZoomMeetingHistory[];
+    matches?: GrainRecordingMatch[];
+  }) => {
+    if (snapshot.sessions) {
+      const cleaned = snapshot.sessions.map((x) => sanitizeZoomRecordForStorage(x));
+      groupWeeklySessionsRef.current = cleaned;
+      setGroupWeeklySessions(cleaned);
+      storage.setItem('glueck_group_weekly_sessions_v1', cleaned);
+      autoSyncEngine.notifyMutation('groupWeeklySessions', 'bulk_zoom_update');
+    }
+    if (snapshot.records) {
+      const cleaned = snapshot.records.map((x) => sanitizeZoomRecordForStorage(x));
+      zoomMeetingRecordsRef.current = cleaned;
+      setZoomMeetingRecords(cleaned);
+      storage.setItem('glueck_zoom_meeting_records_v1', cleaned);
+      autoSyncEngine.notifyMutation('zoomMeetingRecords', 'bulk_zoom_update');
+    }
+    if (snapshot.history) {
+      const cleaned = snapshot.history.map((x) => sanitizeZoomRecordForStorage(x));
+      zoomMeetingHistoryRef.current = cleaned;
+      setZoomMeetingHistory(cleaned);
+      storage.setItem('glueck_zoom_meeting_history_v1', cleaned);
+      autoSyncEngine.notifyMutation('zoomMeetingHistory', 'bulk_zoom_update');
+    }
+    if (snapshot.matches) {
+      const cleaned = snapshot.matches.map((x) => sanitizeZoomRecordForStorage(x));
+      setGrainRecordingMatches(cleaned);
+      storage.setItem('glueck_grain_recording_matches_v1', cleaned);
+      autoSyncEngine.notifyMutation('grainRecordingMatches', 'bulk_zoom_update');
+    }
+    bumpSyncRevision();
+  }, []);
+
+  const reconcileGroupSessionsState = useCallback((group: Group) => {
+    const tz = profile.defaultZoomTimezone || loadZoomUiMeta().defaultTimezone || DEFAULT_ZOOM_TIMEZONE;
+    const rec = reconcileGroupWeeklySessions({
+      group,
+      existingSessions: groupWeeklySessionsRef.current,
+      timezone: tz
+    });
+    const cleanedSessions = rec.sessions.map((x) => sanitizeZoomRecordForStorage(x));
+    groupWeeklySessionsRef.current = cleanedSessions;
+    setGroupWeeklySessions(cleanedSessions);
+    storage.setItem('glueck_group_weekly_sessions_v1', cleanedSessions);
+    autoSyncEngine.notifyMutation('groupWeeklySessions', group.id);
+
+    if (rec.historyEntries.length > 0) {
+      const cleanedHistory = [...rec.historyEntries, ...zoomMeetingHistoryRef.current]
+        .slice(0, 2000)
+        .map((x) => sanitizeZoomRecordForStorage(x));
+      zoomMeetingHistoryRef.current = cleanedHistory;
+      setZoomMeetingHistory(cleanedHistory);
+      storage.setItem('glueck_zoom_meeting_history_v1', cleanedHistory);
+      autoSyncEngine.notifyMutation('zoomMeetingHistory', group.id);
+    }
+
+    const needsResyncCount = cleanedSessions.filter(
+      (s) => s.groupId === group.id && !s.deleted && s.syncState === 'needs_update'
+    ).length;
+
+    return {
+      sessions: cleanedSessions,
+      historyEntries: rec.historyEntries,
+      needsResyncCount
+    };
+  }, [profile.defaultZoomTimezone]);
+
   // Gold Price State
   const [latestGoldPrice, setLatestGoldPrice] = useState<GoldPriceResult | null>(null);
   const [isRefreshingGoldPrice, setIsRefreshingGoldPrice] = useState<boolean>(false);
@@ -2218,6 +2355,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       lessons: (fullLessonsRef.current && fullLessonsRef.current.length > 0) ? fullLessonsRef.current : lessons,
       schoolNotes,
       notifications,
+      groupWeeklySessions,
+      zoomMeetingRecords,
+      zoomMeetingHistory,
+      grainRecordingMatches,
       recentlyDeleted: recentlyDeletedRef.current
     };
     enforcePurgedTombstonesOnWorkspace(snap, initialPurged);
@@ -2243,6 +2384,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     if (snap.notifications.length !== notifications.length) {
       setNotifications(snap.notifications);
       storage.setItem('dl_notifications', snap.notifications);
+    }
+    if (snap.groupWeeklySessions.length !== groupWeeklySessions.length) {
+      groupWeeklySessionsRef.current = snap.groupWeeklySessions;
+      setGroupWeeklySessions(snap.groupWeeklySessions);
+      storage.setItem('glueck_group_weekly_sessions_v1', snap.groupWeeklySessions);
+    }
+    if (snap.zoomMeetingRecords.length !== zoomMeetingRecords.length) {
+      zoomMeetingRecordsRef.current = snap.zoomMeetingRecords;
+      setZoomMeetingRecords(snap.zoomMeetingRecords);
+      storage.setItem('glueck_zoom_meeting_records_v1', snap.zoomMeetingRecords);
+    }
+    if (snap.zoomMeetingHistory.length !== zoomMeetingHistory.length) {
+      zoomMeetingHistoryRef.current = snap.zoomMeetingHistory;
+      setZoomMeetingHistory(snap.zoomMeetingHistory);
+      storage.setItem('glueck_zoom_meeting_history_v1', snap.zoomMeetingHistory);
+    }
+    if (snap.grainRecordingMatches.length !== grainRecordingMatches.length) {
+      setGrainRecordingMatches(snap.grainRecordingMatches);
+      storage.setItem('glueck_grain_recording_matches_v1', snap.grainRecordingMatches);
     }
   }, []);
 
@@ -3130,6 +3290,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       id: `g_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
     } as Group);
     setGroups(prev => [...prev, newGroup]);
+    if (newGroup.type === 'online') {
+      reconcileGroupSessionsState(newGroup);
+    }
     autoSyncEngine.notifyMutation('groups', newGroup.id);
     return newGroup;
   };
@@ -3504,6 +3667,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return prev;
     });
 
+    if (updatedGroup.type === 'online' || groupWeeklySessionsRef.current.some((s) => s.groupId === id && !s.deleted)) {
+      reconcileGroupSessionsState(updatedGroup);
+    }
+
     autoSyncEngine.notifyMutation('groups', id);
     autoSyncEngine.notifyMutation('students', id);
     autoSyncEngine.notifyMutation('payments', id);
@@ -3526,6 +3693,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       });
     }
     setGroups(prev => prev.map(g => g.id === id ? wrapDeletion(g) : g));
+
+    // Soft-delete weekly Zoom sessions belonging to deleted group while preserving ZoomMeetingHistory for historical Grain lookup
+    if (groupWeeklySessionsRef.current.some((s) => s.groupId === id && !s.deleted)) {
+      const nextSessions = groupWeeklySessionsRef.current.map((s) =>
+        s.groupId === id ? sanitizeZoomRecordForStorage(wrapDeletion(s as any) as GroupWeeklySession) : s
+      );
+      groupWeeklySessionsRef.current = nextSessions;
+      setGroupWeeklySessions(nextSessions);
+      storage.setItem('glueck_group_weekly_sessions_v1', nextSessions);
+      autoSyncEngine.notifyMutation('groupWeeklySessions', id);
+    }
 
     // Remove group association safely for linked students while preserving student records
     setStudents(prev => prev.map(s => s.groupId === id ? wrapMutation({ ...s, groupId: '' } as Student) : s));
@@ -3606,6 +3784,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
 
     setGroups(prev => prev.map(g => g.id === id ? wrapDeletion(g) : g));
+    if (groupWeeklySessionsRef.current.some((s) => s.groupId === id && !s.deleted)) {
+      const nextSessions = groupWeeklySessionsRef.current.map((s) =>
+        s.groupId === id ? sanitizeZoomRecordForStorage(wrapDeletion(s as any) as GroupWeeklySession) : s
+      );
+      groupWeeklySessionsRef.current = nextSessions;
+      setGroupWeeklySessions(nextSessions);
+      storage.setItem('glueck_group_weekly_sessions_v1', nextSessions);
+      autoSyncEngine.notifyMutation('groupWeeklySessions', id);
+    }
     try {
       const records = loadGrainGroupLearningRecords();
       if (records.some((r) => r.groupId === id && !r.obsoleteGroup)) {
@@ -4732,6 +4919,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('gluck-ai-backgrounds-updated'));
         }
+      }
+      return filtered;
+    });
+
+    setGroupWeeklySessions(prev => {
+      const filtered = (prev || []).filter(s => s && s.id && !allPurgedIds.has(String(s.id).trim()) && (!s.groupId || !purgedGroupIds.has(s.groupId.trim())));
+      if (filtered.length !== (prev || []).length) {
+        groupWeeklySessionsRef.current = filtered;
+        storage.setItem('glueck_group_weekly_sessions_v1', filtered);
+      }
+      return filtered;
+    });
+
+    setZoomMeetingRecords(prev => {
+      const filtered = (prev || []).filter(r => r && r.id && !allPurgedIds.has(String(r.id).trim()) && (!r.groupId || !purgedGroupIds.has(r.groupId.trim())));
+      if (filtered.length !== (prev || []).length) {
+        zoomMeetingRecordsRef.current = filtered;
+        storage.setItem('glueck_zoom_meeting_records_v1', filtered);
+      }
+      return filtered;
+    });
+
+    setGrainRecordingMatches(prev => {
+      const filtered = (prev || []).filter(m => {
+        if (!m || !m.id || allPurgedIds.has(String(m.id).trim())) return false;
+        const lId = (m.matchedLessonId || m.lessonId || '').trim();
+        const gId = (m.matchedGroupId || m.groupId || '').trim();
+        return (!lId || !purgedLessonIds.has(lId)) && (!gId || !purgedGroupIds.has(gId));
+      });
+      if (filtered.length !== (prev || []).length) {
+        storage.setItem('glueck_grain_recording_matches_v1', filtered);
       }
       return filtered;
     });
@@ -6868,6 +7086,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       homeworkAssignments: hwAssignments,
       homeworkSubmissions: hwSubmissions,
       grainGroupLearningRecords: await loadGrainGroupLearningRecords(),
+      groupWeeklySessions: groupWeeklySessions.map((x) => sanitizeZoomRecordForStorage(x)),
+      zoomMeetingRecords: zoomMeetingRecords.map((x) => sanitizeZoomRecordForStorage(x)),
+      zoomMeetingHistory: zoomMeetingHistory.map((x) => sanitizeZoomRecordForStorage(x)),
+      grainRecordingMatches: grainRecordingMatches.map((x) => sanitizeZoomRecordForStorage(x)),
       pickerNames,
       recentlyDeleted: recDeleted,
       dismissedDashboardLessons: dismissedLessons,
@@ -7407,6 +7629,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         }).merged;
         await saveGrainGroupLearningRecords(mergedLearning as any[]);
       }
+      if (hasBackupSection(parsed, 'groupWeeklySessions') && Array.isArray((data as any).groupWeeklySessions)) {
+        const incomingSessions = ((data as any).groupWeeklySessions as any[]).map((x) => sanitizeZoomRecordForStorage(x));
+        const mergedSessions = groupWeeklySessionsRef.current.length > 0
+          ? mergeEntities(groupWeeklySessionsRef.current as any[], incomingSessions, { entityTypeName: 'groupWeeklySessions', purgedRecords: activePurged }).merged
+          : incomingSessions;
+        const cleaned = mergedSessions.map((x) => sanitizeZoomRecordForStorage(x as GroupWeeklySession));
+        groupWeeklySessionsRef.current = cleaned;
+        setGroupWeeklySessions(cleaned);
+        await writeAndTrack('glueck_group_weekly_sessions_v1', cleaned);
+      }
+      if (hasBackupSection(parsed, 'zoomMeetingRecords') && Array.isArray((data as any).zoomMeetingRecords)) {
+        const incomingRecords = ((data as any).zoomMeetingRecords as any[]).map((x) => sanitizeZoomRecordForStorage(x));
+        const mergedRecords = zoomMeetingRecordsRef.current.length > 0
+          ? mergeEntities(zoomMeetingRecordsRef.current as any[], incomingRecords, { entityTypeName: 'zoomMeetingRecords', purgedRecords: activePurged }).merged
+          : incomingRecords;
+        const cleaned = mergedRecords.map((x) => sanitizeZoomRecordForStorage(x as ZoomMeetingRecord));
+        zoomMeetingRecordsRef.current = cleaned;
+        setZoomMeetingRecords(cleaned);
+        await writeAndTrack('glueck_zoom_meeting_records_v1', cleaned);
+      }
+      if (hasBackupSection(parsed, 'zoomMeetingHistory') && Array.isArray((data as any).zoomMeetingHistory)) {
+        const incomingHistory = ((data as any).zoomMeetingHistory as any[]).map((x) => sanitizeZoomRecordForStorage(x));
+        const mergedHistory = zoomMeetingHistoryRef.current.length > 0
+          ? mergeEntities(zoomMeetingHistoryRef.current as any[], incomingHistory, { entityTypeName: 'zoomMeetingHistory', purgedRecords: activePurged }).merged
+          : incomingHistory;
+        const cleaned = mergedHistory.map((x) => sanitizeZoomRecordForStorage(x as ZoomMeetingHistory));
+        zoomMeetingHistoryRef.current = cleaned;
+        setZoomMeetingHistory(cleaned);
+        await writeAndTrack('glueck_zoom_meeting_history_v1', cleaned);
+      }
+      if (hasBackupSection(parsed, 'grainRecordingMatches') && Array.isArray((data as any).grainRecordingMatches)) {
+        const incomingMatches = ((data as any).grainRecordingMatches as any[]).map((x) => sanitizeZoomRecordForStorage(x));
+        const mergedMatches = grainRecordingMatches.length > 0
+          ? mergeEntities(grainRecordingMatches as any[], incomingMatches, { entityTypeName: 'grainRecordingMatches', purgedRecords: activePurged }).merged
+          : incomingMatches;
+        const cleaned = mergedMatches.map((x) => sanitizeZoomRecordForStorage(x as GrainRecordingMatch));
+        setGrainRecordingMatches(cleaned);
+        await writeAndTrack('glueck_grain_recording_matches_v1', cleaned);
+      }
 
       // Reconcile and safeguard synchronization metadata
       const reconciledState = await applyRestoreSyncSafeguards(
@@ -7594,6 +7855,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       goldHoldings,
       lernstudioSets,
       grainGroupLearningRecords: await loadGrainGroupLearningRecords(),
+      groupWeeklySessions: groupWeeklySessions.map((x) => sanitizeZoomRecordForStorage(x)),
+      zoomMeetingRecords: zoomMeetingRecords.map((x) => sanitizeZoomRecordForStorage(x)),
+      zoomMeetingHistory: zoomMeetingHistory.map((x) => sanitizeZoomRecordForStorage(x)),
+      grainRecordingMatches: grainRecordingMatches.map((x) => sanitizeZoomRecordForStorage(x)),
       recentlyDeleted: recentlyDeletedRef.current || recentlyDeleted,
       dismissedDashboardLessons: dismissedDashboardLessonIds,
       syncQueue: [],
@@ -7979,7 +8244,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     financeInstallments,
     financeNotifications,
     goldHoldings,
-    lernstudioSets
+    lernstudioSets,
+    groupWeeklySessions,
+    zoomMeetingRecords,
+    zoomMeetingHistory,
+    grainRecordingMatches
   });
   useEffect(() => {
     localDataRef.current = { 
@@ -8004,9 +8273,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       financeInstallments,
       financeNotifications,
       goldHoldings,
-      lernstudioSets
+      lernstudioSets,
+      groupWeeklySessions: groupWeeklySessions.map((x) => sanitizeZoomRecordForStorage(x)),
+      zoomMeetingRecords: zoomMeetingRecords.map((x) => sanitizeZoomRecordForStorage(x)),
+      zoomMeetingHistory: zoomMeetingHistory.map((x) => sanitizeZoomRecordForStorage(x)),
+      grainRecordingMatches: grainRecordingMatches.map((x) => sanitizeZoomRecordForStorage(x))
     };
-  }, [groups, students, lessons, payments, notifications, todos, certificates, customAiBackgrounds, teacherSettingsRecord, hodStudents, hodComplaints, hodActionPlans, hodVisits, schoolNotes, financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments, financeNotifications, goldHoldings, lernstudioSets]);
+  }, [groups, students, lessons, payments, notifications, todos, certificates, customAiBackgrounds, teacherSettingsRecord, hodStudents, hodComplaints, hodActionPlans, hodVisits, schoolNotes, financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments, financeNotifications, goldHoldings, lernstudioSets, groupWeeklySessions, zoomMeetingRecords, zoomMeetingHistory, grainRecordingMatches]);
 
   // Notify P2P auto-sync engine whenever local homework assignments or submissions mutate
   useEffect(() => {
@@ -8327,6 +8600,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           setLernstudioSets(finalSets);
           break;
         }
+        case 'groupWeeklySessions': {
+          const cleaned = (Array.isArray(data) ? data : []).map((x) => sanitizeZoomRecordForStorage(x as GroupWeeklySession));
+          groupWeeklySessionsRef.current = cleaned;
+          setGroupWeeklySessions(cleaned);
+          await storage.setItem('glueck_group_weekly_sessions_v1', cleaned);
+          break;
+        }
+        case 'zoomMeetingRecords': {
+          const cleaned = (Array.isArray(data) ? data : []).map((x) => sanitizeZoomRecordForStorage(x as ZoomMeetingRecord));
+          zoomMeetingRecordsRef.current = cleaned;
+          setZoomMeetingRecords(cleaned);
+          await storage.setItem('glueck_zoom_meeting_records_v1', cleaned);
+          break;
+        }
+        case 'zoomMeetingHistory': {
+          const cleaned = (Array.isArray(data) ? data : []).map((x) => sanitizeZoomRecordForStorage(x as ZoomMeetingHistory));
+          zoomMeetingHistoryRef.current = cleaned;
+          setZoomMeetingHistory(cleaned);
+          await storage.setItem('glueck_zoom_meeting_history_v1', cleaned);
+          break;
+        }
+        case 'grainRecordingMatches': {
+          const cleaned = (Array.isArray(data) ? data : []).map((x) => sanitizeZoomRecordForStorage(x as GrainRecordingMatch));
+          setGrainRecordingMatches(cleaned);
+          await storage.setItem('glueck_grain_recording_matches_v1', cleaned);
+          break;
+        }
         case 'settings': {
           if (Array.isArray(data) && data.length > 0) {
             const incoming = data[0] as TeacherSettingsRecord;
@@ -8536,6 +8836,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const activeFinanceRecurring = useMemo(() => getActiveRecords(financeRecurring || []), [financeRecurring]);
   const activeFinanceInstallments = useMemo(() => getActiveRecords(financeInstallments || []), [financeInstallments]);
   const activeFinanceNotifications = useMemo(() => getActiveRecords(financeNotifications || []), [financeNotifications]);
+  const activeGroupWeeklySessions = useMemo(() => getActiveRecords(groupWeeklySessions || []), [groupWeeklySessions]);
+  const activeZoomMeetingRecords = useMemo(() => getActiveRecords(zoomMeetingRecords || []), [zoomMeetingRecords]);
+  const activeZoomMeetingHistory = useMemo(() => getActiveRecords(zoomMeetingHistory || []), [zoomMeetingHistory]);
+  const activeGrainRecordingMatches = useMemo(() => getActiveRecords(grainRecordingMatches || []), [grainRecordingMatches]);
 
   return (
     <AppContext.Provider
@@ -8788,7 +9092,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         updateSyncState: syncDataSource.updateSyncState,
         startHosting,
         externalDataVersion,
-        bumpExternalDataVersion
+        bumpExternalDataVersion,
+        groupWeeklySessions: activeGroupWeeklySessions,
+        setGroupWeeklySessions,
+        zoomMeetingRecords: activeZoomMeetingRecords,
+        setZoomMeetingRecords,
+        zoomMeetingHistory: activeZoomMeetingHistory,
+        setZoomMeetingHistory,
+        grainRecordingMatches: activeGrainRecordingMatches,
+        setGrainRecordingMatches,
+        applyZoomWorkspaceSnapshot,
+        reconcileGroupSessionsState
       }}
     >
       {children}

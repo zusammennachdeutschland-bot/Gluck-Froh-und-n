@@ -1,0 +1,1294 @@
+import {
+  Group,
+  GroupWeeklySession,
+  ZoomMeetingRecord,
+  ZoomMeetingHistory,
+  ZoomHistoryAction,
+  GrainRecordingMatch
+} from '../types';
+import { auth } from '../shared/firebaseCloudSync';
+import {
+  DEFAULT_ZOOM_TIMEZONE,
+  buildZoomMeetingRecordFromSession,
+  computeNextSessionStartWallTime,
+  extractNumericZoomMeetingId,
+  normalizeCanonicalZoomJoinUrl,
+  reconcileGroupWeeklySessions,
+  toZoomWeeklyDayNumber
+} from './zoomSessionStandardizer';
+import { storage } from './storageService';
+
+export interface ZoomUiMetaState {
+  defaultTimezone: string;
+  connected: boolean;
+  hasCredentials: boolean;
+  maskedAccountId: string | null;
+  maskedClientId: string | null;
+  planType: 'basic' | 'licensed' | 'unknown';
+  isBasicPlan: boolean;
+  maxMeetingMinutes: number | null;
+  hostEmail: string | null;
+  lastTestedAt: string | null;
+  lastMigrationAt: string | null;
+  lastError: string | null;
+}
+
+export interface ZoomMigrationPreviewItem {
+  sessionId: string;
+  sessionCode: string;
+  groupId: string;
+  groupName: string;
+  weekdayName: string;
+  startTime: string;
+  durationMinutes: number;
+  standardizedTitle: string;
+  action:
+    | 'create_new'
+    | 'replace_manual_with_standardized'
+    | 'update_standardized'
+    | 'already_standardized';
+  previousZoomUrl?: string;
+  previousZoomMeetingId?: string;
+  willArchivePrevious: boolean;
+  planWarning40Min: boolean;
+}
+
+export interface ZoomMigrationPreviewSummary {
+  totalOnlineGroups: number;
+  groupsMissingSchedule: Array<{ groupId: string; groupName: string }>;
+  items: ZoomMigrationPreviewItem[];
+  counts: {
+    createNew: number;
+    replaceManual: number;
+    updateStandardized: number;
+    alreadyStandardized: number;
+    willArchivePrevious: number;
+    planWarningCount: number;
+  };
+  reconciledSessions: GroupWeeklySession[];
+  reconciledHistory: ZoomMeetingHistory[];
+}
+
+export interface ZoomBulkMigrationProgress {
+  completed: number;
+  total: number;
+  currentSessionId?: string;
+  currentTitle?: string;
+  succeeded: number;
+  skipped: number;
+  failed: number;
+  rateLimited: boolean;
+}
+
+export interface ZoomBulkMigrationResult {
+  completed: boolean;
+  aborted: boolean;
+  rateLimited: boolean;
+  succeededCount: number;
+  skippedCount: number;
+  failedCount: number;
+  archivedPreviousCount: number;
+  sessions: GroupWeeklySession[];
+  records: ZoomMeetingRecord[];
+  history: ZoomMeetingHistory[];
+  errors: Array<{ sessionId: string; title: string; error: string }>;
+  processedSessionIds: string[];
+}
+
+export const ZOOM_UI_META_STORAGE_KEY = 'glueck_zoom_ui_meta_v1';
+export const GROUP_WEEKLY_SESSIONS_STORAGE_KEY = 'glueck_group_weekly_sessions_v1';
+export const ZOOM_MEETING_RECORDS_STORAGE_KEY = 'glueck_zoom_meeting_records_v1';
+export const ZOOM_MEETING_HISTORY_STORAGE_KEY = 'glueck_zoom_meeting_history_v1';
+export const GRAIN_RECORDING_MATCHES_STORAGE_KEY = 'glueck_grain_recording_matches_v1';
+
+// Strictly in-memory session token & test hook (never persisted)
+let cachedZoomLoopbackSessionToken: string | null = null;
+let inMemorySessionsFallback: GroupWeeklySession[] = [];
+let inMemoryRecordsFallback: ZoomMeetingRecord[] = [];
+let inMemoryHistoryFallback: ZoomMeetingHistory[] = [];
+let inMemoryMatchesFallback: GrainRecordingMatch[] = [];
+
+export type ZoomProxyFetchFn = (url: string, init?: RequestInit) => Promise<{
+  ok: boolean;
+  status: number;
+  json: () => Promise<any>;
+  headers?: { get: (k: string) => string | null };
+}>;
+
+let customZoomProxyFetchForTesting: ZoomProxyFetchFn | null = null;
+let inMemoryZoomUiMetaFallback: ZoomUiMetaState | null = null;
+
+export function __setZoomProxyFetchForTesting(fn: ZoomProxyFetchFn | null): void {
+  customZoomProxyFetchForTesting = fn;
+}
+
+export function __resetZoomServiceMemoryForTesting(): void {
+  cachedZoomLoopbackSessionToken = null;
+  inMemoryZoomUiMetaFallback = null;
+  inMemorySessionsFallback = [];
+  inMemoryRecordsFallback = [];
+  inMemoryHistoryFallback = [];
+  inMemoryMatchesFallback = [];
+}
+
+/**
+ * Strips any accidental Zoom secrets, OAuth tokens, or short-lived zak start_url strings.
+ */
+export function redactZoomSecrets(input: unknown): string {
+  const raw = typeof input === 'string' ? input : String((input as any)?.message || input || '');
+  return raw
+    .replace(/([?&]zak=)[^&\s"']+/gi, '$1[REDACTED]')
+    .replace(/(Bearer\s+)[a-zA-Z0-9._-]+/gi, '$1[REDACTED]')
+    .replace(/(client_?secret["':=\s]+)[^\s"',}]+/gi, '$1[REDACTED]');
+}
+
+export function getDefaultZoomUiMeta(): ZoomUiMetaState {
+  return {
+    defaultTimezone: DEFAULT_ZOOM_TIMEZONE,
+    connected: false,
+    hasCredentials: false,
+    maskedAccountId: null,
+    maskedClientId: null,
+    planType: 'unknown',
+    isBasicPlan: false,
+    maxMeetingMinutes: null,
+    hostEmail: null,
+    lastTestedAt: null,
+    lastMigrationAt: null,
+    lastError: null
+  };
+}
+
+export function loadZoomUiMeta(): ZoomUiMetaState {
+  const base = getDefaultZoomUiMeta();
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+    return inMemoryZoomUiMetaFallback ? { ...inMemoryZoomUiMetaFallback } : base;
+  }
+  try {
+    const raw = localStorage.getItem(ZOOM_UI_META_STORAGE_KEY);
+    if (!raw) return base;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return base;
+    return {
+      ...base,
+      defaultTimezone: typeof parsed.defaultTimezone === 'string' && parsed.defaultTimezone.trim()
+        ? parsed.defaultTimezone.trim()
+        : DEFAULT_ZOOM_TIMEZONE,
+      connected: Boolean(parsed.connected),
+      hasCredentials: Boolean(parsed.hasCredentials),
+      maskedAccountId: typeof parsed.maskedAccountId === 'string' ? redactZoomSecrets(parsed.maskedAccountId) : null,
+      maskedClientId: typeof parsed.maskedClientId === 'string' ? redactZoomSecrets(parsed.maskedClientId) : null,
+      planType: parsed.planType === 'basic' || parsed.planType === 'licensed' ? parsed.planType : 'unknown',
+      isBasicPlan: Boolean(parsed.isBasicPlan),
+      maxMeetingMinutes: typeof parsed.maxMeetingMinutes === 'number' ? parsed.maxMeetingMinutes : null,
+      hostEmail: typeof parsed.hostEmail === 'string' ? parsed.hostEmail : null,
+      lastTestedAt: typeof parsed.lastTestedAt === 'string' ? parsed.lastTestedAt : null,
+      lastMigrationAt: typeof parsed.lastMigrationAt === 'string' ? parsed.lastMigrationAt : null,
+      lastError: typeof parsed.lastError === 'string' ? redactZoomSecrets(parsed.lastError) : null
+    };
+  } catch {
+    return base;
+  }
+}
+
+export function saveZoomUiMeta(patch: Partial<ZoomUiMetaState>): ZoomUiMetaState {
+  const current = loadZoomUiMeta();
+  const next: ZoomUiMetaState = {
+    ...current,
+    ...patch,
+    defaultTimezone: (patch.defaultTimezone !== undefined ? patch.defaultTimezone : current.defaultTimezone) || DEFAULT_ZOOM_TIMEZONE,
+    lastError: patch.lastError !== undefined ? (patch.lastError ? redactZoomSecrets(patch.lastError) : null) : current.lastError
+  };
+
+  inMemoryZoomUiMetaFallback = { ...next };
+
+  if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+    try {
+      // Strictly non-secret metadata only
+      const safeMeta: ZoomUiMetaState = {
+        defaultTimezone: next.defaultTimezone,
+        connected: next.connected,
+        hasCredentials: next.hasCredentials,
+        maskedAccountId: next.maskedAccountId,
+        maskedClientId: next.maskedClientId,
+        planType: next.planType,
+        isBasicPlan: next.isBasicPlan,
+        maxMeetingMinutes: next.maxMeetingMinutes,
+        hostEmail: next.hostEmail,
+        lastTestedAt: next.lastTestedAt,
+        lastMigrationAt: next.lastMigrationAt,
+        lastError: next.lastError
+      };
+      localStorage.setItem(ZOOM_UI_META_STORAGE_KEY, JSON.stringify(safeMeta));
+    } catch {
+      // Ignore storage error
+    }
+  }
+  return next;
+}
+
+export function sanitizeZoomRecordForStorage<T>(item: T): T {
+  if (!item || typeof item !== 'object') return item;
+  const clone: Record<string, any> = {};
+  const forbidden = new Set([
+    'startUrl',
+    'start_url',
+    'zoomClientSecret',
+    'clientSecret',
+    'zoomAccessToken',
+    'accessToken',
+    'zoomAccountId',
+    'accountId',
+    'clientId',
+    'zak',
+    'transcript',
+    'rawTranscript',
+    'transcriptText',
+    'plainText',
+    'grainApiToken'
+  ]);
+  for (const [k, v] of Object.entries(item as Record<string, any>)) {
+    if (forbidden.has(k)) continue;
+    if (typeof v === 'string') {
+      clone[k] = redactZoomSecrets(v);
+    } else if (v && typeof v === 'object' && !Array.isArray(v)) {
+      clone[k] = sanitizeZoomRecordForStorage(v);
+    } else {
+      clone[k] = v;
+    }
+  }
+  return clone as T;
+}
+
+export async function loadGroupWeeklySessions(): Promise<GroupWeeklySession[]> {
+  if (typeof window === 'undefined') return inMemorySessionsFallback;
+  try {
+    const raw = await storage.getItem(GROUP_WEEKLY_SESSIONS_STORAGE_KEY);
+    if (Array.isArray(raw)) {
+      inMemorySessionsFallback = raw.map(sanitizeZoomRecordForStorage);
+      return inMemorySessionsFallback;
+    }
+  } catch {
+    // fallback below
+  }
+  return inMemorySessionsFallback;
+}
+
+export async function saveGroupWeeklySessions(items: GroupWeeklySession[]): Promise<GroupWeeklySession[]> {
+  const clean = (Array.isArray(items) ? items : []).map(sanitizeZoomRecordForStorage);
+  inMemorySessionsFallback = clean;
+  if (typeof window !== 'undefined') {
+    try {
+      await storage.setItem(GROUP_WEEKLY_SESSIONS_STORAGE_KEY, clean);
+    } catch {}
+  }
+  return clean;
+}
+
+export async function loadZoomMeetingRecords(): Promise<ZoomMeetingRecord[]> {
+  if (typeof window === 'undefined') return inMemoryRecordsFallback;
+  try {
+    const raw = await storage.getItem(ZOOM_MEETING_RECORDS_STORAGE_KEY);
+    if (Array.isArray(raw)) {
+      inMemoryRecordsFallback = raw.map(sanitizeZoomRecordForStorage);
+      return inMemoryRecordsFallback;
+    }
+  } catch {}
+  return inMemoryRecordsFallback;
+}
+
+export async function saveZoomMeetingRecords(items: ZoomMeetingRecord[]): Promise<ZoomMeetingRecord[]> {
+  const clean = (Array.isArray(items) ? items : []).map(sanitizeZoomRecordForStorage);
+  inMemoryRecordsFallback = clean;
+  if (typeof window !== 'undefined') {
+    try {
+      await storage.setItem(ZOOM_MEETING_RECORDS_STORAGE_KEY, clean);
+    } catch {}
+  }
+  return clean;
+}
+
+export async function loadZoomMeetingHistory(): Promise<ZoomMeetingHistory[]> {
+  if (typeof window === 'undefined') return inMemoryHistoryFallback;
+  try {
+    const raw = await storage.getItem(ZOOM_MEETING_HISTORY_STORAGE_KEY);
+    if (Array.isArray(raw)) {
+      inMemoryHistoryFallback = raw.map(sanitizeZoomRecordForStorage);
+      return inMemoryHistoryFallback;
+    }
+  } catch {}
+  return inMemoryHistoryFallback;
+}
+
+export async function saveZoomMeetingHistory(items: ZoomMeetingHistory[]): Promise<ZoomMeetingHistory[]> {
+  const clean = (Array.isArray(items) ? items : []).map(sanitizeZoomRecordForStorage);
+  inMemoryHistoryFallback = clean;
+  if (typeof window !== 'undefined') {
+    try {
+      await storage.setItem(ZOOM_MEETING_HISTORY_STORAGE_KEY, clean);
+    } catch {}
+  }
+  return clean;
+}
+
+export async function loadGrainRecordingMatches(): Promise<GrainRecordingMatch[]> {
+  if (typeof window === 'undefined') return inMemoryMatchesFallback;
+  try {
+    const raw = await storage.getItem(GRAIN_RECORDING_MATCHES_STORAGE_KEY);
+    if (Array.isArray(raw)) {
+      inMemoryMatchesFallback = raw.map(sanitizeZoomRecordForStorage);
+      return inMemoryMatchesFallback;
+    }
+  } catch {}
+  return inMemoryMatchesFallback;
+}
+
+export async function saveGrainRecordingMatches(items: GrainRecordingMatch[]): Promise<GrainRecordingMatch[]> {
+  const clean = (Array.isArray(items) ? items : []).map(sanitizeZoomRecordForStorage);
+  inMemoryMatchesFallback = clean;
+  if (typeof window !== 'undefined') {
+    try {
+      await storage.setItem(GRAIN_RECORDING_MATCHES_STORAGE_KEY, clean);
+    } catch {}
+  }
+  return clean;
+}
+
+async function performProxyFetch(url: string, init?: RequestInit) {
+  if (customZoomProxyFetchForTesting) {
+    return customZoomProxyFetchForTesting(url, init);
+  }
+  if (typeof fetch !== 'function') {
+    throw new Error('Fetch API is unavailable in this runtime.');
+  }
+  return fetch(url, init);
+}
+
+async function buildZoomProxyAuthHeaders(forceRefreshSession = false): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Zoom-Local-Client': 'glueck-web'
+  };
+
+  try {
+    const currentUser = auth?.currentUser;
+    if (currentUser && typeof currentUser.getIdToken === 'function') {
+      const idToken = await currentUser.getIdToken();
+      if (idToken) {
+        headers['Authorization'] = `Bearer ${idToken}`;
+        return headers;
+      }
+    }
+  } catch {
+    // Fall back to loopback teacher session
+  }
+
+  if (forceRefreshSession) {
+    cachedZoomLoopbackSessionToken = null;
+  }
+
+  if (!cachedZoomLoopbackSessionToken) {
+    try {
+      const sessRes = await performProxyFetch('/api/zoom/session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Zoom-Local-Client': 'glueck-web'
+        },
+        body: JSON.stringify({ deviceId: 'local_teacher' })
+      });
+      if (sessRes.ok) {
+        const parsed = await sessRes.json();
+        if (parsed && typeof parsed.sessionToken === 'string') {
+          cachedZoomLoopbackSessionToken = parsed.sessionToken;
+        }
+      }
+    } catch {
+      // Proxy may be unreachable when offline
+    }
+  }
+
+  if (cachedZoomLoopbackSessionToken) {
+    headers['X-Zoom-Session-Token'] = cachedZoomLoopbackSessionToken;
+  }
+
+  return headers;
+}
+
+async function callZoomProxyJson(
+  path: string,
+  init: RequestInit = {}
+): Promise<{
+  ok: boolean;
+  status: number;
+  code?: string;
+  data?: any;
+  error?: string;
+  retryAfterSeconds?: number;
+}> {
+  try {
+    let headers = await buildZoomProxyAuthHeaders(false);
+    let res = await performProxyFetch(path, {
+      ...init,
+      headers: {
+        ...headers,
+        ...(init.headers || {})
+      }
+    });
+
+    if (res.status === 401 && !headers['Authorization']) {
+      headers = await buildZoomProxyAuthHeaders(true);
+      res = await performProxyFetch(path, {
+        ...init,
+        headers: {
+          ...headers,
+          ...(init.headers || {})
+        }
+      });
+    }
+
+    let parsed: any = null;
+    try {
+      parsed = await res.json();
+    } catch {
+      parsed = null;
+    }
+
+    if (!res.ok) {
+      const retryHeader = res.headers?.get?.('Retry-After');
+      return {
+        ok: false,
+        status: res.status,
+        code: parsed?.code || (res.status === 429 ? 'RATE_LIMITED' : 'ZOOM_PROXY_ERROR'),
+        data: parsed,
+        error: redactZoomSecrets(parsed?.error || `Zoom request failed (HTTP ${res.status})`),
+        retryAfterSeconds: retryHeader ? Number(retryHeader) || 30 : undefined
+      };
+    }
+
+    return { ok: true, status: res.status, data: parsed };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 0,
+      code: 'NETWORK_ERROR',
+      error: redactZoomSecrets(err?.message || 'Unable to reach Zoom backend proxy.')
+    };
+  }
+}
+
+export async function getZoomConnectionStatus(): Promise<ZoomUiMetaState> {
+  const res = await callZoomProxyJson('/api/zoom/status', { method: 'GET' });
+  if (!res.ok || !res.data) {
+    return loadZoomUiMeta();
+  }
+  const d = res.data;
+  return saveZoomUiMeta({
+    hasCredentials: Boolean(d.hasCredentials),
+    connected: Boolean(d.hasCredentials),
+    maskedAccountId: d.maskedAccountId || null,
+    maskedClientId: d.maskedClientId || null,
+    defaultTimezone: d.defaultTimezone || loadZoomUiMeta().defaultTimezone || DEFAULT_ZOOM_TIMEZONE,
+    planType: d.planType || 'unknown',
+    isBasicPlan: Boolean(d.isBasicPlan),
+    maxMeetingMinutes: typeof d.maxMeetingMinutes === 'number' ? d.maxMeetingMinutes : null,
+    hostEmail: d.hostEmail || null
+  });
+}
+
+export async function connectZoomAccount(params: {
+  accountId: string;
+  clientId: string;
+  clientSecret: string;
+  defaultTimezone?: string;
+}): Promise<{ ok: boolean; state: ZoomUiMetaState; error?: string }> {
+  const res = await callZoomProxyJson('/api/zoom/connect', {
+    method: 'POST',
+    body: JSON.stringify({
+      accountId: params.accountId.trim(),
+      clientId: params.clientId.trim(),
+      clientSecret: params.clientSecret.trim(),
+      defaultTimezone: params.defaultTimezone?.trim() || loadZoomUiMeta().defaultTimezone || DEFAULT_ZOOM_TIMEZONE
+    })
+  });
+
+  if (!res.ok || !res.data?.saved) {
+    const state = saveZoomUiMeta({
+      connected: false,
+      lastError: res.error || 'Failed to connect Zoom Server-to-Server OAuth app.'
+    });
+    return { ok: false, state, error: state.lastError || undefined };
+  }
+
+  const d = res.data;
+  const state = saveZoomUiMeta({
+    connected: true,
+    hasCredentials: true,
+    maskedAccountId: d.maskedAccountId || null,
+    maskedClientId: d.maskedClientId || null,
+    defaultTimezone: d.defaultTimezone || DEFAULT_ZOOM_TIMEZONE,
+    planType: d.planType || 'unknown',
+    isBasicPlan: Boolean(d.isBasicPlan),
+    maxMeetingMinutes: typeof d.maxMeetingMinutes === 'number' ? d.maxMeetingMinutes : null,
+    hostEmail: d.hostEmail || null,
+    lastTestedAt: new Date().toISOString(),
+    lastError: null
+  });
+  return { ok: true, state };
+}
+
+export async function testZoomConnection(): Promise<{ ok: boolean; state: ZoomUiMetaState; error?: string }> {
+  const res = await callZoomProxyJson('/api/zoom/test-connection', { method: 'POST', body: '{}' });
+  if (!res.ok || !res.data?.connected) {
+    const state = saveZoomUiMeta({
+      connected: false,
+      lastTestedAt: new Date().toISOString(),
+      lastError: res.error || res.data?.error || 'Zoom connection test failed.'
+    });
+    return { ok: false, state, error: state.lastError || undefined };
+  }
+  const d = res.data;
+  const state = saveZoomUiMeta({
+    connected: true,
+    hasCredentials: true,
+    planType: d.planType || 'unknown',
+    isBasicPlan: Boolean(d.isBasicPlan),
+    maxMeetingMinutes: typeof d.maxMeetingMinutes === 'number' ? d.maxMeetingMinutes : null,
+    hostEmail: d.hostEmail || null,
+    defaultTimezone: d.defaultTimezone || loadZoomUiMeta().defaultTimezone,
+    lastTestedAt: new Date().toISOString(),
+    lastError: d.profileCheckWarning || null
+  });
+  return { ok: true, state };
+}
+
+export async function updateZoomDefaultTimezone(defaultTimezone: string): Promise<{ ok: boolean; state: ZoomUiMetaState; error?: string }> {
+  const cleanTz = defaultTimezone.trim() || DEFAULT_ZOOM_TIMEZONE;
+  const res = await callZoomProxyJson('/api/zoom/settings', {
+    method: 'PATCH',
+    body: JSON.stringify({ defaultTimezone: cleanTz })
+  });
+  const state = saveZoomUiMeta({ defaultTimezone: cleanTz });
+  if (!res.ok) {
+    return { ok: false, state, error: res.error };
+  }
+  return { ok: true, state };
+}
+
+export async function disconnectZoomAccount(): Promise<ZoomUiMetaState> {
+  await callZoomProxyJson('/api/zoom/disconnect', { method: 'POST', body: '{}' });
+  cachedZoomLoopbackSessionToken = null;
+  return saveZoomUiMeta({
+    connected: false,
+    hasCredentials: false,
+    maskedAccountId: null,
+    maskedClientId: null,
+    planType: 'unknown',
+    isBasicPlan: false,
+    maxMeetingMinutes: null,
+    hostEmail: null,
+    lastError: null
+  });
+}
+
+export async function fetchHostStartUrlForSession(
+  zoomMeetingId: string
+): Promise<{ ok: boolean; startUrl?: string; joinUrl?: string; exists?: boolean; error?: string }> {
+  const cleanId = extractNumericZoomMeetingId(zoomMeetingId);
+  if (!cleanId) {
+    return { ok: false, error: 'Invalid numeric Zoom Meeting ID.' };
+  }
+  const res = await callZoomProxyJson(`/api/zoom/meetings/${encodeURIComponent(cleanId)}`, {
+    method: 'GET'
+  });
+  if (!res.ok) {
+    return {
+      ok: false,
+      exists: res.status !== 404,
+      error: res.error || 'Could not retrieve fresh host start link.'
+    };
+  }
+  return {
+    ok: true,
+    exists: true,
+    startUrl: typeof res.data?.startUrl === 'string' ? res.data.startUrl : undefined,
+    joinUrl: typeof res.data?.joinUrl === 'string' ? res.data.joinUrl : undefined
+  };
+}
+
+export function appendZoomHistoryEntry(
+  history: ZoomMeetingHistory[],
+  params: {
+    session: GroupWeeklySession;
+    action: ZoomHistoryAction;
+    previousZoomMeetingId?: string;
+    previousJoinUrl?: string;
+    previousTopic?: string;
+    newZoomMeetingId?: string;
+    newJoinUrl?: string;
+    newTopic?: string;
+    reason?: string;
+    deviceId?: string;
+    nowMs?: number;
+  }
+): ZoomMeetingHistory[] {
+  const nowMs = params.nowMs || Date.now();
+  const entry: ZoomMeetingHistory = {
+    id: `zmh_${params.session.id}_${nowMs}_${Math.random().toString(36).slice(2, 6)}`,
+    sessionId: params.session.id,
+    groupId: params.session.groupId,
+    action: params.action,
+    previousZoomMeetingId: params.previousZoomMeetingId,
+    previousJoinUrl: params.previousJoinUrl ? redactZoomSecrets(params.previousJoinUrl) : undefined,
+    previousTopic: params.previousTopic,
+    newZoomMeetingId: params.newZoomMeetingId,
+    newJoinUrl: params.newJoinUrl ? redactZoomSecrets(params.newJoinUrl) : undefined,
+    newTopic: params.newTopic,
+    reason: params.reason,
+    recordedAt: new Date(nowMs).toISOString(),
+    updatedAt: nowMs,
+    originDeviceId: params.deviceId || 'local_device',
+    originRevision: 1,
+    deleted: false
+  };
+  return [entry, ...(history || [])].slice(0, 2000);
+}
+
+/**
+ * Sets a manual Zoom fallback URL on a weekly session while archiving any previous meeting ID/URL cleanly.
+ */
+export function setManualZoomLinkForSession(params: {
+  session: GroupWeeklySession;
+  manualUrl: string;
+  sessions: GroupWeeklySession[];
+  records: ZoomMeetingRecord[];
+  history: ZoomMeetingHistory[];
+  reason?: string;
+}): {
+  ok: boolean;
+  error?: string;
+  updatedSession?: GroupWeeklySession;
+  sessions: GroupWeeklySession[];
+  records: ZoomMeetingRecord[];
+  history: ZoomMeetingHistory[];
+} {
+  const parsed = normalizeCanonicalZoomJoinUrl(params.manualUrl);
+  const trimmedRaw = String(params.manualUrl || '').trim();
+  if (!parsed.valid || !parsed.canonicalUrl) {
+    return {
+      ok: false,
+      error: 'Please enter a valid Zoom meeting link (e.g. https://zoom.us/j/...).',
+      sessions: params.sessions,
+      records: params.records,
+      history: params.history
+    };
+  }
+
+  const nowMs = Date.now();
+  const prevUrl = params.session.zoomJoinUrl || params.session.manualFallbackUrl;
+  const prevId = params.session.zoomMeetingId;
+
+  let nextHistory = params.history;
+  if (prevUrl || prevId) {
+    nextHistory = appendZoomHistoryEntry(nextHistory, {
+      session: params.session,
+      action: 'manual_override',
+      previousZoomMeetingId: prevId,
+      previousJoinUrl: prevUrl,
+      previousTopic: params.session.standardizedTitle,
+      newZoomMeetingId: parsed.meetingId,
+      newJoinUrl: parsed.canonicalUrl,
+      newTopic: params.session.standardizedTitle,
+      reason: params.reason || 'Teacher entered manual Zoom link override',
+      nowMs
+    });
+  }
+
+  const zoomChangedForCalendar =
+    Boolean(params.session.googleCalendarEventId || params.session.calendarSyncStatus === 'synced') &&
+    (parsed.canonicalUrl !== params.session.zoomJoinUrl || parsed.meetingId !== params.session.zoomMeetingId);
+
+  const updatedSession: GroupWeeklySession = {
+    ...params.session,
+    zoomMeetingId: parsed.meetingId,
+    zoomJoinUrl: parsed.canonicalUrl,
+    zoomPasscode: parsed.passcode,
+    manualFallbackUrl: trimmedRaw,
+    meetingSource: 'manual',
+    syncState: 'manual',
+    ...(zoomChangedForCalendar ? { calendarSyncStatus: 'needs_update' as const } : {}),
+    lastError: undefined,
+    updatedAt: nowMs,
+    version: (params.session.version || 1) + 1,
+    originRevision: (params.session.originRevision || 1) + 1
+  };
+
+  const nextSessions = params.sessions.map((s) => (s.id === updatedSession.id ? updatedSession : s));
+  const nextRecords = params.records.map((r) =>
+    r.sessionId === updatedSession.id && r.status === 'active'
+      ? { ...r, status: 'superseded' as const, supersededByMeetingId: parsed.meetingId, updatedAt: nowMs }
+      : r
+  );
+
+  return {
+    ok: true,
+    updatedSession,
+    sessions: nextSessions,
+    records: nextRecords,
+    history: nextHistory
+  };
+}
+
+/**
+ * Creates a standardized recurring Zoom meeting (`type = 8`) for one weekly session via `/api/zoom/meetings/create`.
+ * Archives any pre-existing manual/legacy/previous API link BEFORE replacing so historical recordings keep matching.
+ */
+export async function createOrReplaceZoomMeetingForSession(params: {
+  session: GroupWeeklySession;
+  sessions: GroupWeeklySession[];
+  records: ZoomMeetingRecord[];
+  history: ZoomMeetingHistory[];
+  timezone?: string;
+  actionType?: ZoomHistoryAction;
+  reason?: string;
+  deletePreviousRemote?: boolean;
+}): Promise<{
+  ok: boolean;
+  rateLimited?: boolean;
+  error?: string;
+  updatedSession?: GroupWeeklySession;
+  createdRecord?: ZoomMeetingRecord;
+  sessions: GroupWeeklySession[];
+  records: ZoomMeetingRecord[];
+  history: ZoomMeetingHistory[];
+  archivedPrevious: boolean;
+  planWarning40Min: boolean;
+}> {
+  const tz = params.timezone || params.session.timezone || loadZoomUiMeta().defaultTimezone || DEFAULT_ZOOM_TIMEZONE;
+  const { startTimeIsoLocal } = computeNextSessionStartWallTime(
+    params.session.weekday,
+    params.session.startTime,
+    tz,
+    undefined,
+    params.session.recurrence
+  );
+  const repeatInterval = params.session.recurrence === 'biweekly_a' || params.session.recurrence === 'biweekly_b' ? 2 : 1;
+
+  const res = await callZoomProxyJson('/api/zoom/meetings/create', {
+    method: 'POST',
+    body: JSON.stringify({
+      topic: params.session.standardizedTitle,
+      startTime: startTimeIsoLocal,
+      duration: params.session.durationMinutes,
+      timezone: tz,
+      weeklyDay: toZoomWeeklyDayNumber(params.session.weekday),
+      repeatInterval
+    })
+  });
+
+  if (!res.ok || !res.data?.zoomMeetingId || !res.data?.joinUrl) {
+    const nowMs = Date.now();
+    const erroredSession: GroupWeeklySession = {
+      ...params.session,
+      syncState: 'error',
+      lastError: res.error || 'Failed to create Zoom meeting.',
+      updatedAt: nowMs
+    };
+    return {
+      ok: false,
+      rateLimited: res.status === 429 || res.code === 'RATE_LIMITED',
+      error: res.error || 'Failed to create Zoom meeting.',
+      sessions: params.sessions.map((s) => (s.id === params.session.id ? erroredSession : s)),
+      records: params.records,
+      history: params.history,
+      archivedPrevious: false,
+      planWarning40Min: false
+    };
+  }
+
+  const nowMs = Date.now();
+  const prevId = params.session.zoomMeetingId;
+  const prevUrl = params.session.zoomJoinUrl || params.session.manualFallbackUrl;
+  const hadPrevious = Boolean(prevId || prevUrl);
+
+  let nextHistory = params.history;
+  if (hadPrevious) {
+    nextHistory = appendZoomHistoryEntry(nextHistory, {
+      session: params.session,
+      action:
+        params.actionType ||
+        (params.session.meetingSource === 'manual' || params.session.meetingSource === 'legacy_migrated'
+          ? 'migrated_replace'
+          : 'regenerated'),
+      previousZoomMeetingId: prevId,
+      previousJoinUrl: prevUrl,
+      previousTopic: params.session.standardizedTitle,
+      newZoomMeetingId: String(res.data.zoomMeetingId),
+      newJoinUrl: String(res.data.joinUrl),
+      newTopic: String(res.data.topic || params.session.standardizedTitle),
+      reason: params.reason || 'Created standardized recurring Zoom meeting',
+      nowMs
+    });
+  } else {
+    nextHistory = appendZoomHistoryEntry(nextHistory, {
+      session: params.session,
+      action: 'created',
+      newZoomMeetingId: String(res.data.zoomMeetingId),
+      newJoinUrl: String(res.data.joinUrl),
+      newTopic: String(res.data.topic || params.session.standardizedTitle),
+      reason: params.reason || 'Created standardized recurring Zoom meeting',
+      nowMs
+    });
+  }
+
+  // Optionally delete previous API-managed meeting only if explicitly requested and it differs from new
+  if (
+    params.deletePreviousRemote &&
+    prevId &&
+    prevId !== String(res.data.zoomMeetingId) &&
+    params.session.meetingSource === 'zoom_api'
+  ) {
+    await callZoomProxyJson(`/api/zoom/meetings/${encodeURIComponent(prevId)}`, { method: 'DELETE' });
+  }
+
+  const uiMeta = loadZoomUiMeta();
+  const planWarning40Min = Boolean(res.data.planWarning40Min || (uiMeta.isBasicPlan && params.session.durationMinutes >= 41));
+
+  const newJoinUrl = String(res.data.joinUrl);
+  const newMeetingId = String(res.data.zoomMeetingId);
+  const newPasscode = typeof res.data.meetingPasscode === 'string' ? res.data.meetingPasscode : undefined;
+  const zoomChangedForCalendar =
+    Boolean(params.session.googleCalendarEventId || params.session.calendarSyncStatus === 'synced') &&
+    (newJoinUrl !== params.session.zoomJoinUrl ||
+      newMeetingId !== params.session.zoomMeetingId ||
+      newPasscode !== params.session.zoomPasscode);
+
+  const updatedSession: GroupWeeklySession = {
+    ...params.session,
+    timezone: tz,
+    zoomMeetingId: newMeetingId,
+    zoomJoinUrl: newJoinUrl,
+    zoomPasscode: newPasscode,
+    zoomHostEmail: typeof res.data.hostEmail === 'string' ? res.data.hostEmail : uiMeta.hostEmail || undefined,
+    meetingSource: 'zoom_api',
+    syncState: 'synced',
+    lastSyncedAt: new Date(nowMs).toISOString(),
+    ...(zoomChangedForCalendar ? { calendarSyncStatus: 'needs_update' as const } : {}),
+    lastError: undefined,
+    planWarning40Min,
+    updatedAt: nowMs,
+    version: (params.session.version || 1) + 1,
+    originRevision: (params.session.originRevision || 1) + 1
+  };
+
+  const createdRecord = buildZoomMeetingRecordFromSession(updatedSession, {
+    zoomMeetingId: updatedSession.zoomMeetingId!,
+    joinUrl: updatedSession.zoomJoinUrl!,
+    meetingPasscode: updatedSession.zoomPasscode,
+    hostEmail: updatedSession.zoomHostEmail,
+    isBasicPlan: uiMeta.isBasicPlan || planWarning40Min,
+    nowMs
+  });
+
+  const nextSessions = params.sessions.map((s) => (s.id === updatedSession.id ? updatedSession : s));
+  const nextRecords = [
+    ...params.records.map((r) =>
+      r.sessionId === updatedSession.id && r.status === 'active'
+        ? { ...r, status: 'superseded' as const, supersededByMeetingId: createdRecord.zoomMeetingId, updatedAt: nowMs }
+        : r
+    ),
+    createdRecord
+  ];
+
+  return {
+    ok: true,
+    updatedSession,
+    createdRecord,
+    sessions: nextSessions,
+    records: nextRecords,
+    history: nextHistory,
+    archivedPrevious: hadPrevious,
+    planWarning40Min
+  };
+}
+
+/**
+ * Updates an existing API-managed Zoom meeting via PATCH `/api/zoom/meetings/:meetingId`.
+ * If the remote Zoom meeting was deleted (404), seamlessly falls back to creating a replacement recurring meeting.
+ */
+export async function updateZoomMeetingForSession(params: {
+  session: GroupWeeklySession;
+  sessions: GroupWeeklySession[];
+  records: ZoomMeetingRecord[];
+  history: ZoomMeetingHistory[];
+  timezone?: string;
+}): Promise<{
+  ok: boolean;
+  replacedDeletedRemote?: boolean;
+  rateLimited?: boolean;
+  error?: string;
+  updatedSession?: GroupWeeklySession;
+  sessions: GroupWeeklySession[];
+  records: ZoomMeetingRecord[];
+  history: ZoomMeetingHistory[];
+}> {
+  if (!params.session.zoomMeetingId || params.session.meetingSource !== 'zoom_api') {
+    const created = await createOrReplaceZoomMeetingForSession({
+      ...params,
+      actionType: 'migrated_replace',
+      reason: 'Converted session to standardized API-managed Zoom meeting'
+    });
+    return {
+      ok: created.ok,
+      rateLimited: created.rateLimited,
+      error: created.error,
+      updatedSession: created.updatedSession,
+      sessions: created.sessions,
+      records: created.records,
+      history: created.history
+    };
+  }
+
+  const tz = params.timezone || params.session.timezone || loadZoomUiMeta().defaultTimezone || DEFAULT_ZOOM_TIMEZONE;
+  const { startTimeIsoLocal } = computeNextSessionStartWallTime(
+    params.session.weekday,
+    params.session.startTime,
+    tz,
+    undefined,
+    params.session.recurrence
+  );
+  const repeatInterval: 1 | 2 =
+    params.session.recurrence === 'biweekly_a' || params.session.recurrence === 'biweekly_b' ? 2 : 1;
+
+  const res = await callZoomProxyJson(`/api/zoom/meetings/${encodeURIComponent(params.session.zoomMeetingId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      topic: params.session.standardizedTitle,
+      startTime: startTimeIsoLocal,
+      duration: params.session.durationMinutes,
+      timezone: tz,
+      weeklyDay: toZoomWeeklyDayNumber(params.session.weekday),
+      repeatInterval
+    })
+  });
+
+  if (res.status === 404) {
+    // Meeting no longer exists on Zoom: archive old link cleanly & create a fresh standardized meeting
+    const replacement = await createOrReplaceZoomMeetingForSession({
+      ...params,
+      timezone: tz,
+      actionType: 'regenerated',
+      reason: 'Original Zoom meeting missing (404) — created replacement standardized meeting'
+    });
+    return {
+      ok: replacement.ok,
+      replacedDeletedRemote: replacement.ok,
+      rateLimited: replacement.rateLimited,
+      error: replacement.error,
+      updatedSession: replacement.updatedSession,
+      sessions: replacement.sessions,
+      records: replacement.records,
+      history: replacement.history
+    };
+  }
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      rateLimited: res.status === 429,
+      error: res.error || 'Failed to update Zoom meeting.',
+      sessions: params.sessions,
+      records: params.records,
+      history: params.history
+    };
+  }
+
+  const nowMs = Date.now();
+  const patchedJoinUrl = typeof res.data?.joinUrl === 'string' ? res.data.joinUrl : params.session.zoomJoinUrl;
+  const timezoneChanged = tz !== params.session.timezone;
+  const joinUrlChanged = patchedJoinUrl !== params.session.zoomJoinUrl;
+  const updatedSession: GroupWeeklySession = {
+    ...params.session,
+    timezone: tz,
+    ...(patchedJoinUrl ? { zoomJoinUrl: patchedJoinUrl } : {}),
+    syncState: 'synced',
+    lastSyncedAt: new Date(nowMs).toISOString(),
+    ...((timezoneChanged || joinUrlChanged) &&
+    (params.session.googleCalendarEventId || params.session.calendarSyncStatus === 'synced')
+      ? { calendarSyncStatus: 'needs_update' as const }
+      : {}),
+    lastError: undefined,
+    planWarning40Min: Boolean(res.data?.planWarning40Min),
+    updatedAt: nowMs,
+    version: (params.session.version || 1) + 1,
+    originRevision: (params.session.originRevision || 1) + 1
+  };
+
+  const nextSessions = params.sessions.map((s) => (s.id === updatedSession.id ? updatedSession : s));
+  const nextRecords = params.records.map((r) =>
+    r.sessionId === updatedSession.id && r.status === 'active'
+      ? {
+          ...r,
+          topic: updatedSession.standardizedTitle,
+          startTime: updatedSession.startTime,
+          durationMinutes: updatedSession.durationMinutes,
+          timezone: tz,
+          recurrenceWeeklyDay: toZoomWeeklyDayNumber(updatedSession.weekday),
+          recurrenceRepeatInterval: repeatInterval,
+          syncedAt: new Date(nowMs).toISOString(),
+          updatedAt: nowMs
+        }
+      : r
+  );
+
+  return {
+    ok: true,
+    updatedSession,
+    sessions: nextSessions,
+    records: nextRecords,
+    history: params.history
+  };
+}
+
+/**
+ * Computes a deterministic Dry-Run Migration Preview for all active online groups and their weekly sessions.
+ * Does NOT call Zoom API or mutate any stored groups, lessons, attendance, grades, or payments.
+ */
+export function buildZoomMigrationPreview(params: {
+  groups: Group[];
+  existingSessions: GroupWeeklySession[];
+  targetTimezone?: string;
+  includePausedOrArchived?: boolean;
+}): ZoomMigrationPreviewSummary {
+  const tz = params.targetTimezone || loadZoomUiMeta().defaultTimezone || DEFAULT_ZOOM_TIMEZONE;
+  const uiMeta = loadZoomUiMeta();
+
+  let workingSessions = [...(params.existingSessions || [])];
+  const collectedHistory: ZoomMeetingHistory[] = [];
+  const groupsMissingSchedule: Array<{ groupId: string; groupName: string }> = [];
+
+  const candidateGroups = (params.groups || []).filter((g) => {
+    if (!g || g.deleted || g.type !== 'online') return false;
+    if (!params.includePausedOrArchived && g.status === 'archived') return false;
+    return true;
+  });
+
+  for (const grp of candidateGroups) {
+    const rec = reconcileGroupWeeklySessions({
+      group: grp,
+      existingSessions: workingSessions,
+      timezone: tz
+    });
+    workingSessions = rec.sessions;
+    if (rec.historyEntries.length > 0) {
+      collectedHistory.push(...rec.historyEntries);
+    }
+    if (rec.slotsMissingSchedule) {
+      groupsMissingSchedule.push({ groupId: grp.id, groupName: grp.name });
+    }
+  }
+
+  const candidateGroupIds = new Set(candidateGroups.map((g) => g.id));
+  const activeSessionsForOnline = workingSessions.filter(
+    (s) => s && !s.deleted && candidateGroupIds.has(s.groupId)
+  );
+
+  const items: ZoomMigrationPreviewItem[] = activeSessionsForOnline.map((s) => {
+    const hasExistingUrlOrId = Boolean(s.zoomJoinUrl || s.manualFallbackUrl || s.zoomMeetingId);
+    let action: ZoomMigrationPreviewItem['action'] = 'create_new';
+
+    if (s.meetingSource === 'zoom_api' && s.zoomMeetingId && s.zoomJoinUrl) {
+      action = s.syncState === 'needs_update' || s.syncState === 'error'
+        ? 'update_standardized'
+        : 'already_standardized';
+    } else if (hasExistingUrlOrId) {
+      action = 'replace_manual_with_standardized';
+    } else {
+      action = 'create_new';
+    }
+
+    return {
+      sessionId: s.id,
+      sessionCode: s.sessionCode,
+      groupId: s.groupId,
+      groupName: s.groupNameSnapshot,
+      weekdayName: s.weekdayName,
+      startTime: s.startTime,
+      durationMinutes: s.durationMinutes,
+      standardizedTitle: s.standardizedTitle,
+      action,
+      previousZoomUrl: s.zoomJoinUrl || s.manualFallbackUrl,
+      previousZoomMeetingId: s.zoomMeetingId,
+      willArchivePrevious: hasExistingUrlOrId && action !== 'already_standardized' && action !== 'update_standardized',
+      planWarning40Min: Boolean(uiMeta.isBasicPlan && s.durationMinutes >= 41)
+    };
+  });
+
+  return {
+    totalOnlineGroups: candidateGroups.length,
+    groupsMissingSchedule,
+    items,
+    counts: {
+      createNew: items.filter((i) => i.action === 'create_new').length,
+      replaceManual: items.filter((i) => i.action === 'replace_manual_with_standardized').length,
+      updateStandardized: items.filter((i) => i.action === 'update_standardized').length,
+      alreadyStandardized: items.filter((i) => i.action === 'already_standardized').length,
+      willArchivePrevious: items.filter((i) => i.willArchivePrevious).length,
+      planWarningCount: items.filter((i) => i.planWarning40Min).length
+    },
+    reconciledSessions: workingSessions,
+    reconciledHistory: collectedHistory
+  };
+}
+
+/**
+ * Executes idempotent, checkpointed bulk Zoom meeting standardization / creation across sessions.
+ * - `mode: 'standardize_all'` updates/replaces every weekly session so all online groups have standardized API-managed Zoom meetings (archiving old links in history).
+ * - `mode: 'create_missing_only'` only creates Zoom meetings for sessions that don't yet have a Zoom meeting URL/ID or have `meetingSource === 'zoom_api' && syncState !== 'synced'`.
+ * - Persists checkpoint after EVERY session if `onCheckpoint` is provided so resuming skips already completed sessions.
+ */
+export async function executeBulkZoomMigration(params: {
+  mode: 'standardize_all' | 'create_missing_only';
+  preview: ZoomMigrationPreviewSummary;
+  existingRecords: ZoomMeetingRecord[];
+  existingHistory: ZoomMeetingHistory[];
+  timezone?: string;
+  skipSessionIds?: Set<string>;
+  shouldAbort?: () => boolean;
+  onProgress?: (progress: ZoomBulkMigrationProgress) => void;
+  onCheckpoint?: (state: {
+    sessions: GroupWeeklySession[];
+    records: ZoomMeetingRecord[];
+    history: ZoomMeetingHistory[];
+    processedSessionIds: string[];
+  }) => void;
+}): Promise<ZoomBulkMigrationResult> {
+  const tz = params.timezone || loadZoomUiMeta().defaultTimezone || DEFAULT_ZOOM_TIMEZONE;
+  let workingSessions = [...params.preview.reconciledSessions];
+  let workingRecords = [...(params.existingRecords || [])];
+  let workingHistory = [...params.preview.reconciledHistory, ...(params.existingHistory || [])];
+
+  const targetItems = params.preview.items.filter((item) => {
+    if (params.skipSessionIds?.has(item.sessionId)) return false;
+    if (item.action === 'already_standardized') return false;
+    if (params.mode === 'create_missing_only' && item.action === 'replace_manual_with_standardized') {
+      return false;
+    }
+    return true;
+  });
+
+  const total = targetItems.length;
+  let completed = 0;
+  let succeededCount = 0;
+  let skippedCount = params.preview.items.length - total;
+  let failedCount = 0;
+  let archivedPreviousCount = 0;
+  let rateLimited = false;
+  let aborted = false;
+  const errors: Array<{ sessionId: string; title: string; error: string }> = [];
+  const processedSessionIds: string[] = [];
+
+  for (const item of targetItems) {
+    if (params.shouldAbort?.()) {
+      aborted = true;
+      break;
+    }
+
+    const currentSession = workingSessions.find((s) => s.id === item.sessionId);
+    if (!currentSession) {
+      completed++;
+      skippedCount++;
+      continue;
+    }
+
+    params.onProgress?.({
+      completed,
+      total,
+      currentSessionId: item.sessionId,
+      currentTitle: item.standardizedTitle,
+      succeeded: succeededCount,
+      skipped: skippedCount,
+      failed: failedCount,
+      rateLimited
+    });
+
+    if (item.action === 'update_standardized') {
+      const upd = await updateZoomMeetingForSession({
+        session: currentSession,
+        sessions: workingSessions,
+        records: workingRecords,
+        history: workingHistory,
+        timezone: tz
+      });
+      workingSessions = upd.sessions;
+      workingRecords = upd.records;
+      workingHistory = upd.history;
+      if (upd.ok) {
+        succeededCount++;
+        processedSessionIds.push(item.sessionId);
+      } else {
+        failedCount++;
+        errors.push({ sessionId: item.sessionId, title: item.standardizedTitle, error: upd.error || 'Update failed' });
+        if (upd.rateLimited) {
+          rateLimited = true;
+          break;
+        }
+      }
+    } else {
+      const created = await createOrReplaceZoomMeetingForSession({
+        session: currentSession,
+        sessions: workingSessions,
+        records: workingRecords,
+        history: workingHistory,
+        timezone: tz,
+        actionType: item.willArchivePrevious ? 'migrated_replace' : 'created',
+        reason:
+          item.action === 'replace_manual_with_standardized'
+            ? 'Bulk migration archived manual Zoom link and created standardized recurring meeting'
+            : 'Bulk setup created standardized recurring Zoom meeting'
+      });
+      workingSessions = created.sessions;
+      workingRecords = created.records;
+      workingHistory = created.history;
+      if (created.ok) {
+        succeededCount++;
+        if (created.archivedPrevious) archivedPreviousCount++;
+        processedSessionIds.push(item.sessionId);
+      } else {
+        failedCount++;
+        errors.push({ sessionId: item.sessionId, title: item.standardizedTitle, error: created.error || 'Create failed' });
+        if (created.rateLimited) {
+          rateLimited = true;
+          break;
+        }
+      }
+    }
+
+    completed++;
+    params.onCheckpoint?.({
+      sessions: workingSessions,
+      records: workingRecords,
+      history: workingHistory,
+      processedSessionIds: [...processedSessionIds]
+    });
+  }
+
+  if (succeededCount > 0) {
+    saveZoomUiMeta({ lastMigrationAt: new Date().toISOString(), lastError: null });
+  }
+
+  return {
+    completed: !aborted && !rateLimited,
+    aborted,
+    rateLimited,
+    succeededCount,
+    skippedCount,
+    failedCount,
+    archivedPreviousCount,
+    sessions: workingSessions,
+    records: workingRecords,
+    history: workingHistory,
+    errors,
+    processedSessionIds
+  };
+}

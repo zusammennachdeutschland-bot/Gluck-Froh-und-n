@@ -16,6 +16,7 @@ import { getGroupCycleInfo, isGroupPerLesson, resolveLessonCycleNumber, compareL
 import { buildWhatsAppUrl } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
 import { transliterateArabicNameToEnglish } from '../utils/nameUtils';
+import { GroupWeeklySessionsPanel } from './GroupWeeklySessionsPanel';
 
 interface GroupProfileModalProps {
   group: Group;
@@ -921,6 +922,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
                 </div>
               </div>
             </GroupForm>
+            <GroupWeeklySessionsPanel group={group} />
             </div>
           ) : (
             /* RECORDINGS TAB */

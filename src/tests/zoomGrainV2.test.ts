@@ -1,0 +1,692 @@
+import assert from 'node:assert/strict';
+import expressApp from '../api/expressApp';
+import {
+  DEFAULT_ZOOM_TIMEZONE,
+  normalizeWeekdayIndex,
+  formatEnglishWeekday,
+  normalize24HourTime,
+  formatStandardizedZoomTopic,
+  parseStandardizedZoomTopic,
+  generateReadableSessionCode,
+  generateStableCalendarUid,
+  reconcileGroupWeeklySessions
+} from '../services/zoomSessionStandardizer';
+import {
+  __resetZoomServerVaultForTesting,
+  __setZoomServerUpstreamFetchForTesting
+} from '../server/zoomServerProxy';
+import {
+  __setZoomProxyFetchForTesting,
+  __resetZoomServiceMemoryForTesting,
+  connectZoomAccount,
+  getZoomConnectionStatus,
+  fetchHostStartUrlForSession,
+  buildZoomMigrationPreview,
+  executeBulkZoomMigration,
+  sanitizeZoomRecordForStorage,
+  redactZoomSecrets
+} from '../services/zoomService';
+import {
+  generateSessionsIcsContent,
+  syncSessionsToGoogleCalendar,
+  __setCalendarFetchForTesting
+} from '../services/calendarSyncService';
+import {
+  evaluateRecordingMatchAgainstLessons,
+  sanitizeEntityForGrainPrivacy,
+  detectGrainTwoPartRecordingPairs,
+  extractStructuredLessonContentForLesson
+} from '../services/grainService';
+import { buildOutboundDelta } from '../services/sync/deltaBuilder';
+import { partitionBackupPayload } from '../services/firebaseWorkspaceSync';
+import { validateAndSanitizeBackupPayload } from '../utils/backupEngine';
+import { Group, GroupWeeklySession, Lesson, Student, ZoomMeetingHistory } from '../types';
+
+async function runZoomGrainV2Tests() {
+  console.log('=== Starting Glück × Zoom × Grain V2.0 Verification Suite ===');
+
+  // ---------------------------------------------------------------------------
+  // 1. STANDARDIZED NAMING, WEEKDAY NORMALIZATION & ZERO STUDENT PRIVACY
+  // ---------------------------------------------------------------------------
+  console.log('1. Testing standardized naming, session codes & student privacy...');
+
+  assert.equal(normalizeWeekdayIndex('Monday'), 1);
+  assert.equal(normalizeWeekdayIndex('الأربعاء'), 3);
+  assert.equal(normalizeWeekdayIndex('Mittwoch'), 3);
+  assert.equal(normalizeWeekdayIndex('الأحد'), 0);
+  assert.equal(formatEnglishWeekday('الأثنين'), 'Monday');
+  assert.equal(normalize24HourTime('7:05 PM'), '19:05');
+  assert.equal(normalize24HourTime('15:00'), '15:00');
+
+  const topic1 = formatStandardizedZoomTopic('الاثنين', '19:00', '  Grade 8   A1  ');
+  assert.equal(topic1, 'Monday - 19:00 - Grade 8 A1');
+
+  const parsedTopic = parseStandardizedZoomTopic('Wednesday - 15:00 - Grade 8 A1');
+  assert.ok(parsedTopic, 'parseStandardizedZoomTopic must parse standardized string');
+  assert.equal(parsedTopic!.weekdayName, 'Wednesday');
+  assert.equal(parsedTopic!.weekdayIndex, 3);
+  assert.equal(parsedTopic!.startTime, '15:00');
+  assert.equal(parsedTopic!.groupName, 'Grade 8 A1');
+
+  // Collision-safe readable Session Codes
+  const usedCodes = new Set<string>();
+  const codeA = generateReadableSessionCode('Grade 8 A1', 'Monday', '19:00', usedCodes, 'grp_1');
+  usedCodes.add(codeA);
+  const codeB = generateReadableSessionCode('Grade 8 A1', 'Monday', '19:00', usedCodes, 'grp_1_dup');
+  assert.equal(codeA, 'GR8A1-MON-1900');
+  assert.notEqual(codeA, codeB, 'Session codes must remain collision-safe');
+
+  // Stable Calendar UID
+  const uid1 = generateStableCalendarUid('sess_abc_123');
+  const uid2 = generateStableCalendarUid('sess_abc_123');
+  assert.equal(uid1, 'gluck-session-sess_abc_123@glueck.app');
+  assert.equal(uid1, uid2);
+
+  // ---------------------------------------------------------------------------
+  // 2. MULTI-SLOT RECONCILIATION, RENAMES & HISTORICAL LESSON IMMUTABILITY
+  // ---------------------------------------------------------------------------
+  console.log('2. Testing group reconciliation across multi-slot schedules & group rename...');
+
+  const groupV1: Group = {
+    id: 'grp_grade8_a1',
+    name: 'Grade 8 A1',
+    type: 'online',
+    grade: 'Grade 8',
+    monthlyPackagePrice: 1200,
+    sessionCount: 4,
+    color: '#6366f1',
+    lessonDurationMinutes: 60,
+    schedules: [
+      { day: 'Monday', time: '19:00' },
+      { day: 'Wednesday', time: '15:00' }
+    ],
+    zoomLink: 'https://zoom.us/j/11122233344',
+    updatedAt: Date.now()
+  };
+
+  const rec1 = reconcileGroupWeeklySessions({
+    group: groupV1,
+    existingSessions: [],
+    timezone: DEFAULT_ZOOM_TIMEZONE
+  });
+
+  assert.equal(rec1.sessions.length, 2, 'Online group with 2 weekly days must create 2 independent weekly sessions');
+  const monSession = rec1.sessions.find((s) => s.weekday === 1)!;
+  const wedSession = rec1.sessions.find((s) => s.weekday === 3)!;
+  assert.equal(monSession.standardizedTitle, 'Monday - 19:00 - Grade 8 A1');
+  assert.equal(wedSession.standardizedTitle, 'Wednesday - 15:00 - Grade 8 A1');
+  assert.equal(monSession.timezone, 'Africa/Cairo');
+  assert.notEqual(monSession.id, wedSession.id);
+  assert.notEqual(monSession.calendarEventUid, wedSession.calendarEventUid);
+
+  // Zero student names in public topic
+  assert.equal(monSession.standardizedTitle.includes('Malak'), false);
+
+  // Simulate API-synced state + rename group -> must preserve IDs, sessionCode, UID and flag needs_update
+  const syncedMon: GroupWeeklySession = {
+    ...monSession,
+    zoomMeetingId: '99887766554',
+    zoomJoinUrl: 'https://zoom.us/j/99887766554',
+    meetingSource: 'zoom_api',
+    syncState: 'synced',
+    googleCalendarEventId: 'gcal_evt_mon_1',
+    calendarSyncStatus: 'synced'
+  };
+  const groupRenamed: Group = {
+    ...groupV1,
+    name: 'Grade 8 B2'
+  };
+  const historicalLesson: Lesson = {
+    id: 'les_hist_1',
+    groupId: 'grp_grade8_a1',
+    groupName: 'Grade 8 A1',
+    grade: 'Grade 8',
+    title: 'Past Grammar Lesson',
+    date: '2025-02-10',
+    time: '19:00',
+    durationMinutes: 60,
+    type: 'online',
+    status: 'completed',
+    paymentStatus: 'paid',
+    amountDue: 300,
+    amountPaid: 300,
+    sessionNumber: 1,
+    totalSessionsInPackage: 4,
+    report: {
+      attendanceStatus: 'present',
+      studentAttendance: { stu_1: 'present' },
+      teacherNotes: 'Immutability test'
+    }
+  };
+  const lessonBeforeSnapshot = JSON.stringify(historicalLesson);
+
+  const recRenamed = reconcileGroupWeeklySessions({
+    group: groupRenamed,
+    existingSessions: [syncedMon, wedSession]
+  });
+  const renamedMon = recRenamed.sessions.find((s) => s.id === syncedMon.id)!;
+  assert.equal(renamedMon.sessionCode, syncedMon.sessionCode, 'sessionCode must remain immutable on group rename');
+  assert.equal(renamedMon.calendarEventUid, syncedMon.calendarEventUid, 'calendarEventUid must stay immutable');
+  assert.equal(renamedMon.standardizedTitle, 'Monday - 19:00 - Grade 8 B2');
+  assert.equal(renamedMon.syncState, 'needs_update');
+  assert.equal(renamedMon.calendarSyncStatus, 'needs_update');
+  assert.equal(renamedMon.zoomMeetingId, '99887766554');
+  assert.ok(recRenamed.historyEntries.some((h) => h.action === 'group_renamed'));
+  assert.equal(JSON.stringify(historicalLesson), lessonBeforeSnapshot, 'Historical lesson must remain completely untouched');
+
+  // ---------------------------------------------------------------------------
+  // 3. SERVER VAULT ENCRYPTION, BASIC 40m PLAN & ON-DEMAND START URL
+  // ---------------------------------------------------------------------------
+  console.log('3. Testing encrypted server S2S OAuth vault, Basic 40m advisory & start_url isolation...');
+
+  __resetZoomServerVaultForTesting();
+  __resetZoomServiceMemoryForTesting();
+
+  const createdZoomTopics: string[] = [];
+  let zoomCreateCounter = 9500100100;
+  __setZoomServerUpstreamFetchForTesting(async (url, init) => {
+    const jsonResp = (status: number, obj: any) => new Response(JSON.stringify(obj), { status });
+    if (url.startsWith('https://zoom.us/oauth/token')) {
+      return jsonResp(200, {
+        access_token: 'zoom_s2s_secret_access_token_xyz',
+        token_type: 'bearer',
+        expires_in: 3600
+      });
+    }
+    if (url === 'https://api.zoom.us/v2/users/me') {
+      return jsonResp(200, {
+        id: 'zoom_user_1',
+        email: 'lehrer@glueck.app',
+        type: 1 // Zoom Basic (40m limit)
+      });
+    }
+    if (url === 'https://api.zoom.us/v2/users/me/meetings' && init?.method === 'POST') {
+      const parsed = JSON.parse(String(init.body || '{}'));
+      assert.equal(parsed.type, 8, 'Recurring meetings must be created with type = 8');
+      assert.equal(parsed.duration, 60, 'Requested session duration must NOT be truncated for Basic accounts');
+      createdZoomTopics.push(parsed.topic);
+      zoomCreateCounter += 1;
+      return jsonResp(201, {
+        id: zoomCreateCounter,
+        topic: parsed.topic,
+        join_url: `https://zoom.us/j/${zoomCreateCounter}?pwd=pass123`,
+        start_url: `https://zoom.us/s/${zoomCreateCounter}?zak=SECRET_ZAK_TOKEN_999`,
+        password: 'pass123',
+        host_email: 'lehrer@glueck.app',
+        timezone: parsed.timezone || 'Africa/Cairo'
+      });
+    }
+    if (url.startsWith('https://api.zoom.us/v2/meetings/') && init?.method === 'GET') {
+      const mId = url.split('/meetings/')[1];
+      return jsonResp(200, {
+        id: mId,
+        join_url: `https://zoom.us/j/${mId}?pwd=pass123`,
+        start_url: `https://zoom.us/s/${mId}?zak=EPHEMERAL_HOST_ZAK_TOKEN`,
+        password: 'pass123',
+        host_email: 'lehrer@glueck.app'
+      });
+    }
+    if (url.startsWith('https://api.zoom.us/v2/meetings/') && init?.method === 'PATCH') {
+      return new Response('', { status: 204 });
+    }
+    return jsonResp(404, { message: 'Not found' });
+  });
+
+  const server = expressApp.listen(0);
+  try {
+    const addr = server.address() as any;
+    const baseUrl = `http://127.0.0.1:${addr.port}`;
+
+    // Route /api/zoom/* requests through the live Express server over loopback
+    __setZoomProxyFetchForTesting(async (path, init) => {
+      const r = await fetch(`${baseUrl}${path}`, init);
+      return {
+        ok: r.ok,
+        status: r.status,
+        json: () => r.json(),
+        headers: r.headers
+      };
+    });
+
+    const connectRes = await connectZoomAccount({
+      accountId: 'acc_secret_987654',
+      clientId: 'cli_secret_123456',
+      clientSecret: 'super_secret_client_secret_value',
+      defaultTimezone: 'Africa/Cairo'
+    });
+    assert.equal(connectRes.ok, true);
+    assert.equal(connectRes.state.isBasicPlan, true);
+    assert.equal(connectRes.state.maxMeetingMinutes, 40);
+    assert.equal(connectRes.state.hostEmail, 'lehrer@glueck.app');
+
+    // Ensure /api/zoom/status NEVER leaks raw credentials or secrets
+    const statusState = await getZoomConnectionStatus();
+    const serializedStatus = JSON.stringify(statusState);
+    assert.equal(serializedStatus.includes('super_secret_client_secret_value'), false);
+    assert.equal(serializedStatus.includes('zoom_s2s_secret_access_token_xyz'), false);
+    assert.equal(serializedStatus.includes('acc_secret_987654'), false);
+    assert.equal(statusState.hasCredentials, true);
+
+    // -------------------------------------------------------------------------
+    // 4. DRY-RUN PREVIEW & RESUMABLE BULK MIGRATION
+    // -------------------------------------------------------------------------
+    console.log('4. Testing dry-run migration preview, manual link archiving & checkpoint resume...');
+
+    const preview = buildZoomMigrationPreview({
+      groups: [groupV1],
+      existingSessions: []
+    });
+    assert.equal(preview.totalOnlineGroups, 1);
+    assert.equal(preview.items.length, 2);
+    assert.equal(preview.counts.replaceManual, 2, 'Manual group.zoomLink sessions must be flagged to archive & replace');
+    assert.equal(preview.counts.planWarningCount, 2, 'Basic plan with 60m duration must surface 40m cap warning');
+
+    // Execute bulk migration first checkpoint only (abort after 1st session), then resume
+    let checkpointCalls = 0;
+    let firstSkipIds: string[] = [];
+    const partialRes = await executeBulkZoomMigration({
+      mode: 'standardize_all',
+      preview,
+      existingRecords: [],
+      existingHistory: [],
+      shouldAbort: () => checkpointCalls >= 1,
+      onCheckpoint: (ckpt) => {
+        checkpointCalls++;
+        firstSkipIds = ckpt.processedSessionIds;
+      }
+    });
+    assert.equal(partialRes.completed, false);
+    assert.equal(partialRes.aborted, true);
+    assert.equal(partialRes.succeededCount, 1);
+    assert.equal(firstSkipIds.length, 1);
+
+    // Resume from checkpoint — only remaining session should be created
+    const resumePreview = buildZoomMigrationPreview({
+      groups: [groupV1],
+      existingSessions: partialRes.sessions
+    });
+    const resumedRes = await executeBulkZoomMigration({
+      mode: 'standardize_all',
+      preview: resumePreview,
+      existingRecords: partialRes.records,
+      existingHistory: partialRes.history,
+      skipSessionIds: new Set(firstSkipIds)
+    });
+    assert.equal(resumedRes.completed, true);
+    assert.equal(resumedRes.succeededCount, 1, 'Resume must only process remaining session');
+    assert.equal(createdZoomTopics.length, 2, 'Total Zoom meetings created across pause+resume must be exactly 2');
+
+    const migratedMon = resumedRes.sessions.find((s) => s.weekday === 1)!;
+    assert.equal(migratedMon.meetingSource, 'zoom_api');
+    assert.equal(migratedMon.syncState, 'synced');
+    assert.ok(
+      resumedRes.history.some(
+        (h) =>
+          h.sessionId === migratedMon.id &&
+          h.action === 'migrated_replace' &&
+          h.previousZoomMeetingId === '11122233344'
+      ),
+      'Previous manual Zoom meeting ID must be archived in ZoomMeetingHistory before replacement'
+    );
+
+    // Verify start_url / zak= is NOT persisted anywhere in session or meeting records
+    const serializedMigration = JSON.stringify({
+      sessions: resumedRes.sessions,
+      records: resumedRes.records,
+      history: resumedRes.history
+    });
+    assert.equal(serializedMigration.includes('SECRET_ZAK_TOKEN_999'), false);
+    assert.equal(serializedMigration.includes('start_url'), false);
+
+    // On-demand host start URL fetch works cleanly
+    const hostStart = await fetchHostStartUrlForSession(migratedMon.zoomMeetingId!);
+    assert.equal(hostStart.ok, true);
+    assert.ok(hostStart.startUrl?.includes('EPHEMERAL_HOST_ZAK_TOKEN'));
+
+    // -------------------------------------------------------------------------
+    // 5. 5-TIER GRAIN RECOGNITION + PART 1 / PART 2 PAIRING + FALLBACK EXTRACT
+    // -------------------------------------------------------------------------
+    console.log('5. Testing 5-tier Grain recording recognition & Part 1 / Part 2 preservation...');
+
+    const toLocalIso = (year: number, month1Based: number, day: number, hour: number, minute: number) =>
+      new Date(year, month1Based - 1, day, hour, minute, 0, 0).toISOString();
+
+    const lessonMon: Lesson = {
+      id: 'les_mon_today',
+      groupId: 'grp_grade8_a1',
+      groupName: 'Grade 8 A1',
+      grade: 'Grade 8',
+      title: 'Monday Grammar Session',
+      date: '2026-11-16',
+      time: '19:00',
+      durationMinutes: 80,
+      type: 'online',
+      status: 'scheduled',
+      paymentStatus: 'pending',
+      amountDue: 300,
+      amountPaid: 0,
+      sessionNumber: 2,
+      totalSessionsInPackage: 4
+    };
+    const lessonWed: Lesson = {
+      id: 'les_wed_today',
+      groupId: 'grp_grade8_a1',
+      groupName: 'Grade 8 A1',
+      grade: 'Grade 8',
+      title: 'Wednesday Speaking Session',
+      date: '2026-11-18',
+      time: '15:00',
+      durationMinutes: 60,
+      type: 'online',
+      status: 'scheduled',
+      paymentStatus: 'pending',
+      amountDue: 300,
+      amountPaid: 0,
+      sessionNumber: 3,
+      totalSessionsInPackage: 4
+    };
+    const studentsList: Student[] = [
+      {
+        id: 'stu_1',
+        name: 'Malak Ahmed',
+        grade: 'Grade 8',
+        parentName: 'Ahmed',
+        parentPhone: '01000000001',
+        studentPhone: '01000000002',
+        groupId: 'grp_grade8_a1',
+        paymentPlan: '4_lessons',
+        documents: [],
+        joinedDate: '2026-01-01'
+      }
+    ];
+
+    // Tier 1: Match via HISTORICAL archived Zoom ID after migration
+    const tier1HistEval = evaluateRecordingMatchAgainstLessons(
+      {
+        id: 'grec_tier1_hist',
+        title: 'Part 1 - Old Zoom Recording',
+        startDatetime: toLocalIso(2026, 11, 16, 19, 2),
+        durationSeconds: 40 * 60,
+        recordingUrl: 'https://grain.com/share/recording/tier1_hist',
+        sourcePlatform: 'zoom',
+        zoomMeetingId: '11122233344'
+      },
+      [lessonMon, lessonWed],
+      [groupV1],
+      studentsList,
+      undefined,
+      undefined,
+      resumedRes.sessions,
+      resumedRes.history
+    );
+    assert.equal(tier1HistEval.matchTier, 'zoom_meeting_id');
+    assert.equal(tier1HistEval.candidates[0]?.lessonId, 'les_mon_today');
+    assert.ok((tier1HistEval.candidates[0]?.confidenceScore || 0) >= 80);
+
+    // Tier 2: Match via standardized topic ("Wednesday - 15:00 - Grade 8 A1") without zoomMeetingId
+    const wedSessionLive = resumedRes.sessions.find((s) => s.weekday === 3)!;
+    const tier2TopicEval = evaluateRecordingMatchAgainstLessons(
+      {
+        id: 'grec_tier2_topic',
+        title: wedSessionLive.standardizedTitle,
+        startDatetime: toLocalIso(2026, 11, 18, 15, 1),
+        durationSeconds: 45 * 60,
+        recordingUrl: 'https://grain.com/share/recording/tier2_topic',
+        sourcePlatform: 'zoom'
+      },
+      [lessonMon, lessonWed],
+      [groupV1],
+      studentsList,
+      undefined,
+      undefined,
+      resumedRes.sessions,
+      resumedRes.history
+    );
+    assert.equal(tier2TopicEval.matchTier, 'standardized_topic');
+    assert.equal(tier2TopicEval.candidates[0]?.lessonId, 'les_wed_today');
+    assert.equal(tier2TopicEval.matchedSessionId, wedSessionLive.id);
+
+    // Tier 4: Match via Google Calendar UID
+    const wedWithCal: GroupWeeklySession = {
+      ...wedSessionLive,
+      calendarEventUid: 'gluck-session-custom-wed@glueck.app'
+    };
+    const tier4CalEval = evaluateRecordingMatchAgainstLessons(
+      {
+        id: 'grec_tier4_cal',
+        title: 'Custom Recording Name',
+        startDatetime: toLocalIso(2026, 11, 18, 15, 3),
+        durationSeconds: 40 * 60,
+        recordingUrl: 'https://grain.com/share/recording/tier4_cal',
+        sourcePlatform: 'zoom',
+        calendarEventUid: 'gluck-session-custom-wed@glueck.app'
+      },
+      [lessonWed],
+      [groupV1],
+      studentsList,
+      undefined,
+      undefined,
+      [wedWithCal],
+      []
+    );
+    assert.equal(tier4CalEval.matchTier, 'calendar_uid');
+    assert.equal(tier4CalEval.matchedSessionId, wedWithCal.id);
+
+    // Part 1 + Part 2 detection stays intact (40m + 26m within reconnect window)
+    const evaluatedP1 = evaluateRecordingMatchAgainstLessons(
+      {
+        id: 'grec_p1',
+        title: 'Monday - 19:00 - Grade 8 A1',
+        recordingUrl: 'https://grain.com/share/recording/p1',
+        sourcePlatform: 'zoom',
+        startDatetime: toLocalIso(2026, 11, 16, 19, 0),
+        endDatetime: toLocalIso(2026, 11, 16, 19, 40),
+        durationSeconds: 40 * 60,
+        zoomMeetingId: migratedMon.zoomMeetingId,
+        participantNames: ['lehrer@glueck.app']
+      },
+      [lessonMon],
+      [groupV1],
+      studentsList,
+      undefined,
+      undefined,
+      resumedRes.sessions,
+      resumedRes.history
+    );
+    const evaluatedP2 = evaluateRecordingMatchAgainstLessons(
+      {
+        id: 'grec_p2',
+        title: 'Monday - 19:00 - Grade 8 A1',
+        recordingUrl: 'https://grain.com/share/recording/p2',
+        sourcePlatform: 'zoom',
+        startDatetime: toLocalIso(2026, 11, 16, 19, 44),
+        endDatetime: toLocalIso(2026, 11, 16, 20, 10),
+        durationSeconds: 26 * 60,
+        zoomMeetingId: migratedMon.zoomMeetingId,
+        participantNames: ['lehrer@glueck.app']
+      },
+      [lessonMon],
+      [groupV1],
+      studentsList,
+      undefined,
+      undefined,
+      resumedRes.sessions,
+      resumedRes.history
+    );
+
+    const pairedResults = detectGrainTwoPartRecordingPairs({
+      recordings: [evaluatedP1, evaluatedP2],
+      lessons: [lessonMon],
+      groups: [groupV1],
+      students: studentsList
+    });
+    const pairedP1 = pairedResults.find((r) => r.id === 'grec_p1')!;
+    const pairedP2 = pairedResults.find((r) => r.id === 'grec_p2')!;
+    assert.equal(pairedP1.detectedPartSlot, 'part1', 'First 40m segment must be tagged part1');
+    assert.equal(pairedP2.detectedPartSlot, 'part2', 'Reconnect segment 4m later must be tagged part2');
+    assert.equal(pairedP2.pairedRecordingId, 'grec_p1', 'Part 2 must pair back to Part 1');
+
+    // Gemini-free 7-section deterministic extraction remains intact
+    const extractionRes = await extractStructuredLessonContentForLesson({
+      lesson: lessonMon,
+      providedPart1Transcript:
+        'Thema: Perfekt mit haben und sein. Neue Wörter: fahren, fliegen. Beispiel: Ich bin nach Berlin gefahren.',
+      providedPart2Transcript:
+        'Übung: Sätze im Perfekt bilden. Hausaufgabe: Arbeitsbuch Seite 14.'
+    });
+    assert.equal(extractionRes.transcriptStatus, 'complete');
+    assert.equal(extractionRes.origin, 'grain_transcript_and_notes');
+    assert.equal(extractionRes.partCount, 2);
+    assert.ok(extractionRes.themaDerStunde);
+
+    // -------------------------------------------------------------------------
+    // 6. ICS EXPORT STABILITY & GOOGLE CALENDAR DUPLICATE PREVENTION
+    // -------------------------------------------------------------------------
+    console.log('6. Testing .ics stability & Google Calendar iCalUID duplicate prevention...');
+
+    const icsA = generateSessionsIcsContent([migratedMon], { referenceDate: new Date('2026-11-16T08:00:00Z') });
+    const icsB = generateSessionsIcsContent([migratedMon], { referenceDate: new Date('2026-11-16T08:00:00Z') });
+    assert.equal(icsA, icsB, '.ics generation must be completely deterministic');
+    assert.ok(icsA.includes(`UID:${migratedMon.calendarEventUid}`));
+    assert.ok(icsA.includes('TZID=Africa/Cairo'));
+    assert.ok(icsA.includes('RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO'));
+    assert.ok(icsA.includes('SUMMARY:Monday - 19:00 - Grade 8 A1'));
+
+    let postCount = 0;
+    let patchCount = 0;
+    __setCalendarFetchForTesting(async (url, init) => {
+      const u = String(url);
+      if (init?.method === 'GET' && u.includes('privateExtendedProperty=')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 'existing_gcal_evt_77',
+                iCalUID: 'existing_gcal_evt_77@google.com',
+                extendedProperties: { private: { gluckSessionId: migratedMon.id } }
+              }
+            ]
+          }),
+          { status: 200 }
+        );
+      }
+      if (init?.method === 'GET' && u.includes('/events/')) {
+        return new Response('{}', { status: 404 });
+      }
+      if (u.includes('/events/existing_gcal_evt_77') && init?.method === 'PATCH') {
+        const body = JSON.parse(String(init.body || '{}'));
+        assert.equal('iCalUID' in body, false, 'PATCH must NEVER send iCalUID');
+        patchCount++;
+        return new Response(
+          JSON.stringify({
+            id: 'existing_gcal_evt_77',
+            iCalUID: 'existing_gcal_evt_77@google.com'
+          }),
+          { status: 200 }
+        );
+      }
+      if (init?.method === 'POST') {
+        postCount++;
+        return new Response(JSON.stringify({ id: 'new_evt_unexpected' }), { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    });
+
+    const gcalSync = await syncSessionsToGoogleCalendar({
+      allSessions: [migratedMon],
+      accessToken: 'test_gcal_bearer_token'
+    });
+    assert.equal(gcalSync.success, true);
+    assert.equal(patchCount, 1, 'Existing event matching privateExtendedProperty must be updated via PATCH');
+    assert.equal(postCount, 0, 'Duplicate POST must NOT occur when existing event is found');
+    assert.equal(gcalSync.sessions[0].googleCalendarEventId, 'existing_gcal_evt_77');
+    assert.equal(gcalSync.sessions[0].googleCalendarIcalUid, 'existing_gcal_evt_77@google.com');
+    assert.equal(gcalSync.sessions[0].calendarEventUid, migratedMon.calendarEventUid, 'Glück ICS UID must stay independent');
+    __setCalendarFetchForTesting(null);
+
+    // -------------------------------------------------------------------------
+    // 7. ZERO SECRETS IN STORAGE, BACKUP, P2P DELTAS & FIRESTORE CHUNKS
+    // -------------------------------------------------------------------------
+    console.log('7. Testing secret stripping across storage, backup, P2P deltas & Firebase sync...');
+
+    const dirtySession: any = {
+      ...migratedMon,
+      startUrl: 'https://zoom.us/s/999?zak=TOP_SECRET_ZAK',
+      clientSecret: 'super_secret_zoom_key',
+      zoomAccessToken: 'tok_secret',
+      transcript: 'Raw sensitive transcript text'
+    };
+    const cleanedSession = sanitizeZoomRecordForStorage(dirtySession);
+    assert.equal((cleanedSession as any).startUrl, undefined);
+    assert.equal((cleanedSession as any).clientSecret, undefined);
+    assert.equal((cleanedSession as any).zoomAccessToken, undefined);
+    assert.equal((cleanedSession as any).transcript, undefined);
+
+    const privacyStripped = sanitizeEntityForGrainPrivacy(dirtySession);
+    assert.equal((privacyStripped as any).startUrl, undefined);
+    assert.equal((privacyStripped as any).clientSecret, undefined);
+    assert.equal((privacyStripped as any).transcript, undefined);
+
+    assert.equal(redactZoomSecrets('Error https://zoom.us/s/1?zak=abc123SECRET').includes('abc123SECRET'), false);
+
+    // Verify backup sanitization & Firestore partitioning include new collections cleanly & strip secrets
+    const backupCheck = validateAndSanitizeBackupPayload({
+      timestamp: new Date().toISOString(),
+      groups: [groupV1],
+      students: studentsList,
+      lessons: [lessonMon],
+      payments: [],
+      groupWeeklySessions: [dirtySession],
+      zoomMeetingRecords: resumedRes.records,
+      zoomMeetingHistory: resumedRes.history,
+      grainRecordingMatches: []
+    });
+    assert.equal(backupCheck.isValid, true);
+    const sanitizedBackupSession = (backupCheck.sanitizedData as any).groupWeeklySessions[0];
+    assert.equal(sanitizedBackupSession.startUrl, undefined);
+    assert.equal(sanitizedBackupSession.clientSecret, undefined);
+
+    const delta = buildOutboundDelta(
+      'peer_1',
+      {},
+      {
+        groupWeeklySessions: [dirtySession],
+        zoomMeetingRecords: resumedRes.records,
+        zoomMeetingHistory: resumedRes.history
+      } as any,
+      { id: 'dev_test', name: 'Test Device' },
+      { forceFull: true }
+    );
+    assert.equal(delta.records.groupWeeklySessions?.length, 1);
+    assert.equal((delta.records.groupWeeklySessions?.[0] as any).startUrl, undefined);
+    assert.equal((delta.records.groupWeeklySessions?.[0] as any).clientSecret, undefined);
+
+    const cloudPartition = partitionBackupPayload({
+      timestamp: new Date().toISOString(),
+      groups: [groupV1],
+      students: studentsList,
+      lessons: [lessonMon],
+      payments: [],
+      groupWeeklySessions: [dirtySession],
+      zoomMeetingRecords: resumedRes.records,
+      zoomMeetingHistory: resumedRes.history
+    } as any);
+    assert.equal(cloudPartition.core_crm.groupWeeklySessions.length, 1);
+    assert.equal(cloudPartition.core_crm.groupWeeklySessions[0].startUrl, undefined);
+    assert.equal(cloudPartition.core_crm.groupWeeklySessions[0].clientSecret, undefined);
+    assert.equal(cloudPartition.core_crm.groupWeeklySessions[0].transcript, undefined);
+
+    console.log('✅ All Glück × Zoom × Grain V2.0 tests passed!');
+  } finally {
+    __setZoomProxyFetchForTesting(null);
+    __setZoomServerUpstreamFetchForTesting(null);
+    __setCalendarFetchForTesting(null);
+    __resetZoomServerVaultForTesting();
+    server.close();
+  }
+}
+
+runZoomGrainV2Tests().catch((err) => {
+  console.error('❌ Zoom × Grain V2.0 Test Suite Failed:', err);
+  process.exit(1);
+});

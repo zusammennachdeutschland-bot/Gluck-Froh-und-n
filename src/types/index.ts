@@ -169,6 +169,10 @@ export interface SyncDeltaPayload {
     homeworkAssignments?: any[];
     homeworkSubmissions?: any[];
     customVerbGroups?: any[];
+    groupWeeklySessions?: GroupWeeklySession[];
+    zoomMeetingRecords?: ZoomMeetingRecord[];
+    zoomMeetingHistory?: ZoomMeetingHistory[];
+    grainRecordingMatches?: GrainRecordingMatch[];
   };
   purgedRecords?: PurgedRecordTombstone[];
   hasAuthoritativeTombstones?: boolean;
@@ -319,6 +323,7 @@ export interface TeacherProfile {
   };
   defaultZoomLink: string;
   defaultMeetLink: string;
+  defaultZoomTimezone?: string;
   enableLessonAlerts?: boolean; // In-app alerts for upcoming lessons (within 30 mins)
   enableBrowserPush?: boolean; // Browser push notifications
   parentMessageTemplates?: Record<string, string>;
@@ -1107,6 +1112,10 @@ export interface BackupData {
   dismissedDashboardLessons?: string[];
   activeLessonSessionState?: ActiveLessonSessionState;
   grainGroupLearningRecords?: GrainGroupLearningRecord[];
+  groupWeeklySessions?: GroupWeeklySession[];
+  zoomMeetingRecords?: ZoomMeetingRecord[];
+  zoomMeetingHistory?: ZoomMeetingHistory[];
+  grainRecordingMatches?: GrainRecordingMatch[];
 }
 
 export type InspirationFrequency = 'disabled' | 'daily' | 'before_first_lesson' | 'random_daily';
@@ -1534,6 +1543,13 @@ export interface GrainMatchEvidence {
   detectedPartSlot?: 'part1' | 'part2';
   pairedRecordingId?: string;
   part2StartGapMinutes?: number;
+  matchTier?: GrainMatchTier;
+  confidenceLevel?: GrainConfidenceLevel;
+  matchedSessionId?: string;
+  matchedSessionCode?: string;
+  matchedCalendarEventUid?: string;
+  matchedHistoryMeetingId?: string;
+  matchedFromHistory?: boolean;
   reasons: string[];
 }
 
@@ -1548,6 +1564,8 @@ export interface GrainLessonMatchCandidate {
   lessonTime: string;
   lessonDurationMinutes: number;
   confidenceScore: number; // 0 to 100
+  confidenceLevel?: GrainConfidenceLevel;
+  matchTier?: GrainMatchTier;
   evidence: GrainMatchEvidence;
   existingRecordingLink?: string;
   existingRecordingLink2?: string;
@@ -1568,10 +1586,15 @@ export interface GrainDiscoveredRecording {
   sourcePlatform: string; // e.g. 'zoom', 'google_meet', 'unknown'
   zoomMeetingUrl?: string; // Optional supporting evidence only
   calendarEventTitle?: string;
+  calendarEventUid?: string;
   participantNames?: string[]; // Supplementary display only — NEVER modifies attendance (Rule 2)
   hasAiSummary?: boolean;
   aiSummaryExcerpt?: string; // Compact excerpt only
   matchStatus: GrainMatchStatus;
+  matchTier?: GrainMatchTier;
+  confidenceLevel?: GrainConfidenceLevel;
+  matchedSessionId?: string;
+  matchedSessionCode?: string;
   suggestedLessonId?: string;
   confirmedLessonId?: string;
   matchedGroupId?: string;
@@ -1786,6 +1809,123 @@ export interface GrainLessonMetadata {
   approvedParentReportSummaryDe?: string;
   supplementaryParticipantsObserved?: string[]; // Informational only — never alters attendance (Rule 2)
 }
+
+// ==========================================
+// GLÜCK × ZOOM × GRAIN MULTI-SESSION & CALENDAR TYPES
+// ==========================================
+
+export type ZoomMeetingSource = 'zoom_api' | 'manual' | 'legacy_migrated';
+export type ZoomSessionSyncState = 'pending' | 'synced' | 'needs_update' | 'error' | 'manual_only' | 'manual';
+export type ZoomMeetingStatus = 'active' | 'outdated' | 'replaced' | 'superseded' | 'deleted';
+export type ZoomHistoryAction =
+  | 'created'
+  | 'created_by_zoom'
+  | 'migrated_replace'
+  | 'replaced_by_migration'
+  | 'manual_override'
+  | 'schedule_changed'
+  | 'group_renamed'
+  | 'regenerated'
+  | 'unlinked';
+
+export type GrainMatchTier =
+  | 'zoom_meeting_id'
+  | 'standardized_topic'
+  | 'date_and_session'
+  | 'calendar_uid'
+  | 'metadata_heuristic';
+
+export type GrainConfidenceLevel = 'high' | 'medium' | 'low';
+
+export interface GroupWeeklySession extends SyncableRecord {
+  groupId: string;
+  groupNameSnapshot?: string;
+  weekday: number; // 0 = Sunday .. 6 = Saturday
+  weekdayName: string; // English: Sunday .. Saturday
+  startTime: string; // 24h HH:mm
+  durationMinutes: number;
+  timezone: string; // Default 'Africa/Cairo'
+  recurrence: ScheduleRecurrence; // 'weekly' | 'biweekly_a' | 'biweekly_b'
+  sessionCode: string; // Stable readable code, e.g. 'GR8A1-MON-1900'
+  standardizedTitle: string; // '{Weekday} - {HH:mm} - {GroupName}'
+  zoomMeetingRecordId?: string;
+  zoomMeetingId?: string; // Canonical numeric Zoom Meeting ID
+  zoomJoinUrl?: string;
+  zoomPasscode?: string;
+  zoomHostEmail?: string;
+  manualFallbackUrl?: string;
+  meetingSource: ZoomMeetingSource;
+  syncState: ZoomSessionSyncState;
+  lastError?: string;
+  lastSyncError?: string;
+  lastSyncedAt?: string;
+  calendarEventUid: string; // Immutable stable UID: e.g. 'gluck-session-{id}@glueck.app'
+  googleCalendarEventId?: string;
+  googleCalendarIcalUid?: string; // Actual iCalUID returned by Google Calendar API (independent of calendarEventUid)
+  googleCalendarSyncedAt?: string;
+  lastCalendarSyncedAt?: string;
+  calendarSyncStatus?: 'not_synced' | 'synced' | 'needs_update' | 'error';
+  calendarSyncError?: string;
+  planWarning40Min?: boolean;
+}
+
+export interface ZoomMeetingRecord extends SyncableRecord {
+  sessionId: string;
+  groupId: string;
+  zoomMeetingId: string; // Canonical numeric ID
+  joinUrl: string;
+  meetingPasscode?: string;
+  topic: string;
+  startTime: string; // HH:mm
+  durationMinutes: number;
+  timezone: string;
+  meetingType: 8; // Zoom Recurring Fixed Time
+  recurrenceWeeklyDay: number; // Zoom weekly_days: 1=Sun .. 7=Sat
+  recurrenceRepeatInterval: 1 | 2;
+  hostEmail?: string;
+  status: ZoomMeetingStatus;
+  supersededByMeetingId?: string;
+  planWarning40Min?: boolean;
+  syncedAt: string;
+}
+
+export interface ZoomMeetingHistory extends SyncableRecord {
+  sessionId: string;
+  groupId: string;
+  action: ZoomHistoryAction;
+  previousZoomMeetingId?: string;
+  previousJoinUrl?: string;
+  newZoomMeetingId?: string;
+  newJoinUrl?: string;
+  previousTopic?: string;
+  newTopic?: string;
+  reason?: string;
+  recordedAt: string;
+}
+
+export interface GrainRecordingMatch extends SyncableRecord {
+  recordingId?: string;
+  grainRecordingId?: string;
+  grainRecordingTitle?: string;
+  grainRecordingUrl?: string;
+  zoomMeetingId?: string;
+  sessionId?: string;
+  sessionCode?: string;
+  lessonId?: string;
+  matchedLessonId?: string;
+  groupId?: string;
+  matchedGroupId?: string;
+  matchTier: GrainMatchTier;
+  confidenceLevel: GrainConfidenceLevel;
+  confidenceScore: number;
+  matchedZoomMeetingId?: string;
+  matchedTopic?: string;
+  status: 'auto_assigned' | 'auto_matched' | 'suggested' | 'confirmed' | 'rejected';
+  reasons: string[];
+  matchedAt?: string;
+  evaluatedAt?: string;
+}
+
 
 
 

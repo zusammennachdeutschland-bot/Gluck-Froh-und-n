@@ -279,6 +279,12 @@ export function sanitizeInitialData(rawData: Record<string, any>): Record<string
     maxCacheAgeHours: 72,
   });
 
+  // 17. Zoom Weekly Sessions, Meeting Records, History, and Grain Recording Matches (never store secrets)
+  sanitized['glueck_group_weekly_sessions_v1'] = ensureArray('glueck_group_weekly_sessions_v1', []).filter((s: any) => s && typeof s === 'object');
+  sanitized['glueck_zoom_meeting_records_v1'] = ensureArray('glueck_zoom_meeting_records_v1', []).filter((r: any) => r && typeof r === 'object');
+  sanitized['glueck_zoom_meeting_history_v1'] = ensureArray('glueck_zoom_meeting_history_v1', []).filter((h: any) => h && typeof h === 'object');
+  sanitized['glueck_grain_recording_matches_v1'] = ensureArray('glueck_grain_recording_matches_v1', []).filter((m: any) => m && typeof m === 'object');
+
   // Asynchronously write back cleaned data if corruption or non-standard format was detected
   if (needsPersistCleaned) {
     console.log('[DataSanitizer] Repaired legacy data discrepancies. Persisting clean state to storage...');

@@ -20,6 +20,7 @@ import { ContactsUnificationModal } from './ContactsUnificationModal';
 import { DownloadedFilesSection } from './DownloadedFilesSection';
 import { GoogleCloudSyncCard } from './GoogleCloudSyncCard';
 import { GrainSettingsCard } from './GrainSettingsCard';
+import { ZoomIntegrationsManager } from './ZoomIntegrationsManager';
 import { isBackupFileSizeValid } from '../utils/backupEngine';
 import { AndroidKeystoreSection } from './AndroidKeystoreSection';
 import { getActiveCloudUser, getLastCloudSyncTime } from '../services/firebaseWorkspaceSync';
@@ -64,6 +65,7 @@ export const SettingsView: React.FC = () => {
   } = useApp();
 
   const [activeCategory, setActiveCategory] = useState<SettingsCategory | null>(null);
+  const [integrationTab, setIntegrationTab] = useState<'zoom' | 'grain'>('zoom');
   const [searchQuery, setSearchQuery] = useState('');
   const [isContactsModalOpen, setIsContactsModalOpen] = useState(false);
   const [biweeklyCleanupPreview, setBiweeklyCleanupPreview] = useState<Lesson[] | null>(null);
@@ -320,11 +322,11 @@ export const SettingsView: React.FC = () => {
   const categoryCards = [
     {
       id: 'grain' as SettingsCategory,
-      title: _t('ربط Grain للتسجيلات', 'Grain Integration', 'Grain-Integration'),
-      description: _t('ربط تسجيلات Grain ومطابقة الحصص بأمان عبر Personal API Token', 'Connect Grain recordings & lesson matching via Personal API Token', 'Grain-Aufnahmen & Lektionsabgleich über Personal API Token'),
+      title: _t('التكاملات (Zoom و Grain)', 'Integrations (Zoom & Grain)', 'Integrationen (Zoom & Grain)'),
+      description: _t('إدارة اجتماعات Zoom الموحدة، مزامنة التقويم، وربط تسجيلات Grain', 'Manage standardized Zoom meetings, Calendar sync & Grain recordings', 'Zoom-Meetings, Kalender-Sync & Grain-Aufnahmen verwalten'),
       icon: Video,
       color: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20 dark:border-purple-500/30',
-      badge: 'Personal API v2'
+      badge: 'Zoom + Grain + Calendar'
     },
     {
       id: 'downloaded_files' as SettingsCategory,
@@ -563,16 +565,41 @@ export const SettingsView: React.FC = () => {
         ) : (
           <div className="animate-fade-in bg-surface rounded-xl border border-surface-border shadow-2xs p-3.5 sm:p-4 min-h-[50vh]">
             {/* ==========================================
-                SUBPAGE: GRAIN INTEGRATION
+                SUBPAGE: INTEGRATIONS (ZOOM MANAGER & GRAIN)
             ========================================== */}
             {activeCategory === 'grain' && (
               <div className="space-y-3.5 animate-scale-up">
                 {renderSubPageHeader(
-                  _t('ربط Grain للتسجيلات 🎥', 'Grain Recording Integration 🎥', 'Grain-Aufnahme-Integration 🎥'),
-                  _t('إعداد مفتاح Grain Personal API Token وفحص الصلاحيات ومطابقة تسجيلات الحصص بأمان', 'Configure Grain Personal API Token, inspect account capabilities, and safely match lesson recordings', 'Grain Personal API Token konfigurieren und Aufnahmen sicher abgleichen'),
+                  _t('التكاملات الذكية (Zoom + Grain + Calendar)', 'Integrations (Zoom + Grain + Calendar)', 'Integrationen (Zoom + Grain + Kalender)'),
+                  _t('توحيد اجتماعات Zoom للمجموعات الأونلاين ومزامنة التقويم وربط تسجيلات Grain تلقائياً', 'Standardize recurring Zoom meetings, sync calendars, and auto-match Grain recordings securely', 'Zoom-Meetings vereinheitlichen, Kalender synchronisieren & Grain-Aufnahmen verknüpfen'),
                   Video
                 )}
-                <GrainSettingsCard />
+                <div className="flex items-center gap-1.5 p-1 bg-surface-hover rounded-xl border border-surface-border">
+                  <button
+                    type="button"
+                    onClick={() => setIntegrationTab('zoom')}
+                    className={`flex-1 py-2 px-3 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                      integrationTab === 'zoom'
+                        ? 'bg-primary text-white shadow-xs'
+                        : 'text-text-muted hover:text-text-main'
+                    }`}
+                  >
+                    {_t('مدير Zoom والتقويم (Zoom Manager)', 'Zoom Manager & Calendar', 'Zoom-Manager & Kalender')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIntegrationTab('grain')}
+                    className={`flex-1 py-2 px-3 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                      integrationTab === 'grain'
+                        ? 'bg-violet-600 text-white shadow-xs'
+                        : 'text-text-muted hover:text-text-main'
+                    }`}
+                  >
+                    {_t('تسجيلات Grain (Personal API)', 'Grain Personal API', 'Grain Personal-API')}
+                  </button>
+                </div>
+
+                {integrationTab === 'zoom' ? <ZoomIntegrationsManager /> : <GrainSettingsCard />}
               </div>
             )}
 

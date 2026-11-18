@@ -1176,6 +1176,10 @@ export interface WorkspaceMutableState {
   homeworkAssignments?: any[];
   homeworkSubmissions?: any[];
   notifications?: NotificationItem[];
+  groupWeeklySessions?: any[];
+  zoomMeetingRecords?: any[];
+  zoomMeetingHistory?: any[];
+  grainRecordingMatches?: any[];
   recentlyDeleted?: RecentlyDeletedData;
   settings?: TeacherSettingsRecord[];
   [key: string]: any;
@@ -1383,6 +1387,31 @@ export function enforcePurgedTombstonesOnWorkspace<T extends WorkspaceMutableSta
   }
   if (Array.isArray(workspace.customAiBackgrounds)) {
     workspace.customAiBackgrounds = workspace.customAiBackgrounds.filter((b: any) => b && b.id && !allPurgedIds.has(String(b.id).trim()));
+  }
+  if (Array.isArray(workspace.groupWeeklySessions)) {
+    workspace.groupWeeklySessions = workspace.groupWeeklySessions.filter((s: any) => {
+      if (!s || !s.id) return false;
+      const sid = String(s.id).trim();
+      const gid = (s.groupId || '').trim();
+      return !allPurgedIds.has(sid) && (!gid || !purgedGroupIds.has(gid));
+    });
+  }
+  if (Array.isArray(workspace.zoomMeetingRecords)) {
+    workspace.zoomMeetingRecords = workspace.zoomMeetingRecords.filter((r: any) => {
+      if (!r || !r.id) return false;
+      const rid = String(r.id).trim();
+      const gid = (r.groupId || '').trim();
+      return !allPurgedIds.has(rid) && (!gid || !purgedGroupIds.has(gid));
+    });
+  }
+  if (Array.isArray(workspace.grainRecordingMatches)) {
+    workspace.grainRecordingMatches = workspace.grainRecordingMatches.filter((m: any) => {
+      if (!m || !m.id) return false;
+      const mid = String(m.id).trim();
+      const lid = (m.lessonId || '').trim();
+      const gid = (m.groupId || '').trim();
+      return !allPurgedIds.has(mid) && (!lid || !purgedLessonIds.has(lid)) && (!gid || !purgedGroupIds.has(gid));
+    });
   }
 
   if (Array.isArray(workspace.notifications)) {
