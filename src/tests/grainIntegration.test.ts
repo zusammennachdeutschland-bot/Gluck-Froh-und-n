@@ -1091,6 +1091,7 @@ async function runGrainIntegrationTests() {
   // Reset test adapter with full in-memory Grain API mock supporting recordings + transcripts
   const mockRemoteRecordings: any[] = [];
   const mockTranscripts: Record<string, any> = {};
+  const mockRecordingDetails: Record<string, any> = {};
   let section12TokenStored: string | null = null;
 
   __setGrainServiceTestAdapter({
@@ -1132,10 +1133,12 @@ async function runGrainIntegrationTests() {
         };
       }
       if (operation === 'recording_details') {
+        const override = recordingId ? mockRecordingDetails[recordingId] : undefined;
         const found = mockRemoteRecordings.find((r) => r.id === recordingId);
+        const merged = override ? { ...(found || { id: recordingId }), ...override } : found;
         return {
-          httpStatus: found ? 200 : 404,
-          bodyText: JSON.stringify(found || { id: recordingId })
+          httpStatus: merged ? 200 : 404,
+          bodyText: JSON.stringify(merged || { id: recordingId })
         };
       }
       if (operation === 'recording_transcript') {
@@ -1776,6 +1779,394 @@ async function runGrainIntegrationTests() {
     'les_dst_summer',
     'DST summer local time must match lesson.date + lesson.time accurately without off-by-1h drift'
   );
+
+  // ---------------------------------------------------------------------------
+  // 13. GRAIN-ONLY EXTRACTION (NO GEMINI), COMBINED TRANSCRIPT + AI NOTES & PRIVACY
+  // ---------------------------------------------------------------------------
+  console.log('13. Testing Grain-Only Extraction (Transcript + AI Notes, Late Notes, Zero Gemini)...');
+
+  // Case 17: Verify Grain extraction works with GEMINI_API_KEY deleted and never calls Gemini endpoints
+  const prevGeminiEnv = process.env.GEMINI_API_KEY;
+  const origGlobalFetch = globalThis.fetch;
+  delete process.env.GEMINI_API_KEY;
+  let calledGeminiGrainEndpoint = false;
+  (globalThis as any).fetch = async (input: any, init?: any) => {
+    const urlStr = typeof input === 'string' ? input : String(input?.url || '');
+    if (urlStr.includes('/api/grain/extract-lesson-content')) {
+      calledGeminiGrainEndpoint = true;
+      throw new Error('Grain extraction must never call /api/grain/extract-lesson-content');
+    }
+    return origGlobalFetch(input, init);
+  };
+
+  try {
+    const grainProxySource = fs.readFileSync(
+      path.resolve(process.cwd(), 'src/server/grainServerProxy.ts'),
+      'utf8'
+    );
+    assert.equal(
+      grainProxySource.includes('@google/genai'),
+      false,
+      'grainServerProxy.ts must not import @google/genai'
+    );
+    assert.equal(
+      grainProxySource.includes('extract-lesson-content'),
+      false,
+      'grainServerProxy.ts must not expose /api/grain/extract-lesson-content'
+    );
+
+    // Case 18: Combined Grain Transcript + AI Notes (ai_summary, ai_template_sections, highlights, ai_action_items) across Part 1 & Part 2
+    mockTranscripts['rec_combo_p1'] = {
+      transcript: [
+        {
+          speaker: 'Lehrer',
+          text: 'Thema der Stunde: Präteritum und Modalverben. Heute lernen wir der Zug und die Verspätung. Beispiel: Der Zug hatte zehn Minuten Verspätung.'
+        }
+      ]
+    };
+    mockRecordingDetails['rec_combo_p1'] = {
+      id: 'rec_combo_p1',
+      ai_summary: 'Behandelte Inhalte: Wiederholung von müssen und können im Präteritum.',
+      ai_template_sections: [
+        {
+          title: 'Grammatik',
+          bullets: ['Modalverben im Präteritum: musste, konnte, durfte']
+        },
+        {
+          title: 'Neue Wörter',
+          content: 'der Anschluss, die Durchsage'
+        }
+      ],
+      highlights: [
+        {
+          text: 'Übung: Hörverstehen Bahnhofs-Durchsage Seite 64.',
+          timestamp: '00:14:20'
+        }
+      ],
+      ai_action_items: [
+        { text: 'Arbeitsbuch Seite 65 Aufgabe 1 bis Montag erledigen' }
+      ]
+    };
+    mockTranscripts['rec_combo_p2'] = {
+      transcript: [
+        {
+          speaker: 'Lehrer',
+          text: 'Wir wiederholen der Zug und die Verspätung. Beispiel: Der Zug hatte zehn Minuten Verspätung. Beispiel: Ich musste umsteigen.'
+        }
+      ]
+    };
+    mockRecordingDetails['rec_combo_p2'] = {
+      id: 'rec_combo_p2',
+      ai_summary: 'Behandelte Inhalte: Konversation am Fahrkartenschalter.',
+      ai_template_sections: [
+        {
+          title: 'Grammatik',
+          bullets: ['Modalverben im Präteritum: musste, konnte, durfte'] // duplicate of P1 -> must deduplicate
+        }
+      ],
+      ai_action_items: [
+        { text: 'Arbeitsbuch Seite 65 Aufgabe 1 bis Montag erledigen' }, // duplicate of P1 -> must deduplicate
+        { text: 'Unregelmäßige Formen von wollen wiederholen' }
+      ]
+    };
+
+    const comboExtracted = await extractStructuredLessonContentForLesson({
+      lesson: {
+        ...week2Lesson,
+        id: 'les_combo_grain_only',
+        grainMeta: {
+          recordingId: 'rec_combo_p1',
+          recordingIdPart2: 'rec_combo_p2'
+        } as any
+      },
+      recordings: []
+    });
+    assert.equal(calledGeminiGrainEndpoint, false);
+    assert.equal(comboExtracted.origin, 'grain_transcript_and_notes');
+    assert.deepEqual(comboExtracted.sourceKinds, ['transcript', 'ai_notes']);
+    assert.equal(comboExtracted.transcriptStatus, 'complete');
+    assert.equal(comboExtracted.partCount, 2);
+    assert.equal(comboExtracted.themaDerStunde.includes('Präteritum'), true);
+    assert.equal(
+      comboExtracted.behandelteInhalte.some((c) => c.includes('Konversation am Fahrkartenschalter')),
+      true,
+      'AI Notes from Part 2 must be merged into behandelteInhalte'
+    );
+    assert.equal(
+      comboExtracted.neueWoerterUndRedemittel.some((v) => v.german === 'Zug'),
+      true,
+      'Vocabulary from Transcript must be preserved when AI Notes are also present'
+    );
+    assert.equal(
+      comboExtracted.neueWoerterUndRedemittel.some((v) => v.german === 'Anschluss'),
+      true,
+      'Vocabulary from AI Notes ai_template_sections must be combined with Transcript'
+    );
+    assert.equal(
+      comboExtracted.neueWoerterUndRedemittel.filter((v) => v.german === 'Verspätung').length,
+      1,
+      'Vocabulary repeated across Part 1 and Part 2 must be deduplicated'
+    );
+    assert.equal(
+      comboExtracted.beispiele.filter((b) => b.includes('zehn Minuten Verspätung')).length,
+      1,
+      'Duplicate examples across Part 1 and Part 2 must be deduplicated'
+    );
+    assert.equal(
+      comboExtracted.beispiele.some((b) => b.includes('Ich musste umsteigen')),
+      true
+    );
+    assert.equal(
+      comboExtracted.grammatik.filter((g) => g.topic === 'Präteritum von sein, haben und Modalverben').length,
+      1,
+      'Präteritum grammar rule across Part 1 and Part 2 must be deduplicated'
+    );
+    assert.equal(
+      comboExtracted.grammatik.filter((g) => g.topic.includes('Modalverben im Präteritum')).length,
+      1,
+      'Duplicate grammar bullet across AI Notes Part 1 and Part 2 must be extracted and deduplicated'
+    );
+    assert.equal(
+      comboExtracted.uebungenUndAktivitaeten.some((u) => u.includes('Bahnhofs-Durchsage')),
+      true,
+      'Highlights with Übung must populate uebungenUndAktivitaeten'
+    );
+    assert.equal(
+      comboExtracted.offenePunkte.filter((o) => o.includes('Arbeitsbuch Seite 65')).length,
+      1,
+      'ai_action_items must populate offenePunkte and deduplicate across Part 1 & Part 2'
+    );
+    assert.equal(
+      comboExtracted.offenePunkte.some((o) => o.includes('Unregelmäßige Formen von wollen wiederholen')),
+      true
+    );
+
+    // Case 19: AI Notes-only extraction when Transcript returns 404
+    mockRecordingDetails['rec_notes_only'] = {
+      id: 'rec_notes_only',
+      ai_summary: 'Thema der Stunde: Einkaufen im Supermarkt. Behandelte Inhalte: Preise und Mengen angeben.',
+      ai_template_sections: [
+        { title: 'Neue Wörter', bullets: ['das Angebot', 'die Quittung'] },
+        { title: 'Beispiele', bullets: ['Wie viel kostet das Kilo Äpfel?'] }
+      ],
+      ai_action_items: [{ text: 'Einkaufsliste auf Deutsch schreiben' }]
+    };
+    const notesOnlyExtracted = await extractStructuredLessonContentForLesson({
+      lesson: {
+        ...week2Lesson,
+        id: 'les_notes_only',
+        grainMeta: { recordingId: 'rec_notes_only' } as any
+      },
+      recordings: []
+    });
+    assert.equal(notesOnlyExtracted.transcriptStatus, 'complete');
+    assert.deepEqual(notesOnlyExtracted.sourceKinds, ['ai_notes']);
+    assert.equal(notesOnlyExtracted.themaDerStunde.includes('Einkaufen im Supermarkt'), true);
+    assert.equal(notesOnlyExtracted.neueWoerterUndRedemittel.some((v) => v.german === 'Quittung'), true);
+    assert.equal(notesOnlyExtracted.beispiele.some((b) => b.includes('Kilo Äpfel')), true);
+    assert.equal(notesOnlyExtracted.offenePunkte.some((o) => o.includes('Einkaufsliste')), true);
+
+    // Case 20: Late-arriving AI Notes during subsequent sync trigger reprocessing & preserve teacher edits
+    saveGrainGroupLearningRecords([]);
+    recordConfirmedGrainGroupLearning({
+      lesson: week1Lesson,
+      recording: recW1P1,
+      groups: [renamedMontagGroup],
+      students: [stMon1]
+    });
+
+    const lateDate = '2026-12-28'; // Monday
+    const lateRecId = 'rec_late_notes_1';
+    mockRemoteRecordings.push({
+      id: lateRecId,
+      title: 'Montag B1 Zoom Session',
+      start_datetime: mkLocalIso(lateDate, '17:00'),
+      duration_seconds: 2400,
+      url: `https://grain.com/share/recording/${lateRecId}`,
+      public_url: `https://grain.com/share/recording/${lateRecId}`,
+      share_state: 'public',
+      source: 'zoom',
+      participants: [{ name: 'Amira K.' }]
+    });
+    mockTranscripts[lateRecId] = {
+      transcript: [
+        { speaker: 'Lehrer', text: 'Thema der Stunde: Wegbeschreibung in der Stadt. Beispiel: Gehen Sie geradeaus.' }
+      ]
+    };
+
+    let lateLesson: Lesson = {
+      ...week2Lesson,
+      id: 'les_late_notes',
+      date: lateDate,
+      time: '17:00'
+    };
+
+    // Sync 1: Only transcript is ready (no AI Notes yet)
+    const lateSync1 = await syncGrainRecordingsIncrementally({
+      lessons: [lateLesson],
+      groups: [renamedMontagGroup],
+      students: [stMon1],
+      onUpdateLesson: (_id, patch) => {
+        lateLesson = { ...lateLesson, ...patch };
+      }
+    });
+    assert.equal(lateSync1.success, true);
+    assert.deepEqual(lateLesson.grainMeta?.extractedLessonContent?.sourceKinds, ['transcript']);
+    const fpBeforeLateNotes = lateLesson.grainMeta?.extractedLessonContent?.sourceContentFingerprint;
+    assert.ok(fpBeforeLateNotes);
+
+    // Teacher edits lesson manually
+    lateLesson = {
+      ...lateLesson,
+      ...saveTeacherEditedGrainLessonContent(lateLesson, {
+        themaDerStunde: 'Lehrkraft-Notiz: Wegbeschreibung',
+        behandelteInhalte: ['Manuelle Lehrer-Zusammenfassung bleibt geschützt']
+      })
+    };
+
+    // Sync 2 (before AI Notes exist): Idempotent — no update queued
+    const lateSync2 = await syncGrainRecordingsIncrementally({
+      lessons: [lateLesson],
+      groups: [renamedMontagGroup],
+      students: [stMon1],
+      onUpdateLesson: (_id, patch) => {
+        lateLesson = { ...lateLesson, ...patch };
+      }
+    });
+    assert.equal(lateSync2.lessonPatches?.['les_late_notes'], undefined);
+    assert.equal(lateLesson.grainMeta?.extractedLessonContent?.pendingUpdatedExtraction, undefined);
+
+    // Grain finishes AI Notes later -> remote recording_details now returns AI Notes + action items
+    mockRecordingDetails[lateRecId] = {
+      ai_summary: 'Behandelte Inhalte: Präpositionen mit Dativ bei Wegbeschreibungen.',
+      ai_template_sections: [
+        { title: 'Neue Wörter', bullets: ['die Kreuzung', 'die Ampel'] }
+      ],
+      ai_action_items: [{ text: 'Stadtplan-Übung bis Mittwoch lösen' }]
+    };
+
+    // Sync 3: Late-arriving AI Notes change fingerprint, trigger reprocessing, preserve teacher text, populate pendingUpdatedExtraction
+    const lateSync3 = await syncGrainRecordingsIncrementally({
+      lessons: [lateLesson],
+      groups: [renamedMontagGroup],
+      students: [stMon1],
+      onUpdateLesson: (_id, patch) => {
+        lateLesson = { ...lateLesson, ...patch };
+      }
+    });
+    assert.ok(lateSync3.lessonPatches?.['les_late_notes'], 'Late-arriving AI Notes must trigger lesson reprocessing');
+    assert.equal(
+      lateLesson.whatWasTaught?.includes('Manuelle Lehrer-Zusammenfassung bleibt geschützt'),
+      true,
+      'Teacher edits must be preserved when late AI Notes arrive'
+    );
+    const queuedPending = lateLesson.grainMeta?.extractedLessonContent?.pendingUpdatedExtraction;
+    assert.ok(queuedPending, 'Updated extraction with late AI Notes must be stored in pendingUpdatedExtraction');
+    assert.notEqual(queuedPending!.sourceContentFingerprint, fpBeforeLateNotes);
+    assert.equal(
+      queuedPending!.neueWoerterUndRedemittel.some((v) => v.german === 'Kreuzung'),
+      true
+    );
+    assert.equal(
+      queuedPending!.offenePunkte.some((o) => o.includes('Stadtplan-Übung')),
+      true
+    );
+
+    // Sync 4 (same late AI Notes): Strictly idempotent — already in pendingUpdatedExtraction
+    const lateSync4 = await syncGrainRecordingsIncrementally({
+      lessons: [lateLesson],
+      groups: [renamedMontagGroup],
+      students: [stMon1],
+      onUpdateLesson: (_id, patch) => {
+        lateLesson = { ...lateLesson, ...patch };
+      }
+    });
+    assert.equal(
+      lateSync4.lessonPatches?.['les_late_notes'],
+      undefined,
+      'Repeated sync after pendingUpdatedExtraction was queued must remain idempotent'
+    );
+
+    // Case 21: Neither Transcript nor AI Notes exist -> transcript_unavailable & zero fabricated content
+    const emptyExtraction = await extractStructuredLessonContentForLesson({
+      lesson: {
+        ...week2Lesson,
+        id: 'les_totally_empty_grain',
+        grainMeta: { recordingId: 'rec_neither_tr_nor_notes' } as any
+      },
+      recordings: []
+    });
+    assert.equal(emptyExtraction.transcriptStatus, 'transcript_unavailable');
+    assert.deepEqual(emptyExtraction.sourceKinds, []);
+    assert.equal(emptyExtraction.themaDerStunde, '');
+    assert.equal(emptyExtraction.behandelteInhalte.length, 0);
+    assert.equal(emptyExtraction.neueWoerterUndRedemittel.length, 0);
+    assert.equal(emptyExtraction.grammatik.length, 0);
+    assert.equal(emptyExtraction.beispiele.length, 0);
+    assert.equal(emptyExtraction.uebungenUndAktivitaeten.length, 0);
+    assert.equal(emptyExtraction.offenePunkte.length, 0);
+    assert.equal(emptyExtraction.formattedLessonSummaryDe, '');
+
+    // Case 22: Privacy check — raw AI Notes fields and transcripts stripped from P2P, Backup, and Firebase partitions
+    const dirtyNotesLesson: any = {
+      ...lateLesson,
+      updatedAt: Date.now(),
+      originRevision: 2,
+      rawTranscript: 'SECRET_RAW_TRANSCRIPT_TEXT',
+      transcript: 'SECRET_TRANSCRIPT_ARRAY',
+      rawAiNotes: 'SECRET_RAW_AI_NOTES_BLOB',
+      ai_template_sections: [{ title: 'Secret', content: 'SECRET_AI_TEMPLATE_SECTION' }],
+      highlights: [{ text: 'SECRET_HIGHLIGHT_TEXT' }],
+      ai_action_items: [{ text: 'SECRET_RAW_ACTION_ITEM' }]
+    };
+    const p2pClean = JSON.stringify(
+      buildOutboundDelta(
+        'peer_tablet_2',
+        {},
+        { lessons: [dirtyNotesLesson] },
+        { id: 'dev_test', name: 'Teacher Device' },
+        { forceFull: true }
+      )
+    );
+    const backupClean = JSON.stringify(
+      validateAndSanitizeBackupPayload({
+        version: '2.0.0',
+        appVersion: '3.0.0',
+        createdAt: new Date().toISOString(),
+        deviceSource: 'web',
+        data: {
+          lessons: [dirtyNotesLesson],
+          students: [stMon1],
+          groups: [renamedMontagGroup],
+          payments: []
+        }
+      })
+    );
+    const firebasePartitions = JSON.stringify(
+      partitionBackupPayload({
+        lessons: [dirtyNotesLesson],
+        students: [stMon1],
+        groups: [renamedMontagGroup],
+        payments: []
+      } as any)
+    );
+    for (const secretMarker of [
+      'SECRET_RAW_TRANSCRIPT_TEXT',
+      'SECRET_TRANSCRIPT_ARRAY',
+      'SECRET_RAW_AI_NOTES_BLOB',
+      'SECRET_AI_TEMPLATE_SECTION',
+      'SECRET_HIGHLIGHT_TEXT',
+      'SECRET_RAW_ACTION_ITEM'
+    ]) {
+      assert.equal(p2pClean.includes(secretMarker), false, `P2P delta must strip ${secretMarker}`);
+      assert.equal(backupClean.includes(secretMarker), false, `Backup must strip ${secretMarker}`);
+      assert.equal(firebasePartitions.includes(secretMarker), false, `Firebase sync must strip ${secretMarker}`);
+    }
+  } finally {
+    (globalThis as any).fetch = origGlobalFetch;
+    if (prevGeminiEnv !== undefined) process.env.GEMINI_API_KEY = prevGeminiEnv;
+    else delete process.env.GEMINI_API_KEY;
+  }
 
   // Clean up ephemeral tests
   await disconnectGrainAccount();

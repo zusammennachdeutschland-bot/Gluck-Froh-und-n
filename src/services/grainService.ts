@@ -764,6 +764,126 @@ export function extractGrainAiSummaryText(rawAiSummary: any): string {
   return '';
 }
 
+export interface ExtractedGrainAiNotesBundle {
+  summaryText: string;
+  templateSectionLines: string[];
+  highlightLines: string[];
+  actionItemLines: string[];
+  combinedNotesText: string;
+}
+
+/**
+ * Extracts structured Grain AI Notes from a recording or recording_details response:
+ * - `ai_summary`
+ * - `ai_template_sections`
+ * - `highlights`
+ * - `ai_action_items`
+ */
+export function extractGrainAiNotesFromRecordingDetails(
+  detailData: any,
+  cachedSummaryExcerpt?: string
+): ExtractedGrainAiNotesBundle {
+  const rawSummary = extractGrainAiSummaryText(detailData?.ai_summary);
+  const summaryText = rawSummary || String(cachedSummaryExcerpt || '').trim();
+
+  const templateSectionLines: string[] = [];
+  const rawSections = detailData?.ai_template_sections;
+  const pushSection = (title: string, body: string) => {
+    const cleanBody = String(body || '').trim();
+    if (!cleanBody) return;
+    const cleanTitle = String(title || '').trim();
+    templateSectionLines.push(cleanTitle ? `${cleanTitle}: ${cleanBody}` : cleanBody);
+  };
+
+  if (Array.isArray(rawSections)) {
+    for (const sec of rawSections) {
+      if (typeof sec === 'string' && sec.trim()) {
+        templateSectionLines.push(sec.trim());
+      } else if (sec && typeof sec === 'object') {
+        const title = String(sec.title || sec.name || sec.heading || '').trim();
+        const rawContent =
+          sec.content ?? sec.bullets ?? sec.text ?? sec.body ?? sec.summary ?? sec.items;
+        if (Array.isArray(rawContent)) {
+          for (const item of rawContent) {
+            pushSection(title, typeof item === 'string' ? item : String(item?.text || item?.title || ''));
+          }
+        } else if (typeof rawContent === 'string') {
+          pushSection(title, rawContent);
+        }
+      }
+    }
+  } else if (rawSections && typeof rawSections === 'object') {
+    if (Array.isArray(rawSections.sections)) {
+      for (const sec of rawSections.sections) {
+        if (sec && typeof sec === 'object') {
+          const title = String(sec.title || sec.name || sec.heading || '').trim();
+          const rawContent =
+            sec.content ?? sec.bullets ?? sec.text ?? sec.body ?? sec.summary ?? sec.items;
+          if (Array.isArray(rawContent)) {
+            for (const item of rawContent) {
+              pushSection(title, typeof item === 'string' ? item : String(item?.text || item?.title || ''));
+            }
+          } else {
+            pushSection(title, String(rawContent || ''));
+          }
+        }
+      }
+    } else {
+      for (const [k, v] of Object.entries(rawSections)) {
+        if (k === 'format') continue;
+        if (typeof v === 'string' && v.trim()) {
+          pushSection(k, v);
+        } else if (Array.isArray(v)) {
+          for (const item of v) {
+            pushSection(k, typeof item === 'string' ? item : String((item as any)?.text || ''));
+          }
+        }
+      }
+    }
+  }
+
+  const highlightLines: string[] = [];
+  if (Array.isArray(detailData?.highlights)) {
+    for (const h of detailData.highlights) {
+      if (typeof h === 'string' && h.trim()) {
+        highlightLines.push(h.trim());
+      } else if (h && typeof h === 'object') {
+        const txt = String(h.text || h.quote || h.summary || h.note || h.title || '').trim();
+        if (txt) highlightLines.push(txt);
+      }
+    }
+  }
+
+  const actionItemLines: string[] = [];
+  if (Array.isArray(detailData?.ai_action_items)) {
+    for (const a of detailData.ai_action_items) {
+      if (typeof a === 'string' && a.trim()) {
+        actionItemLines.push(a.trim());
+      } else if (a && typeof a === 'object') {
+        const txt = String(a.text || a.description || a.action_item || a.title || '').trim();
+        if (txt) actionItemLines.push(txt);
+      }
+    }
+  }
+
+  const combinedParts = [
+    summaryText,
+    ...templateSectionLines,
+    ...highlightLines.map((h) => `Highlight: ${h}`),
+    ...actionItemLines.map((a) => `Offener Punkt: ${a}`)
+  ]
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  return {
+    summaryText,
+    templateSectionLines,
+    highlightLines,
+    actionItemLines,
+    combinedNotesText: Array.from(new Set(combinedParts)).join('\n')
+  };
+}
+
 /**
  * Canonical request body builder shared across Web Proxy, Electron, and Android runtimes.
  * Enforces Grain Public API v2 (`2026-10-01`) schema (Part 6 — FIX-5 & Part 7):
@@ -3499,18 +3619,25 @@ export function formatExtractedLessonContentSummary(
 }
 
 /**
- * Deterministic pedagogical extractor for German lessons from Part 1 + Part 2 transcripts/summaries.
- * Preserves authentic German words, articles, grammar topics, examples, exercises, and open questions
- * without inventing unsupported content.
+ * Deterministic pedagogical extractor for German lessons from Part 1 + Part 2
+ * Grain Transcripts AND Grain AI Notes (`ai_summary`, `ai_template_sections`, `highlights`, `ai_action_items`).
+ * Preserves authentic German words, articles, grammar topics, examples, exercises, and open points
+ * without inventing unsupported content. Works completely independently without Gemini.
  */
 export function extractStructuredGermanLessonContentDeterministically(options: {
   lessonTitle?: string;
   part1Text: string;
   part2Text?: string;
+  part1AiNotes?: string;
+  part2AiNotes?: string;
+  part1ActionItems?: string[];
+  part2ActionItems?: string[];
 }): GrainExtractedLessonContentCore {
-  const p1 = redactGrainSecrets(String(options.part1Text || '').trim());
-  const p2 = redactGrainSecrets(String(options.part2Text || '').trim());
-  const combined = [p1, p2].filter(Boolean).join('\n');
+  const p1Transcript = redactGrainSecrets(String(options.part1Text || '').trim());
+  const p2Transcript = redactGrainSecrets(String(options.part2Text || '').trim());
+  const p1Notes = redactGrainSecrets(String(options.part1AiNotes || '').trim());
+  const p2Notes = redactGrainSecrets(String(options.part2AiNotes || '').trim());
+  const combined = [p1Transcript, p1Notes, p2Transcript, p2Notes].filter(Boolean).join('\n');
 
   if (!combined) {
     return {
@@ -3525,14 +3652,40 @@ export function extractStructuredGermanLessonContentDeterministically(options: {
     };
   }
 
-  // Strip speaker prefixes ("Speaker: ") for clean sentence analysis
+  // Strip markdown bullets and Grain speaker prefixes ("Speaker: ") while keeping structured note labels
+  const NOTE_LABEL_PREFIX_REGEX =
+    /^(thema(?:\s+der\s+stunde)?|topic|subject|summary|zusammenfassung|overview|überblick|(?:behandelte\s+)?inhalte?|topics?|key\s*takeaways?|neue\s+wörter(?:\s+und\s+redemittel)?|wortschatz|vokabeln|vocabulary|redemittel|grammatik|grammar|beispiele?|examples?|übung(?:en)?(?:\s+und\s+aktivitäten)?|aktivitäten|exercises?|activities?|highlight|offene[rn]?\s*punkte?|action\s*items?|next\s*steps?|hausaufgaben?)\s*[:\-]\s*(.+)$/i;
+
+  const INLINE_SECTION_SPLIT_REGEX =
+    /(?<=[.!?])\s+(?=(?:thema(?:\s+der\s+stunde)?|behandelte\s+inhalte|neue\s+wörter(?:\s+und\s+redemittel)?|grammatik|beispiele|übung(?:en)?(?:\s+und\s+aktivitäten)?|offene\s+punkte)\s*[:\-])/i;
+
   const rawLines = combined
     .split(/\n+/)
-    .map((line) => line.replace(/^[A-Za-zÄÖÜäöüß\u0600-\u06FF0-9_.\-\s]{1,28}:\s+/, '').trim())
+    .flatMap((line) => line.split(INLINE_SECTION_SPLIT_REGEX))
+    .map((line) => line.replace(/^\s*(?:[-*•]+|\d+[.)])\s+/, '').trim())
+    .map((line) => {
+      if (NOTE_LABEL_PREFIX_REGEX.test(line)) return line;
+      return line.replace(/^[A-Za-zÄÖÜäöüß\u0600-\u06FF0-9_.\-\s]{1,28}:\s+/, '').trim();
+    })
     .filter(Boolean);
 
-  const allSentences: string[] = [];
+  const labeledNotes: Array<{ label: string; value: string }> = [];
+  const plainLines: string[] = [];
+
   for (const line of rawLines) {
+    const lblMatch = NOTE_LABEL_PREFIX_REGEX.exec(line);
+    if (lblMatch) {
+      labeledNotes.push({
+        label: lblMatch[1].toLowerCase().trim(),
+        value: lblMatch[2].trim()
+      });
+    } else {
+      plainLines.push(line);
+    }
+  }
+
+  const allSentences: string[] = [];
+  for (const line of [...plainLines, ...labeledNotes.map((n) => n.value)]) {
     const parts = line
       .split(/(?<=[.!?؟])\s+/)
       .map((s) => s.trim())
@@ -3540,7 +3693,7 @@ export function extractStructuredGermanLessonContentDeterministically(options: {
     allSentences.push(...parts);
   }
 
-  // 1. Detect Grammar topics explicitly present in the transcript
+  // 1. Detect Grammar topics explicitly present in the combined transcript + AI Notes
   const grammatik: GrainExtractedGrammarEntry[] = [];
   for (const rule of EXTENDED_GERMAN_GRAMMAR_PATTERNS) {
     if (rule.pattern.test(combined)) {
@@ -3548,6 +3701,19 @@ export function extractStructuredGermanLessonContentDeterministically(options: {
         topic: rule.topic,
         explanationDe: rule.explanationDe,
         explanationAr: rule.explanationAr
+      });
+    }
+  }
+  for (const note of labeledNotes) {
+    if (/^(grammatik|grammar)$/i.test(note.label) && note.value.length >= 4) {
+      const colonIdx = note.value.indexOf(':');
+      const topic =
+        colonIdx > 2 && colonIdx < 80 ? note.value.slice(0, colonIdx).trim() : note.value.slice(0, 120).trim();
+      const explanationDe =
+        colonIdx > 2 && colonIdx < 80 ? note.value.slice(colonIdx + 1).trim() || note.value : note.value;
+      grammatik.push({
+        topic,
+        explanationDe: explanationDe.slice(0, 260)
       });
     }
   }
@@ -3565,7 +3731,11 @@ export function extractStructuredGermanLessonContentDeterministically(options: {
     'Satz',
     'Teil',
     'Tag',
-    'Name'
+    'Name',
+    'Highlight',
+    'Punkt',
+    'Summary',
+    'Topic'
   ]);
   const neueWoerterUndRedemittel: GrainExtractedVocabularyEntry[] = [];
   const articleNounRegex = /\b(der|die|das)\s+([A-ZÄÖÜ][a-zäöüß]{2,24})\b/g;
@@ -3580,7 +3750,7 @@ export function extractStructuredGermanLessonContentDeterministically(options: {
       new RegExp(`\\b(?:der|die|das|den|dem|einen|einem|eine)\\s+${noun}\\b`, 'i').test(s)
     );
 
-    // Check if an explicit translation or meaning is mentioned near the noun (e.g. "der Bahnhof (محطة القطار)" or "bedeutet ...")
+    // Check if an explicit translation or meaning is mentioned near the noun
     let arabicMeaning: string | undefined;
     if (matchingSentence) {
       const arMatch = /([\u0600-\u06FF][\u0600-\u06FF\s،]{2,40})/.exec(matchingSentence);
@@ -3597,7 +3767,25 @@ export function extractStructuredGermanLessonContentDeterministically(options: {
     });
   }
 
-  // Also extract explicitly introduced Redemittel / expressions (e.g., quotes „...“ or "Redemittel: ...")
+  // Extract explicit vocabulary notes from AI template sections like "Neue Wörter: der Bahnhof, die Fahrkarte"
+  for (const note of labeledNotes) {
+    if (/^(neue\s+wörter(?:\s+und\s+redemittel)?|wortschatz|vokabeln|vocabulary|redemittel)$/i.test(note.label)) {
+      const parts = note.value.split(/[,;|•]+/).map((s) => s.trim()).filter(Boolean);
+      for (const part of parts) {
+        const artMatch = /^(der|die|das)\s+([A-ZÄÖÜ][a-zäöüß]{2,24})(.*)$/i.exec(part);
+        if (artMatch) {
+          neueWoerterUndRedemittel.push({
+            german: artMatch[2].trim(),
+            article: artMatch[1].toLowerCase() as 'der' | 'die' | 'das'
+          });
+        } else if (/[A-Za-zÄÖÜäöüß]{3,}/.test(part)) {
+          neueWoerterUndRedemittel.push({ german: part.slice(0, 100) });
+        }
+      }
+    }
+  }
+
+  // Also extract explicitly introduced Redemittel / expressions (e.g., quotes „...“ or "...")
   const quoteRegex = /[„"«]([^„"»\n]{6,95})[“"»]/g;
   while ((m = quoteRegex.exec(combined)) !== null) {
     const phrase = m[1].trim();
@@ -3608,13 +3796,18 @@ export function extractStructuredGermanLessonContentDeterministically(options: {
     }
   }
 
-  // 3. Extract explicit Thema der Stunde
+  // 3. Extract explicit Thema der Stunde (from explicit cue or AI Notes topic/summary header)
   let themaDerStunde = '';
+  const explicitTopicNote = labeledNotes.find((n) =>
+    /^(thema(?:\s+der\s+stunde)?|topic|subject)$/i.test(n.label)
+  );
   const explicitTopicMatch =
     /(?:thema(?:\s+der\s+stunde|\s+heute)?|heute\s+(?:lernen|besprechen|behandeln|machen)\s+wir|wir\s+sprechen\s+heute\s+über|درس\s+اليوم|موضوع\s+الحصة)[:\s\-]+([^\n.!?]{4,110})/i.exec(
       combined
     );
-  if (explicitTopicMatch) {
+  if (explicitTopicNote && explicitTopicNote.value.length >= 4) {
+    themaDerStunde = explicitTopicNote.value.split(/(?<=[.!?])\s+/)[0].slice(0, 120);
+  } else if (explicitTopicMatch) {
     themaDerStunde = explicitTopicMatch[1].trim();
   } else if (grammatik.length > 0 && neueWoerterUndRedemittel.length > 0) {
     const topVocab = neueWoerterUndRedemittel
@@ -3625,13 +3818,25 @@ export function extractStructuredGermanLessonContentDeterministically(options: {
   } else if (grammatik.length > 0) {
     themaDerStunde = grammatik.map((g) => g.topic).slice(0, 2).join(' / ');
   } else if (options.lessonTitle && options.lessonTitle.trim()) {
-    themaDerStunde = `${options.lessonTitle.trim()}: ${ (allSentences[0] || '').slice(0, 80) }`.replace(/:\s*$/, '');
+    themaDerStunde = `${options.lessonTitle.trim()}: ${(allSentences[0] || '').slice(0, 80)}`.replace(/:\s*$/, '');
   } else {
     themaDerStunde = (allSentences[0] || '').slice(0, 110);
   }
 
-  // 4. Extract Behandelte Inhalte (what was covered across Part 1 and Part 2)
+  // 4. Extract Behandelte Inhalte (what was covered across Transcript + AI Notes in Part 1 & Part 2)
   const behandelteInhalte: string[] = [];
+  for (const note of labeledNotes) {
+    if (
+      /^(summary|zusammenfassung|overview|überblick|(?:behandelte\s+)?inhalte?|topics?|key\s*takeaways?|highlight)$/i.test(
+        note.label
+      )
+    ) {
+      const cleanVal = note.value.replace(/^(?:highlight)[:\s]+/i, '').trim();
+      if (cleanVal.length >= 5) {
+        behandelteInhalte.push(cleanVal.slice(0, 180));
+      }
+    }
+  }
   for (const s of allSentences) {
     if (
       /\b(heute|thema|lernen|besprechen|wiederholen|erklären|wortschatz|grammatik|dialog|text|teil\s*1|teil\s*2)\b/i.test(
@@ -3650,8 +3855,14 @@ export function extractStructuredGermanLessonContentDeterministically(options: {
     behandelteInhalte.push(...allSentences.slice(0, 4).map((s) => s.slice(0, 180)));
   }
 
-  // 5. Extract Beispiele (important German example sentences used during the lesson)
+  // 5. Extract Beispiele (important German example sentences from Transcript + AI Notes)
   const beispiele: string[] = [];
+  for (const note of labeledNotes) {
+    if (/^(beispiele?|examples?)$/i.test(note.label)) {
+      const cleaned = note.value.trim();
+      if (cleaned.length >= 6) beispiele.push(cleaned.slice(0, 180));
+    }
+  }
   for (const s of allSentences) {
     if (
       /\b(beispiel|zum\s+beispiel|z\.?\s*b\.?|satz|ich\s+kaufe|ich\s+fahre|ich\s+gehe|ich\s+habe|ich\s+bin|ich\s+stehe|ich\s+muss|ich\s+kann|wir\s+gehen|er\s+hat)\b/i.test(
@@ -3672,8 +3883,13 @@ export function extractStructuredGermanLessonContentDeterministically(options: {
     }
   }
 
-  // 6. Extract Übungen und Aktivitäten (exercises and activities completed)
+  // 6. Extract Übungen und Aktivitäten (from Transcript + AI Notes)
   const uebungenUndAktivitaeten: string[] = [];
+  for (const note of labeledNotes) {
+    if (/^(übung(?:en)?(?:\s+und\s+aktivitäten)?|aktivitäten|exercises?|activities?)$/i.test(note.label)) {
+      if (note.value.length >= 4) uebungenUndAktivitaeten.push(note.value.slice(0, 180));
+    }
+  }
   for (const s of allSentences) {
     if (
       /\b(übung\w*|aufgabe\w*|seite\s*\d+|dialog\w*|rollenspiel\w*|lesen|vorlesen|hören|schreiben|ergänzen|beantworten|kursbuch|arbeitsbuch|hausaufgabe\w*)\b/i.test(
@@ -3684,8 +3900,20 @@ export function extractStructuredGermanLessonContentDeterministically(options: {
     }
   }
 
-  // 7. Extract Offene Punkte (topics needing further explanation, questions, or next-lesson review)
-  const offenePunkte: string[] = [];
+  // 7. Extract Offene Punkte (Transcript questions/review cues + Grain ai_action_items)
+  const offenePunkte: string[] = [
+    ...(options.part1ActionItems || []),
+    ...(options.part2ActionItems || [])
+  ]
+    .map((item) => String(item || '').trim())
+    .filter((item) => item.length >= 3)
+    .map((item) => item.slice(0, 180));
+
+  for (const note of labeledNotes) {
+    if (/^(offene\s*punkte?|offener\s*punkt|action\s*items?|next\s*steps?)$/i.test(note.label)) {
+      if (note.value.length >= 3) offenePunkte.push(note.value.slice(0, 180));
+    }
+  }
   for (const s of allSentences) {
     if (
       /\b(nächst\w*\s+(?:mal|stunde|woche)|noch\s+unklar|schwierig\w*|wiederholen\s+wir|offen\w*\s+punkt\w*|frage\w*\s+zu|nicht\s+ganz\s+klar|müssen\s+wir\s+noch\s+üben|مراجعة|غير\s+واضح|الحصة\s+القادمة)\b/i.test(
@@ -3711,17 +3939,20 @@ export function extractStructuredGermanLessonContentDeterministically(options: {
 
 /**
  * Extracts structured 7-section German lesson content for a lesson from its matched Part 1 and (optional) Part 2
- * Grain recordings.
+ * Grain recordings using Grain's native Transcript and AI Notes (`ai_summary`, `ai_template_sections`, `highlights`, `ai_action_items`).
+ * - Works 100% independently of Gemini (zero GEMINI_API_KEY or external AI endpoint dependency).
+ * - Always combines both Transcript and AI Notes whenever available, and supports AI Notes-only extraction when transcripts are unavailable.
  * - Combines Part 1 and Part 2 into one coherent summary and removes duplicates.
- * - If transcript and educational summary are unavailable, returns `transcriptStatus: 'transcript_unavailable'`
- *   without generating fabricated content.
+ * - Includes both transcript and AI Notes content in `sourceContentFingerprint` so late-arriving AI Notes trigger reprocessing.
+ * - If both transcript and AI Notes are unavailable, returns `transcriptStatus: 'transcript_unavailable'` without generating fabricated content.
  */
 export async function extractStructuredLessonContentForLesson(options: {
   lesson: Lesson;
   recordings?: GrainDiscoveredRecording[];
   providedPart1Transcript?: string;
   providedPart2Transcript?: string;
-  useServerGemini?: boolean;
+  providedPart1AiNotes?: string;
+  providedPart2AiNotes?: string;
 }): Promise<GrainExtractedLessonContent> {
   const { lesson } = options;
   const discovered = options.recordings || loadDiscoveredGrainRecordings({ includeRemoved: true });
@@ -3748,66 +3979,113 @@ export async function extractStructuredLessonContentForLesson(options: {
   const sourceRecordingIds = [part1Id, part2Id].filter(Boolean);
   const nowIso = new Date().toISOString();
 
-  const fetchSourceTextForRecording = async (
+  const fetchSourcesForRecording = async (
     recId: string,
-    providedText?: string
-  ): Promise<{ text: string; fromTranscript: boolean }> => {
-    if (typeof providedText === 'string') {
-      const trimmed = providedText.trim();
-      return { text: trimmed, fromTranscript: trimmed.length > 0 };
-    }
-    if (!recId) return { text: '', fromTranscript: false };
-
-    // 1. Try ephemeral transcript first
-    const tr = await getTranscriptEphemerally(recId);
-    if (tr.available && tr.plainText.trim()) {
-      return { text: tr.plainText.trim(), fromTranscript: true };
-    }
-
-    // 2. Fallback to Grain recording details AI summary / template sections if transcript endpoint is restricted
-    const detailRes = await executeScopedGrainOperation({
-      operation: 'recording_details',
-      recordingId: recId,
-      payload: {
-        include: {
-          ai_summary: true,
-          ai_template_sections: { format: 'json' }
-        }
-      }
-    });
-    const detailData = detailRes.ok ? detailRes.data : null;
-    const summaryText = extractGrainAiSummaryText(detailData?.ai_summary);
-    const sections: string[] = [];
-    if (Array.isArray(detailData?.ai_template_sections)) {
-      for (const sec of detailData.ai_template_sections) {
-        if (sec && typeof sec === 'object') {
-          const t = String(sec.title || sec.name || '').trim();
-          const c = String(sec.content || sec.text || sec.body || '').trim();
-          if (t && c) sections.push(`${t}: ${c}`);
-        }
+    providedTranscript?: string,
+    providedAiNotes?: string
+  ): Promise<{
+    transcriptText: string;
+    aiNotesText: string;
+    actionItems: string[];
+    hasTranscript: boolean;
+    hasAiNotes: boolean;
+  }> => {
+    let transcriptText = '';
+    if (typeof providedTranscript === 'string') {
+      transcriptText = providedTranscript.trim();
+    } else if (recId) {
+      const tr = await getTranscriptEphemerally(recId);
+      if (tr.available && tr.plainText.trim()) {
+        transcriptText = tr.plainText.trim();
       }
     }
-    const cachedRec = discovered.find((r) => r.id === recId);
-    const combinedFallback = [summaryText, ...sections, cachedRec?.aiSummaryExcerpt || '']
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .join('\n');
 
-    return { text: combinedFallback, fromTranscript: false };
+    let aiNotesText = '';
+    let actionItems: string[] = [];
+    if (typeof providedAiNotes === 'string') {
+      aiNotesText = providedAiNotes.trim();
+    } else if (recId) {
+      const cachedRec = discovered.find((r) => r.id === recId);
+      // Skip remote recording_details fetch if both transcript/notes were explicitly supplied in unit tests without live bridge
+      const detailRes = await executeScopedGrainOperation({
+        operation: 'recording_details',
+        recordingId: recId,
+        payload: {
+          include: {
+            ai_summary: true,
+            ai_template_sections: { format: 'json' },
+            highlights: true,
+            ai_action_items: true
+          }
+        }
+      });
+      const detailData = detailRes.ok ? detailRes.data : null;
+      const notesBundle = extractGrainAiNotesFromRecordingDetails(
+        detailData,
+        typeof providedTranscript === 'string' ? undefined : cachedRec?.aiSummaryExcerpt
+      );
+      aiNotesText = notesBundle.combinedNotesText;
+      actionItems = notesBundle.actionItemLines;
+    }
+
+    return {
+      transcriptText,
+      aiNotesText,
+      actionItems,
+      hasTranscript: transcriptText.length > 0,
+      hasAiNotes: aiNotesText.length > 0
+    };
   };
 
-  const part1Source = await fetchSourceTextForRecording(part1Id, options.providedPart1Transcript);
-  const part2Source = part2Id
-    ? await fetchSourceTextForRecording(part2Id, options.providedPart2Transcript)
-    : typeof options.providedPart2Transcript === 'string' && options.providedPart2Transcript.trim()
-    ? { text: options.providedPart2Transcript.trim(), fromTranscript: true }
-    : { text: '', fromTranscript: false };
+  const part1Sources = await fetchSourcesForRecording(
+    part1Id,
+    options.providedPart1Transcript,
+    options.providedPart1AiNotes
+  );
+  const hasPart2Inputs = Boolean(
+    part2Id ||
+      (typeof options.providedPart2Transcript === 'string' && options.providedPart2Transcript.trim()) ||
+      (typeof options.providedPart2AiNotes === 'string' && options.providedPart2AiNotes.trim())
+  );
+  const part2Sources = hasPart2Inputs
+    ? await fetchSourcesForRecording(
+        part2Id,
+        options.providedPart2Transcript,
+        options.providedPart2AiNotes
+      )
+    : {
+        transcriptText: '',
+        aiNotesText: '',
+        actionItems: [],
+        hasTranscript: false,
+        hasAiNotes: false
+      };
 
-  const hasPart1Text = part1Source.text.length > 0;
-  const hasPart2Text = part2Source.text.length > 0;
+  const hasPart1Content = part1Sources.hasTranscript || part1Sources.hasAiNotes;
+  const hasPart2Content = part2Sources.hasTranscript || part2Sources.hasAiNotes;
 
-  // Requirement 4: If transcript/content is unavailable, show a clear status and DO NOT generate fabricated content!
-  if (!hasPart1Text && !hasPart2Text) {
+  const fingerprintItems: Array<{ recordingId: string; text: string }> = [
+    ...(part1Id || hasPart1Content
+      ? [
+          { recordingId: `${part1Id || 'part1'}:transcript`, text: part1Sources.transcriptText },
+          { recordingId: `${part1Id || 'part1'}:ai_notes`, text: part1Sources.aiNotesText }
+        ]
+      : []),
+    ...(part2Id || hasPart2Content
+      ? [
+          { recordingId: `${part2Id || 'part2'}:transcript`, text: part2Sources.transcriptText },
+          { recordingId: `${part2Id || 'part2'}:ai_notes`, text: part2Sources.aiNotesText }
+        ]
+      : [])
+  ];
+  const fingerprint = computeGrainLessonSourceFingerprint(
+    fingerprintItems.length > 0
+      ? fingerprintItems
+      : sourceRecordingIds.map((id) => ({ recordingId: id, text: '' }))
+  );
+
+  // Requirement 6 & 8: If neither transcript nor AI Notes are available, return clear unavailable status and DO NOT fabricate content!
+  if (!hasPart1Content && !hasPart2Content) {
     return {
       themaDerStunde: '',
       behandelteInhalte: [],
@@ -3818,90 +4096,46 @@ export async function extractStructuredLessonContentForLesson(options: {
       offenePunkte: [],
       formattedLessonSummaryDe: '',
       sourceRecordingIds,
-      sourceContentFingerprint: computeGrainLessonSourceFingerprint(
-        sourceRecordingIds.map((id) => ({ recordingId: id, text: '' }))
-      ),
+      sourceContentFingerprint: fingerprint,
       extractedAt: nowIso,
-      origin: 'ai_extracted',
+      origin: 'grain_transcript_and_notes',
+      sourceKinds: [],
       transcriptStatus: 'transcript_unavailable',
       partCount: part2Id ? 2 : 1,
       teacherEdited: false
     };
   }
 
-  const fingerprint = computeGrainLessonSourceFingerprint([
-    ...(part1Id || hasPart1Text ? [{ recordingId: part1Id || 'part1', text: part1Source.text }] : []),
-    ...(part2Id || hasPart2Text ? [{ recordingId: part2Id || 'part2', text: part2Source.text }] : [])
-  ]);
+  const extractedCore = extractStructuredGermanLessonContentDeterministically({
+    lessonTitle: lesson.title || lesson.groupName,
+    part1Text: part1Sources.transcriptText,
+    part2Text: part2Sources.transcriptText,
+    part1AiNotes: part1Sources.aiNotesText,
+    part2AiNotes: part2Sources.aiNotesText,
+    part1ActionItems: part1Sources.actionItems,
+    part2ActionItems: part2Sources.actionItems
+  });
 
-  let extractedCore: GrainExtractedLessonContentCore | null = null;
-
-  // Optional server-side Gemini extraction when running in browser web runtime
-  if (
-    options.useServerGemini &&
-    typeof window !== 'undefined' &&
-    typeof fetch === 'function'
-  ) {
-    try {
-      const resp = await fetch('/api/grain/extract-lesson-content', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Glueck-Grain-Proxy': '1'
-        },
-        body: JSON.stringify({
-          lessonTitle: lesson.title || lesson.groupName || 'Deutschunterricht',
-          part1Transcript: part1Source.text,
-          part2Transcript: part2Source.text || undefined
-        })
-      });
-      if (resp.ok) {
-        const json = await resp.json();
-        if (json?.ok && json?.extracted) {
-          extractedCore = deduplicateGermanExtractedContent({
-            themaDerStunde: json.extracted.themaDerStunde || '',
-            behandelteInhalte: Array.isArray(json.extracted.behandelteInhalte)
-              ? json.extracted.behandelteInhalte
-              : [],
-            neueWoerterUndRedemittel: Array.isArray(json.extracted.neueWoerterUndRedemittel)
-              ? json.extracted.neueWoerterUndRedemittel
-              : [],
-            grammatik: Array.isArray(json.extracted.grammatik) ? json.extracted.grammatik : [],
-            beispiele: Array.isArray(json.extracted.beispiele) ? json.extracted.beispiele : [],
-            uebungenUndAktivitaeten: Array.isArray(json.extracted.uebungenUndAktivitaeten)
-              ? json.extracted.uebungenUndAktivitaeten
-              : [],
-            offenePunkte: Array.isArray(json.extracted.offenePunkte)
-              ? json.extracted.offenePunkte
-              : [],
-            formattedLessonSummaryDe: ''
-          });
-        }
-      }
-    } catch {
-      // Fallback to deterministic pedagogical extractor below
-    }
+  const sourceKinds: Array<'transcript' | 'ai_notes'> = [];
+  if (part1Sources.hasTranscript || part2Sources.hasTranscript) {
+    sourceKinds.push('transcript');
   }
-
-  if (!extractedCore) {
-    extractedCore = extractStructuredGermanLessonContentDeterministically({
-      lessonTitle: lesson.title || lesson.groupName,
-      part1Text: part1Source.text,
-      part2Text: part2Source.text
-    });
+  if (part1Sources.hasAiNotes || part2Sources.hasAiNotes) {
+    sourceKinds.push('ai_notes');
   }
 
   const transcriptStatus: GrainExtractedLessonContent['transcriptStatus'] =
-    part2Id && (!hasPart1Text || !hasPart2Text) ? 'partial_transcript' : 'complete';
+    part2Id && (!hasPart1Content || !hasPart2Content) ? 'partial_transcript' : 'complete';
 
   return {
     ...extractedCore,
     sourceRecordingIds,
     sourceContentFingerprint: fingerprint,
     extractedAt: nowIso,
-    origin: 'ai_extracted',
+    origin: 'grain_transcript_and_notes',
+    sourceKinds,
     transcriptStatus,
-    partCount: hasPart1Text && hasPart2Text ? 2 : 1,
+    partCount: hasPart1Content && hasPart2Content ? 2 : 1,
     teacherEdited: false
   };
 }
@@ -3961,11 +4195,13 @@ export function applyExtractedLessonContentToLesson(
     };
   }
 
-  // Idempotency guard: if identical source fingerprint was already processed, do not duplicate
+  // Idempotency guard: if identical source fingerprint was already processed (or already queued in pendingUpdatedExtraction), do not duplicate
   if (
     existingExtracted &&
-    existingExtracted.sourceContentFingerprint === extracted.sourceContentFingerprint &&
-    existingExtracted.transcriptStatus === extracted.transcriptStatus
+    ((existingExtracted.sourceContentFingerprint === extracted.sourceContentFingerprint &&
+      existingExtracted.transcriptStatus === extracted.transcriptStatus) ||
+      existingExtracted.pendingUpdatedExtraction?.sourceContentFingerprint ===
+        extracted.sourceContentFingerprint)
   ) {
     return {
       updated: false,
@@ -4685,9 +4921,24 @@ export async function syncGrainRecordingsIncrementally(options: {
   const finalLessonPatches: Record<string, Partial<Lesson>> = { ...autoApplied.lessonPatches };
   const autoMatchedLessonIds = Object.keys(autoApplied.lessonPatches);
 
-  // Requirement 4 & 5: Automatically extract 7-section German lesson content for auto-matched lessons
-  if (options.autoExtractContent !== false && autoMatchedLessonIds.length > 0) {
-    for (const lessonId of autoMatchedLessonIds) {
+  // Also check already-linked lessons whose recordings appeared in this sync batch so late-arriving
+  // Grain AI Notes or transcripts trigger reprocessing cleanly (fingerprint-idempotent & teacher-edit safe).
+  const syncedRecordingIds = new Set(
+    fetchedRaw
+      .map((r: any) => (r && typeof r.id === 'string' ? r.id.trim() : ''))
+      .filter(Boolean)
+  );
+  const candidateExtractionLessonIds = new Set<string>(autoMatchedLessonIds);
+  for (const rec of autoApplied.recordings) {
+    const linkedId = rec.confirmedLessonId;
+    if (linkedId && syncedRecordingIds.has(rec.id)) {
+      candidateExtractionLessonIds.add(linkedId);
+    }
+  }
+
+  // Automatically extract 7-section German lesson content from Grain Transcript + AI Notes
+  if (options.autoExtractContent !== false && candidateExtractionLessonIds.size > 0) {
+    for (const lessonId of candidateExtractionLessonIds) {
       const updatedLesson = autoApplied.updatedLessons.find((l) => l.id === lessonId);
       if (!updatedLesson) continue;
       const extracted = await extractStructuredLessonContentForLesson({
@@ -5774,6 +6025,10 @@ const FORBIDDEN_GRAIN_KEYS = new Set([
   'rawTranscript',
   'fullTranscript',
   'utterances',
+  'ai_template_sections',
+  'highlights',
+  'ai_action_items',
+  'rawAiNotes',
   'grainApiToken',
   'grainPersonalAccessToken',
   'grainToken',
@@ -5865,7 +6120,21 @@ function sanitizeExtractedLessonContent(raw: any): GrainExtractedLessonContent |
       : [],
     sourceContentFingerprint: String(raw.sourceContentFingerprint || '').slice(0, 180),
     extractedAt: String(raw.extractedAt || new Date().toISOString()),
-    origin: raw.origin === 'teacher_edited' ? 'teacher_edited' : 'ai_extracted',
+    origin:
+      raw.origin === 'teacher_edited' ||
+      raw.origin === 'teacher_written' ||
+      raw.origin === 'deterministic_transcript' ||
+      raw.origin === 'ai_extracted' ||
+      raw.origin === 'grain_transcript_and_notes'
+        ? raw.origin
+        : 'grain_transcript_and_notes',
+    ...(Array.isArray(raw.sourceKinds)
+      ? {
+          sourceKinds: raw.sourceKinds.filter(
+            (k: any): k is 'transcript' | 'ai_notes' => k === 'transcript' || k === 'ai_notes'
+          )
+        }
+      : {}),
     transcriptStatus:
       raw.transcriptStatus === 'transcript_unavailable' || raw.transcriptStatus === 'partial_transcript'
         ? raw.transcriptStatus

@@ -1731,7 +1731,8 @@ export interface GrainExtractedLessonContent extends GrainExtractedLessonContent
   partCount: 1 | 2;
   sourceContentFingerprint: string;
   extractedAt: string;
-  origin: 'ai_extracted' | 'deterministic_transcript' | 'teacher_edited' | 'teacher_written';
+  origin: 'grain_transcript_and_notes' | 'deterministic_transcript' | 'ai_extracted' | 'teacher_edited' | 'teacher_written';
+  sourceKinds?: Array<'transcript' | 'ai_notes'>;
   transcriptStatus:
     | 'complete'
     | 'partial_transcript'

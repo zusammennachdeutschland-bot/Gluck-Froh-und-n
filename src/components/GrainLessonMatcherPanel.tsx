@@ -185,8 +185,7 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
     try {
       const extracted = await extractStructuredLessonContentForLesson({
         lesson: lessonToExtract,
-        recordings: recsList,
-        useServerGemini: true
+        recordings: recsList
       });
       const applied = applyExtractedLessonContentToLesson(lessonToExtract, extracted);
       if (applied.updated && onUpdateLesson) {
@@ -714,7 +713,7 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
               >
                 {extractedContent.teacherEdited || extractedContent.origin === 'teacher_edited'
                   ? _t('معدّل بواسطة المعلم ✓', 'Teacher-edited ✓', 'Von Lehrkraft bearbeitet ✓')
-                  : _t('مستخرج آلياً من التسجيل', 'AI-extracted', 'Automatisch extrahiert')}
+                  : _t('مستخرج من Grain (Transcript & AI Notes)', 'Grain Transcript & AI Notes', 'Grain-Transkript & KI-Notizen')}
               </span>
               {extractedContent.partCount === 2 && (
                 <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200">
@@ -738,9 +737,9 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
           {extractedContent.transcriptStatus === 'transcript_unavailable' ? (
             <div className="p-2 rounded-lg bg-amber-50/70 dark:bg-amber-950/40 border border-amber-200 text-[11px] text-amber-800 dark:text-amber-200">
               {_t(
-                'النص الكامل (Transcript) غير متاح حالياً من Grain لهذا التسجيل. لم يتم توليد أي محتوى افتراضي.',
-                'Transcript unavailable from Grain for this recording. No fabricated content was generated.',
-                'Transkript in Grain nicht verfügbar. Es wurden keine künstlichen Inhalte erzeugt.'
+                'النص الكامل وملاحظات AI Notes غير متاحة حالياً من Grain لهذا التسجيل. لم يتم توليد أي محتوى افتراضي.',
+                'Transcript and AI Notes are unavailable from Grain for this recording. No fabricated content was generated.',
+                'Transkript und KI-Notizen in Grain nicht verfügbar. Es wurden keine künstlichen Inhalte erzeugt.'
               )}
             </div>
           ) : isEditingExtractedContent ? (

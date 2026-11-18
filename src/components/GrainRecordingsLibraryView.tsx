@@ -235,8 +235,7 @@ export const GrainRecordingsLibraryView: React.FC = () => {
     try {
       const extracted = await extractStructuredLessonContentForLesson({
         lesson: workingLesson,
-        recordings: updatedList,
-        useServerGemini: true
+        recordings: updatedList
       });
       const applied = applyExtractedLessonContentToLesson(workingLesson, extracted);
       if (applied.updated) {
