@@ -15,7 +15,7 @@ interface StartLessonNowModalProps {
 }
 
 export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClose }) => {
-  const { groups, students, profile, lessons, groupWeeklySessions, addLesson, updateLesson, openLessonControl, saveLessonReport, startActiveLessonTimer, t, language, _t } = useApp();
+  const { groups, students, profile, lessons, getFullLessonsSnapshot, groupWeeklySessions, addLesson, updateLesson, openLessonControl, saveLessonReport, startActiveLessonTimer, t, language, _t } = useApp();
 
   const now = new Date();
   const todayStr = formatLocalDate(now);
@@ -177,7 +177,7 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
     // 2. No duplicate exists, create new Lesson object in context with a collision-proof ID
     const randomSuffix = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).substring(2, 8);
     const newLessonId = `l_spont_${Date.now()}_${randomSuffix}`;
-    const selectedGroupCycle = selectedGroup ? getGroupCycleInfo(selectedGroup, lessons, language) : null;
+    const selectedGroupCycle = selectedGroup ? getGroupCycleInfo(selectedGroup, getFullLessonsSnapshot(), language) : null;
 
     const newLessonData = {
       id: newLessonId,
@@ -373,7 +373,7 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
                   filteredGroups.map((g) => {
                     const isSelected = selectedGroupId === g.id;
                     const groupStsCount = activeStudents.filter(s => s.groupId === g.id).length;
-                    const cycleInfo = getGroupCycleInfo(g, lessons, language);
+                    const cycleInfo = getGroupCycleInfo(g, getFullLessonsSnapshot(), language);
 
                     return (
                       <button

@@ -124,6 +124,7 @@ export interface GoogleCalendarTokenResult {
   resolutionRequired?: boolean;
   redirected?: boolean;
   expired?: boolean;
+  retryAfterClearToken?: boolean;
   platform?: 'android_native' | 'web';
   error?: string;
   code?: string;
@@ -551,6 +552,99 @@ if (typeof window !== 'undefined') {
  * Note: Read verification does NOT mark `writeVerified=true`; actual write permission is only
  * confirmed when an `events.insert` or `events.patch` succeeds (or caught if 403 occurs).
  */
+function classifyGoogleCalendar403Error(payload: any): {
+  code: string;
+  permissionDenied: boolean;
+  retryAfterClearToken: boolean;
+  reason?: string;
+  error: string;
+} {
+  const errObj = payload?.error || {};
+  const firstErrorReason =
+    typeof errObj?.errors?.[0]?.reason === 'string' ? errObj.errors[0].reason.trim() : '';
+  const detailReason = Array.isArray(errObj?.details)
+    ? errObj.details.find((d: any) => typeof d?.reason === 'string' && d.reason.trim())?.reason?.trim() || ''
+    : '';
+  const statusStr = typeof errObj?.status === 'string' ? errObj.status.trim() : '';
+  const rawMessage = sanitizeDiagnosticText(typeof errObj?.message === 'string' ? errObj.message : '') || '';
+  const reason = firstErrorReason || detailReason || statusStr || '';
+  const combinedLower = `${reason} ${rawMessage}`.toLowerCase();
+
+  // 1. Google Calendar API not enabled in Google Cloud project
+  if (
+    reason === 'accessNotConfigured' ||
+    reason === 'SERVICE_DISABLED' ||
+    combinedLower.includes('has not been used in project') ||
+    combinedLower.includes('calendar-json.googleapis.com') ||
+    (combinedLower.includes('google calendar api') && combinedLower.includes('disabled'))
+  ) {
+    return {
+      code: 'CALENDAR_API_DISABLED',
+      permissionDenied: false,
+      retryAfterClearToken: false,
+      reason: reason || 'accessNotConfigured',
+      error:
+        'Google Calendar API is disabled in the Google Cloud project (glueck-c8621). Enable "Google Calendar API" in Google Cloud Console → APIs & Services → Library, wait 1–2 minutes, then tap Reconnect.'
+    };
+  }
+
+  // 2. Account has never activated Google Calendar
+  if (reason === 'notACalendarUser' || combinedLower.includes('must be signed up for google calendar')) {
+    return {
+      code: 'NOT_A_CALENDAR_USER',
+      permissionDenied: false,
+      retryAfterClearToken: false,
+      reason: reason || 'notACalendarUser',
+      error:
+        'This Google account does not have Google Calendar activated. Open calendar.google.com once with this account or switch to another Google account.'
+    };
+  }
+
+  // 3. Quota / rate limit (Google APIs also return 403 for quota limits)
+  if (
+    reason === 'rateLimitExceeded' ||
+    reason === 'userRateLimitExceeded' ||
+    reason === 'dailyLimitExceeded' ||
+    reason === 'quotaExceeded'
+  ) {
+    return {
+      code: 'CALENDAR_QUOTA_EXCEEDED',
+      permissionDenied: false,
+      retryAfterClearToken: false,
+      reason,
+      error: 'Google Calendar API rate limit reached. Please wait a minute and try again.'
+    };
+  }
+
+  // 4. Insufficient OAuth scopes or revoked Calendar permission
+  const isExplicitScopeError =
+    reason === 'insufficientPermissions' ||
+    reason === 'ACCESS_TOKEN_SCOPE_INSUFFICIENT' ||
+    reason === 'insufficient_scope' ||
+    combinedLower.includes('insufficient authentication scopes') ||
+    combinedLower.includes('insufficient permission');
+
+  if (isExplicitScopeError || !reason) {
+    return {
+      code: 'INSUFFICIENT_SCOPE',
+      permissionDenied: true,
+      retryAfterClearToken: true,
+      reason: reason || 'insufficientPermissions',
+      error:
+        'Google Calendar event permission (calendar.events) was not granted or was revoked. Tap Reconnect and make sure the Google Calendar permission checkbox is checked before tapping Continue.'
+    };
+  }
+
+  // 5. Any other Google 403 reason — surface sanitized reason instead of hiding it
+  return {
+    code: 'HTTP_403',
+    permissionDenied: true,
+    retryAfterClearToken: true,
+    reason,
+    error: `Google Calendar access was denied (403: ${sanitizeDiagnosticText(reason)}). ${rawMessage ? `${rawMessage} ` : ''}Please reconnect and approve Calendar access.`
+  };
+}
+
 export async function verifyGoogleCalendarAuthorization(
   accessToken: string,
   fallbackEmail?: string
@@ -563,6 +657,8 @@ export async function verifyGoogleCalendarAuthorization(
   calendarAccessRole?: string;
   expired?: boolean;
   permissionDenied?: boolean;
+  retryAfterClearToken?: boolean;
+  errorCode?: string;
   status?: number;
   error?: string;
 }> {
@@ -591,24 +687,33 @@ export async function verifyGoogleCalendarAuthorization(
       return {
         ok: false,
         expired: true,
+        errorCode: 'HTTP_401',
         status: 401,
         error: 'Google Calendar authorization expired or is invalid. Please reconnect.'
       };
     }
 
     if (res.status === 403) {
+      const errorPayload = await res.json().catch(() => null);
+      const classified = classifyGoogleCalendar403Error(errorPayload);
+      if (classified.retryAfterClearToken) {
+        lastInvalidatedAccessToken = accessToken;
+      }
       clearInMemoryGoogleCalendarToken();
       recordCalendarOAuthStage('calendar_oauth_verify_calendar_failed', {
         ok: false,
-        code: 'HTTP_403',
-        detail: 'Calendar permission denied or missing calendar.events scope'
+        code: classified.code,
+        detail: classified.reason
+          ? `Calendar 403 (${sanitizeDiagnosticText(classified.reason)})`
+          : 'Calendar permission denied or missing calendar.events scope'
       });
       return {
         ok: false,
-        permissionDenied: true,
+        permissionDenied: classified.permissionDenied,
+        retryAfterClearToken: classified.retryAfterClearToken,
+        errorCode: classified.code,
         status: 403,
-        error:
-          'Google Calendar event permission (calendar.events) was not granted or was revoked. Please reconnect and approve Calendar access.'
+        error: classified.error
       };
     }
 
@@ -620,6 +725,7 @@ export async function verifyGoogleCalendarAuthorization(
       });
       return {
         ok: false,
+        errorCode: `HTTP_${res.status}`,
         status: res.status,
         error: `Could not verify Google Calendar access (HTTP ${res.status}).`
       };
@@ -694,6 +800,7 @@ async function finalizeVerifiedCalendarToken(params: {
 }): Promise<GoogleCalendarTokenResult> {
   const verify = await verifyGoogleCalendarAuthorization(params.accessToken, params.fallbackEmail);
   if (!verify.ok) {
+    const resolvedErrorCode = verify.errorCode || (verify.status ? `HTTP_${verify.status}` : 'VERIFY_FAILED');
     persistAndEmitConnectionMeta({
       ...currentConnectionMeta,
       status: verify.expired ? 'expired' : verify.permissionDenied ? 'reconnect_required' : 'error',
@@ -702,14 +809,15 @@ async function finalizeVerifiedCalendarToken(params: {
       writeVerified: false,
       platform: params.platform,
       lastMessage: verify.error,
-      lastErrorCode: verify.status ? `HTTP_${verify.status}` : 'VERIFY_FAILED'
+      lastErrorCode: resolvedErrorCode
     });
     return {
       ok: false,
       expired: verify.expired,
+      retryAfterClearToken: verify.retryAfterClearToken,
       platform: params.platform,
       error: verify.error,
-      code: verify.status ? `HTTP_${verify.status}` : 'VERIFY_FAILED'
+      code: resolvedErrorCode
     };
   }
 
@@ -812,8 +920,24 @@ async function executeAndroidNativeCalendarOAuth(
       forcePrompt || lastInvalidatedAccessToken
         ? lastInvalidatedAccessToken || inMemoryGoogleCalendarAccessToken || undefined
         : undefined;
+    const prevErrorCode = currentConnectionMeta.lastErrorCode;
+    const shouldRevokeBeforeInteractiveReconnect =
+      forcePrompt &&
+      !silentOnly &&
+      (prevErrorCode === 'INSUFFICIENT_SCOPE' ||
+        prevErrorCode === 'HTTP_403' ||
+        prevErrorCode === 'SCOPE_NOT_GRANTED');
     if (forcePrompt) {
       clearInMemoryGoogleCalendarToken();
+    }
+
+    if (shouldRevokeBeforeInteractiveReconnect) {
+      const revokeEmail = activeFirebaseEmail || currentConnectionMeta.accountEmail || undefined;
+      if (revokeEmail) {
+        await invokeNativeRevokeCalendarAccess(revokeEmail, GOOGLE_CALENDAR_SCOPE).catch(() => ({
+          revoked: false
+        }));
+      }
     }
 
     // Prefer the signed-in Firebase account email so switching accounts never reuses the old account hint
@@ -941,13 +1065,23 @@ async function executeAndroidNativeCalendarOAuth(
       scopeExplicitlyVerified: true
     });
 
-    // If Play Services returned a stale/revoked cached token (401 on verification),
+    // If Play Services returned a stale/revoked cached token (401 or 403 insufficient scope),
     // strictly await AuthorizationClient.clearToken() before attempting ONE fresh retry.
-    if (!finalized.ok && finalized.expired && allowStale401Retry) {
+    if (!finalized.ok && (finalized.expired || finalized.retryAfterClearToken) && allowStale401Retry) {
       const clearRes = await invokeNativeClearCalendarToken(accessToken);
+      if (finalized.retryAfterClearToken && !silentOnly) {
+        const revokeEmail = nativeRes.email || activeFirebaseEmail || currentConnectionMeta.accountEmail || undefined;
+        if (revokeEmail) {
+          await invokeNativeRevokeCalendarAccess(revokeEmail, GOOGLE_CALENDAR_SCOPE).catch(() => ({
+            revoked: false
+          }));
+        }
+      }
       recordCalendarOAuthStage('calendar_oauth_android_stale_token_cleared', {
         ok: Boolean(clearRes?.cleared),
-        detail: 'Awaited Play Services token clear after 401; retrying once'
+        detail: finalized.expired
+          ? 'Awaited Play Services token clear after 401; retrying once'
+          : 'Awaited Play Services token clear after 403 scope error; retrying once'
       });
       lastInvalidatedAccessToken = clearRes?.cleared ? null : accessToken;
       return executeAndroidNativeCalendarOAuth(forcePrompt, {

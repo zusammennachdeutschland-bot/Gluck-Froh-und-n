@@ -916,6 +916,111 @@ async function runCalendarOAuthFlowTests() {
     assert.ok(appTsx.includes('subscribeNativeCalendarAuthProcessRestored'));
     assert.ok(appTsx.includes('openSettingsIntegrations'));
 
+    // -------------------------------------------------------------------------
+    // 7H. HTTP 403 CLASSIFICATION (API DISABLED VS STALE/INSUFFICIENT SCOPE RECOVERY)
+    // -------------------------------------------------------------------------
+    console.log('7H. Testing HTTP 403 classification (accessNotConfigured vs insufficientPermissions stale token recovery)...');
+    __resetCalendarOAuthStateForTesting();
+
+    let apiDisabledClearCalls = 0;
+    let apiDisabledAuthCalls = 0;
+    __setNativeAuthTestAdapter({
+      isAndroidNative: () => true,
+      clearCalendarToken: async () => {
+        apiDisabledClearCalls++;
+        return { cleared: true };
+      },
+      authorizeCalendar: async () => {
+        apiDisabledAuthCalls++;
+        return {
+          cancelled: false,
+          accessToken: 'ya29.api_disabled_token',
+          grantedScopes: ['https://www.googleapis.com/auth/calendar.events'],
+          scopeVerified: true,
+          email: 'teacher@glueck.app',
+          stage: 'native_consent_approved'
+        };
+      }
+    });
+    __setCalendarFetchForTesting(async () =>
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 403,
+            message: 'Google Calendar API has not been used in project glueck-c8621 before or it is disabled.',
+            errors: [{ domain: 'usageLimits', reason: 'accessNotConfigured', message: 'Access Not Configured' }]
+          }
+        }),
+        { status: 403 }
+      )
+    );
+
+    const disabledRes = await requestGoogleCalendarAccessToken(false);
+    assert.equal(disabledRes.ok, false);
+    assert.equal(disabledRes.code, 'CALENDAR_API_DISABLED');
+    assert.equal(apiDisabledAuthCalls, 1, 'Disabled Cloud API must not trigger useless retry loops');
+    assert.equal(apiDisabledClearCalls, 0, 'Disabled Cloud API must not clear token needlessly');
+    assert.equal(getGoogleCalendarConnectionState().status, 'error');
+    assert.ok(
+      String(disabledRes.error || '').includes('Google Calendar API is disabled'),
+      'Disabled API error must clearly direct user to enable Google Calendar API'
+    );
+
+    // Now test 403 ACCESS_TOKEN_SCOPE_INSUFFICIENT on stale cached token -> clearToken + revokeAccess + retry recovers
+    __resetCalendarOAuthStateForTesting();
+    let scope403Attempt = 0;
+    let scope403Cleared = false;
+    let scope403Revoked = false;
+    __setNativeAuthTestAdapter({
+      isAndroidNative: () => true,
+      clearCalendarToken: async ({ accessToken }) => {
+        if (accessToken === 'ya29.stale_403_token') scope403Cleared = true;
+        return { cleared: true };
+      },
+      revokeCalendarAccess: async () => {
+        scope403Revoked = true;
+        return { revoked: true };
+      },
+      authorizeCalendar: async () => {
+        scope403Attempt++;
+        return {
+          cancelled: false,
+          accessToken: scope403Attempt === 1 ? 'ya29.stale_403_token' : 'ya29.fresh_after_403_token',
+          grantedScopes: ['https://www.googleapis.com/auth/calendar.events'],
+          scopeVerified: true,
+          email: 'teacher@glueck.app',
+          stage: scope403Attempt === 1 ? 'native_immediate_grant' : 'native_consent_approved'
+        };
+      }
+    });
+    __setCalendarFetchForTesting(async (_input, init) => {
+      const authHeader = String((init?.headers as any)?.Authorization || '');
+      if (authHeader.includes('ya29.stale_403_token')) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: 403,
+              message: 'Request had insufficient authentication scopes.',
+              details: [{ reason: 'ACCESS_TOKEN_SCOPE_INSUFFICIENT' }]
+            }
+          }),
+          { status: 403 }
+        );
+      }
+      return new Response(
+        JSON.stringify({ summary: 'teacher@glueck.app', timeZone: 'Africa/Cairo', accessRole: 'owner', items: [] }),
+        { status: 200 }
+      );
+    });
+
+    const recovered403Res = await requestGoogleCalendarAccessToken(false);
+    assert.equal(recovered403Res.ok, true);
+    assert.equal(scope403Attempt, 2, '403 insufficient scope on stale token must clear, revoke, and retry once');
+    assert.equal(scope403Cleared, true, 'Must await clearCalendarToken for stale 403 token');
+    assert.equal(scope403Revoked, true, 'Must await revokeCalendarAccess before interactive retry');
+    assert.equal(getGoogleCalendarConnectionState().status, 'connected');
+    assert.equal(getInMemoryGoogleCalendarToken(), 'ya29.fresh_after_403_token');
+
     console.log('✅ All Google Calendar OAuth Flow Tests Passed!');
   } finally {
     __setNativeAuthTestAdapter(null);

@@ -257,7 +257,8 @@ export function getProjectedLessonsForRange(
   groups: Group[],
   explicitLessons: Lesson[],
   defaultZoomLink?: string,
-  groupWeeklySessions?: GroupWeeklySession[]
+  groupWeeklySessions?: GroupWeeklySession[],
+  numberingBasisLessons?: Lesson[]
 ): Lesson[] {
   const activeGroups = (groups || []).filter(g => !g.deleted && g.status !== 'archived');
   const activeGroupIds = new Set(activeGroups.map(g => g.id));
@@ -419,6 +420,7 @@ export function getProjectedLessonsForRange(
   });
 
   const combined = [...explicit, ...projected];
+  const projectedIdSet = new Set(projected.map(p => p.id));
   const seenIds = new Set<string>();
   const uniqueLessons: Lesson[] = [];
   for (const l of combined) {
@@ -433,6 +435,98 @@ export function getProjectedLessonsForRange(
         scheduleRecurrence: rec,
         biweeklyWeek: l.biweeklyWeek || (l.date ? getAlternatingWeek(l.date) : undefined)
       });
+    }
+  }
+
+  // Assign accurate sequential session numbers to newly projected lessons using the authoritative full basis
+  if (projectedIdSet.size > 0) {
+    const basisRaw = Array.isArray(numberingBasisLessons) && numberingBasisLessons.length > 0
+      ? numberingBasisLessons
+      : explicit;
+    const basisById = new Map<string, Lesson>();
+    for (const l of basisRaw) {
+      if (l && l.id && !l.deleted && l.status !== 'cancelled') {
+        basisById.set(l.id, l);
+      }
+    }
+    for (const l of uniqueLessons) {
+      if (l && l.id && !l.deleted && l.status !== 'cancelled' && !basisById.has(l.id)) {
+        basisById.set(l.id, l);
+      }
+    }
+    const allActiveBasis = Array.from(basisById.values());
+
+    const normalizeTimeLocal = (t?: string): string => {
+      if (!t) return '00:00';
+      const parts = t.trim().split(':');
+      if (parts.length === 2 && /^\d{1,2}$/.test(parts[0]) && /^\d{1,2}$/.test(parts[1])) {
+        return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+      }
+      return t.trim();
+    };
+    const cmpChrono = (a: Partial<Lesson>, b: Partial<Lesson>) => {
+      const kA = `${(a.date || '').trim()}T${normalizeTimeLocal(a.time)}`;
+      const kB = `${(b.date || '').trim()}T${normalizeTimeLocal(b.time)}`;
+      if (kA !== kB) return kA.localeCompare(kB);
+      return String(a.id || '').localeCompare(String(b.id || ''));
+    };
+
+    const computedSessionById = new Map<string, { num: number; total: number }>();
+    activeGroups.forEach(grp => {
+      const isPerLesson = Boolean(
+        grp.paymentCycle === 'per_lesson' ||
+        grp.paymentModel === 'per_session' ||
+        (grp.sessionCount !== undefined && grp.sessionCount <= 1)
+      );
+      const total = isPerLesson ? 1 : (grp.sessionCount && grp.sessionCount > 1 ? grp.sessionCount : 4);
+      const grpNameLower = (grp.name || '').trim().toLowerCase();
+      const grpLessons = allActiveBasis
+        .filter(l => l.groupId === grp.id || (!l.groupId && grpNameLower && (l.groupName || '').trim().toLowerCase() === grpNameLower))
+        .sort(cmpChrono);
+      if (grpLessons.length === 0) return;
+
+      const hasValidAnchor = Boolean(
+        !isPerLesson &&
+        grp.cycleAnchorSessionNumber &&
+        grp.cycleAnchorSessionNumber >= 1 &&
+        (grp.cycleAnchorLessonId || grp.cycleAnchorDate)
+      );
+      let anchorIndex = -1;
+      const anchorSessionNum = hasValidAnchor
+        ? Math.min(total, Math.max(1, Math.floor(grp.cycleAnchorSessionNumber!)))
+        : 1;
+      if (hasValidAnchor) {
+        if (grp.cycleAnchorLessonId) {
+          anchorIndex = grpLessons.findIndex(l => l.id === grp.cycleAnchorLessonId);
+        }
+        if (anchorIndex === -1 && grp.cycleAnchorDate) {
+          const probe = { id: grp.cycleAnchorLessonId || '', date: grp.cycleAnchorDate, time: grp.cycleAnchorTime || '00:00' };
+          const firstAtOrAfter = grpLessons.findIndex(l => cmpChrono(l, probe) >= 0);
+          anchorIndex = firstAtOrAfter === -1 ? grpLessons.length : firstAtOrAfter;
+        }
+      }
+      const startNum = Math.min(total, Math.max(1, grp.startingSessionNumber || 1));
+
+      grpLessons.forEach((l, idx) => {
+        if (!projectedIdSet.has(l.id)) return;
+        const num = isPerLesson
+          ? 1
+          : anchorIndex !== -1
+            ? ((((anchorSessionNum - 1 + (idx - anchorIndex)) % total) + total) % total) + 1
+            : (((startNum - 1 + idx) % total) + 1);
+        computedSessionById.set(l.id, { num, total });
+      });
+    });
+
+    for (let i = 0; i < uniqueLessons.length; i++) {
+      const calc = computedSessionById.get(uniqueLessons[i].id);
+      if (calc) {
+        uniqueLessons[i] = {
+          ...uniqueLessons[i],
+          sessionNumber: calc.num,
+          totalSessionsInPackage: calc.total
+        };
+      }
     }
   }
 

@@ -38,7 +38,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   recipientPhone,
   onClose,
 }) => {
-  const { groups, students, lessons, groupWeeklySessions, profile, updateGroup, updateLesson, updateProfile, language, t, _t, reportLanguage, setReportLanguage, reportT } = useApp();
+  const { groups, students, lessons, getFullLessonsSnapshot, setLessonSessionNumberAnchor, groupWeeklySessions, profile, updateGroup, updateLesson, updateProfile, language, t, _t, reportLanguage, setReportLanguage, reportT } = useApp();
 
   const currentMsgLang = reportLanguage || 'ar';
   const msgT = (ar: string, en: string, de?: string) => {
@@ -123,10 +123,11 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   });
   const initialPhone = resolvedContact.contact;
 
-  // Calculate Package Cycle information from the single authoritative numbering engine
-  const cycleInfo = targetGroup ? getGroupCycleInfo(targetGroup, lessons) : null;
+  // Calculate Package Cycle information from the single authoritative numbering engine (full history)
+  const fullLessonsForNumbering = getFullLessonsSnapshot();
+  const cycleInfo = targetGroup ? getGroupCycleInfo(targetGroup, fullLessonsForNumbering) : null;
   const currentTargetLesson = lesson || upcomingLesson;
-  const cycleResolution = resolveLessonCycleNumber(currentTargetLesson, lessons, {
+  const cycleResolution = resolveLessonCycleNumber(currentTargetLesson, fullLessonsForNumbering, {
     group: targetGroup,
     student: targetStudent,
     students
@@ -246,21 +247,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     setCustomMessage(null);
 
     if (currentTargetLesson) {
-      if (targetGroup) {
-        const newStartingNum = computeStartingSessionNumberForTargetLesson(currentTargetLesson, clamped, lessons, {
-          group: targetGroup,
-          student: targetStudent,
-          students
-        });
-        updateGroup(targetGroup.id, {
-          ...targetGroup,
-          startingSessionNumber: newStartingNum
-        });
-      }
-      updateLesson(currentTargetLesson.id, {
-        sessionNumber: clamped,
-        totalSessionsInPackage: totalCycleSessions
-      });
+      setLessonSessionNumberAnchor(currentTargetLesson, clamped, targetGroup);
     }
   };
 

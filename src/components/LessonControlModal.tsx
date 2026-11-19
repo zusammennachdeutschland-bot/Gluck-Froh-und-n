@@ -38,6 +38,8 @@ export const LessonControlModal: React.FC = () => {
     profile, 
     groups, 
     lessons,
+    getFullLessonsSnapshot,
+    setLessonSessionNumberAnchor,
     groupWeeklySessions,
     convertQuickLessonToStudent,
     activeLessonSession,
@@ -523,14 +525,15 @@ export const LessonControlModal: React.FC = () => {
         : (selectedLesson?.totalSessionsInPackage && selectedLesson.totalSessionsInPackage > 1 ? selectedLesson.totalSessionsInPackage : 4));
   const hasCycle = Boolean(selectedLesson && !isPerLessonGroup && cycleTotalSessions > 1);
   
-  // Dynamically compute the sequential session number among NON-CANCELLED lessons in the group/student
+  // Dynamically compute the sequential session number against full history (immune to 60-day RAM window pruning)
   const autoComputedSessionNumber = useMemo(() => {
-    return resolveLessonCycleNumber(selectedLesson, lessons, {
+    const fullLessons = getFullLessonsSnapshot();
+    return resolveLessonCycleNumber(selectedLesson, fullLessons, {
       group: targetGroup,
       student: targetStudent,
       students
     }).sessionNumber || 1;
-  }, [selectedLesson, lessons, targetGroup, targetStudent, students]);
+  }, [selectedLesson, lessons, getFullLessonsSnapshot, targetGroup, targetStudent, students]);
 
   // Normalize session number strictly within 1 .. cycleTotalSessions
   const rawSessionNumber = customSessionNumber !== null
@@ -572,23 +575,15 @@ export const LessonControlModal: React.FC = () => {
       });
     }
 
-    if (targetGroup) {
-      const newStartingNum = computeStartingSessionNumberForTargetLesson(selectedLesson, clampedNumber, lessons, {
-        group: targetGroup,
-        student: targetStudent,
-        students
-      });
-      updateGroup(targetGroup.id, {
-        ...targetGroup,
-        startingSessionNumber: newStartingNum
+    setLessonSessionNumberAnchor(selectedLesson, clampedNumber, targetGroup);
+
+    if (selectedLesson.report) {
+      updateLesson(selectedLesson.id, {
+        sessionNumber: clampedNumber,
+        totalSessionsInPackage: cycleTotalSessions,
+        report: { ...selectedLesson.report }
       });
     }
-
-    updateLesson(selectedLesson.id, { 
-      sessionNumber: clampedNumber,
-      totalSessionsInPackage: cycleTotalSessions,
-      ...(selectedLesson.report ? { report: { ...selectedLesson.report } } : {})
-    });
 
     setCycleSaveToast(_t(
       `✓ تم حفظ تعديل الحصة (${clampedNumber} من ${cycleTotalSessions}) وتطبيق التسلسل على جميع الحصص بنجاح`,

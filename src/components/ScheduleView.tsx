@@ -25,7 +25,7 @@ import { Share } from '@capacitor/share';
 import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
 
 export const ScheduleView: React.FC = () => {
-  const { lessons, groups, students, groupWeeklySessions, profile, openLessonControl, setIsAddLessonModalOpen, setIsAddQuickLessonModalOpen, updateLesson, deleteLesson, refreshCalendarAndDashboard, t, language, _t } = useApp();
+  const { lessons, getFullLessonsSnapshot, groups, students, groupWeeklySessions, profile, openLessonControl, setIsAddLessonModalOpen, setIsAddQuickLessonModalOpen, updateLesson, deleteLesson, refreshCalendarAndDashboard, t, language, _t } = useApp();
 
   const todayStr = formatLocalDate(new Date());
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
@@ -136,8 +136,8 @@ export const ScheduleView: React.FC = () => {
     const startDateStr = formatLocalDate(startRange);
     const endDateStr = formatLocalDate(endRange);
 
-    return getProjectedLessonsForRange(startDateStr, endDateStr, groups, lessons, profile.defaultZoomLink, groupWeeklySessions);
-  }, [lessons, groups, selectedDate, profile.defaultZoomLink, groupWeeklySessions]);
+    return getProjectedLessonsForRange(startDateStr, endDateStr, groups, lessons, profile.defaultZoomLink, groupWeeklySessions, getFullLessonsSnapshot());
+  }, [lessons, getFullLessonsSnapshot, groups, selectedDate, profile.defaultZoomLink, groupWeeklySessions]);
 
   const conflictsMap = useMemo(() => {
     const map: Record<string, Lesson[]> = {};

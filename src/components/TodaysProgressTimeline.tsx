@@ -25,7 +25,7 @@ const getLessonEndTime = (timeStr: string, durationMinutes: number = 60): string
 };
 
 export const TodaysProgressTimeline: React.FC = () => {
-  const { lessons, groups, students, groupWeeklySessions, profile, openLessonControl, saveLessonReport, cancelLesson, dismissedDashboardLessonIds, dismissLessonFromDashboard, t, _t, language } = useApp();
+  const { lessons, getFullLessonsSnapshot, groups, students, groupWeeklySessions, profile, openLessonControl, saveLessonReport, cancelLesson, dismissedDashboardLessonIds, dismissLessonFromDashboard, t, _t, language } = useApp();
   const [now, setNow] = useState(new Date());
   const [isPastPendingExpanded, setIsPastPendingExpanded] = useState(false);
   const [showAllPastPending, setShowAllPastPending] = useState(false);
@@ -145,7 +145,7 @@ export const TodaysProgressTimeline: React.FC = () => {
           ? targetGroup.sessionCount
           : (targetLesson.totalSessionsInPackage && targetLesson.totalSessionsInPackage > 1 ? targetLesson.totalSessionsInPackage : 4));
 
-    const cycleRes = resolveLessonCycleNumber(targetLesson, lessons, {
+    const cycleRes = resolveLessonCycleNumber(targetLesson, getFullLessonsSnapshot(), {
       group: targetGroup,
       student: targetStudent,
       students

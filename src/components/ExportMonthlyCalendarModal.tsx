@@ -28,7 +28,7 @@ const MONTH_NAMES_DISPLAY = [
 ];
 
 export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProps> = ({ onClose }) => {
-  const { lessons, groups, students, groupWeeklySessions, profile, language, _t, reportLanguage } = useApp();
+  const { lessons, getFullLessonsSnapshot, groups, students, groupWeeklySessions, profile, language, _t, reportLanguage } = useApp();
 
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -90,7 +90,7 @@ export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProp
     const monthStartStr = `${selectedYear}-${monthStr}-01`;
     const monthEndStr = `${selectedYear}-${monthStr}-${String(lastDayOfMonth).padStart(2, '0')}`;
 
-    const monthAllLessons = getProjectedLessonsForRange(monthStartStr, monthEndStr, groups, lessons, profile.defaultZoomLink, groupWeeklySessions);
+    const monthAllLessons = getProjectedLessonsForRange(monthStartStr, monthEndStr, groups, lessons, profile.defaultZoomLink, groupWeeklySessions, getFullLessonsSnapshot());
 
     const isCurrentMonthSelection = (selectedYear === currentYear && selectedMonth === currentMonthIndex);
 

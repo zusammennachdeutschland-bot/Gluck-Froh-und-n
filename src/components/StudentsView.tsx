@@ -32,7 +32,7 @@ import { Pagination } from './common/Pagination';
 
 export const StudentsView: React.FC = () => {
   const { 
-    students, groups, profile, lessons, payments, language,
+    students, groups, profile, lessons, getFullLessonsSnapshot, payments, language,
     setIsAddStudentModalOpen, setIsAddGroupModalOpen,
     deleteStudent, deleteStudentsBulk, deleteStudentsByGroup, moveStudent, moveStudentsBulk,
     archiveStudent, deleteGroup, archiveGroup,
@@ -1221,7 +1221,7 @@ export const StudentsView: React.FC = () => {
           ) : (
             paginatedGroups.map((group, idx) => {
             const count = groupStudentCountMap.get(group.id) || 0;
-            const cycleInfo = getGroupCycleInfo(group, lessons, language);
+            const cycleInfo = getGroupCycleInfo(group, getFullLessonsSnapshot(), language);
             const isPerLessonGroup = Boolean(
               isGroupPerLesson(group) ||
               cycleInfo.isPerLesson

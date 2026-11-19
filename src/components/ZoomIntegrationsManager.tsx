@@ -1006,7 +1006,8 @@ export const ZoomIntegrationsManager: React.FC = () => {
                 handleConnectGoogleCalendar(
                   calendarConn.status === 'connected' ||
                     calendarConn.status === 'expired' ||
-                    calendarConn.status === 'reconnect_required'
+                    calendarConn.status === 'reconnect_required' ||
+                    calendarConn.status === 'error'
                 )
               }
               className="px-2.5 py-1 rounded-lg bg-surface border border-surface-border hover:border-primary/40 text-text-main text-[11px] font-bold cursor-pointer disabled:opacity-50"
@@ -1015,13 +1016,16 @@ export const ZoomIntegrationsManager: React.FC = () => {
                 ? _t('جاري التفويض...', 'Authorizing...')
                 : calendarConn.status === 'connected' && calendarConn.hasInMemoryToken
                 ? _t('إعادة التحقق / تبديل الحساب', 'Verify / Switch Account')
-                : calendarConn.status === 'reconnect_required' || calendarConn.status === 'expired'
+                : calendarConn.status === 'reconnect_required' ||
+                  calendarConn.status === 'expired' ||
+                  calendarConn.status === 'error'
                 ? _t('إعادة ربط Google Calendar', 'Reconnect Google Calendar')
                 : _t('ربط Google Calendar', 'Connect Google Calendar')}
             </button>
             {(calendarConn.status === 'connected' ||
               calendarConn.status === 'needs_verification' ||
-              calendarConn.status === 'reconnect_required') && (
+              calendarConn.status === 'reconnect_required' ||
+              calendarConn.status === 'error') && (
               <button
                 type="button"
                 onClick={handleDisconnectGoogleCalendar}

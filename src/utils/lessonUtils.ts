@@ -255,9 +255,49 @@ export const resolveLessonCycleNumber = (
     sequenceIndex = 0;
   }
 
-  const absoluteOffset = (startingSessionNumber - 1) + sequenceIndex;
-  const sessionNumber = (absoluteOffset % totalCycleSessions) + 1;
-  const cycleIndex = Math.floor(absoluteOffset / totalCycleSessions);
+  const hasValidAnchor = Boolean(
+    options?.group?.cycleAnchorSessionNumber &&
+    options.group.cycleAnchorSessionNumber >= 1 &&
+    (options.group.cycleAnchorLessonId || options.group.cycleAnchorDate)
+  );
+
+  let sessionNumber: number;
+  let cycleIndex: number;
+
+  if (hasValidAnchor && options?.group) {
+    const anchorSessionNum = Math.min(
+      totalCycleSessions,
+      Math.max(1, Math.floor(options.group.cycleAnchorSessionNumber!))
+    );
+    let anchorIndex = -1;
+    if (options.group.cycleAnchorLessonId) {
+      anchorIndex = chronologicalList.findIndex(l => l.id === options.group!.cycleAnchorLessonId);
+    }
+    if (anchorIndex === -1 && options.group.cycleAnchorDate) {
+      const anchorProbe: Partial<Lesson> = {
+        id: options.group.cycleAnchorLessonId || '',
+        date: options.group.cycleAnchorDate,
+        time: normalizeTime(options.group.cycleAnchorTime) || options.group.cycleAnchorTime || '00:00'
+      };
+      const firstAtOrAfter = chronologicalList.findIndex(
+        l => compareLessonsChronologically(l, anchorProbe) >= 0
+      );
+      anchorIndex = firstAtOrAfter === -1 ? chronologicalList.length : firstAtOrAfter;
+    }
+    if (anchorIndex !== -1) {
+      const delta = sequenceIndex - anchorIndex;
+      sessionNumber = ((((anchorSessionNum - 1 + delta) % totalCycleSessions) + totalCycleSessions) % totalCycleSessions) + 1;
+      cycleIndex = Math.floor(((startingSessionNumber - 1) + sequenceIndex) / totalCycleSessions);
+    } else {
+      const absoluteOffset = (startingSessionNumber - 1) + sequenceIndex;
+      sessionNumber = (absoluteOffset % totalCycleSessions) + 1;
+      cycleIndex = Math.floor(absoluteOffset / totalCycleSessions);
+    }
+  } else {
+    const absoluteOffset = (startingSessionNumber - 1) + sequenceIndex;
+    sessionNumber = (absoluteOffset % totalCycleSessions) + 1;
+    cycleIndex = Math.floor(absoluteOffset / totalCycleSessions);
+  }
 
   return {
     sessionNumber,
@@ -286,6 +326,52 @@ export const computeStartingSessionNumberForTargetLesson = (
   const clampedDesired = Math.min(S, Math.max(1, desiredSessionNumber));
   const k = Math.max(0, resolution.sequenceIndex);
   return ((((clampedDesired - 1 - k) % S) + S) % S) + 1;
+};
+
+/**
+ * Builds the stable cycle anchor fields + synchronized startingSessionNumber for a group
+ * when the teacher explicitly sets a target lesson to a specific session number (1..S).
+ * Anchoring to the lesson's ID + date/time makes numbering immune to 60-day RAM window
+ * pruning and historical deletions/merges before the anchor.
+ */
+export const buildGroupCycleAnchorFields = (
+  targetLesson: Partial<Lesson>,
+  desiredSessionNumber: number,
+  allLessons: Lesson[],
+  options?: LessonCycleOptions
+): Pick<
+  Group,
+  | 'startingSessionNumber'
+  | 'cycleAnchorLessonId'
+  | 'cycleAnchorDate'
+  | 'cycleAnchorTime'
+  | 'cycleAnchorSessionNumber'
+> => {
+  const resolution = resolveLessonCycleNumber(targetLesson, allLessons, options);
+  if (resolution.isPerLesson || resolution.totalCycleSessions <= 1) {
+    return {
+      startingSessionNumber: 1,
+      cycleAnchorLessonId: undefined,
+      cycleAnchorDate: undefined,
+      cycleAnchorTime: undefined,
+      cycleAnchorSessionNumber: undefined
+    };
+  }
+  const S = resolution.totalCycleSessions;
+  const clampedDesired = Math.min(S, Math.max(1, Math.floor(desiredSessionNumber)));
+  const startingSessionNumber = computeStartingSessionNumberForTargetLesson(
+    targetLesson,
+    clampedDesired,
+    allLessons,
+    options
+  );
+  return {
+    startingSessionNumber,
+    cycleAnchorLessonId: targetLesson.id || undefined,
+    cycleAnchorDate: targetLesson.date || undefined,
+    cycleAnchorTime: normalizeTime(targetLesson.time) || targetLesson.time || '00:00',
+    cycleAnchorSessionNumber: clampedDesired
+  };
 };
 
 export const getGroupCycleInfo = (
@@ -347,7 +433,9 @@ export const getGroupCycleInfo = (
   } else if (upcomingScheduled.length > 0) {
     currentSessionNumber = resolveLessonCycleNumber(upcomingScheduled[0], groupLessons, { group }).sessionNumber;
   } else if (completedLessons.length > 0) {
-    currentSessionNumber = ((startingSessionNumber - 1 + completedLessons.length) % sessionCount) + 1;
+    const lastCompleted = completedLessons[completedLessons.length - 1];
+    const lastRes = resolveLessonCycleNumber(lastCompleted, groupLessons, { group });
+    currentSessionNumber = (lastRes.sessionNumber % sessionCount) + 1;
   }
 
   const completedInCycle = currentSessionNumber - 1;
@@ -919,6 +1007,13 @@ export const shouldRetainLessonInActiveWindow = (
   if (!lesson || lesson.deleted) return false;
   if (!lesson.date || typeof lesson.date !== 'string') return true;
   if (lesson.date >= cutoffStr) return true;
+  // Never evict a group's cycle anchor lesson from the active RAM window
+  if (lesson.groupId && Array.isArray(groups) && groups.length > 0) {
+    const anchorGrp = groups.find(g => g && !g.deleted && g.id === lesson.groupId);
+    if (anchorGrp?.cycleAnchorLessonId && anchorGrp.cycleAnchorLessonId === lesson.id) {
+      return true;
+    }
+  }
   if (lesson.status === 'scheduled' || isPendingStatus(lesson.status)) return true;
 
   if (lesson.status !== 'completed') return false;

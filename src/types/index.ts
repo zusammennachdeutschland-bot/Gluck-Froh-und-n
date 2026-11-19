@@ -759,6 +759,10 @@ export interface Group extends SyncableRecord {
   pricePerSession?: number;
   sessionCount: number; // e.g., 1, 4, 8, 12
   startingSessionNumber?: number; // e.g., 1, 3, 5, 8...
+  cycleAnchorLessonId?: string;
+  cycleAnchorDate?: string; // YYYY-MM-DD
+  cycleAnchorTime?: string; // HH:MM
+  cycleAnchorSessionNumber?: number; // 1..sessionCount explicitly anchored by teacher
   defaultFinanceAccountId?: string; // Replaced paymentMethod
   paymentCycle?: PaymentCycle;
   paymentModel?: 'per_session' | 'package';

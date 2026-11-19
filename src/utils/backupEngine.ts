@@ -590,6 +590,10 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
       pricePerSession: sanitizeNumber(g.pricePerSession, 0),
       monthlyPackagePrice: sanitizeNumber(g.monthlyPackagePrice, 0),
       startingSessionNumber: sanitizeNumber(g.startingSessionNumber, 1),
+      cycleAnchorLessonId: typeof g.cycleAnchorLessonId === 'string' && g.cycleAnchorLessonId.trim() ? g.cycleAnchorLessonId.trim() : undefined,
+      cycleAnchorDate: typeof g.cycleAnchorDate === 'string' && g.cycleAnchorDate.trim() ? g.cycleAnchorDate.trim() : undefined,
+      cycleAnchorTime: typeof g.cycleAnchorTime === 'string' && g.cycleAnchorTime.trim() ? g.cycleAnchorTime.trim() : undefined,
+      cycleAnchorSessionNumber: sanitizeOptionalNumber(g.cycleAnchorSessionNumber),
       price: sanitizeNumber(g.price, 0),
       schedules: Array.isArray(g.schedules) ? g.schedules : []
     });

@@ -27,7 +27,7 @@ interface GroupProfileModalProps {
 export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onClose, initialTab = 'details' }) => {
   const { 
     updateGroup, updateLesson, deleteGroup, archiveGroup, generateGroupScheduleLessons, 
-    groups, students, addStudent, updateStudent, moveStudent, lessons, payments, language, t, _t 
+    groups, students, addStudent, updateStudent, moveStudent, lessons, getFullLessonsSnapshot, setLessonSessionNumberAnchor, payments, language, t, _t 
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'details' | 'recordings'>(initialTab);
@@ -73,7 +73,8 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
   }, [onClose]);
 
   const groupStudents = students.filter(s => s.groupId === group.id && !s.deleted && s.status !== 'archived');
-  const cycleInfo = getGroupCycleInfo(group, lessons, language);
+  const fullLessonsForNumbering = getFullLessonsSnapshot();
+  const cycleInfo = getGroupCycleInfo(group, fullLessonsForNumbering, language);
 
   const groupLessons = lessons
     .filter(l => l.groupId === group.id && l.status !== 'cancelled')
@@ -160,7 +161,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
 
   const nearestUpcomingLesson = upcomingScheduledLessons[0];
   const detectedNextSessionNum = nearestUpcomingLesson
-    ? (resolveLessonCycleNumber(nearestUpcomingLesson, lessons || [], { group }).sessionNumber || 1)
+    ? (resolveLessonCycleNumber(nearestUpcomingLesson, fullLessonsForNumbering, { group }).sessionNumber || 1)
     : (group.startingSessionNumber || 1);
 
   const [selectedUpcomingCycleNumber, setSelectedUpcomingCycleNumber] = useState<number>(detectedNextSessionNum);
@@ -174,24 +175,14 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
     if (chosenNum < 1 || chosenNum > cycleTotalSessions) return;
     setSelectedUpcomingCycleNumber(chosenNum);
 
-    const newStartingNum = nearestUpcomingLesson
-      ? computeStartingSessionNumberForTargetLesson(nearestUpcomingLesson, chosenNum, lessons || [], { group })
-      : chosenNum;
-
-    // 1. Update the group startingSessionNumber (which also resequences all non-cancelled group lessons)
-    updateGroup(group.id, {
-      ...group,
-      startingSessionNumber: newStartingNum
-    });
-
-    // 2. Synchronize all upcoming scheduled lessons
-    upcomingScheduledLessons.forEach((upLesson, idx) => {
-      const nextSeqNum = (((chosenNum - 1 + idx) % cycleTotalSessions) + 1);
-      updateLesson(upLesson.id, {
-        sessionNumber: nextSeqNum,
-        totalSessionsInPackage: cycleTotalSessions
+    if (nearestUpcomingLesson) {
+      setLessonSessionNumberAnchor(nearestUpcomingLesson, chosenNum, group);
+    } else {
+      updateGroup(group.id, {
+        ...group,
+        startingSessionNumber: chosenNum
       });
-    });
+    }
 
     setCycleUpdateSuccessMsg(_t(
       `✓ تم حفظ وضبط الحصة القادمة برقم (${chosenNum} من ${cycleTotalSessions}) وتحديث كافة مواعيد المجموعة بنجاح`,

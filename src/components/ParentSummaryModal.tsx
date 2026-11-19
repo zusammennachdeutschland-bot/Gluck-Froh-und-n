@@ -32,7 +32,7 @@ export const ParentSummaryModal: React.FC<ParentSummaryModalProps> = ({
   onClose,
   onGoToHomeScreen
 }) => {
-  const { groups, students, lessons, reportLanguage, reportT, _t } = useApp();
+  const { groups, students, lessons, getFullLessonsSnapshot, reportLanguage, reportT, _t } = useApp();
   const [copied, setCopied] = useState(false);
   const [showArabicModal, setShowArabicModal] = useState(false);
   const [showMultiLessonSelector, setShowMultiLessonSelector] = useState(false);
@@ -62,12 +62,12 @@ export const ParentSummaryModal: React.FC<ParentSummaryModalProps> = ({
   }, [lesson.groupId, activeStudent?.groupId, groups]);
 
   const cycleResolution = useMemo(() => {
-    return resolveLessonCycleNumber(lesson, lessons || [], {
+    return resolveLessonCycleNumber(lesson, getFullLessonsSnapshot(), {
       group: associatedGroup,
       student: activeStudent,
       students
     });
-  }, [lesson, lessons, associatedGroup, activeStudent, students]);
+  }, [lesson, lessons, getFullLessonsSnapshot, associatedGroup, activeStudent, students]);
 
   // Dynamically compute exact session number excluding cancelled lessons
   const currentSessionNumber = cycleResolution.sessionNumber >= 1 ? cycleResolution.sessionNumber : 1;

@@ -120,7 +120,7 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   onSaveReport,
   onGoToHomeScreen
 }) => {
-  const { students, groups, lessons, updateLesson, saveLessonReport, _t, language, t, reportLanguage, reportT } = useApp();
+  const { students, groups, lessons, getFullLessonsSnapshot, updateLesson, saveLessonReport, _t, language, t, reportLanguage, reportT } = useApp();
   const { assignments: syncedAssignments, submissions: syncedSubmissions, currentOwnerUid } = useSyncedHomeworkData();
   const [copied, setCopied] = useState(false);
   const [showGroupProfile, setShowGroupProfile] = useState(false);
@@ -199,12 +199,12 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
 
   // Dynamically compute the exact sequential session number strictly among NON-CANCELLED lessons
   const cycleResolution = useMemo(() => {
-    return resolveLessonCycleNumber(lesson, lessons || [], {
+    return resolveLessonCycleNumber(lesson, getFullLessonsSnapshot(), {
       group: associatedGroup,
       student: activeStudent,
       students
     });
-  }, [lesson, lessons, associatedGroup, activeStudent, students]);
+  }, [lesson, lessons, getFullLessonsSnapshot, associatedGroup, activeStudent, students]);
 
   const currentSessionNumber = cycleResolution.sessionNumber >= 1 ? cycleResolution.sessionNumber : 1;
 

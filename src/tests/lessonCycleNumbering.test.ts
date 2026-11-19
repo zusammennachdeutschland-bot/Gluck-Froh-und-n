@@ -5,13 +5,16 @@ import {
   resequenceScheduledLessonsAfterChange,
   getGroupCycleInfo,
   computeStartingSessionNumberForTargetLesson,
+  buildGroupCycleAnchorFields,
   compareLessonsChronologically,
   shouldShowLessonPaymentCollection,
+  shouldRetainLessonInActiveWindow,
 } from '../utils/lessonUtils';
+import { getProjectedLessonsForRange } from '../utils/scheduleUtils';
 import { Group, Lesson, Student } from '../types';
 
 console.log('===============================================================');
-console.log('Running Unified Lesson Cycle Numbering Suite (Tests A - P)...');
+console.log('Running Unified Lesson Cycle Numbering Suite (Tests A - T)...');
 console.log('===============================================================');
 
 const makeGroup = (overrides?: Partial<Group>): Group => ({
@@ -452,6 +455,155 @@ runTest('TEST Q: Payment collection is hidden mid-cycle (Sessions 1-3 of 4) and 
   );
 });
 
+// TEST R: Cycle Anchor guarantees 100% immunity to 60-day RAM window pruning & historical deletions/insertions
+runTest('TEST R: Cycle Anchor prevents session number drift (#1 -> #4) when older paid lessons are pruned or edited', () => {
+  const baseGroup = makeGroup({ sessionCount: 4 });
+  const fullHistory: Lesson[] = [
+    makeLesson({ id: 'l1', date: '2026-01-05', status: 'completed', paymentStatus: 'paid', sessionNumber: 1 }),
+    makeLesson({ id: 'l2', date: '2026-01-12', status: 'completed', paymentStatus: 'paid', sessionNumber: 2 }),
+    makeLesson({ id: 'l3', date: '2026-01-19', status: 'completed', paymentStatus: 'paid', sessionNumber: 3 }),
+    makeLesson({ id: 'l4', date: '2026-01-26', status: 'completed', paymentStatus: 'paid', sessionNumber: 4 }),
+    makeLesson({ id: 'l5', date: '2026-02-02', status: 'completed', paymentStatus: 'paid', sessionNumber: 1 }),
+    makeLesson({ id: 'l6', date: '2026-04-06', status: 'completed', paymentStatus: 'pending', sessionNumber: 2 }),
+    makeLesson({ id: 'l7', date: '2026-04-13', status: 'scheduled', paymentStatus: 'pending', sessionNumber: 3 }),
+    makeLesson({ id: 'l8', date: '2026-04-20', status: 'scheduled', paymentStatus: 'pending', sessionNumber: 4 }),
+  ];
+
+  // Teacher anchors l6 (2026-04-06) to session #1
+  const anchorFields = buildGroupCycleAnchorFields(fullHistory[5], 1, fullHistory, { group: baseGroup });
+  const anchoredGroup: Group = { ...baseGroup, ...anchorFields };
+
+  assert.equal(resolveLessonCycleNumber(fullHistory[5], fullHistory, { group: anchoredGroup }).sessionNumber, 1);
+  assert.equal(resolveLessonCycleNumber(fullHistory[6], fullHistory, { group: anchoredGroup }).sessionNumber, 2);
+  assert.equal(resolveLessonCycleNumber(fullHistory[7], fullHistory, { group: anchoredGroup }).sessionNumber, 3);
+
+  // Drop 1, 2, 3, or 5 older paid lessons from the front (simulating 60-day RAM window eviction!)
+  for (const dropCount of [1, 2, 3, 5]) {
+    const pruned = fullHistory.slice(dropCount);
+    assert.equal(
+      resolveLessonCycleNumber(fullHistory[5], pruned, { group: anchoredGroup }).sessionNumber,
+      1,
+      `Anchored lesson l6 must stay #1 after dropping ${dropCount} older lessons`
+    );
+    assert.equal(
+      resolveLessonCycleNumber(fullHistory[6], pruned, { group: anchoredGroup }).sessionNumber,
+      2,
+      `Next lesson l7 must stay #2 after dropping ${dropCount} older lessons`
+    );
+    assert.equal(
+      resolveLessonCycleNumber(fullHistory[7], pruned, { group: anchoredGroup }).sessionNumber,
+      3,
+      `Subsequent lesson l8 must stay #3 after dropping ${dropCount} older lessons`
+    );
+    assert.equal(
+      getGroupCycleInfo(anchoredGroup, pruned, 'en').currentSessionNumber,
+      2,
+      `getGroupCycleInfo must still report #2 (next scheduled l7) after dropping ${dropCount} older lessons`
+    );
+  }
+
+  // Also insert an extra historical lesson before the anchor -> must NOT shift l6/l7/l8!
+  const withBackdated: Lesson[] = [
+    makeLesson({ id: 'l0_backdated', date: '2025-12-29', status: 'completed', paymentStatus: 'paid', sessionNumber: 1 }),
+    ...fullHistory,
+  ];
+  assert.equal(resolveLessonCycleNumber(fullHistory[5], withBackdated, { group: anchoredGroup }).sessionNumber, 1);
+  assert.equal(resolveLessonCycleNumber(fullHistory[6], withBackdated, { group: anchoredGroup }).sessionNumber, 2);
+});
+
+// TEST S: Cancelling the anchored lesson shifts cleanly to next chronological lesson + anchor retention past 60 days
+runTest('TEST S: Cancelling anchored lesson preserves cycle progression & active window retains anchor lesson past 60 days', () => {
+  const baseGroup = makeGroup({ sessionCount: 4 });
+  const lessons: Lesson[] = [
+    makeLesson({ id: 'old_1', date: '2025-11-01', status: 'completed', paymentStatus: 'paid' }),
+    makeLesson({ id: 'anc_1', date: '2026-01-05', status: 'scheduled', paymentStatus: 'paid' }),
+    makeLesson({ id: 'next_1', date: '2026-01-12', status: 'scheduled', paymentStatus: 'pending' }),
+    makeLesson({ id: 'next_2', date: '2026-01-19', status: 'scheduled', paymentStatus: 'pending' }),
+  ];
+
+  const anchorFields = buildGroupCycleAnchorFields(lessons[1], 1, lessons, { group: baseGroup });
+  const anchoredGroup: Group = { ...baseGroup, ...anchorFields };
+
+  // Cancel the anchored lesson itself
+  const withCancelledAnchor = lessons.map(l => (l.id === 'anc_1' ? { ...l, status: 'cancelled' as const } : l));
+  // Even if old_1 is dropped, next_1 (the first active lesson after anchor timestamp) takes #1 and next_2 takes #2
+  const prunedWithCancelledAnchor = withCancelledAnchor.slice(1);
+  assert.equal(
+    resolveLessonCycleNumber(prunedWithCancelledAnchor[1], prunedWithCancelledAnchor, { group: anchoredGroup }).sessionNumber,
+    1,
+    'When anchored lesson #1 is cancelled, the next active lesson seamlessly becomes #1'
+  );
+  assert.equal(
+    resolveLessonCycleNumber(prunedWithCancelledAnchor[2], prunedWithCancelledAnchor, { group: anchoredGroup }).sessionNumber,
+    2,
+    'Following lesson becomes #2'
+  );
+
+  // Verify shouldRetainLessonInActiveWindow retains the anchored paid lesson even >90 days old
+  const cutoffStr = '2026-03-16'; // 60 days before 2026-05-15 (anc_1 is 2026-01-05 -> >120 days old)
+  const maxCutoffStr = '2025-05-15';
+  const completedAnchor = { ...lessons[1], status: 'completed' as const, paymentStatus: 'paid' as const };
+  const completedOld = { ...lessons[0], status: 'completed' as const, paymentStatus: 'paid' as const };
+
+  assert.equal(
+    shouldRetainLessonInActiveWindow(completedAnchor, cutoffStr, maxCutoffStr, [], [anchoredGroup]),
+    true,
+    'Anchor lesson must never be evicted by 60-day RAM pruning'
+  );
+  assert.equal(
+    shouldRetainLessonInActiveWindow(completedOld, cutoffStr, maxCutoffStr, [], [anchoredGroup]),
+    false,
+    'Non-anchor paid lesson older than 60 days may still be pruned normally'
+  );
+});
+
+// TEST T: Projected future lessons in ScheduleView / Calendar export receive accurate sequential session numbers
+runTest('TEST T: getProjectedLessonsForRange computes sequential session numbers instead of hardcoded 1', () => {
+  const baseGroup = makeGroup({
+    id: 'grp_proj',
+    name: 'Proj Group',
+    sessionCount: 4,
+    scheduleDays: ['Monday'],
+    scheduleTime: '17:00',
+  });
+  const existing: Lesson[] = [
+    makeLesson({ id: 'p_old', groupId: 'grp_proj', date: '2026-01-05', time: '17:00', status: 'completed', paymentStatus: 'paid' }),
+    makeLesson({ id: 'p1', groupId: 'grp_proj', date: '2026-04-06', time: '17:00', status: 'completed', paymentStatus: 'pending' }),
+    makeLesson({ id: 'p2', groupId: 'grp_proj', date: '2026-04-13', time: '17:00', status: 'completed', paymentStatus: 'pending' }),
+  ];
+
+  // Anchor p1 (2026-04-06) to session #1 -> p2 is #2
+  const anchorFields = buildGroupCycleAnchorFields(existing[1], 1, existing, { group: baseGroup });
+  const anchoredGroup: Group = { ...baseGroup, ...anchorFields };
+
+  // Project 5 future Mondays from 2026-04-20 to 2026-05-18
+  const projectedAll = getProjectedLessonsForRange(
+    '2026-04-20',
+    '2026-05-18',
+    [anchoredGroup],
+    existing.slice(1), // truncated active window without p_old
+    undefined,
+    [],
+    existing // authoritative full numbering basis
+  );
+
+  const projectedOnly = projectedAll
+    .filter(l => l.id.startsWith('l_auto_'))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  assert.equal(projectedOnly.length, 5, 'Should project 5 Mondays');
+  assert.deepEqual(
+    projectedOnly.map(l => ({ date: l.date, sessionNumber: l.sessionNumber, total: l.totalSessionsInPackage })),
+    [
+      { date: '2026-04-20', sessionNumber: 3, total: 4 },
+      { date: '2026-04-27', sessionNumber: 4, total: 4 },
+      { date: '2026-05-04', sessionNumber: 1, total: 4 },
+      { date: '2026-05-11', sessionNumber: 2, total: 4 },
+      { date: '2026-05-18', sessionNumber: 3, total: 4 },
+    ]
+  );
+});
+
 console.log('===============================================================');
-console.log(`✅ All ${passedCount}/17 Unified Lesson Cycle Numbering Tests Passed!`);
+console.log(`✅ All ${passedCount}/20 Unified Lesson Cycle Numbering Tests Passed!`);
 console.log('===============================================================');
