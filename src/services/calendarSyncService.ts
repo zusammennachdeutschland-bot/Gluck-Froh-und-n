@@ -1,5 +1,21 @@
-import { GoogleAuthProvider, linkWithPopup, reauthenticateWithPopup, signInWithPopup } from 'firebase/auth';
-import { auth } from '../shared/firebaseCloudSync';
+import {
+  GoogleAuthProvider,
+  UserCredential,
+  linkWithPopup,
+  linkWithRedirect,
+  onAuthStateChanged,
+  reauthenticateWithPopup,
+  reauthenticateWithRedirect,
+  signInWithPopup,
+  signInWithRedirect
+} from 'firebase/auth';
+import { auth, consumeFirebaseWebRedirectResultOnce } from '../shared/firebaseCloudSync';
+import {
+  invokeNativeClearCalendarToken,
+  invokeNativeGoogleCalendarAuthorize,
+  invokeNativeRevokeCalendarAccess,
+  isAndroidNativePlatform
+} from '../shared/googleCredentialAuthPlugin';
 import { GroupWeeklySession } from '../types';
 import {
   DEFAULT_ZOOM_TIMEZONE,
@@ -29,6 +45,7 @@ export interface CalendarSyncPreviewItem {
 export interface CalendarSyncResult {
   success: boolean;
   authExpired?: boolean;
+  scopeInsufficient?: boolean;
   createdCount: number;
   updatedCount: number;
   skippedCount: number;
@@ -37,97 +54,1496 @@ export interface CalendarSyncResult {
   errors: Array<{ sessionId: string; title: string; error: string; status?: number }>;
 }
 
-const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+export type CalendarOAuthStage =
+  | 'calendar_oauth_start'
+  | 'calendar_oauth_memory_cache_hit'
+  | 'calendar_oauth_android_native_invoke'
+  | 'calendar_oauth_android_native_cancelled'
+  | 'calendar_oauth_android_native_resolution_required'
+  | 'calendar_oauth_android_native_token_received'
+  | 'calendar_oauth_android_stale_token_cleared'
+  | 'calendar_oauth_web_popup_start'
+  | 'calendar_oauth_web_popup_fallback_redirect'
+  | 'calendar_oauth_web_redirect_result_check'
+  | 'calendar_oauth_web_redirect_result_processed'
+  | 'calendar_oauth_verify_calendar_start'
+  | 'calendar_oauth_verify_calendar_ok'
+  | 'calendar_oauth_verify_calendar_failed'
+  | 'calendar_oauth_write_verified'
+  | 'calendar_oauth_write_permission_denied'
+  | 'calendar_oauth_deeplink_callback'
+  | 'calendar_oauth_auth_state_cleared'
+  | 'calendar_oauth_disconnected'
+  | 'calendar_oauth_error';
 
-// Strictly in-memory Google Calendar OAuth token (never written to localStorage/IndexedDB)
+export interface CalendarOAuthDiagnosticEvent {
+  timestampIso: string;
+  stage: CalendarOAuthStage;
+  platform: 'android_native' | 'web';
+  ok?: boolean;
+  code?: string;
+  detail?: string;
+}
+
+export type GoogleCalendarConnectionStatus =
+  | 'disconnected'
+  | 'needs_verification'
+  | 'reconnect_required'
+  | 'connected'
+  | 'cancelled'
+  | 'expired'
+  | 'error'
+  | 'pending_redirect';
+
+export interface GoogleCalendarConnectionState {
+  status: GoogleCalendarConnectionStatus;
+  accountEmail?: string;
+  calendarId?: string;
+  calendarSummary?: string;
+  calendarTimeZone?: string;
+  calendarAccessRole?: string;
+  scopeVerified: boolean;
+  readVerified: boolean;
+  writeVerified: boolean;
+  hasInMemoryToken: boolean;
+  platform: 'android_native' | 'web';
+  lastVerifiedAtIso?: string;
+  lastMessage?: string;
+  lastErrorCode?: string;
+}
+
+export interface GoogleCalendarTokenResult {
+  ok: boolean;
+  accessToken?: string;
+  accountEmail?: string;
+  calendarSummary?: string;
+  scopeVerified?: boolean;
+  readVerified?: boolean;
+  writeVerified?: boolean;
+  cancelled?: boolean;
+  resolutionRequired?: boolean;
+  redirected?: boolean;
+  expired?: boolean;
+  platform?: 'android_native' | 'web';
+  error?: string;
+  code?: string;
+}
+
+export interface WebCalendarRedirectStartupResult {
+  handled: boolean;
+  ok: boolean;
+  shouldOpenIntegrations: boolean;
+  accountEmail?: string;
+  message?: string;
+}
+
+export interface CalendarDeepLinkCallbackResult {
+  matched: boolean;
+  alreadyHandled: boolean;
+  shouldOpenIntegrations: boolean;
+  status: 'connected' | 'cancelled' | 'error' | 'open_integrations';
+  message?: string;
+}
+
+export interface WebCalendarAuthTestAdapter {
+  popupAuthorize?: (params: {
+    forcePrompt: boolean;
+    scope: string;
+  }) => Promise<{ accessToken?: string; email?: string }>;
+  redirectAuthorize?: (params: {
+    forcePrompt: boolean;
+    scope: string;
+  }) => Promise<void>;
+  consumeRedirectResult?: () => Promise<{ accessToken?: string; email?: string } | null>;
+}
+
+const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+const CALENDAR_CONNECTION_META_STORAGE_KEY = 'glueck_google_calendar_connection_meta_v1';
+const PENDING_WEB_CALENDAR_REDIRECT_KEY = 'glueck_pending_web_calendar_redirect_v1';
+const MAX_DIAGNOSTIC_EVENTS = 40;
+
+// Strictly in-memory Google Calendar OAuth token (NEVER written to localStorage/sessionStorage/IndexedDB)
 let inMemoryGoogleCalendarAccessToken: string | null = null;
 let inMemoryTokenExpiresAtMs = 0;
+let inMemoryTokenAccountEmail: string | null = null;
+let lastInvalidatedAccessToken: string | null = null;
+let inFlightCalendarAuthPromise: Promise<GoogleCalendarTokenResult> | null = null;
+
+// Single-shot guards for startup redirect processing and deep-link callbacks
+let webRedirectProcessingPromise: Promise<WebCalendarRedirectStartupResult> | null = null;
+const handledCalendarDeepLinkKeys = new Set<string>();
+
+// Safe in-memory diagnostic ring buffer (zero secrets/tokens/codes)
+const calendarOAuthDiagnostics: CalendarOAuthDiagnosticEvent[] = [];
+
+// Connection state listeners
+type ConnectionStateListener = (state: GoogleCalendarConnectionState) => void;
+const connectionStateListeners = new Set<ConnectionStateListener>();
 
 export type CalendarFetchFn = typeof fetch;
 let customCalendarFetchForTesting: CalendarFetchFn | null = null;
+let webCalendarAuthTestAdapter: WebCalendarAuthTestAdapter | null = null;
+
+function sanitizeDiagnosticText(value?: string): string | undefined {
+  if (!value) return undefined;
+  return String(value)
+    .replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi, 'Bearer [REDACTED]')
+    .replace(/ya29\.[A-Za-z0-9\-._~+/]+/g, '[REDACTED_TOKEN]')
+    .replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, '[REDACTED_JWT]')
+    .replace(/(access_token|refresh_token|id_token|code|token|secret)=([^&\s]+)/gi, '$1=[REDACTED]')
+    .slice(0, 220);
+}
+
+function getCurrentPlatformTag(): 'android_native' | 'web' {
+  return isAndroidNativePlatform() ? 'android_native' : 'web';
+}
+
+function recordCalendarOAuthStage(
+  stage: CalendarOAuthStage,
+  info: { ok?: boolean; code?: string; detail?: string } = {}
+): void {
+  const event: CalendarOAuthDiagnosticEvent = {
+    timestampIso: new Date().toISOString(),
+    stage,
+    platform: getCurrentPlatformTag(),
+    ...(typeof info.ok === 'boolean' ? { ok: info.ok } : {}),
+    ...(info.code ? { code: sanitizeDiagnosticText(info.code) } : {}),
+    ...(info.detail ? { detail: sanitizeDiagnosticText(info.detail) } : {})
+  };
+  calendarOAuthDiagnostics.push(event);
+  if (calendarOAuthDiagnostics.length > MAX_DIAGNOSTIC_EVENTS) {
+    calendarOAuthDiagnostics.shift();
+  }
+  const summary = `[Glück CalendarOAuth] stage=${event.stage} platform=${event.platform}${
+    event.code ? ` code=${event.code}` : ''
+  }${typeof event.ok === 'boolean' ? ` ok=${event.ok}` : ''}${
+    event.detail ? ` detail="${event.detail}"` : ''
+  }`;
+  if (event.ok === false || stage === 'calendar_oauth_error') {
+    console.warn(summary);
+  } else {
+    console.info(summary);
+  }
+}
+
+export function getCalendarOAuthDiagnostics(): CalendarOAuthDiagnosticEvent[] {
+  return [...calendarOAuthDiagnostics];
+}
+
+export function clearCalendarOAuthDiagnostics(): void {
+  calendarOAuthDiagnostics.length = 0;
+}
+
+function readPersistedConnectionMeta(): Omit<GoogleCalendarConnectionState, 'hasInMemoryToken'> {
+  const platform = getCurrentPlatformTag();
+  const fallback: Omit<GoogleCalendarConnectionState, 'hasInMemoryToken'> = {
+    status: 'disconnected',
+    scopeVerified: false,
+    readVerified: false,
+    writeVerified: false,
+    platform
+  };
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return fallback;
+  }
+  try {
+    const raw = window.localStorage.getItem(CALENDAR_CONNECTION_META_STORAGE_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return fallback;
+
+    // CRITICAL: Persisted metadata is NEVER proof of an active OAuth access token.
+    // After app restart / process death, a previously connected state MUST downgrade
+    // to 'needs_verification' until a live in-memory token is freshly obtained & verified.
+    let hydratedStatus: GoogleCalendarConnectionStatus = parsed.status || 'disconnected';
+    if (hydratedStatus === 'connected' || hydratedStatus === 'pending_redirect') {
+      hydratedStatus = 'needs_verification';
+    }
+
+    return {
+      status: hydratedStatus,
+      accountEmail: typeof parsed.accountEmail === 'string' ? parsed.accountEmail : undefined,
+      calendarId: typeof parsed.calendarId === 'string' ? parsed.calendarId : undefined,
+      calendarSummary: typeof parsed.calendarSummary === 'string' ? parsed.calendarSummary : undefined,
+      calendarTimeZone: typeof parsed.calendarTimeZone === 'string' ? parsed.calendarTimeZone : undefined,
+      calendarAccessRole: typeof parsed.calendarAccessRole === 'string' ? parsed.calendarAccessRole : undefined,
+      scopeVerified: hydratedStatus === 'needs_verification' ? Boolean(parsed.scopeVerified) : false,
+      readVerified: false,
+      writeVerified: false,
+      platform,
+      lastVerifiedAtIso: typeof parsed.lastVerifiedAtIso === 'string' ? parsed.lastVerifiedAtIso : undefined,
+      lastMessage:
+        hydratedStatus === 'needs_verification'
+          ? 'Verifying Google Calendar authorization...'
+          : typeof parsed.lastMessage === 'string'
+          ? parsed.lastMessage
+          : undefined,
+      lastErrorCode: typeof parsed.lastErrorCode === 'string' ? parsed.lastErrorCode : undefined
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+let currentConnectionMeta: Omit<GoogleCalendarConnectionState, 'hasInMemoryToken'> = readPersistedConnectionMeta();
+let testActiveFirebaseEmail: string | null | undefined = undefined;
+
+function getActiveFirebaseUserEmail(): string | undefined {
+  if (testActiveFirebaseEmail !== undefined) {
+    return testActiveFirebaseEmail || undefined;
+  }
+  return auth.currentUser?.email || undefined;
+}
+
+function persistAndEmitConnectionMeta(
+  next: Omit<GoogleCalendarConnectionState, 'hasInMemoryToken'>
+): GoogleCalendarConnectionState {
+  // Strictly strip any token-like fields before storing non-secret UI status metadata
+  const safeMeta: Omit<GoogleCalendarConnectionState, 'hasInMemoryToken'> = {
+    status: next.status,
+    accountEmail: next.accountEmail,
+    calendarId: next.calendarId,
+    calendarSummary: next.calendarSummary,
+    calendarTimeZone: next.calendarTimeZone,
+    calendarAccessRole: next.calendarAccessRole,
+    scopeVerified: Boolean(next.scopeVerified),
+    readVerified: Boolean(next.readVerified),
+    writeVerified: Boolean(next.writeVerified),
+    platform: getCurrentPlatformTag(),
+    lastVerifiedAtIso: next.lastVerifiedAtIso,
+    lastMessage: sanitizeDiagnosticText(next.lastMessage),
+    lastErrorCode: sanitizeDiagnosticText(next.lastErrorCode)
+  };
+  currentConnectionMeta = safeMeta;
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      window.localStorage.setItem(CALENDAR_CONNECTION_META_STORAGE_KEY, JSON.stringify(safeMeta));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }
+  const snapshot = getGoogleCalendarConnectionState();
+  connectionStateListeners.forEach((listener) => {
+    try {
+      listener(snapshot);
+    } catch {
+      // Ignore subscriber errors
+    }
+  });
+  return snapshot;
+}
+
+export function getGoogleCalendarConnectionState(): GoogleCalendarConnectionState {
+  const hasInMemoryToken = Boolean(getInMemoryGoogleCalendarToken());
+  // Never report 'connected' if the in-memory token has expired or is absent
+  const effectiveStatus: GoogleCalendarConnectionStatus =
+    currentConnectionMeta.status === 'connected' && !hasInMemoryToken
+      ? 'needs_verification'
+      : currentConnectionMeta.status;
+  return {
+    ...currentConnectionMeta,
+    status: effectiveStatus,
+    platform: getCurrentPlatformTag(),
+    hasInMemoryToken
+  };
+}
+
+export function subscribeGoogleCalendarConnectionState(listener: ConnectionStateListener): () => void {
+  connectionStateListeners.add(listener);
+  try {
+    listener(getGoogleCalendarConnectionState());
+  } catch {
+    // Ignore initial emit error
+  }
+  return () => {
+    connectionStateListeners.delete(listener);
+  };
+}
 
 export function __setCalendarFetchForTesting(fn: CalendarFetchFn | null): void {
   customCalendarFetchForTesting = fn;
 }
 
-export function clearInMemoryGoogleCalendarToken(): void {
+export function __setWebCalendarAuthTestAdapter(adapter: WebCalendarAuthTestAdapter | null): void {
+  webCalendarAuthTestAdapter = adapter;
+  webRedirectProcessingPromise = null;
+}
+
+export function __resetCalendarOAuthStateForTesting(): void {
+  clearInMemoryGoogleCalendarToken();
+  lastInvalidatedAccessToken = null;
+  inFlightCalendarAuthPromise = null;
+  webRedirectProcessingPromise = null;
+  testActiveFirebaseEmail = undefined;
+  handledCalendarDeepLinkKeys.clear();
+  clearCalendarOAuthDiagnostics();
+  currentConnectionMeta = {
+    status: 'disconnected',
+    scopeVerified: false,
+    readVerified: false,
+    writeVerified: false,
+    platform: getCurrentPlatformTag()
+  };
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      window.localStorage.removeItem(CALENDAR_CONNECTION_META_STORAGE_KEY);
+    } catch {}
+  }
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    try {
+      window.sessionStorage.removeItem(PENDING_WEB_CALENDAR_REDIRECT_KEY);
+    } catch {}
+  }
+}
+
+export function __simulateColdRestartForTesting(): GoogleCalendarConnectionState {
   inMemoryGoogleCalendarAccessToken = null;
   inMemoryTokenExpiresAtMs = 0;
+  inMemoryTokenAccountEmail = null;
+  lastInvalidatedAccessToken = null;
+  inFlightCalendarAuthPromise = null;
+  webRedirectProcessingPromise = null;
+  currentConnectionMeta = readPersistedConnectionMeta();
+  return getGoogleCalendarConnectionState();
+}
+
+export function __setInMemoryTokenExpiryForTesting(expiresAtMs: number): void {
+  inMemoryTokenExpiresAtMs = expiresAtMs;
+}
+
+export function __simulateFirebaseAccountChangeForTesting(email: string | null): void {
+  testActiveFirebaseEmail = email;
+  handleFirebaseAccountIdentityChange(email);
+}
+
+export function clearInMemoryGoogleCalendarToken(markExpired = false, staleToken?: string): void {
+  const invalidated = staleToken || inMemoryGoogleCalendarAccessToken;
+  if (invalidated) {
+    lastInvalidatedAccessToken = invalidated;
+  }
+  inMemoryGoogleCalendarAccessToken = null;
+  inMemoryTokenExpiresAtMs = 0;
+  inMemoryTokenAccountEmail = null;
+  if (markExpired) {
+    persistAndEmitConnectionMeta({
+      ...currentConnectionMeta,
+      status: 'expired',
+      scopeVerified: false,
+      readVerified: false,
+      writeVerified: false,
+      platform: getCurrentPlatformTag(),
+      lastErrorCode: 'HTTP_401',
+      lastMessage: 'Google Calendar authorization expired or is invalid. Please reconnect.'
+    });
+  }
 }
 
 export function getInMemoryGoogleCalendarToken(): string | null {
   if (!inMemoryGoogleCalendarAccessToken) return null;
   if (inMemoryTokenExpiresAtMs > 0 && Date.now() >= inMemoryTokenExpiresAtMs) {
+    lastInvalidatedAccessToken = inMemoryGoogleCalendarAccessToken;
     inMemoryGoogleCalendarAccessToken = null;
     inMemoryTokenExpiresAtMs = 0;
+    inMemoryTokenAccountEmail = null;
     return null;
   }
   return inMemoryGoogleCalendarAccessToken;
 }
 
-/**
- * Acquires a client-side Google Calendar OAuth access token via Firebase Auth GoogleAuthProvider popup
- * (reusing the single initialized Firebase app/auth instance).
- */
-export async function requestGoogleCalendarAccessToken(forcePrompt = false): Promise<{
-  ok: boolean;
-  accessToken?: string;
-  error?: string;
-}> {
-  if (!forcePrompt) {
-    const existing = getInMemoryGoogleCalendarToken();
-    if (existing) {
-      return { ok: true, accessToken: existing };
+export async function disconnectGoogleCalendar(): Promise<void> {
+  const tokenToClear = inMemoryGoogleCalendarAccessToken || lastInvalidatedAccessToken;
+  const emailToRevoke = inMemoryTokenAccountEmail || currentConnectionMeta.accountEmail;
+  clearInMemoryGoogleCalendarToken();
+  lastInvalidatedAccessToken = null;
+  if (isAndroidNativePlatform()) {
+    if (tokenToClear) {
+      await invokeNativeClearCalendarToken(tokenToClear);
+    }
+    if (emailToRevoke) {
+      await invokeNativeRevokeCalendarAccess(emailToRevoke, GOOGLE_CALENDAR_SCOPE);
     }
   }
+  persistAndEmitConnectionMeta({
+    status: 'disconnected',
+    scopeVerified: false,
+    readVerified: false,
+    writeVerified: false,
+    platform: getCurrentPlatformTag(),
+    lastMessage: 'Google Calendar disconnected.'
+  });
+  recordCalendarOAuthStage('calendar_oauth_disconnected', { ok: true });
+}
 
-  try {
-    const provider = new GoogleAuthProvider();
-    provider.addScope(GOOGLE_CALENDAR_SCOPE);
-    provider.setCustomParameters({
-      prompt: forcePrompt ? 'consent select_account' : 'consent'
+function handleFirebaseAccountIdentityChange(userEmail: string | null | undefined): void {
+  if (!userEmail) {
+    const hadToken = Boolean(inMemoryGoogleCalendarAccessToken);
+    const wasActive =
+      currentConnectionMeta.status === 'connected' ||
+      currentConnectionMeta.status === 'needs_verification' ||
+      Boolean(currentConnectionMeta.accountEmail);
+    clearInMemoryGoogleCalendarToken();
+    lastInvalidatedAccessToken = null;
+    if (hadToken || wasActive) {
+      persistAndEmitConnectionMeta({
+        status: 'disconnected',
+        scopeVerified: false,
+        readVerified: false,
+        writeVerified: false,
+        platform: getCurrentPlatformTag(),
+        lastMessage: 'Signed out of Google account.'
+      });
+      recordCalendarOAuthStage('calendar_oauth_auth_state_cleared', {
+        ok: true,
+        detail: 'User signed out; cleared in-memory Calendar token and state'
+      });
+    }
+    return;
+  }
+
+  const normalizedIncoming = userEmail.trim().toLowerCase();
+  const normalizedTokenEmail = inMemoryTokenAccountEmail?.trim().toLowerCase();
+  const normalizedMetaEmail = currentConnectionMeta.accountEmail?.trim().toLowerCase();
+
+  if (
+    (normalizedTokenEmail && normalizedTokenEmail !== normalizedIncoming) ||
+    (normalizedMetaEmail && normalizedMetaEmail !== normalizedIncoming)
+  ) {
+    clearInMemoryGoogleCalendarToken();
+    lastInvalidatedAccessToken = null;
+    persistAndEmitConnectionMeta({
+      status: 'reconnect_required',
+      accountEmail: undefined,
+      calendarId: undefined,
+      calendarSummary: undefined,
+      calendarTimeZone: undefined,
+      calendarAccessRole: undefined,
+      scopeVerified: false,
+      readVerified: false,
+      writeVerified: false,
+      platform: getCurrentPlatformTag(),
+      lastErrorCode: 'ACCOUNT_SWITCHED',
+      lastMessage: 'Active Google account changed. Please reconnect Google Calendar.'
     });
+    recordCalendarOAuthStage('calendar_oauth_auth_state_cleared', {
+      ok: true,
+      code: 'ACCOUNT_SWITCHED',
+      detail: 'Active Google account changed; cleared previous Calendar token & metadata'
+    });
+  }
+}
 
-    let result;
-    if (auth.currentUser) {
-      const hasGoogleLinked = (auth.currentUser.providerData || []).some(
-        (p) => p?.providerId === 'google.com'
-      );
-      if (hasGoogleLinked) {
-        result = await reauthenticateWithPopup(auth.currentUser, provider);
-      } else {
-        try {
-          result = await linkWithPopup(auth.currentUser, provider);
-        } catch (linkErr: any) {
-          if (linkErr?.code === 'auth/credential-already-in-use' || linkErr?.code === 'auth/provider-already-linked') {
-            result = await signInWithPopup(auth, provider);
-          } else {
-            throw linkErr;
-          }
+// Clear in-memory Calendar OAuth token and stale account metadata whenever Firebase user signs out or switches accounts
+if (typeof window !== 'undefined') {
+  try {
+    onAuthStateChanged(auth, (user) => {
+      handleFirebaseAccountIdentityChange(user?.email || null);
+    });
+  } catch {
+    // Ignore in headless/non-browser environments
+  }
+}
+
+/**
+ * Performs a lightweight read-only verification against Google Calendar API v3 `events.list`
+ * (`GET /calendars/primary/events?maxResults=1&fields=summary,timeZone,accessRole`), which is
+ * officially authorized by the `calendar.events` scope (unlike `calendars.get`, which returns 403
+ * under `calendar.events`-only tokens). Also verifies `accessRole` is `owner` or `writer`.
+ * Note: Read verification does NOT mark `writeVerified=true`; actual write permission is only
+ * confirmed when an `events.insert` or `events.patch` succeeds (or caught if 403 occurs).
+ */
+export async function verifyGoogleCalendarAuthorization(
+  accessToken: string,
+  fallbackEmail?: string
+): Promise<{
+  ok: boolean;
+  accountEmail?: string;
+  calendarId?: string;
+  calendarSummary?: string;
+  calendarTimeZone?: string;
+  calendarAccessRole?: string;
+  expired?: boolean;
+  permissionDenied?: boolean;
+  status?: number;
+  error?: string;
+}> {
+  const fetchFn = customCalendarFetchForTesting || fetch;
+  recordCalendarOAuthStage('calendar_oauth_verify_calendar_start');
+  try {
+    const res = await fetchFn(
+      'https://www.googleapis.com/calendar/v3/calendars/primary/events?maxResults=1&fields=summary,timeZone,accessRole',
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json'
         }
       }
-    } else {
-      result = await signInWithPopup(auth, provider);
-    }
+    );
 
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    const accessToken = credential?.accessToken;
-    if (!accessToken) {
+    if (res.status === 401) {
+      lastInvalidatedAccessToken = accessToken;
+      clearInMemoryGoogleCalendarToken();
+      recordCalendarOAuthStage('calendar_oauth_verify_calendar_failed', {
+        ok: false,
+        code: 'HTTP_401',
+        detail: 'Access token expired or invalid'
+      });
       return {
         ok: false,
-        error: 'Google authorization completed, but no Calendar access token was granted.'
+        expired: true,
+        status: 401,
+        error: 'Google Calendar authorization expired or is invalid. Please reconnect.'
       };
     }
 
-    inMemoryGoogleCalendarAccessToken = accessToken;
-    inMemoryTokenExpiresAtMs = Date.now() + 50 * 60 * 1000;
-    return { ok: true, accessToken };
+    if (res.status === 403) {
+      clearInMemoryGoogleCalendarToken();
+      recordCalendarOAuthStage('calendar_oauth_verify_calendar_failed', {
+        ok: false,
+        code: 'HTTP_403',
+        detail: 'Calendar permission denied or missing calendar.events scope'
+      });
+      return {
+        ok: false,
+        permissionDenied: true,
+        status: 403,
+        error:
+          'Google Calendar event permission (calendar.events) was not granted or was revoked. Please reconnect and approve Calendar access.'
+      };
+    }
+
+    if (!res.ok) {
+      recordCalendarOAuthStage('calendar_oauth_verify_calendar_failed', {
+        ok: false,
+        code: `HTTP_${res.status}`,
+        detail: 'Primary calendar events.list verification failed'
+      });
+      return {
+        ok: false,
+        status: res.status,
+        error: `Could not verify Google Calendar access (HTTP ${res.status}).`
+      };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    const calendarSummary =
+      typeof data?.summary === 'string' && data.summary.trim() ? data.summary.trim() : undefined;
+    const calendarTimeZone =
+      typeof data?.timeZone === 'string' && data.timeZone.trim() ? data.timeZone.trim() : undefined;
+    const calendarAccessRole =
+      typeof data?.accessRole === 'string' && data.accessRole.trim() ? data.accessRole.trim() : undefined;
+
+    if (
+      calendarAccessRole &&
+      calendarAccessRole !== 'owner' &&
+      calendarAccessRole !== 'writer'
+    ) {
+      clearInMemoryGoogleCalendarToken();
+      recordCalendarOAuthStage('calendar_oauth_verify_calendar_failed', {
+        ok: false,
+        code: 'WRITE_ACCESS_DENIED',
+        detail: `Calendar accessRole=${calendarAccessRole} does not permit event writes`
+      });
+      return {
+        ok: false,
+        permissionDenied: true,
+        status: 403,
+        error: `This Google Calendar only allows read-only access (${calendarAccessRole}). Event write access is required.`
+      };
+    }
+
+    const calendarId =
+      calendarSummary && calendarSummary.includes('@') ? calendarSummary : 'primary';
+    const accountEmail =
+      (calendarSummary && calendarSummary.includes('@') ? calendarSummary : undefined) ||
+      fallbackEmail ||
+      getActiveFirebaseUserEmail() ||
+      undefined;
+
+    recordCalendarOAuthStage('calendar_oauth_verify_calendar_ok', {
+      ok: true,
+      detail: `Verified events.list read access (role=${calendarAccessRole || 'unknown'}, tz=${calendarTimeZone || 'unknown'})`
+    });
+
+    return {
+      ok: true,
+      accountEmail,
+      calendarId,
+      calendarSummary,
+      calendarTimeZone,
+      calendarAccessRole
+    };
   } catch (err: any) {
+    recordCalendarOAuthStage('calendar_oauth_verify_calendar_failed', {
+      ok: false,
+      code: 'NETWORK_ERROR',
+      detail: err?.message || 'Network failure verifying Calendar access'
+    });
     return {
       ok: false,
-      error: err?.message || 'Google Calendar authorization failed or was cancelled.'
+      error: 'Network error while verifying Google Calendar connection. Please try again.'
     };
   }
+}
+
+async function finalizeVerifiedCalendarToken(params: {
+  accessToken: string;
+  fallbackEmail?: string;
+  platform: 'android_native' | 'web';
+  scopeExplicitlyVerified: boolean;
+}): Promise<GoogleCalendarTokenResult> {
+  const verify = await verifyGoogleCalendarAuthorization(params.accessToken, params.fallbackEmail);
+  if (!verify.ok) {
+    persistAndEmitConnectionMeta({
+      ...currentConnectionMeta,
+      status: verify.expired ? 'expired' : verify.permissionDenied ? 'reconnect_required' : 'error',
+      scopeVerified: false,
+      readVerified: false,
+      writeVerified: false,
+      platform: params.platform,
+      lastMessage: verify.error,
+      lastErrorCode: verify.status ? `HTTP_${verify.status}` : 'VERIFY_FAILED'
+    });
+    return {
+      ok: false,
+      expired: verify.expired,
+      platform: params.platform,
+      error: verify.error,
+      code: verify.status ? `HTTP_${verify.status}` : 'VERIFY_FAILED'
+    };
+  }
+
+  inMemoryGoogleCalendarAccessToken = params.accessToken;
+  // Conservative 45-minute client-side TTL (strictly under Google's 60-minute OAuth access token expiry)
+  inMemoryTokenExpiresAtMs = Date.now() + 45 * 60 * 1000;
+  inMemoryTokenAccountEmail = verify.accountEmail || params.fallbackEmail || null;
+  lastInvalidatedAccessToken = null;
+
+  persistAndEmitConnectionMeta({
+    status: 'connected',
+    accountEmail: verify.accountEmail,
+    calendarId: verify.calendarId,
+    calendarSummary: verify.calendarSummary,
+    calendarTimeZone: verify.calendarTimeZone,
+    calendarAccessRole: verify.calendarAccessRole,
+    scopeVerified: params.scopeExplicitlyVerified,
+    readVerified: true,
+    writeVerified: false, // Confirmed ONLY after a real events.insert / events.patch succeeds
+    platform: params.platform,
+    lastVerifiedAtIso: new Date().toISOString(),
+    lastMessage: verify.accountEmail
+      ? `Connected to Google Calendar (${verify.accountEmail}).`
+      : 'Connected to Google Calendar.'
+  });
+
+  return {
+    ok: true,
+    accessToken: params.accessToken,
+    accountEmail: verify.accountEmail,
+    calendarSummary: verify.calendarSummary,
+    scopeVerified: params.scopeExplicitlyVerified,
+    readVerified: true,
+    writeVerified: false,
+    platform: params.platform
+  };
+}
+
+function isWebPopupCancellation(err: any): boolean {
+  const code = String(err?.code || '').toLowerCase();
+  return code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request';
+}
+
+function shouldFallbackToWebRedirect(err: any): boolean {
+  const code = String(err?.code || '').toLowerCase();
+  return (
+    code === 'auth/popup-blocked' ||
+    code === 'auth/operation-not-supported-in-this-environment'
+  );
+}
+
+function markPendingWebCalendarRedirect(): void {
+  if (typeof window === 'undefined' || !window.sessionStorage) return;
+  try {
+    window.sessionStorage.setItem(
+      PENDING_WEB_CALENDAR_REDIRECT_KEY,
+      JSON.stringify({
+        startedAtIso: new Date().toISOString(),
+        returnTo: 'settings_integrations'
+      })
+    );
+  } catch {
+    // Ignore sessionStorage restrictions
+  }
+}
+
+function consumePendingWebCalendarRedirectFlag(): boolean {
+  if (typeof window === 'undefined' || !window.sessionStorage) return false;
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_WEB_CALENDAR_REDIRECT_KEY);
+    if (!raw) return false;
+    window.sessionStorage.removeItem(PENDING_WEB_CALENDAR_REDIRECT_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function executeAndroidNativeCalendarOAuth(
+  forcePrompt: boolean,
+  options: { silentOnly?: boolean; allowStale401Retry?: boolean } = {}
+): Promise<GoogleCalendarTokenResult> {
+  // STRICT SEPARATION: On Capacitor Android, NEVER invoke Firebase Web popup or redirect flows
+  // (which launch /__/auth/handler in an external browser without window.opener and hang on a white screen).
+  const silentOnly = Boolean(options.silentOnly);
+  const allowStale401Retry = options.allowStale401Retry !== false;
+
+  // Enforce account consistency before requesting a Play Services token
+  const activeFirebaseEmail = getActiveFirebaseUserEmail();
+  if (activeFirebaseEmail) {
+    handleFirebaseAccountIdentityChange(activeFirebaseEmail);
+  }
+
+  recordCalendarOAuthStage('calendar_oauth_android_native_invoke', {
+    detail: `forcePrompt=${forcePrompt} silentOnly=${silentOnly}`
+  });
+
+  try {
+    const staleToken =
+      forcePrompt || lastInvalidatedAccessToken
+        ? lastInvalidatedAccessToken || inMemoryGoogleCalendarAccessToken || undefined
+        : undefined;
+    if (forcePrompt) {
+      clearInMemoryGoogleCalendarToken();
+    }
+
+    // Prefer the signed-in Firebase account email so switching accounts never reuses the old account hint
+    const accountHint = forcePrompt
+      ? undefined
+      : activeFirebaseEmail || currentConnectionMeta.accountEmail || undefined;
+
+    const nativeRes = await invokeNativeGoogleCalendarAuthorize({
+      accountEmail: accountHint,
+      scope: GOOGLE_CALENDAR_SCOPE,
+      forceAccountSelection: forcePrompt,
+      silentOnly,
+      staleAccessToken: staleToken
+    });
+
+    if (nativeRes?.resolutionRequired) {
+      const msg =
+        'Google Calendar authorization requires reconnection. Tap Reconnect Google Calendar to approve access.';
+      recordCalendarOAuthStage('calendar_oauth_android_native_resolution_required', {
+        ok: false,
+        code: 'RESOLUTION_REQUIRED',
+        detail: nativeRes.reason || msg
+      });
+      persistAndEmitConnectionMeta({
+        ...currentConnectionMeta,
+        status: 'reconnect_required',
+        scopeVerified: false,
+        readVerified: false,
+        writeVerified: false,
+        platform: 'android_native',
+        lastMessage: msg,
+        lastErrorCode: 'RESOLUTION_REQUIRED'
+      });
+      return {
+        ok: false,
+        resolutionRequired: true,
+        platform: 'android_native',
+        code: 'RESOLUTION_REQUIRED',
+        error: msg
+      };
+    }
+
+    if (nativeRes?.cancelled) {
+      recordCalendarOAuthStage('calendar_oauth_android_native_cancelled', {
+        ok: false,
+        code: 'USER_CANCELLED',
+        detail: nativeRes.reason || 'Native consent cancelled'
+      });
+      persistAndEmitConnectionMeta({
+        ...currentConnectionMeta,
+        status: 'cancelled',
+        readVerified: false,
+        writeVerified: false,
+        platform: 'android_native',
+        lastMessage: 'Google Calendar authorization was cancelled.',
+        lastErrorCode: 'USER_CANCELLED'
+      });
+      return {
+        ok: false,
+        cancelled: true,
+        platform: 'android_native',
+        code: 'USER_CANCELLED',
+        error: 'Google Calendar authorization was cancelled.'
+      };
+    }
+
+    const accessToken = nativeRes?.accessToken;
+    if (!accessToken) {
+      recordCalendarOAuthStage('calendar_oauth_error', {
+        ok: false,
+        code: 'EMPTY_ACCESS_TOKEN',
+        detail: 'Native authorization completed without access token'
+      });
+      persistAndEmitConnectionMeta({
+        ...currentConnectionMeta,
+        status: 'reconnect_required',
+        scopeVerified: false,
+        readVerified: false,
+        writeVerified: false,
+        platform: 'android_native',
+        lastMessage: 'Google authorization completed, but no Calendar access token was returned.',
+        lastErrorCode: 'EMPTY_ACCESS_TOKEN'
+      });
+      return {
+        ok: false,
+        platform: 'android_native',
+        code: 'EMPTY_ACCESS_TOKEN',
+        error: 'Google authorization completed, but no Calendar access token was returned.'
+      };
+    }
+
+    if (nativeRes.scopeVerified !== true) {
+      recordCalendarOAuthStage('calendar_oauth_error', {
+        ok: false,
+        code: 'SCOPE_NOT_GRANTED',
+        detail: 'Google Calendar events write scope (calendar.events) was not granted'
+      });
+      persistAndEmitConnectionMeta({
+        ...currentConnectionMeta,
+        status: 'reconnect_required',
+        scopeVerified: false,
+        readVerified: false,
+        writeVerified: false,
+        platform: 'android_native',
+        lastMessage: 'Google Calendar event write permission (calendar.events) was not granted.',
+        lastErrorCode: 'SCOPE_NOT_GRANTED'
+      });
+      return {
+        ok: false,
+        platform: 'android_native',
+        code: 'SCOPE_NOT_GRANTED',
+        error: 'Google Calendar event write permission (calendar.events) was not granted. Please allow Calendar access and retry.'
+      };
+    }
+
+    recordCalendarOAuthStage('calendar_oauth_android_native_token_received', {
+      ok: true,
+      detail: nativeRes.stage || 'native_authorized'
+    });
+
+    const finalized = await finalizeVerifiedCalendarToken({
+      accessToken,
+      fallbackEmail: nativeRes.email || activeFirebaseEmail || currentConnectionMeta.accountEmail,
+      platform: 'android_native',
+      scopeExplicitlyVerified: true
+    });
+
+    // If Play Services returned a stale/revoked cached token (401 on verification),
+    // strictly await AuthorizationClient.clearToken() before attempting ONE fresh retry.
+    if (!finalized.ok && finalized.expired && allowStale401Retry) {
+      const clearRes = await invokeNativeClearCalendarToken(accessToken);
+      recordCalendarOAuthStage('calendar_oauth_android_stale_token_cleared', {
+        ok: Boolean(clearRes?.cleared),
+        detail: 'Awaited Play Services token clear after 401; retrying once'
+      });
+      lastInvalidatedAccessToken = clearRes?.cleared ? null : accessToken;
+      return executeAndroidNativeCalendarOAuth(forcePrompt, {
+        silentOnly,
+        allowStale401Retry: false
+      });
+    }
+
+    return finalized;
+  } catch (err: any) {
+    const code = String(err?.code || 'ANDROID_CALENDAR_AUTH_ERROR');
+    const message =
+      sanitizeDiagnosticText(err?.message) ||
+      'Native Android Google Calendar authorization failed. Please try again.';
+    recordCalendarOAuthStage('calendar_oauth_error', {
+      ok: false,
+      code,
+      detail: message
+    });
+    persistAndEmitConnectionMeta({
+      ...currentConnectionMeta,
+      status: silentOnly ? 'reconnect_required' : 'error',
+      scopeVerified: false,
+      readVerified: false,
+      writeVerified: false,
+      platform: 'android_native',
+      lastMessage: message,
+      lastErrorCode: code
+    });
+    return {
+      ok: false,
+      platform: 'android_native',
+      code,
+      error: message
+    };
+  }
+}
+
+async function executeWebCalendarOAuth(forcePrompt: boolean): Promise<GoogleCalendarTokenResult> {
+  recordCalendarOAuthStage('calendar_oauth_web_popup_start', {
+    detail: `forcePrompt=${forcePrompt}`
+  });
+
+  if (forcePrompt) {
+    clearInMemoryGoogleCalendarToken();
+  }
+
+  try {
+    let accessToken: string | undefined;
+    let fallbackEmail: string | undefined = auth.currentUser?.email || undefined;
+
+    if (webCalendarAuthTestAdapter?.popupAuthorize) {
+      const adapterRes = await webCalendarAuthTestAdapter.popupAuthorize({
+        forcePrompt,
+        scope: GOOGLE_CALENDAR_SCOPE
+      });
+      accessToken = adapterRes?.accessToken;
+      fallbackEmail = adapterRes?.email || fallbackEmail;
+    } else {
+      const provider = new GoogleAuthProvider();
+      provider.addScope(GOOGLE_CALENDAR_SCOPE);
+      provider.setCustomParameters({
+        prompt: forcePrompt ? 'consent select_account' : 'consent'
+      });
+
+      let result: UserCredential;
+      if (auth.currentUser) {
+        const hasGoogleLinked = (auth.currentUser.providerData || []).some(
+          (p) => p?.providerId === 'google.com'
+        );
+        if (hasGoogleLinked) {
+          result = await reauthenticateWithPopup(auth.currentUser, provider);
+        } else {
+          try {
+            result = await linkWithPopup(auth.currentUser, provider);
+          } catch (linkErr: any) {
+            if (
+              linkErr?.code === 'auth/credential-already-in-use' ||
+              linkErr?.code === 'auth/provider-already-linked'
+            ) {
+              result = await signInWithPopup(auth, provider);
+            } else {
+              throw linkErr;
+            }
+          }
+        }
+      } else {
+        result = await signInWithPopup(auth, provider);
+      }
+
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      accessToken = credential?.accessToken;
+      fallbackEmail = result?.user?.email || fallbackEmail;
+    }
+
+    if (!accessToken) {
+      const msg = 'Google authorization completed, but no Calendar access token was granted.';
+      recordCalendarOAuthStage('calendar_oauth_error', {
+        ok: false,
+        code: 'EMPTY_ACCESS_TOKEN',
+        detail: msg
+      });
+      persistAndEmitConnectionMeta({
+        ...currentConnectionMeta,
+        status: 'error',
+        scopeVerified: false,
+        platform: 'web',
+        lastMessage: msg,
+        lastErrorCode: 'EMPTY_ACCESS_TOKEN'
+      });
+      return {
+        ok: false,
+        platform: 'web',
+        code: 'EMPTY_ACCESS_TOKEN',
+        error: msg
+      };
+    }
+
+    return finalizeVerifiedCalendarToken({
+      accessToken,
+      fallbackEmail,
+      platform: 'web',
+      scopeExplicitlyVerified: false
+    });
+  } catch (err: any) {
+    if (isWebPopupCancellation(err)) {
+      const msg = 'Google Calendar authorization was cancelled.';
+      recordCalendarOAuthStage('calendar_oauth_error', {
+        ok: false,
+        code: String(err?.code || 'USER_CANCELLED'),
+        detail: msg
+      });
+      persistAndEmitConnectionMeta({
+        ...currentConnectionMeta,
+        status: 'cancelled',
+        readVerified: false,
+        writeVerified: false,
+        platform: 'web',
+        lastMessage: msg,
+        lastErrorCode: 'USER_CANCELLED'
+      });
+      return {
+        ok: false,
+        cancelled: true,
+        platform: 'web',
+        code: 'USER_CANCELLED',
+        error: msg
+      };
+    }
+
+    if (shouldFallbackToWebRedirect(err)) {
+      recordCalendarOAuthStage('calendar_oauth_web_popup_fallback_redirect', {
+        ok: true,
+        code: String(err?.code || 'POPUP_BLOCKED'),
+        detail: 'Falling back to Web Firebase redirect flow'
+      });
+      markPendingWebCalendarRedirect();
+      persistAndEmitConnectionMeta({
+        ...currentConnectionMeta,
+        status: 'pending_redirect',
+        readVerified: false,
+        writeVerified: false,
+        platform: 'web',
+        lastMessage: 'Redirecting to Google to finish Calendar authorization...'
+      });
+
+      if (webCalendarAuthTestAdapter?.redirectAuthorize) {
+        await webCalendarAuthTestAdapter.redirectAuthorize({
+          forcePrompt,
+          scope: GOOGLE_CALENDAR_SCOPE
+        });
+      } else {
+        const provider = new GoogleAuthProvider();
+        provider.addScope(GOOGLE_CALENDAR_SCOPE);
+        provider.setCustomParameters({
+          prompt: forcePrompt ? 'consent select_account' : 'consent'
+        });
+        if (auth.currentUser) {
+          const hasGoogleLinked = (auth.currentUser.providerData || []).some(
+            (p) => p?.providerId === 'google.com'
+          );
+          if (hasGoogleLinked) {
+            await reauthenticateWithRedirect(auth.currentUser, provider);
+          } else {
+            await linkWithRedirect(auth.currentUser, provider);
+          }
+        } else {
+          await signInWithRedirect(auth, provider);
+        }
+      }
+
+      return {
+        ok: false,
+        redirected: true,
+        platform: 'web',
+        code: 'WEB_REDIRECT_STARTED',
+        error: 'Redirecting to Google to complete Calendar authorization...'
+      };
+    }
+
+    const code = String(err?.code || 'WEB_CALENDAR_AUTH_ERROR');
+    const msg =
+      sanitizeDiagnosticText(err?.message) ||
+      'Google Calendar authorization failed. Please try again.';
+    recordCalendarOAuthStage('calendar_oauth_error', {
+      ok: false,
+      code,
+      detail: msg
+    });
+    persistAndEmitConnectionMeta({
+      ...currentConnectionMeta,
+      status: 'error',
+      scopeVerified: false,
+      readVerified: false,
+      writeVerified: false,
+      platform: 'web',
+      lastMessage: msg,
+      lastErrorCode: code
+    });
+    return {
+      ok: false,
+      platform: 'web',
+      code,
+      error: msg
+    };
+  }
+}
+
+/**
+ * Non-interactive startup/mount verification of Google Calendar authorization:
+ * - Never treats persisted metadata as proof of a valid token.
+ * - On Android Capacitor: uses `AuthorizationClient.authorize(silentOnly=true)`.
+ *   If Play Services still holds a valid grant (`hasResolution=false`), obtains a fresh
+ *   in-memory token and verifies Calendar access. If consent/re-login is required
+ *   (`hasResolution=true` — e.g. revoked permissions), transitions cleanly to `'reconnect_required'`
+ *   without showing an unsolicited popup and without falsely reporting connected.
+ * - On Web: if no in-memory token exists after restart, marks `'reconnect_required'`.
+ */
+export async function verifyOrSilentlyReauthorizeGoogleCalendar(
+  options: { forceSilentCheck?: boolean } = {}
+): Promise<GoogleCalendarTokenResult> {
+  const activeEmail = getActiveFirebaseUserEmail();
+  if (activeEmail) {
+    handleFirebaseAccountIdentityChange(activeEmail);
+  }
+
+  const existing = getInMemoryGoogleCalendarToken();
+  if (existing) {
+    return {
+      ok: true,
+      accessToken: existing,
+      accountEmail: inMemoryTokenAccountEmail || currentConnectionMeta.accountEmail,
+      calendarSummary: currentConnectionMeta.calendarSummary,
+      scopeVerified: currentConnectionMeta.scopeVerified,
+      readVerified: currentConnectionMeta.readVerified,
+      writeVerified: currentConnectionMeta.writeVerified,
+      platform: getCurrentPlatformTag()
+    };
+  }
+
+  const shouldAttempt =
+    options.forceSilentCheck || currentConnectionMeta.status === 'needs_verification';
+  if (!shouldAttempt) {
+    return {
+      ok: false,
+      platform: getCurrentPlatformTag(),
+      code: 'NOT_CONNECTED',
+      error: currentConnectionMeta.lastMessage || 'Google Calendar is not connected.'
+    };
+  }
+
+  if (isAndroidNativePlatform()) {
+    if (inFlightCalendarAuthPromise) {
+      return inFlightCalendarAuthPromise;
+    }
+    inFlightCalendarAuthPromise = executeAndroidNativeCalendarOAuth(false, { silentOnly: true });
+    try {
+      return await inFlightCalendarAuthPromise;
+    } finally {
+      inFlightCalendarAuthPromise = null;
+    }
+  }
+
+  const msg = 'Google Calendar session ended after reload. Tap Connect Google Calendar to re-authorize.';
+  persistAndEmitConnectionMeta({
+    ...currentConnectionMeta,
+    status: 'reconnect_required',
+    scopeVerified: false,
+    readVerified: false,
+    writeVerified: false,
+    platform: 'web',
+    lastErrorCode: 'SESSION_ENDED',
+    lastMessage: msg
+  });
+  return {
+    ok: false,
+    resolutionRequired: true,
+    platform: 'web',
+    code: 'SESSION_ENDED',
+    error: msg
+  };
+}
+
+/**
+ * Acquires a client-side Google Calendar OAuth access token strictly in-memory:
+ * - On Capacitor Android: uses native Google Identity Services AuthorizationClient
+ *   (zero external browser /__/auth/handler white screen).
+ * - On Web: uses Firebase Auth GoogleAuthProvider popup with clean redirect fallback
+ *   and single-shot startup `getRedirectResult` processing.
+ */
+export async function requestGoogleCalendarAccessToken(
+  forcePrompt = false
+): Promise<GoogleCalendarTokenResult> {
+  const activeEmail = getActiveFirebaseUserEmail();
+  if (activeEmail) {
+    handleFirebaseAccountIdentityChange(activeEmail);
+  }
+
+  if (!forcePrompt) {
+    const existing = getInMemoryGoogleCalendarToken();
+    if (existing) {
+      recordCalendarOAuthStage('calendar_oauth_memory_cache_hit', { ok: true });
+      return {
+        ok: true,
+        accessToken: existing,
+        accountEmail: inMemoryTokenAccountEmail || currentConnectionMeta.accountEmail,
+        calendarSummary: currentConnectionMeta.calendarSummary,
+        scopeVerified: currentConnectionMeta.scopeVerified,
+        readVerified: currentConnectionMeta.readVerified,
+        writeVerified: currentConnectionMeta.writeVerified,
+        platform: getCurrentPlatformTag()
+      };
+    }
+  }
+
+  if (inFlightCalendarAuthPromise) {
+    return inFlightCalendarAuthPromise;
+  }
+
+  recordCalendarOAuthStage('calendar_oauth_start', {
+    detail: `forcePrompt=${forcePrompt}`
+  });
+
+  inFlightCalendarAuthPromise = (async () => {
+    if (isAndroidNativePlatform()) {
+      return executeAndroidNativeCalendarOAuth(forcePrompt, { silentOnly: false });
+    }
+    return executeWebCalendarOAuth(forcePrompt);
+  })();
+
+  try {
+    return await inFlightCalendarAuthPromise;
+  } finally {
+    inFlightCalendarAuthPromise = null;
+  }
+}
+
+/**
+ * Processes a pending Web Firebase Auth redirect result exactly once on app startup.
+ * Strictly a no-op on Capacitor Android native platforms.
+ */
+export async function processPendingWebCalendarRedirectResult(): Promise<WebCalendarRedirectStartupResult> {
+  if (isAndroidNativePlatform()) {
+    return { handled: false, ok: false, shouldOpenIntegrations: false };
+  }
+  if (webRedirectProcessingPromise) {
+    return webRedirectProcessingPromise;
+  }
+
+  webRedirectProcessingPromise = (async (): Promise<WebCalendarRedirectStartupResult> => {
+    const hadPendingCalendarRedirect = consumePendingWebCalendarRedirectFlag();
+    recordCalendarOAuthStage('calendar_oauth_web_redirect_result_check', {
+      detail: `hadPendingCalendarRedirect=${hadPendingCalendarRedirect}`
+    });
+
+    try {
+      let accessToken: string | undefined;
+      let email: string | undefined;
+
+      if (webCalendarAuthTestAdapter?.consumeRedirectResult) {
+        const res = await webCalendarAuthTestAdapter.consumeRedirectResult();
+        accessToken = res?.accessToken;
+        email = res?.email;
+      } else {
+        const res = await consumeFirebaseWebRedirectResultOnce();
+        if (res) {
+          const cred = GoogleAuthProvider.credentialFromResult(res);
+          accessToken = cred?.accessToken;
+          email = res.user?.email || undefined;
+        }
+      }
+
+      if (accessToken) {
+        const finalized = await finalizeVerifiedCalendarToken({
+          accessToken,
+          fallbackEmail: email,
+          platform: 'web',
+          scopeExplicitlyVerified: false
+        });
+        recordCalendarOAuthStage('calendar_oauth_web_redirect_result_processed', {
+          ok: finalized.ok,
+          detail: finalized.ok ? 'Redirect token verified' : finalized.error
+        });
+        return {
+          handled: true,
+          ok: finalized.ok,
+          shouldOpenIntegrations: true,
+          accountEmail: finalized.accountEmail,
+          message: finalized.ok
+            ? finalized.accountEmail
+              ? `Google Calendar connected (${finalized.accountEmail}).`
+              : 'Google Calendar connected.'
+            : finalized.error
+        };
+      }
+
+      if (hadPendingCalendarRedirect) {
+        const msg = 'Google Calendar authorization did not complete. Please try again.';
+        persistAndEmitConnectionMeta({
+          ...currentConnectionMeta,
+          status: 'cancelled',
+          platform: 'web',
+          lastMessage: msg,
+          lastErrorCode: 'REDIRECT_INCOMPLETE'
+        });
+        recordCalendarOAuthStage('calendar_oauth_web_redirect_result_processed', {
+          ok: false,
+          code: 'REDIRECT_INCOMPLETE',
+          detail: msg
+        });
+        return {
+          handled: true,
+          ok: false,
+          shouldOpenIntegrations: true,
+          message: msg
+        };
+      }
+
+      return { handled: false, ok: false, shouldOpenIntegrations: false };
+    } catch (err: any) {
+      const cancelled = isWebPopupCancellation(err);
+      const code = String(err?.code || 'WEB_REDIRECT_ERROR');
+      const msg = cancelled
+        ? 'Google Calendar authorization was cancelled.'
+        : sanitizeDiagnosticText(err?.message) || 'Google Calendar redirect authorization failed.';
+      if (hadPendingCalendarRedirect) {
+        persistAndEmitConnectionMeta({
+          ...currentConnectionMeta,
+          status: cancelled ? 'cancelled' : 'error',
+          platform: 'web',
+          lastMessage: msg,
+          lastErrorCode: code
+        });
+      }
+      recordCalendarOAuthStage('calendar_oauth_error', {
+        ok: false,
+        code,
+        detail: msg
+      });
+      return {
+        handled: hadPendingCalendarRedirect,
+        ok: false,
+        shouldOpenIntegrations: hadPendingCalendarRedirect,
+        message: hadPendingCalendarRedirect ? msg : undefined
+      };
+    }
+  })();
+
+  return webRedirectProcessingPromise;
+}
+
+/**
+ * Handles Android/Capacitor deep-link callbacks targeting Calendar OAuth or Integrations
+ * (e.g., `glueck://oauth/calendar/callback`, `glueck://integrations`) exactly once so
+ * the app always lands on Settings -> Integrations with a clear status message.
+ */
+export function handleCalendarOAuthDeepLinkCallback(rawUrl: string): CalendarDeepLinkCallbackResult {
+  if (!rawUrl || typeof rawUrl !== 'string') {
+    return { matched: false, alreadyHandled: false, shouldOpenIntegrations: false, status: 'open_integrations' };
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return { matched: false, alreadyHandled: false, shouldOpenIntegrations: false, status: 'open_integrations' };
+  }
+
+  const scheme = parsed.protocol.replace(/:$/, '').toLowerCase();
+  if (scheme !== 'glueck' && scheme !== 'ags19') {
+    return { matched: false, alreadyHandled: false, shouldOpenIntegrations: false, status: 'open_integrations' };
+  }
+
+  const normalizedRoute = `${parsed.host}${parsed.pathname}`.replace(/\/+$/, '').toLowerCase();
+  const isCalendarCallback =
+    normalizedRoute === 'oauth/calendar/callback' ||
+    normalizedRoute === 'oauth/google/callback' ||
+    normalizedRoute === 'calendar/callback';
+  const isIntegrationsRoute =
+    normalizedRoute === 'integrations' || normalizedRoute === 'settings/integrations';
+
+  if (!isCalendarCallback && !isIntegrationsRoute) {
+    return { matched: false, alreadyHandled: false, shouldOpenIntegrations: false, status: 'open_integrations' };
+  }
+
+  if (isIntegrationsRoute) {
+    recordCalendarOAuthStage('calendar_oauth_deeplink_callback', {
+      ok: true,
+      detail: 'Opened Settings -> Integrations via deep link'
+    });
+    return {
+      matched: true,
+      alreadyHandled: false,
+      shouldOpenIntegrations: true,
+      status: 'open_integrations'
+    };
+  }
+
+  // Deduplicate callback handling using safe non-secret key (never store tokens/codes)
+  const rawStatus = (parsed.searchParams.get('status') || '').toLowerCase();
+  const rawError = (parsed.searchParams.get('error') || '').toLowerCase();
+  const safeNonce = parsed.searchParams.get('state') ? `state_len_${parsed.searchParams.get('state')!.length}` : 'no_state';
+  const dedupeKey = `${scheme}://${normalizedRoute}?status=${rawStatus}&error=${rawError}&nonce=${safeNonce}`;
+
+  if (handledCalendarDeepLinkKeys.has(dedupeKey)) {
+    recordCalendarOAuthStage('calendar_oauth_deeplink_callback', {
+      ok: true,
+      detail: 'Duplicate Calendar OAuth deep-link callback ignored'
+    });
+    return {
+      matched: true,
+      alreadyHandled: true,
+      shouldOpenIntegrations: true,
+      status: currentConnectionMeta.status === 'connected' ? 'connected' : 'open_integrations'
+    };
+  }
+  handledCalendarDeepLinkKeys.add(dedupeKey);
+
+  if (rawError === 'access_denied' || rawStatus === 'cancelled' || rawStatus === 'canceled') {
+    const msg = 'Google Calendar authorization was cancelled.';
+    persistAndEmitConnectionMeta({
+      ...currentConnectionMeta,
+      status: 'cancelled',
+      lastMessage: msg,
+      lastErrorCode: 'USER_CANCELLED'
+    });
+    recordCalendarOAuthStage('calendar_oauth_deeplink_callback', {
+      ok: false,
+      code: 'USER_CANCELLED',
+      detail: msg
+    });
+    return {
+      matched: true,
+      alreadyHandled: false,
+      shouldOpenIntegrations: true,
+      status: 'cancelled',
+      message: msg
+    };
+  }
+
+  if (rawError || rawStatus === 'error') {
+    const msg = `Google Calendar authorization failed (${sanitizeDiagnosticText(rawError) || 'oauth_error'}). Please try again from Settings → Integrations.`;
+    persistAndEmitConnectionMeta({
+      ...currentConnectionMeta,
+      status: 'error',
+      lastMessage: msg,
+      lastErrorCode: sanitizeDiagnosticText(rawError) || 'OAUTH_CALLBACK_ERROR'
+    });
+    recordCalendarOAuthStage('calendar_oauth_deeplink_callback', {
+      ok: false,
+      code: sanitizeDiagnosticText(rawError) || 'OAUTH_CALLBACK_ERROR',
+      detail: 'Calendar OAuth callback returned error'
+    });
+    return {
+      matched: true,
+      alreadyHandled: false,
+      shouldOpenIntegrations: true,
+      status: 'error',
+      message: msg
+    };
+  }
+
+  const msg = getInMemoryGoogleCalendarToken()
+    ? 'Google Calendar is connected and ready to sync.'
+    : 'Returned to Glück Settings → Integrations. Tap Sync Google Calendar to complete verification.';
+  recordCalendarOAuthStage('calendar_oauth_deeplink_callback', {
+    ok: true,
+    detail: 'Handled Calendar OAuth deep-link callback cleanly'
+  });
+  return {
+    matched: true,
+    alreadyHandled: false,
+    shouldOpenIntegrations: true,
+    status: getInMemoryGoogleCalendarToken() ? 'connected' : 'open_integrations',
+    message: msg
+  };
 }
 
 function escapeIcsText(value: string): string {
@@ -402,6 +1818,7 @@ export async function syncSessionsToGoogleCalendar(params: {
   const skippedCount = workingSessions.filter((s) => !s.deleted).length - targets.length;
   let failedCount = 0;
   let authExpired = false;
+  let scopeInsufficient = false;
   const errors: Array<{ sessionId: string; title: string; error: string; status?: number }> = [];
 
   for (let i = 0; i < targets.length; i++) {
@@ -511,7 +1928,7 @@ export async function syncSessionsToGoogleCalendar(params: {
           sessionId: session.id
         });
         if (lookup.authExpired) {
-          clearInMemoryGoogleCalendarToken();
+          clearInMemoryGoogleCalendarToken(true, params.accessToken);
           authExpired = true;
           throw Object.assign(new Error('Google Calendar OAuth token expired or unauthorized (401). Please reconnect.'), {
             status: 401
@@ -524,15 +1941,35 @@ export async function syncSessionsToGoogleCalendar(params: {
       if (existingEventId) {
         const patchRes = await runPatch(existingEventId);
         if (patchRes.status === 401) {
-          clearInMemoryGoogleCalendarToken();
+          clearInMemoryGoogleCalendarToken(true, params.accessToken);
           authExpired = true;
           throw Object.assign(new Error('Google Calendar OAuth token expired or unauthorized (401). Please reconnect.'), {
             status: 401
           });
         }
+        if (patchRes.status === 403) {
+          throw Object.assign(
+            new Error('Google Calendar event write permission (calendar.events) was denied (403). Please reconnect and allow event editing.'),
+            { status: 403 }
+          );
+        }
         if (patchRes.ok) {
           const updatedEvent = await patchRes.json();
           persistSyncedSession(updatedEvent, existingEventId, nowMs);
+          if (!currentConnectionMeta.writeVerified && getInMemoryGoogleCalendarToken()) {
+            persistAndEmitConnectionMeta({
+              ...currentConnectionMeta,
+              status: 'connected',
+              scopeVerified: true,
+              readVerified: true,
+              writeVerified: true,
+              lastVerifiedAtIso: new Date().toISOString()
+            });
+            recordCalendarOAuthStage('calendar_oauth_write_verified', {
+              ok: true,
+              detail: 'Confirmed event write permission via events.patch'
+            });
+          }
           updatedCount++;
           continue;
         }
@@ -579,11 +2016,18 @@ export async function syncSessionsToGoogleCalendar(params: {
       });
 
       if (createRes.status === 401) {
-        clearInMemoryGoogleCalendarToken();
+        clearInMemoryGoogleCalendarToken(true, params.accessToken);
         authExpired = true;
         throw Object.assign(new Error('Google Calendar OAuth token expired or unauthorized (401). Please reconnect.'), {
           status: 401
         });
+      }
+
+      if (createRes.status === 403) {
+        throw Object.assign(
+          new Error('Google Calendar event write permission (calendar.events) was denied (403). Please reconnect and allow event editing.'),
+          { status: 403 }
+        );
       }
 
       // 409 Conflict: idempotent recovery when event with deterministic id already exists remotely (e.g. interrupted prior POST or deleted event)
@@ -598,11 +2042,17 @@ export async function syncSessionsToGoogleCalendar(params: {
         const recoverTargetId = conflictLookup.eventId || deterministicEventId;
         const recoverPatch = await runPatch(recoverTargetId);
         if (recoverPatch.status === 401) {
-          clearInMemoryGoogleCalendarToken();
+          clearInMemoryGoogleCalendarToken(true, params.accessToken);
           authExpired = true;
           throw Object.assign(new Error('Google Calendar OAuth token expired or unauthorized (401). Please reconnect.'), {
             status: 401
           });
+        }
+        if (recoverPatch.status === 403) {
+          throw Object.assign(
+            new Error('Google Calendar event write permission (calendar.events) was denied (403). Please reconnect and allow event editing.'),
+            { status: 403 }
+          );
         }
         if (!recoverPatch.ok) {
           const errText = await recoverPatch.text().catch(() => '');
@@ -613,6 +2063,16 @@ export async function syncSessionsToGoogleCalendar(params: {
         }
         const recoveredEvent = await recoverPatch.json();
         persistSyncedSession(recoveredEvent, recoverTargetId, nowMs);
+        if (!currentConnectionMeta.writeVerified && getInMemoryGoogleCalendarToken()) {
+          persistAndEmitConnectionMeta({
+            ...currentConnectionMeta,
+            status: 'connected',
+            scopeVerified: true,
+            readVerified: true,
+            writeVerified: true,
+            lastVerifiedAtIso: new Date().toISOString()
+          });
+        }
         updatedCount++;
         continue;
       }
@@ -627,6 +2087,20 @@ export async function syncSessionsToGoogleCalendar(params: {
 
       const createdEvent = await createRes.json();
       persistSyncedSession(createdEvent, deterministicEventId, nowMs);
+      if (!currentConnectionMeta.writeVerified && getInMemoryGoogleCalendarToken()) {
+        persistAndEmitConnectionMeta({
+          ...currentConnectionMeta,
+          status: 'connected',
+          scopeVerified: true,
+          readVerified: true,
+          writeVerified: true,
+          lastVerifiedAtIso: new Date().toISOString()
+        });
+        recordCalendarOAuthStage('calendar_oauth_write_verified', {
+          ok: true,
+          detail: 'Confirmed event write permission via events.insert'
+        });
+      }
       createdCount++;
     } catch (err: any) {
       failedCount++;
@@ -648,7 +2122,39 @@ export async function syncSessionsToGoogleCalendar(params: {
         };
       }
       if (err?.status === 401) {
+        lastInvalidatedAccessToken = params.accessToken;
+        clearInMemoryGoogleCalendarToken();
+        persistAndEmitConnectionMeta({
+          ...currentConnectionMeta,
+          status: 'expired',
+          scopeVerified: false,
+          readVerified: false,
+          writeVerified: false,
+          lastMessage: 'Google Calendar authorization expired (401). Please reconnect.',
+          lastErrorCode: 'HTTP_401'
+        });
         authExpired = true;
+        break;
+      }
+      if (err?.status === 403) {
+        lastInvalidatedAccessToken = params.accessToken;
+        clearInMemoryGoogleCalendarToken();
+        persistAndEmitConnectionMeta({
+          ...currentConnectionMeta,
+          status: 'reconnect_required',
+          scopeVerified: false,
+          readVerified: false,
+          writeVerified: false,
+          lastMessage:
+            'Missing Google Calendar event write permission (calendar.events). Please reconnect and allow Calendar editing.',
+          lastErrorCode: 'HTTP_403_WRITE_DENIED'
+        });
+        recordCalendarOAuthStage('calendar_oauth_write_permission_denied', {
+          ok: false,
+          code: 'HTTP_403_WRITE_DENIED',
+          detail: 'Event write endpoint returned 403 Forbidden'
+        });
+        scopeInsufficient = true;
         break;
       }
     }
@@ -657,6 +2163,7 @@ export async function syncSessionsToGoogleCalendar(params: {
   return {
     success: failedCount === 0,
     ...(authExpired ? { authExpired: true } : {}),
+    ...(scopeInsufficient ? { scopeInsufficient: true } : {}),
     createdCount,
     updatedCount,
     skippedCount,
@@ -685,4 +2192,675 @@ export async function syncSingleSessionToGoogleCalendar(params: {
     forceUpdateSynced: params.forceUpdateSynced,
     referenceDate: params.referenceDate
   });
+}
+
+// ============================================================================
+// Google Calendar Cleanup Helpers (Strict Confident Matching Only)
+// ============================================================================
+
+export interface GoogleCalendarCleanupEvent {
+  id: string;
+  iCalUID?: string;
+  summary: string;
+  location?: string;
+  description?: string;
+  status?: string;
+  startDateTime?: string;
+  endDateTime?: string;
+  recurrence?: string[];
+  recurringEventId?: string;
+  hangoutLink?: string;
+  conferenceJoinUrls: string[];
+  privateExtendedProperties: Record<string, string>;
+  extractedZoomMeetingIds: string[];
+  extractedZoomJoinUrls: string[];
+}
+
+export type CalendarCleanupMatchSignal =
+  | 'stored_google_calendar_event_id'
+  | 'deterministic_gluck_event_id'
+  | 'private_extended_property_gluck_session_id'
+  | 'deleted_zoom_meeting_id'
+  | 'deleted_zoom_join_url'
+  | 'stored_session_or_history_zoom_mapping';
+
+export interface CalendarCleanupEventDecision {
+  eventId: string;
+  summary: string;
+  startDateTime?: string;
+  isRecurringSeries: boolean;
+  matched: boolean;
+  ambiguous: boolean;
+  signals: CalendarCleanupMatchSignal[];
+  matchedZoomMeetingIds: string[];
+  matchedSessionId?: string;
+  reason: string;
+}
+
+export interface CalendarCleanupMatchSummary {
+  totalEventsScanned: number;
+  matchedToDelete: CalendarCleanupEventDecision[];
+  untouchedEventsCount: number;
+  ambiguousEvents: CalendarCleanupEventDecision[];
+}
+
+export interface CalendarListCleanupEventsResult {
+  ok: boolean;
+  status: number;
+  events: GoogleCalendarCleanupEvent[];
+  pagesFetched: number;
+  authExpired?: boolean;
+  permissionDenied?: boolean;
+  rateLimited?: boolean;
+  error?: string;
+}
+
+export interface CalendarDeleteEventResult {
+  ok: boolean;
+  status: number;
+  eventId: string;
+  deleted: boolean;
+  alreadyDeleted?: boolean;
+  authExpired?: boolean;
+  permissionDenied?: boolean;
+  rateLimited?: boolean;
+  error?: string;
+}
+
+function sleepCalendarMs(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeZoomUrlForMatching(rawUrl: string): string {
+  try {
+    const u = new URL(rawUrl.trim());
+    const host = u.hostname.toLowerCase();
+    if (!host.endsWith('zoom.us')) return '';
+    // Normalize path & lowercase host; strip ephemeral tracking/hash but preserve meeting path (/j/<id> or /wc/join/<id> or /s/<id>)
+    const cleanPath = u.pathname.replace(/\/+$/, '');
+    const pwd = u.searchParams.get('pwd');
+    return `${u.protocol}//${host}${cleanPath}${pwd ? `?pwd=${pwd}` : ''}`;
+  } catch {
+    return '';
+  }
+}
+
+function normalizeZoomUrlPathKey(rawUrl: string): string {
+  try {
+    const u = new URL(rawUrl.trim());
+    if (!u.hostname.toLowerCase().endsWith('zoom.us')) return '';
+    return u.pathname.replace(/\/+$/, '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function extractZoomReferencesFromText(texts: string[]): {
+  meetingIds: string[];
+  normalizedUrls: string[];
+} {
+  const idSet = new Set<string>();
+  const urlSet = new Set<string>();
+  const urlRegex = /https?:\/\/[a-z0-9.-]*zoom\.us\/(?:j|wc\/join|s|w)\/[0-9]{8,15}(?:\?[^\s<>"')\]}]+)?/gi;
+  const pathIdRegex = /zoom\.us\/(?:j|wc\/join|s|w)\/([0-9]{8,15})/gi;
+  const explicitIdRegex = /(?:zoom\s+meeting\s+id|meeting\s+id)\s*[:#]\s*([0-9][0-9\s-]{7,18}[0-9])/gi;
+
+  for (const text of texts) {
+    if (!text) continue;
+    let m: RegExpExecArray | null;
+    urlRegex.lastIndex = 0;
+    while ((m = urlRegex.exec(text)) !== null) {
+      const cleaned = m[0].replace(/[.,;!?]+$/, '');
+      const norm = normalizeZoomUrlForMatching(cleaned);
+      if (norm) urlSet.add(norm);
+    }
+    pathIdRegex.lastIndex = 0;
+    while ((m = pathIdRegex.exec(text)) !== null) {
+      const digits = m[1].replace(/[^0-9]/g, '');
+      if (digits.length >= 8 && digits.length <= 15) idSet.add(digits);
+    }
+    explicitIdRegex.lastIndex = 0;
+    while ((m = explicitIdRegex.exec(text)) !== null) {
+      const digits = m[1].replace(/[^0-9]/g, '');
+      if (digits.length >= 8 && digits.length <= 15) idSet.add(digits);
+    }
+  }
+
+  return {
+    meetingIds: Array.from(idSet),
+    normalizedUrls: Array.from(urlSet)
+  };
+}
+
+function parseGoogleCalendarCleanupEvent(raw: any): GoogleCalendarCleanupEvent | null {
+  if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || !raw.id.trim()) return null;
+  if (raw.status === 'cancelled') return null;
+
+  const privatePropsRaw = raw.extendedProperties?.private;
+  const privateExtendedProperties: Record<string, string> = {};
+  if (privatePropsRaw && typeof privatePropsRaw === 'object') {
+    for (const [k, v] of Object.entries(privatePropsRaw)) {
+      if (typeof v === 'string') privateExtendedProperties[k] = v;
+    }
+  }
+
+  const conferenceJoinUrls: string[] = [];
+  const entryPoints = raw.conferenceData?.entryPoints;
+  if (Array.isArray(entryPoints)) {
+    for (const ep of entryPoints) {
+      if (typeof ep?.uri === 'string' && ep.uri.trim()) {
+        conferenceJoinUrls.push(ep.uri.trim());
+      }
+    }
+  }
+
+  const textsToInspect = [
+    typeof raw.location === 'string' ? raw.location : '',
+    typeof raw.description === 'string' ? raw.description : '',
+    typeof raw.hangoutLink === 'string' ? raw.hangoutLink : '',
+    ...conferenceJoinUrls
+  ];
+
+  const { meetingIds, normalizedUrls } = extractZoomReferencesFromText(textsToInspect);
+  if (privateExtendedProperties.zoomMeetingId) {
+    const propDigits = privateExtendedProperties.zoomMeetingId.replace(/[^0-9]/g, '');
+    if (propDigits.length >= 8 && !meetingIds.includes(propDigits)) {
+      meetingIds.push(propDigits);
+    }
+  }
+
+  return {
+    id: raw.id.trim(),
+    iCalUID: typeof raw.iCalUID === 'string' ? raw.iCalUID : undefined,
+    summary: typeof raw.summary === 'string' ? raw.summary : '(No title)',
+    location: typeof raw.location === 'string' ? raw.location : undefined,
+    description: typeof raw.description === 'string' ? raw.description : undefined,
+    status: typeof raw.status === 'string' ? raw.status : undefined,
+    startDateTime: raw.start?.dateTime || raw.start?.date || undefined,
+    endDateTime: raw.end?.dateTime || raw.end?.date || undefined,
+    recurrence: Array.isArray(raw.recurrence) ? raw.recurrence.filter((r: any) => typeof r === 'string') : undefined,
+    recurringEventId: typeof raw.recurringEventId === 'string' ? raw.recurringEventId : undefined,
+    hangoutLink: typeof raw.hangoutLink === 'string' ? raw.hangoutLink : undefined,
+    conferenceJoinUrls,
+    privateExtendedProperties,
+    extractedZoomMeetingIds: meetingIds,
+    extractedZoomJoinUrls: normalizedUrls
+  };
+}
+
+/**
+ * Lists ALL non-cancelled master/standalone events from the user's primary Google Calendar
+ * (`singleEvents=false` so recurring series are returned as master events rather than expanded occurrences),
+ * following `nextPageToken` across all pages with bounded retries on 429/5xx.
+ */
+export async function listPrimaryGoogleCalendarEventsForCleanup(params: {
+  accessToken: string;
+  calendarId?: string;
+  maxPages?: number;
+  maxRetries?: number;
+  retryDelayMs?: number;
+}): Promise<CalendarListCleanupEventsResult> {
+  const fetchFn = customCalendarFetchForTesting || fetch;
+  const calendarId = encodeURIComponent(params.calendarId || 'primary');
+  const maxPages = Math.max(1, Math.min(100, params.maxPages ?? 50));
+  const maxRetries = Math.max(0, Math.min(4, params.maxRetries ?? 3));
+  const baseDelayMs = Math.max(0, params.retryDelayMs ?? 450);
+
+  const byId = new Map<string, GoogleCalendarCleanupEvent>();
+  const seenTokens = new Set<string>();
+  let pageToken = '';
+  let pagesFetched = 0;
+
+  while (pagesFetched < maxPages) {
+    const qs = new URLSearchParams({
+      maxResults: '250',
+      singleEvents: 'false',
+      showDeleted: 'false'
+    });
+    if (pageToken) qs.set('pageToken', pageToken);
+
+    const url = `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events?${qs.toString()}`;
+    let attempt = 0;
+    let res: Response | null = null;
+    while (true) {
+      try {
+        res = await fetchFn(url, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${params.accessToken}`,
+            Accept: 'application/json'
+          }
+        });
+      } catch (err: any) {
+        if (attempt < maxRetries) {
+          attempt++;
+          await sleepCalendarMs(baseDelayMs * attempt);
+          continue;
+        }
+        return {
+          ok: false,
+          status: 0,
+          events: [],
+          pagesFetched,
+          error: sanitizeDiagnosticText(err?.message) || 'Network error while listing Google Calendar events.'
+        };
+      }
+
+      if (res.status === 401) {
+        clearInMemoryGoogleCalendarToken(true, params.accessToken);
+        return {
+          ok: false,
+          status: 401,
+          events: [],
+          pagesFetched,
+          authExpired: true,
+          error: 'Google Calendar authorization expired (401). Please reconnect.'
+        };
+      }
+      if (res.status === 403) {
+        return {
+          ok: false,
+          status: 403,
+          events: [],
+          pagesFetched,
+          permissionDenied: true,
+          error: 'Google Calendar permission denied (403). Ensure calendar.events scope is granted.'
+        };
+      }
+      if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
+        attempt++;
+        const retryAfterHeader = res.headers?.get?.('Retry-After');
+        const retryAfterMs = retryAfterHeader ? Math.min(4000, Number(retryAfterHeader) * 1000 || 0) : 0;
+        await sleepCalendarMs(Math.max(retryAfterMs, baseDelayMs * attempt));
+        continue;
+      }
+      break;
+    }
+
+    if (!res || !res.ok) {
+      const status = res?.status || 502;
+      return {
+        ok: false,
+        status,
+        events: [],
+        pagesFetched,
+        rateLimited: status === 429,
+        error: `Google Calendar events.list failed (HTTP ${status}).`
+      };
+    }
+
+    const json = await res.json().catch(() => ({}));
+    pagesFetched++;
+    const items = Array.isArray(json?.items) ? json.items : [];
+    for (const rawItem of items) {
+      const parsed = parseGoogleCalendarCleanupEvent(rawItem);
+      if (parsed && !byId.has(parsed.id)) {
+        byId.set(parsed.id, parsed);
+      }
+    }
+
+    const nextTok = typeof json?.nextPageToken === 'string' ? json.nextPageToken.trim() : '';
+    if (!nextTok) break;
+    if (seenTokens.has(nextTok)) {
+      return {
+        ok: false,
+        status: 502,
+        events: Array.from(byId.values()),
+        pagesFetched,
+        error: 'Google Calendar pagination returned a repeating nextPageToken.'
+      };
+    }
+    seenTokens.add(nextTok);
+    pageToken = nextTok;
+  }
+
+  return {
+    ok: true,
+    status: 200,
+    events: Array.from(byId.values()),
+    pagesFetched
+  };
+}
+
+/**
+ * Matches Google Calendar events ONLY via strong deterministic/Zoom linkage signals:
+ * 1. Stored `googleCalendarEventId` on a Glück session/record
+ * 2. Deterministic Glück event ID (`deriveDeterministicGoogleEventId(sessionId)`)
+ * 3. `extendedProperties.private.gluckSessionId` matching a known Glück session or Glück-managed tag
+ * 4. Event location/description/conferenceData contains a deleted Zoom meeting ID (exact 8–15 digit match)
+ * 5. Event location/description/conferenceData contains an exact deleted Zoom join URL
+ * 6. Stored session/record/history Zoom meeting ID or historical Zoom join URL mapping
+ *
+ * NEVER matches by title similarity or date/time similarity alone.
+ * Unrelated personal/school/ordinary events remain strictly untouched.
+ * Events containing a Zoom link NOT in the deleted/historical set (and without Glück linkage)
+ * are kept untouched and flagged for visibility as ambiguous/unlinked if they reference an unknown Zoom link.
+ */
+export function matchGoogleCalendarEventsToZoomCleanup(params: {
+  calendarEvents: GoogleCalendarCleanupEvent[];
+  targetZoomMeetingIds: Set<string>;
+  targetZoomJoinUrls: Set<string>;
+  sessions: GroupWeeklySession[];
+  historicalZoomMeetingIds?: Set<string>;
+  historicalZoomJoinUrls?: Set<string>;
+  storedCalendarEventIds?: Set<string>;
+  liveZoomMeetingIds?: Set<string>;
+}): CalendarCleanupMatchSummary {
+  const knownSessionById = new Map<string, GroupWeeklySession>();
+  const storedEventIdToSessionId = new Map<string, string>();
+  const deterministicEventIdToSessionId = new Map<string, string>();
+  const sessionZoomIdToSessionId = new Map<string, string>();
+
+  for (const s of params.sessions || []) {
+    if (!s || !s.id) continue;
+    knownSessionById.set(s.id, s);
+    if (s.googleCalendarEventId) {
+      storedEventIdToSessionId.set(s.googleCalendarEventId.trim(), s.id);
+    }
+    deterministicEventIdToSessionId.set(deriveDeterministicGoogleEventId(s.id), s.id);
+    if (s.zoomMeetingId) {
+      const clean = s.zoomMeetingId.replace(/[^0-9]/g, '');
+      if (clean.length >= 8) sessionZoomIdToSessionId.set(clean, s.id);
+    }
+  }
+
+  const normalizedTargetUrls = new Set<string>();
+  const targetUrlPathKeys = new Set<string>();
+  for (const raw of params.targetZoomJoinUrls || []) {
+    const norm = normalizeZoomUrlForMatching(raw);
+    if (norm) normalizedTargetUrls.add(norm);
+    const pk = normalizeZoomUrlPathKey(raw);
+    if (pk) targetUrlPathKeys.add(pk);
+  }
+
+  const normalizedHistUrls = new Set<string>();
+  const histUrlPathKeys = new Set<string>();
+  for (const raw of params.historicalZoomJoinUrls || []) {
+    const norm = normalizeZoomUrlForMatching(raw);
+    if (norm) normalizedHistUrls.add(norm);
+    const pk = normalizeZoomUrlPathKey(raw);
+    if (pk) histUrlPathKeys.add(pk);
+  }
+
+  const liveZoomIds = params.liveZoomMeetingIds || new Set<string>();
+  const matchedToDelete: CalendarCleanupEventDecision[] = [];
+  const ambiguousEvents: CalendarCleanupEventDecision[] = [];
+  let untouchedEventsCount = 0;
+
+  for (const evt of params.calendarEvents || []) {
+    // Skip recurring exception instances whose master series is handled directly (deleting master deletes series)
+    const isRecurringSeries = Boolean(evt.recurrence && evt.recurrence.length > 0);
+    const signals: CalendarCleanupMatchSignal[] = [];
+    const matchedZoomIds = new Set<string>();
+    let matchedSessionId: string | undefined;
+
+    // Never delete a Calendar event pointing to a currently live Zoom meeting that will not be deleted
+    const referencesLiveMeeting = evt.extractedZoomMeetingIds.some((id) => liveZoomIds.has(id));
+    if (referencesLiveMeeting) {
+      ambiguousEvents.push({
+        eventId: evt.id,
+        summary: evt.summary,
+        startDateTime: evt.startDateTime,
+        isRecurringSeries,
+        matched: false,
+        ambiguous: true,
+        signals: [],
+        matchedZoomMeetingIds: evt.extractedZoomMeetingIds.filter((id) => liveZoomIds.has(id)),
+        reason: 'References a currently live Zoom meeting; left untouched for safety.'
+      });
+      untouchedEventsCount++;
+      continue;
+    }
+
+    // Signal 1: Stored Google Calendar event ID on Glück session or snapshot
+    if (storedEventIdToSessionId.has(evt.id) || params.storedCalendarEventIds?.has(evt.id)) {
+      signals.push('stored_google_calendar_event_id');
+      matchedSessionId = matchedSessionId || storedEventIdToSessionId.get(evt.id);
+    }
+
+    // Signal 2: Deterministic Glück event ID
+    if (deterministicEventIdToSessionId.has(evt.id)) {
+      signals.push('deterministic_gluck_event_id');
+      matchedSessionId = matchedSessionId || deterministicEventIdToSessionId.get(evt.id);
+    }
+
+    // Signal 3: privateExtendedProperties.gluckSessionId
+    const propSessionId = evt.privateExtendedProperties.gluckSessionId;
+    if (propSessionId && propSessionId.trim()) {
+      signals.push('private_extended_property_gluck_session_id');
+      matchedSessionId = matchedSessionId || propSessionId.trim();
+    }
+
+    // Signal 4: Deleted Zoom meeting ID present in event
+    for (const zid of evt.extractedZoomMeetingIds) {
+      if (params.targetZoomMeetingIds.has(zid)) {
+        if (!signals.includes('deleted_zoom_meeting_id')) signals.push('deleted_zoom_meeting_id');
+        matchedZoomIds.add(zid);
+        matchedSessionId = matchedSessionId || sessionZoomIdToSessionId.get(zid);
+      }
+    }
+
+    // Signal 5: Exact deleted Zoom join URL present in event
+    for (const zurl of evt.extractedZoomJoinUrls) {
+      const pk = normalizeZoomUrlPathKey(zurl);
+      if (normalizedTargetUrls.has(zurl) || (pk && targetUrlPathKeys.has(pk))) {
+        if (!signals.includes('deleted_zoom_join_url')) signals.push('deleted_zoom_join_url');
+      }
+    }
+
+    // Signal 6: Stored session/history Zoom ID or historical URL mapping
+    for (const zid of evt.extractedZoomMeetingIds) {
+      if (params.historicalZoomMeetingIds?.has(zid) || sessionZoomIdToSessionId.has(zid)) {
+        if (!signals.includes('stored_session_or_history_zoom_mapping')) {
+          signals.push('stored_session_or_history_zoom_mapping');
+        }
+        matchedZoomIds.add(zid);
+        matchedSessionId = matchedSessionId || sessionZoomIdToSessionId.get(zid);
+      }
+    }
+    for (const zurl of evt.extractedZoomJoinUrls) {
+      const pk = normalizeZoomUrlPathKey(zurl);
+      if (normalizedHistUrls.has(zurl) || (pk && histUrlPathKeys.has(pk))) {
+        if (!signals.includes('stored_session_or_history_zoom_mapping')) {
+          signals.push('stored_session_or_history_zoom_mapping');
+        }
+      }
+    }
+
+    if (signals.length > 0) {
+      matchedToDelete.push({
+        eventId: evt.id,
+        summary: evt.summary,
+        startDateTime: evt.startDateTime,
+        isRecurringSeries,
+        matched: true,
+        ambiguous: false,
+        signals,
+        matchedZoomMeetingIds: Array.from(matchedZoomIds),
+        matchedSessionId,
+        reason: `Confident match via ${signals.join(', ')}`
+      });
+    } else {
+      // Unrelated event — strictly untouched. If it references an unrecognized Zoom link (e.g. from another Zoom host),
+      // surface it as an untouched ambiguous/manual-review item so the teacher sees why it was preserved.
+      if (evt.extractedZoomMeetingIds.length > 0 || evt.extractedZoomJoinUrls.length > 0) {
+        ambiguousEvents.push({
+          eventId: evt.id,
+          summary: evt.summary,
+          startDateTime: evt.startDateTime,
+          isRecurringSeries,
+          matched: false,
+          ambiguous: true,
+          signals: [],
+          matchedZoomMeetingIds: evt.extractedZoomMeetingIds,
+          reason: 'Contains a Zoom link not found in this host cleanup inventory or Glück records; left untouched.'
+        });
+      }
+      untouchedEventsCount++;
+    }
+  }
+
+  return {
+    totalEventsScanned: (params.calendarEvents || []).length,
+    matchedToDelete,
+    untouchedEventsCount,
+    ambiguousEvents
+  };
+}
+
+/**
+ * Deletes a single confidently matched Google Calendar event (`DELETE /calendars/primary/events/{eventId}`).
+ * - Handles 401 by invoking optional `onAuthExpiredRenew` (existing token renewal flow) once.
+ * - Treats 403 as explicit failure (never deleted).
+ * - On 404/410, verifies via `GET /events/{eventId}` that the event is absent or `status === 'cancelled'`
+ *   before returning `alreadyDeleted: true`.
+ * - Bounded retry with backoff on 429 and transient 5xx/network failures.
+ */
+export async function deleteGoogleCalendarEventForCleanup(params: {
+  eventId: string;
+  accessToken: string;
+  calendarId?: string;
+  onAuthExpiredRenew?: () => Promise<string | null>;
+  maxRetries?: number;
+  retryDelayMs?: number;
+}): Promise<CalendarDeleteEventResult> {
+  const fetchFn = customCalendarFetchForTesting || fetch;
+  const calendarId = encodeURIComponent(params.calendarId || 'primary');
+  const eventId = String(params.eventId || '').trim();
+  if (!eventId) {
+    return { ok: false, status: 400, eventId: '', deleted: false, error: 'Missing Google Calendar eventId.' };
+  }
+
+  const maxRetries = Math.max(0, Math.min(4, params.maxRetries ?? 3));
+  const baseDelayMs = Math.max(0, params.retryDelayMs ?? 450);
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events/${encodeURIComponent(eventId)}`;
+
+  let currentToken = params.accessToken;
+  let renewedOnce = false;
+  let attempt = 0;
+
+  while (true) {
+    let res: Response;
+    try {
+      res = await fetchFn(url, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${currentToken}`,
+          Accept: 'application/json'
+        }
+      });
+    } catch (err: any) {
+      if (attempt < maxRetries) {
+        attempt++;
+        await sleepCalendarMs(baseDelayMs * attempt);
+        continue;
+      }
+      return {
+        ok: false,
+        status: 0,
+        eventId,
+        deleted: false,
+        error: sanitizeDiagnosticText(err?.message) || `Network error deleting Calendar event ${eventId}.`
+      };
+    }
+
+    if (res.status === 204 || (res.status >= 200 && res.status < 300)) {
+      return { ok: true, status: res.status, eventId, deleted: true, alreadyDeleted: false };
+    }
+
+    if (res.status === 401) {
+      clearInMemoryGoogleCalendarToken(true, currentToken);
+      if (!renewedOnce && params.onAuthExpiredRenew) {
+        renewedOnce = true;
+        const freshToken = await params.onAuthExpiredRenew();
+        if (freshToken) {
+          currentToken = freshToken;
+          continue;
+        }
+      }
+      return {
+        ok: false,
+        status: 401,
+        eventId,
+        deleted: false,
+        authExpired: true,
+        error: 'Google Calendar authorization expired (401). Please reconnect.'
+      };
+    }
+
+    if (res.status === 403) {
+      return {
+        ok: false,
+        status: 403,
+        eventId,
+        deleted: false,
+        permissionDenied: true,
+        error: 'Google Calendar delete permission denied (403). Ensure calendar.events scope is granted.'
+      };
+    }
+
+    // 404 or 410: verify via GET before declaring already deleted
+    if (res.status === 404 || res.status === 410) {
+      try {
+        const verifyRes = await fetchFn(url, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${currentToken}`,
+            Accept: 'application/json'
+          }
+        });
+        if (verifyRes.status === 404 || verifyRes.status === 410) {
+          return { ok: true, status: verifyRes.status, eventId, deleted: true, alreadyDeleted: true };
+        }
+        if (verifyRes.ok) {
+          const evtJson = await verifyRes.json().catch(() => ({}));
+          if (evtJson?.status === 'cancelled') {
+            return { ok: true, status: 410, eventId, deleted: true, alreadyDeleted: true };
+          }
+          return {
+            ok: false,
+            status: 409,
+            eventId,
+            deleted: false,
+            error: `Google Calendar DELETE returned ${res.status} for event ${eventId}, but GET verification shows it still exists.`
+          };
+        }
+        return {
+          ok: false,
+          status: verifyRes.status,
+          eventId,
+          deleted: false,
+          authExpired: verifyRes.status === 401,
+          permissionDenied: verifyRes.status === 403,
+          error: `Unable to verify ${res.status} deletion for Calendar event ${eventId} (GET HTTP ${verifyRes.status}).`
+        };
+      } catch (err: any) {
+        return {
+          ok: false,
+          status: 0,
+          eventId,
+          deleted: false,
+          error: sanitizeDiagnosticText(err?.message) || `Network error verifying Calendar event ${eventId} deletion.`
+        };
+      }
+    }
+
+    if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
+      attempt++;
+      const retryAfterHeader = res.headers?.get?.('Retry-After');
+      const retryAfterMs = retryAfterHeader ? Math.min(4000, Number(retryAfterHeader) * 1000 || 0) : 0;
+      await sleepCalendarMs(Math.max(retryAfterMs, baseDelayMs * attempt));
+      continue;
+    }
+
+    return {
+      ok: false,
+      status: res.status,
+      eventId,
+      deleted: false,
+      rateLimited: res.status === 429,
+      error: `Failed to delete Google Calendar event ${eventId} (HTTP ${res.status}).`
+    };
+  }
 }

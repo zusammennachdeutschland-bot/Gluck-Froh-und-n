@@ -11,6 +11,7 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { getSchoolSettings } from '../utils/schoolUtils';
 import { generateMonthlySchoolScheduleIcsEvents } from '../utils/schoolScheduleIcsUtils';
+import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
 
 interface ExportMonthlyCalendarModalProps {
   onClose: () => void;
@@ -27,7 +28,7 @@ const MONTH_NAMES_DISPLAY = [
 ];
 
 export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProps> = ({ onClose }) => {
-  const { lessons, groups, students, profile, language, _t, reportLanguage } = useApp();
+  const { lessons, groups, students, groupWeeklySessions, profile, language, _t, reportLanguage } = useApp();
 
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -89,7 +90,7 @@ export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProp
     const monthStartStr = `${selectedYear}-${monthStr}-01`;
     const monthEndStr = `${selectedYear}-${monthStr}-${String(lastDayOfMonth).padStart(2, '0')}`;
 
-    const monthAllLessons = getProjectedLessonsForRange(monthStartStr, monthEndStr, groups, lessons, profile.defaultZoomLink);
+    const monthAllLessons = getProjectedLessonsForRange(monthStartStr, monthEndStr, groups, lessons, profile.defaultZoomLink, groupWeeklySessions);
 
     const isCurrentMonthSelection = (selectedYear === currentYear && selectedMonth === currentMonthIndex);
 
@@ -137,7 +138,14 @@ export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProp
       const grade = l.grade || targetGroup?.grade || 'General';
       const duration = l.durationMinutes || targetGroup?.lessonDurationMinutes || 60;
       const lessonType = l.type || targetGroup?.type || 'offline';
-      const zoomLink = l.meetingLink || targetGroup?.zoomLink || '';
+      const zoomLink = lessonType === 'online'
+        ? resolveActiveZoomLinkForLesson({
+            group: targetGroup,
+            lesson: l,
+            groupWeeklySessions,
+            defaultZoomLink: profile.defaultZoomLink
+          })
+        : '';
       const address = l.locationAddress || targetGroup?.address || '';
       const price = l.amountDue || targetGroup?.monthlyPackagePrice || 0;
       const paymentCycle = targetGroup?.paymentCycle || 'Per Lesson';

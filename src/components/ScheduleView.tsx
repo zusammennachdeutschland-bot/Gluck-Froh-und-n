@@ -22,9 +22,10 @@ import { DAY_KEY_TO_RRULE_BYDAY, getUpcomingDateForDayKey, formatIcsEventBlock, 
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
+import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
 
 export const ScheduleView: React.FC = () => {
-  const { lessons, groups, students, profile, openLessonControl, setIsAddLessonModalOpen, setIsAddQuickLessonModalOpen, updateLesson, deleteLesson, refreshCalendarAndDashboard, t, language, _t } = useApp();
+  const { lessons, groups, students, groupWeeklySessions, profile, openLessonControl, setIsAddLessonModalOpen, setIsAddQuickLessonModalOpen, updateLesson, deleteLesson, refreshCalendarAndDashboard, t, language, _t } = useApp();
 
   const todayStr = formatLocalDate(new Date());
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
@@ -135,8 +136,8 @@ export const ScheduleView: React.FC = () => {
     const startDateStr = formatLocalDate(startRange);
     const endDateStr = formatLocalDate(endRange);
 
-    return getProjectedLessonsForRange(startDateStr, endDateStr, groups, lessons, profile.defaultZoomLink);
-  }, [lessons, groups, selectedDate, profile.defaultZoomLink]);
+    return getProjectedLessonsForRange(startDateStr, endDateStr, groups, lessons, profile.defaultZoomLink, groupWeeklySessions);
+  }, [lessons, groups, selectedDate, profile.defaultZoomLink, groupWeeklySessions]);
 
   const conflictsMap = useMemo(() => {
     const map: Record<string, Lesson[]> = {};
@@ -438,7 +439,18 @@ export const ScheduleView: React.FC = () => {
       const targetGroup = groups.find(g => g.id === l.groupId);
       const groupName = l.groupName || targetGroup?.name || 'Group';
       const grade = l.grade || targetGroup?.grade || 'General';
-      const location = l.meetingLink || l.locationAddress || targetGroup?.zoomLink || targetGroup?.address || '';
+      const isOnlineLesson = l.type === 'online' || targetGroup?.type === 'online';
+      const resolvedOnlineLink = isOnlineLesson
+        ? resolveActiveZoomLinkForLesson({
+            group: targetGroup,
+            lesson: l,
+            groupWeeklySessions,
+            defaultZoomLink: profile.defaultZoomLink
+          })
+        : '';
+      const location = isOnlineLesson
+        ? (resolvedOnlineLink || l.meetingLink || targetGroup?.zoomLink || '')
+        : (l.locationAddress || targetGroup?.address || '');
 
       icsContent.push('BEGIN:VEVENT');
       icsContent.push(`UID:lesson_${l.id}_${cleanDate}@teacherassistant`);

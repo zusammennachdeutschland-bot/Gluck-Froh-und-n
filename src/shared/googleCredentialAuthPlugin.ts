@@ -39,10 +39,46 @@ export interface AndroidAuthDiagnostic extends AndroidApkSigningInfo {
   reason?: string;
 }
 
+export interface GoogleCalendarAuthorizeOptions {
+  accountEmail?: string;
+  scope?: string;
+  forceAccountSelection?: boolean;
+  silentOnly?: boolean;
+  staleAccessToken?: string;
+}
+
+export interface GoogleCalendarAuthorizeResult extends AndroidApkSigningInfo {
+  cancelled?: boolean;
+  resolutionRequired?: boolean;
+  accessToken?: string;
+  grantedScopes?: string[];
+  scopeVerified?: boolean;
+  email?: string;
+  stage?: string;
+  elapsedMs?: number;
+  reason?: string;
+  code?: string;
+}
+
+export interface CalendarAuthProcessRestoredEvent {
+  restoredAfterProcessDeath?: boolean;
+  status: 'approved' | 'cancelled' | 'error';
+  scopeVerified?: boolean;
+  email?: string;
+  reason?: string;
+}
+
 export interface GoogleCredentialAuthPlugin {
   signIn(options?: GoogleCredentialSignInOptions): Promise<GoogleCredentialSignInResult>;
   signOut(): Promise<GoogleCredentialSignOutResult>;
   getSigningInfo?(): Promise<AndroidApkSigningInfo>;
+  authorizeCalendar?(options?: GoogleCalendarAuthorizeOptions): Promise<GoogleCalendarAuthorizeResult>;
+  clearCalendarToken?(options: { accessToken: string }): Promise<{ cleared: boolean }>;
+  revokeCalendarAccess?(options: { accountEmail: string; scope?: string }): Promise<{ revoked: boolean }>;
+  addListener?(
+    eventName: 'calendarAuthProcessRestored',
+    listenerFunc: (event: CalendarAuthProcessRestoredEvent) => void
+  ): Promise<{ remove: () => Promise<void> }>;
 }
 
 const NativeGoogleCredentialAuth = registerPlugin<GoogleCredentialAuthPlugin>('GoogleCredentialAuth');
@@ -52,6 +88,9 @@ export interface NativeAuthTestAdapter {
   signIn?: (options?: GoogleCredentialSignInOptions) => Promise<GoogleCredentialSignInResult>;
   signOut?: () => Promise<GoogleCredentialSignOutResult>;
   getSigningInfo?: () => Promise<AndroidApkSigningInfo>;
+  authorizeCalendar?: (options?: GoogleCalendarAuthorizeOptions) => Promise<GoogleCalendarAuthorizeResult>;
+  clearCalendarToken?: (options: { accessToken: string }) => Promise<{ cleared: boolean }>;
+  revokeCalendarAccess?: (options: { accountEmail: string; scope?: string }) => Promise<{ revoked: boolean }>;
 }
 
 let testAdapter: NativeAuthTestAdapter | null = null;
@@ -173,4 +212,71 @@ export async function invokeNativeGoogleCredentialSignOut(): Promise<GoogleCrede
     return testAdapter.signOut();
   }
   return NativeGoogleCredentialAuth.signOut();
+}
+
+export async function invokeNativeGoogleCalendarAuthorize(
+  options?: GoogleCalendarAuthorizeOptions
+): Promise<GoogleCalendarAuthorizeResult> {
+  if (testAdapter?.authorizeCalendar) {
+    return testAdapter.authorizeCalendar(options);
+  }
+  if (typeof NativeGoogleCredentialAuth.authorizeCalendar !== 'function') {
+    throw Object.assign(
+      new Error('Native Android Google Calendar authorization plugin is unavailable in this build. Please update the Android app.'),
+      { code: 'PLUGIN_UNAVAILABLE' }
+    );
+  }
+  return NativeGoogleCredentialAuth.authorizeCalendar(options);
+}
+
+export async function invokeNativeClearCalendarToken(accessToken: string): Promise<{ cleared: boolean }> {
+  if (!accessToken) return { cleared: false };
+  try {
+    if (testAdapter?.clearCalendarToken) {
+      return await testAdapter.clearCalendarToken({ accessToken });
+    }
+    if (typeof NativeGoogleCredentialAuth.clearCalendarToken === 'function') {
+      return await NativeGoogleCredentialAuth.clearCalendarToken({ accessToken });
+    }
+  } catch {
+    // Non-fatal cleanup error
+  }
+  return { cleared: false };
+}
+
+export async function invokeNativeRevokeCalendarAccess(
+  accountEmail: string,
+  scope = 'https://www.googleapis.com/auth/calendar.events'
+): Promise<{ revoked: boolean }> {
+  if (!accountEmail) return { revoked: false };
+  try {
+    if (testAdapter?.revokeCalendarAccess) {
+      return await testAdapter.revokeCalendarAccess({ accountEmail, scope });
+    }
+    if (typeof NativeGoogleCredentialAuth.revokeCalendarAccess === 'function') {
+      return await NativeGoogleCredentialAuth.revokeCalendarAccess({ accountEmail, scope });
+    }
+  } catch {
+    // Non-fatal cleanup error
+  }
+  return { revoked: false };
+}
+
+export function subscribeNativeCalendarAuthProcessRestored(
+  listener: (event: CalendarAuthProcessRestoredEvent) => void
+): () => void {
+  if (!isAndroidNativePlatform() || typeof NativeGoogleCredentialAuth.addListener !== 'function') {
+    return () => {};
+  }
+  let handlePromise: Promise<{ remove: () => Promise<void> }> | null = null;
+  try {
+    handlePromise = NativeGoogleCredentialAuth.addListener('calendarAuthProcessRestored', listener);
+  } catch {
+    return () => {};
+  }
+  return () => {
+    if (handlePromise) {
+      handlePromise.then((h) => h.remove()).catch(() => {});
+    }
+  };
 }

@@ -506,17 +506,26 @@ if (typeof window !== 'undefined') {
       });
     });
   });
-  if (!isAndroidNativePlatform()) {
-    getRedirectResult(auth)
-      .then((res) => {
-        if (res?.user) {
-          console.log('Redirect sign-in success:', res.user.email);
-        }
-      })
-      .catch((e) => {
-        console.warn('Redirect result notice:', e);
-      });
+  // Web redirect results are consumed exactly once by consumeFirebaseWebRedirectResultOnce()
+  // during app startup so Google Calendar OAuth credentials are never discarded.
+}
+
+let cachedWebRedirectResultPromise: Promise<import('firebase/auth').UserCredential | null> | null = null;
+
+/**
+ * Consumes Firebase Auth's pending web redirect result at most once per page load.
+ * Strictly a no-op on Capacitor Android native platforms (which never use web redirect OAuth).
+ */
+export function consumeFirebaseWebRedirectResultOnce(): Promise<import('firebase/auth').UserCredential | null> {
+  if (typeof window === 'undefined' || isAndroidNativePlatform()) {
+    return Promise.resolve(null);
   }
+  if (!cachedWebRedirectResultPromise) {
+    cachedWebRedirectResultPromise = getRedirectResult(auth).catch((err) => {
+      throw err;
+    });
+  }
+  return cachedWebRedirectResultPromise;
 }
 
 export function emailToWorkspaceId(email: string): string {

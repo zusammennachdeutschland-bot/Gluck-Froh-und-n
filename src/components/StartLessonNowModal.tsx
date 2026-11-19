@@ -8,13 +8,14 @@ import {
   X, Play, Users, User, Clock, Calendar as CalendarIcon, Video, MapPin, 
   CheckCircle2, Sparkles, BookOpen, Award, FileText, Zap, ChevronRight, ArrowLeft
 } from 'lucide-react';
+import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
 
 interface StartLessonNowModalProps {
   onClose: () => void;
 }
 
 export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClose }) => {
-  const { groups, students, profile, lessons, addLesson, updateLesson, openLessonControl, saveLessonReport, startActiveLessonTimer, t, language, _t } = useApp();
+  const { groups, students, profile, lessons, groupWeeklySessions, addLesson, updateLesson, openLessonControl, saveLessonReport, startActiveLessonTimer, t, language, _t } = useApp();
 
   const now = new Date();
   const todayStr = formatLocalDate(now);
@@ -196,7 +197,14 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
       paymentStatus: 'unpaid' as PaymentStatus,
       amountDue,
       amountPaid: 0,
-      meetingLink: lessonType === 'online' ? (selectedGroup?.zoomLink || profile.defaultZoomLink) : undefined,
+      meetingLink: lessonType === 'online'
+        ? resolveActiveZoomLinkForLesson({
+            group: selectedGroup,
+            lesson: { groupId: targetGroupId, date: lessonDate, time: startTime },
+            groupWeeklySessions,
+            defaultZoomLink: profile.defaultZoomLink
+          })
+        : undefined,
       locationAddress: lessonType === 'offline' ? (selectedGroup?.address || '') : undefined
     };
 

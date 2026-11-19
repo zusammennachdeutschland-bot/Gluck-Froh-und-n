@@ -541,7 +541,12 @@ function clearEncryptedElectronZoomCreds() {
   } catch {}
 }
 
-async function performElectronZoomFetch(url, init) {
+function parseElectronZoomJsonSafeIds(rawText) {
+  const safeText = String(rawText || '').replace(/"id"\s*:\s*(\d{8,25})(?=\s*[,}\]])/g, '"id":"$1"');
+  return JSON.parse(safeText);
+}
+
+async function performElectronZoomFetch(url, init, retriesLeft = 3) {
   const parsedUrl = new URL(url);
   if (parsedUrl.protocol !== 'https:' || (parsedUrl.hostname !== 'zoom.us' && parsedUrl.hostname !== 'api.zoom.us')) {
     return { status: 400, bodyText: JSON.stringify({ message: 'Forbidden target host.' }) };
@@ -555,8 +560,19 @@ async function performElectronZoomFetch(url, init) {
     }
     const bodyText = await resp.text();
     const retryAfter = resp.headers.get('retry-after') || undefined;
+    if ((resp.status === 429 || resp.status >= 500) && retriesLeft > 0) {
+      const waitMs = retryAfter
+        ? Math.min(5000, Math.max(400, Number(retryAfter) * 1000 || 1000))
+        : Math.min(3500, 450 * (4 - Math.min(3, retriesLeft)));
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      return performElectronZoomFetch(url, init, retriesLeft - 1);
+    }
     return { status: resp.status, bodyText, retryAfter };
   } catch (err) {
+    if (retriesLeft > 0) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(3000, 450 * (4 - Math.min(3, retriesLeft)))));
+      return performElectronZoomFetch(url, init, retriesLeft - 1);
+    }
     return { status: 502, bodyText: JSON.stringify({ message: err?.message || 'Zoom network timeout' }) };
   } finally {
     clearTimeout(timeoutId);
@@ -778,7 +794,7 @@ function registerZoomSecureIpcHandlers() {
           participant_video: true,
           join_before_host: false,
           mute_upon_entry: true,
-          waiting_room: payload?.waitingRoom !== false,
+          waiting_room: payload?.waitingRoom === true,
           auto_recording: payload?.autoRecording === 'cloud' ? 'cloud' : 'none'
         }
       })
@@ -821,7 +837,10 @@ function registerZoomSecureIpcHandlers() {
       type: 8,
       duration,
       timezone,
-      recurrence: { type: 2, repeat_interval: repeatInterval, weekly_days: String(weeklyDay), end_times: 50 }
+      recurrence: { type: 2, repeat_interval: repeatInterval, weekly_days: String(weeklyDay), end_times: 50 },
+      settings: {
+        waiting_room: payload?.waitingRoom === true
+      }
     };
     if (topic) patchBody.topic = topic;
     if (startTime) patchBody.start_time = startTime;
@@ -838,6 +857,76 @@ function registerZoomSecureIpcHandlers() {
     return { ok: true, httpStatus: 200, updated: true, zoomMeetingId: meetingId, topic: topic || undefined, planWarning40Min: Boolean(creds.isBasicPlan && duration >= 41) };
   });
 
+  ipcMain.handle('zoom:listMeetings', async (event, payload) => {
+    validateIpcSender(event);
+    const creds = loadDecryptedElectronZoomCreds();
+    if (!creds) return { ok: false, httpStatus: 401, code: 'CREDENTIALS_MISSING', error: 'Zoom credentials are not configured.' };
+    const tokenRes = await getElectronZoomAccessToken(creds);
+    if (!tokenRes.ok || !tokenRes.accessToken) return { ok: false, httpStatus: tokenRes.status === 401 ? 401 : 502, error: tokenRes.error || 'OAuth token unavailable.' };
+    const rawType = String(payload?.type || 'scheduled').trim();
+    const listType = rawType === 'live' || rawType === 'upcoming' || rawType === 'scheduled' ? rawType : 'scheduled';
+    const pageSize = Math.max(1, Math.min(300, Number(payload?.pageSize) || 300));
+    const nextPageToken = String(payload?.nextPageToken || '').trim();
+    const qs = new URLSearchParams({ type: listType, page_size: String(pageSize) });
+    if (nextPageToken) qs.set('next_page_token', nextPageToken);
+
+    let apiRes = await performElectronZoomFetch(`${ZOOM_API_BASE_URL}/users/me/meetings?${qs.toString()}`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${tokenRes.accessToken}`, Accept: 'application/json' }
+    });
+    if (apiRes.status === 401) {
+      const refreshed = await getElectronZoomAccessToken(creds, true);
+      if (refreshed.ok && refreshed.accessToken) {
+        apiRes = await performElectronZoomFetch(`${ZOOM_API_BASE_URL}/users/me/meetings?${qs.toString()}`, {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${refreshed.accessToken}`, Accept: 'application/json' }
+        }, 0);
+      }
+    }
+    if (apiRes.status < 200 || apiRes.status >= 300) {
+      let msg = `Zoom list meetings error (HTTP ${apiRes.status})`;
+      try { msg = JSON.parse(apiRes.bodyText).message || msg; } catch {}
+      const outStatus = apiRes.status === 401 || apiRes.status === 403 || apiRes.status === 429 || apiRes.status >= 500 ? apiRes.status : 502;
+      return {
+        ok: false,
+        httpStatus: outStatus,
+        code: apiRes.status === 429 ? 'RATE_LIMITED' : apiRes.status === 401 ? 'UNAUTHORIZED' : apiRes.status === 403 ? 'FORBIDDEN' : undefined,
+        error: msg,
+        retryAfter: apiRes.retryAfter
+      };
+    }
+    try {
+      const parsed = parseElectronZoomJsonSafeIds(apiRes.bodyText);
+      const rawMeetings = Array.isArray(parsed.meetings) ? parsed.meetings : [];
+      const meetings = rawMeetings.map((m) => ({
+        id: m && m.id !== undefined && m.id !== null ? String(m.id) : '',
+        uuid: typeof m?.uuid === 'string' ? m.uuid : undefined,
+        hostId: typeof m?.host_id === 'string' ? m.host_id : undefined,
+        topic: typeof m?.topic === 'string' ? m.topic : '',
+        type: typeof m?.type === 'number' ? m.type : 0,
+        startTime: typeof m?.start_time === 'string' ? m.start_time : undefined,
+        duration: typeof m?.duration === 'number' ? m.duration : undefined,
+        timezone: typeof m?.timezone === 'string' ? m.timezone : undefined,
+        createdAt: typeof m?.created_at === 'string' ? m.created_at : undefined,
+        joinUrl: typeof m?.join_url === 'string' ? m.join_url : '',
+        status: typeof m?.status === 'string' ? m.status : undefined
+      }));
+      return {
+        ok: true,
+        httpStatus: 200,
+        meetings,
+        nextPageToken: typeof parsed.next_page_token === 'string' ? parsed.next_page_token.trim() : '',
+        pageCount: typeof parsed.page_count === 'number' ? parsed.page_count : 1,
+        pageSize: typeof parsed.page_size === 'number' ? parsed.page_size : pageSize,
+        totalRecords: typeof parsed.total_records === 'number' ? parsed.total_records : meetings.length,
+        hostEmail: creds.hostEmail || null,
+        hostScope: 'single_connected_host'
+      };
+    } catch {
+      return { ok: false, httpStatus: 502, error: 'Invalid JSON returned by Zoom while listing meetings.' };
+    }
+  });
+
   ipcMain.handle('zoom:getMeeting', async (event, payload) => {
     validateIpcSender(event);
     const meetingId = String(payload?.meetingId || '').replace(/[^0-9]/g, '');
@@ -845,17 +934,27 @@ function registerZoomSecureIpcHandlers() {
     const creds = loadDecryptedElectronZoomCreds();
     if (!creds) return { ok: false, httpStatus: 401, error: 'Zoom credentials are not configured.' };
     const tokenRes = await getElectronZoomAccessToken(creds);
-    if (!tokenRes.ok || !tokenRes.accessToken) return { ok: false, httpStatus: 502, error: tokenRes.error || 'OAuth token unavailable.' };
-    const apiRes = await performElectronZoomFetch(`${ZOOM_API_BASE_URL}/meetings/${encodeURIComponent(meetingId)}`, {
+    if (!tokenRes.ok || !tokenRes.accessToken) return { ok: false, httpStatus: tokenRes.status === 401 ? 401 : 502, error: tokenRes.error || 'OAuth token unavailable.' };
+    let apiRes = await performElectronZoomFetch(`${ZOOM_API_BASE_URL}/meetings/${encodeURIComponent(meetingId)}`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${tokenRes.accessToken}`, Accept: 'application/json' }
     });
+    if (apiRes.status === 401) {
+      const refreshed = await getElectronZoomAccessToken(creds, true);
+      if (refreshed.ok && refreshed.accessToken) {
+        apiRes = await performElectronZoomFetch(`${ZOOM_API_BASE_URL}/meetings/${encodeURIComponent(meetingId)}`, {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${refreshed.accessToken}`, Accept: 'application/json' }
+        }, 0);
+      }
+    }
     if (apiRes.status < 200 || apiRes.status >= 300) {
       let msg = `Zoom inspect error (HTTP ${apiRes.status})`;
       try { msg = JSON.parse(apiRes.bodyText).message || msg; } catch {}
-      return { ok: false, httpStatus: apiRes.status === 404 ? 404 : 502, exists: apiRes.status !== 404, error: msg };
+      const outStatus = apiRes.status === 401 || apiRes.status === 403 || apiRes.status === 404 || apiRes.status === 429 || apiRes.status >= 500 ? apiRes.status : 502;
+      return { ok: false, httpStatus: outStatus, exists: apiRes.status !== 404, error: msg, retryAfter: apiRes.retryAfter };
     }
-    const m = JSON.parse(apiRes.bodyText);
+    const m = parseElectronZoomJsonSafeIds(apiRes.bodyText);
     return {
       ok: true,
       httpStatus: 200,
@@ -877,15 +976,38 @@ function registerZoomSecureIpcHandlers() {
     const creds = loadDecryptedElectronZoomCreds();
     if (!creds) return { ok: false, httpStatus: 401, error: 'Zoom credentials are not configured.' };
     const tokenRes = await getElectronZoomAccessToken(creds);
-    if (!tokenRes.ok || !tokenRes.accessToken) return { ok: false, httpStatus: 502, error: tokenRes.error || 'OAuth token unavailable.' };
-    const apiRes = await performElectronZoomFetch(`${ZOOM_API_BASE_URL}/meetings/${encodeURIComponent(meetingId)}`, {
+    if (!tokenRes.ok || !tokenRes.accessToken) return { ok: false, httpStatus: tokenRes.status === 401 ? 401 : 502, error: tokenRes.error || 'OAuth token unavailable.' };
+    // Never pass occurrence_id so recurring series are deleted completely
+    let apiRes = await performElectronZoomFetch(`${ZOOM_API_BASE_URL}/meetings/${encodeURIComponent(meetingId)}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${tokenRes.accessToken}`, Accept: 'application/json' }
     });
-    if (apiRes.status !== 204 && (apiRes.status < 200 || apiRes.status >= 300) && apiRes.status !== 404) {
+    if (apiRes.status === 401) {
+      const refreshed = await getElectronZoomAccessToken(creds, true);
+      if (refreshed.ok && refreshed.accessToken) {
+        apiRes = await performElectronZoomFetch(`${ZOOM_API_BASE_URL}/meetings/${encodeURIComponent(meetingId)}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${refreshed.accessToken}`, Accept: 'application/json' }
+        }, 0);
+      }
+    }
+    if (apiRes.status === 404) {
+      let msg = `Zoom meeting ${meetingId} not found (404)`;
+      try { msg = JSON.parse(apiRes.bodyText).message || msg; } catch {}
+      return { ok: false, httpStatus: 404, deleted: false, alreadyDeletedCandidate: true, zoomMeetingId: meetingId, error: msg };
+    }
+    if (apiRes.status !== 204 && (apiRes.status < 200 || apiRes.status >= 300)) {
       let msg = `Zoom DELETE error (HTTP ${apiRes.status})`;
       try { msg = JSON.parse(apiRes.bodyText).message || msg; } catch {}
-      return { ok: false, httpStatus: 502, error: msg };
+      const outStatus = apiRes.status === 401 || apiRes.status === 403 || apiRes.status === 429 || apiRes.status >= 500 ? apiRes.status : 502;
+      return {
+        ok: false,
+        httpStatus: outStatus,
+        deleted: false,
+        code: apiRes.status === 429 ? 'RATE_LIMITED' : apiRes.status === 401 ? 'UNAUTHORIZED' : apiRes.status === 403 ? 'FORBIDDEN' : undefined,
+        error: msg,
+        retryAfter: apiRes.retryAfter
+      };
     }
     return { ok: true, httpStatus: 200, deleted: true, zoomMeetingId: meetingId };
   });

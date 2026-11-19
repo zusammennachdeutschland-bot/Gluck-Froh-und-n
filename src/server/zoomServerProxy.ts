@@ -363,10 +363,23 @@ async function resolveAuthenticatedZoomUser(
   };
 }
 
+/**
+ * Preserves 64-bit numeric Zoom meeting IDs as JSON strings BEFORE JSON.parse
+ * so JavaScript IEEE-754 number parsing can never truncate large IDs.
+ */
+function parseZoomJsonSafeIds(rawText: string): any {
+  const safeText = String(rawText || '').replace(
+    /("id"\s*:\s*)(\d{8,25})(\s*[,}\]])/g,
+    '$1"$2"$3'
+  );
+  return JSON.parse(safeText);
+}
+
 async function performZoomFetch(
   url: string,
   init: { method: string; headers: Record<string, string>; body?: string },
-  retriesLeft = 2
+  retriesLeft = 3,
+  attempt = 0
 ): Promise<{ status: number; bodyText: string; retryAfter?: string }> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -385,17 +398,22 @@ async function performZoomFetch(
           : (resp.headers as Record<string, string>)['retry-after'];
     }
 
-    if ((resp.status === 429 || resp.status >= 502) && retriesLeft > 0) {
-      const waitMs = Math.min(3000, Math.max(400, (Number(retryAfter) || 1) * 1000));
-      await new Promise((r) => setTimeout(r, waitMs));
-      return performZoomFetch(url, init, retriesLeft - 1);
+    if ((resp.status === 429 || resp.status >= 500) && retriesLeft > 0) {
+      const parsedRetrySec = retryAfter ? Number(retryAfter) : NaN;
+      const backoffMs = Number.isFinite(parsedRetrySec) && parsedRetrySec > 0
+        ? Math.min(5000, Math.max(250, parsedRetrySec * 1000))
+        : Math.min(4000, 350 * Math.pow(2, attempt));
+      const effectiveWaitMs = customZoomUpstreamFetch ? Math.min(25, backoffMs) : backoffMs;
+      await new Promise((r) => setTimeout(r, effectiveWaitMs));
+      return performZoomFetch(url, init, retriesLeft - 1, attempt + 1);
     }
 
     return { status: resp.status, bodyText: text, retryAfter };
   } catch (err: any) {
     if (retriesLeft > 0) {
-      await new Promise((r) => setTimeout(r, 450));
-      return performZoomFetch(url, init, retriesLeft - 1);
+      const backoffMs = customZoomUpstreamFetch ? 15 : Math.min(3000, 400 * Math.pow(2, attempt));
+      await new Promise((r) => setTimeout(r, backoffMs));
+      return performZoomFetch(url, init, retriesLeft - 1, attempt + 1);
     }
     return {
       status: 502,
@@ -787,7 +805,7 @@ export function registerZoomServerRoutes(
         participant_video: true,
         join_before_host: false,
         mute_upon_entry: true,
-        waiting_room: req.body?.waitingRoom !== false,
+        waiting_room: req.body?.waitingRoom === true,
         auto_recording: req.body?.autoRecording === 'cloud' ? 'cloud' : 'none'
       }
     };
@@ -812,7 +830,7 @@ export function registerZoomServerRoutes(
     }
 
     try {
-      const m = JSON.parse(apiRes.bodyText);
+      const m = parseZoomJsonSafeIds(apiRes.bodyText);
       return res.status(200).json({
         zoomMeetingId: String(m.id || ''),
         joinUrl: String(m.join_url || ''),
@@ -825,6 +843,135 @@ export function registerZoomServerRoutes(
       });
     } catch {
       return res.status(502).json({ error: 'Invalid JSON returned by Zoom API.' });
+    }
+  });
+
+  // 7b. List Zoom meetings for the connected host account (GET /v2/users/me/meetings?type=scheduled&page_size=300)
+  app.get('/api/zoom/meetings', async (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    const authResult = await resolveAuthenticatedZoomUser(req, verifyFirebaseIdToken);
+    if (!authResult.authenticated || !authResult.uid) {
+      return res.status(authResult.status || 401).json({ error: authResult.error || 'Unauthorized' });
+    }
+
+    const entry = inMemoryZoomVault.get(authResult.uid);
+    const creds = entry ? decryptZoomPayloadFromVault(entry) : null;
+    if (!creds) {
+      return res.status(401).json({ error: 'Zoom credentials are not configured.', code: 'CREDENTIALS_MISSING' });
+    }
+
+    const tokenRes = await getZoomAccessTokenForUid(authResult.uid, creds);
+    if (!tokenRes.ok || !tokenRes.accessToken) {
+      return res.status(tokenRes.status === 401 || tokenRes.status === 403 ? tokenRes.status : 502).json({
+        error: tokenRes.error || 'OAuth token unavailable.',
+        code: tokenRes.status === 401 ? 'ZOOM_UNAUTHORIZED' : 'TOKEN_UNAVAILABLE'
+      });
+    }
+
+    const rawType = String(req.query?.type || 'scheduled').trim().toLowerCase();
+    const meetingListType =
+      rawType === 'live' || rawType === 'upcoming' || rawType === 'upcoming_meetings' || rawType === 'scheduled'
+        ? rawType
+        : 'scheduled';
+    const parsedSize = Number(req.query?.page_size || 300);
+    const pageSize = Number.isFinite(parsedSize) ? Math.max(1, Math.min(300, Math.floor(parsedSize))) : 300;
+    const nextPageToken = String(req.query?.next_page_token || '').trim();
+
+    const qs = new URLSearchParams();
+    qs.set('type', meetingListType);
+    qs.set('page_size', String(pageSize));
+    if (nextPageToken) {
+      qs.set('next_page_token', nextPageToken);
+    }
+
+    let apiRes = await performZoomFetch(`${ZOOM_API_BASE_URL}/users/me/meetings?${qs.toString()}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${tokenRes.accessToken}`,
+        Accept: 'application/json'
+      }
+    });
+
+    if (apiRes.status === 401) {
+      const refreshed = await getZoomAccessTokenForUid(authResult.uid, creds, true);
+      if (refreshed.ok && refreshed.accessToken) {
+        apiRes = await performZoomFetch(`${ZOOM_API_BASE_URL}/users/me/meetings?${qs.toString()}`, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${refreshed.accessToken}`,
+            Accept: 'application/json'
+          }
+        });
+      }
+    }
+
+    if (apiRes.status < 200 || apiRes.status >= 300) {
+      let msg = `Zoom list meetings error (HTTP ${apiRes.status})`;
+      let zoomCode: number | undefined;
+      try {
+        const errObj = JSON.parse(apiRes.bodyText);
+        msg = errObj.message || msg;
+        if (typeof errObj.code === 'number') zoomCode = errObj.code;
+      } catch {}
+      const outStatus =
+        apiRes.status === 401 || apiRes.status === 403 || apiRes.status === 429 || apiRes.status === 400
+          ? apiRes.status
+          : apiRes.status >= 500
+          ? apiRes.status
+          : 502;
+      if (apiRes.retryAfter) {
+        res.setHeader('Retry-After', apiRes.retryAfter);
+      }
+      return res.status(outStatus).json({
+        error: msg,
+        zoomCode,
+        httpStatus: apiRes.status,
+        code:
+          outStatus === 401
+            ? 'ZOOM_UNAUTHORIZED'
+            : outStatus === 403
+            ? 'ZOOM_FORBIDDEN'
+            : outStatus === 429
+            ? 'RATE_LIMITED'
+            : 'ZOOM_LIST_ERROR'
+      });
+    }
+
+    try {
+      const parsed = parseZoomJsonSafeIds(apiRes.bodyText);
+      const rawMeetings = Array.isArray(parsed?.meetings) ? parsed.meetings : [];
+      const meetings = rawMeetings
+        .filter((m: any) => m && m.id !== undefined && m.id !== null)
+        .map((m: any) => ({
+          id: String(m.id).replace(/[^0-9]/g, '') || String(m.id),
+          uuid: typeof m.uuid === 'string' ? m.uuid : undefined,
+          hostId: typeof m.host_id === 'string' ? m.host_id : undefined,
+          topic: typeof m.topic === 'string' ? m.topic : '',
+          type: Number(m.type) || 2,
+          startTime: typeof m.start_time === 'string' ? m.start_time : undefined,
+          duration: typeof m.duration === 'number' ? m.duration : undefined,
+          timezone: typeof m.timezone === 'string' ? m.timezone : undefined,
+          createdAt: typeof m.created_at === 'string' ? m.created_at : undefined,
+          joinUrl: typeof m.join_url === 'string' ? m.join_url : undefined,
+          status:
+            meetingListType === 'live'
+              ? 'started'
+              : typeof m.status === 'string'
+              ? m.status
+              : undefined
+        }));
+
+      return res.status(200).json({
+        meetings,
+        nextPageToken: typeof parsed?.next_page_token === 'string' ? parsed.next_page_token : '',
+        pageCount: typeof parsed?.page_count === 'number' ? parsed.page_count : 1,
+        pageSize: typeof parsed?.page_size === 'number' ? parsed.page_size : pageSize,
+        totalRecords: typeof parsed?.total_records === 'number' ? parsed.total_records : meetings.length,
+        hostEmail: creds.hostEmail || null,
+        hostScope: 'single_connected_host'
+      });
+    } catch {
+      return res.status(502).json({ error: 'Invalid JSON returned by Zoom list meetings API.' });
     }
   });
 
@@ -868,6 +1015,9 @@ export function registerZoomServerRoutes(
         repeat_interval: repeatInterval,
         weekly_days: String(weeklyDay),
         end_times: 50
+      },
+      settings: {
+        waiting_room: req.body?.waitingRoom === true
       }
     };
     if (topic) patchBody.topic = topic;
@@ -938,14 +1088,29 @@ export function registerZoomServerRoutes(
         const errObj = JSON.parse(apiRes.bodyText);
         msg = errObj.message || msg;
       } catch {}
-      return res.status(apiRes.status === 404 ? 404 : 502).json({ error: msg, exists: apiRes.status !== 404 });
+      const outStatus =
+        apiRes.status === 404 || apiRes.status === 401 || apiRes.status === 403 || apiRes.status === 429
+          ? apiRes.status
+          : apiRes.status >= 500
+          ? apiRes.status
+          : 502;
+      if (apiRes.retryAfter) {
+        res.setHeader('Retry-After', apiRes.retryAfter);
+      }
+      return res.status(outStatus).json({
+        error: msg,
+        exists: apiRes.status !== 404,
+        httpStatus: apiRes.status
+      });
     }
 
     try {
-      const m = JSON.parse(apiRes.bodyText);
+      const m = parseZoomJsonSafeIds(apiRes.bodyText);
       return res.status(200).json({
         exists: true,
         zoomMeetingId: String(m.id || meetingId),
+        uuid: typeof m.uuid === 'string' ? m.uuid : undefined,
+        type: typeof m.type === 'number' ? m.type : undefined,
         topic: String(m.topic || ''),
         joinUrl: String(m.join_url || ''),
         startUrl: typeof m.start_url === 'string' ? m.start_url : undefined,
@@ -958,7 +1123,7 @@ export function registerZoomServerRoutes(
     }
   });
 
-  // 10. Delete Zoom meeting (only when teacher explicitly requests deletion)
+  // 10. Delete Zoom meeting series (NEVER passes occurrence_id; propagates 401/403/429/5xx faithfully)
   app.delete('/api/zoom/meetings/:meetingId', async (req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     const authResult = await resolveAuthenticatedZoomUser(req, verifyFirebaseIdToken);
@@ -979,10 +1144,12 @@ export function registerZoomServerRoutes(
 
     const tokenRes = await getZoomAccessTokenForUid(authResult.uid, creds);
     if (!tokenRes.ok || !tokenRes.accessToken) {
-      return res.status(502).json({ error: tokenRes.error || 'OAuth token unavailable.' });
+      return res.status(tokenRes.status === 401 || tokenRes.status === 403 ? tokenRes.status : 502).json({
+        error: tokenRes.error || 'OAuth token unavailable.'
+      });
     }
 
-    const apiRes = await performZoomFetch(`${ZOOM_API_BASE_URL}/meetings/${encodeURIComponent(meetingId)}`, {
+    let apiRes = await performZoomFetch(`${ZOOM_API_BASE_URL}/meetings/${encodeURIComponent(meetingId)}`, {
       method: 'DELETE',
       headers: {
         Authorization: `Bearer ${tokenRes.accessToken}`,
@@ -990,15 +1157,61 @@ export function registerZoomServerRoutes(
       }
     });
 
-    if (apiRes.status !== 204 && (apiRes.status < 200 || apiRes.status >= 300) && apiRes.status !== 404) {
+    if (apiRes.status === 401) {
+      const refreshed = await getZoomAccessTokenForUid(authResult.uid, creds, true);
+      if (refreshed.ok && refreshed.accessToken) {
+        apiRes = await performZoomFetch(`${ZOOM_API_BASE_URL}/meetings/${encodeURIComponent(meetingId)}`, {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${refreshed.accessToken}`,
+            Accept: 'application/json'
+          }
+        });
+      }
+    }
+
+    if (apiRes.status === 404) {
+      return res.status(404).json({
+        deleted: false,
+        alreadyDeletedCandidate: true,
+        zoomMeetingId: meetingId,
+        httpStatus: 404,
+        error: 'Zoom meeting not found (HTTP 404).'
+      });
+    }
+
+    if (apiRes.status !== 204 && (apiRes.status < 200 || apiRes.status >= 300)) {
       let msg = `Zoom DELETE error (HTTP ${apiRes.status})`;
+      let zoomCode: number | undefined;
       try {
         const errObj = JSON.parse(apiRes.bodyText);
         msg = errObj.message || msg;
+        if (typeof errObj.code === 'number') zoomCode = errObj.code;
       } catch {}
-      return res.status(502).json({ error: msg });
+      const outStatus =
+        apiRes.status === 401 || apiRes.status === 403 || apiRes.status === 429 || apiRes.status === 400
+          ? apiRes.status
+          : apiRes.status >= 500
+          ? apiRes.status
+          : 502;
+      if (apiRes.retryAfter) {
+        res.setHeader('Retry-After', apiRes.retryAfter);
+      }
+      return res.status(outStatus).json({
+        error: msg,
+        zoomCode,
+        httpStatus: apiRes.status,
+        code:
+          outStatus === 401
+            ? 'ZOOM_UNAUTHORIZED'
+            : outStatus === 403
+            ? 'ZOOM_FORBIDDEN'
+            : outStatus === 429
+            ? 'RATE_LIMITED'
+            : 'ZOOM_DELETE_ERROR'
+      });
     }
 
-    return res.status(200).json({ deleted: true, zoomMeetingId: meetingId });
+    return res.status(200).json({ deleted: true, zoomMeetingId: meetingId, httpStatus: apiRes.status });
   });
 }

@@ -10,6 +10,7 @@ import android.util.Base64;
 import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -32,6 +33,7 @@ import javax.crypto.SecretKey;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.net.ssl.HttpsURLConnection;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
@@ -324,11 +326,11 @@ public class ZoomSecureBridgePlugin extends Plugin {
                 }
             }
 
-            if ((status == 429 || status >= 502) && retriesLeft > 0) {
-                long waitMs = 1000L;
+            if ((status == 429 || status >= 500) && retriesLeft > 0) {
+                long waitMs = Math.min(3500L, 450L * (4L - Math.min(3, retriesLeft)));
                 if (retryAfter != null) {
                     try {
-                        waitMs = Math.min(3000L, Math.max(400L, Long.parseLong(retryAfter.trim()) * 1000L));
+                        waitMs = Math.min(5000L, Math.max(400L, Long.parseLong(retryAfter.trim()) * 1000L));
                     } catch (NumberFormatException ignored) {}
                 }
                 try {
@@ -343,7 +345,7 @@ public class ZoomSecureBridgePlugin extends Plugin {
         } catch (Exception ex) {
             if (retriesLeft > 0) {
                 try {
-                    Thread.sleep(450L);
+                    Thread.sleep(Math.min(3000L, 450L * (4L - Math.min(3, retriesLeft))));
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                 }
@@ -477,7 +479,7 @@ public class ZoomSecureBridgePlugin extends Plugin {
             "Bearer " + tokenRes.accessToken,
             jsonBody != null ? "application/json; charset=utf-8" : null,
             jsonBody,
-            1
+            3
         );
 
         if (res.status == 401) {
@@ -810,8 +812,8 @@ public class ZoomSecureBridgePlugin extends Plugin {
         final int weeklyDay = Math.max(1, Math.min(7, weeklyDayBoxed != null ? weeklyDayBoxed : 2));
         Integer repeatBoxed = call.getInt("repeatInterval", 1);
         final int repeatInterval = (repeatBoxed != null && repeatBoxed == 2) ? 2 : 1;
-        Boolean waitingRoomBoxed = call.getBoolean("waitingRoom", true);
-        final boolean waitingRoom = waitingRoomBoxed == null || waitingRoomBoxed;
+        Boolean waitingRoomBoxed = call.getBoolean("waitingRoom", false);
+        final boolean waitingRoom = Boolean.TRUE.equals(waitingRoomBoxed);
         final String autoRecording = "cloud".equals(call.getString("autoRecording", "none")) ? "cloud" : "none";
 
         ioExecutor.execute(() -> {
@@ -931,6 +933,8 @@ public class ZoomSecureBridgePlugin extends Plugin {
         final int weeklyDay = Math.max(1, Math.min(7, weeklyDayBoxed != null ? weeklyDayBoxed : 2));
         Integer repeatBoxed = call.getInt("repeatInterval", 1);
         final int repeatInterval = (repeatBoxed != null && repeatBoxed == 2) ? 2 : 1;
+        Boolean waitingRoomBoxed = call.getBoolean("waitingRoom", false);
+        final boolean waitingRoom = Boolean.TRUE.equals(waitingRoomBoxed);
 
         ioExecutor.execute(() -> {
             try {
@@ -940,11 +944,15 @@ public class ZoomSecureBridgePlugin extends Plugin {
                 recurrence.put("weekly_days", String.valueOf(weeklyDay));
                 recurrence.put("end_times", 50);
 
+                JSONObject settings = new JSONObject();
+                settings.put("waiting_room", waitingRoom);
+
                 JSONObject patchBody = new JSONObject();
                 patchBody.put("type", 8);
                 patchBody.put("duration", duration);
                 patchBody.put("timezone", timezone);
                 patchBody.put("recurrence", recurrence);
+                patchBody.put("settings", settings);
                 if (!topic.isEmpty()) {
                     patchBody.put("topic", topic.length() > 200 ? topic.substring(0, 200) : topic);
                 }
@@ -988,6 +996,110 @@ public class ZoomSecureBridgePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void listMeetings(final PluginCall call) {
+        final Context context = getContext();
+        if (context == null) {
+            JSObject out = new JSObject();
+            out.put("ok", false);
+            out.put("httpStatus", 500);
+            out.put("error", "Android context unavailable.");
+            call.resolve(out);
+            return;
+        }
+
+        final JSONObject creds = loadDecryptedCredentials(context);
+        if (creds == null) {
+            JSObject out = new JSObject();
+            out.put("ok", false);
+            out.put("httpStatus", 401);
+            out.put("code", "CREDENTIALS_MISSING");
+            out.put("error", "Zoom credentials are not configured.");
+            call.resolve(out);
+            return;
+        }
+
+        String rawType = call.getString("type", "scheduled");
+        final String listType = ("live".equals(rawType) || "upcoming".equals(rawType) || "scheduled".equals(rawType))
+            ? rawType
+            : "scheduled";
+        Integer pageSizeBoxed = call.getInt("pageSize", 300);
+        final int pageSize = Math.max(1, Math.min(300, pageSizeBoxed != null ? pageSizeBoxed : 300));
+        final String nextPageToken = call.getString("nextPageToken", "");
+
+        ioExecutor.execute(() -> {
+            try {
+                StringBuilder path = new StringBuilder("/users/me/meetings?type=")
+                    .append(URLEncoder.encode(listType, "UTF-8"))
+                    .append("&page_size=")
+                    .append(pageSize);
+                if (nextPageToken != null && !nextPageToken.trim().isEmpty()) {
+                    path.append("&next_page_token=").append(URLEncoder.encode(nextPageToken.trim(), "UTF-8"));
+                }
+
+                HttpResult apiRes = performZoomApiWithRefresh(creds, path.toString(), "GET", null);
+                if (apiRes.status < 200 || apiRes.status >= 300) {
+                    int outStatus = (apiRes.status == 401 || apiRes.status == 403 || apiRes.status == 429 || apiRes.status >= 500)
+                        ? apiRes.status
+                        : 502;
+                    JSObject errOut = new JSObject();
+                    errOut.put("ok", false);
+                    errOut.put("httpStatus", outStatus);
+                    if (apiRes.status == 429) errOut.put("code", "RATE_LIMITED");
+                    else if (apiRes.status == 401) errOut.put("code", "UNAUTHORIZED");
+                    else if (apiRes.status == 403) errOut.put("code", "FORBIDDEN");
+                    errOut.put("error", extractZoomApiErrorMessage(apiRes, "Zoom list meetings error"));
+                    if (apiRes.retryAfter != null) errOut.put("retryAfter", apiRes.retryAfter);
+                    call.resolve(errOut);
+                    return;
+                }
+
+                JSONObject parsed = new JSONObject(apiRes.bodyText);
+                JSONArray rawMeetings = parsed.optJSONArray("meetings");
+                JSArray safeMeetings = new JSArray();
+                if (rawMeetings != null) {
+                    for (int i = 0; i < rawMeetings.length(); i++) {
+                        JSONObject m = rawMeetings.optJSONObject(i);
+                        if (m == null) continue;
+                        JSObject item = new JSObject();
+                        item.put("id", m.has("id") && !m.isNull("id") ? String.valueOf(m.get("id")) : "");
+                        if (m.has("uuid") && !m.isNull("uuid")) item.put("uuid", m.optString("uuid", ""));
+                        if (m.has("host_id") && !m.isNull("host_id")) item.put("hostId", m.optString("host_id", ""));
+                        item.put("topic", m.optString("topic", ""));
+                        item.put("type", m.optInt("type", 0));
+                        if (m.has("start_time") && !m.isNull("start_time")) item.put("startTime", m.optString("start_time", ""));
+                        if (m.has("duration") && !m.isNull("duration")) item.put("duration", m.optInt("duration", 0));
+                        if (m.has("timezone") && !m.isNull("timezone")) item.put("timezone", m.optString("timezone", ""));
+                        if (m.has("created_at") && !m.isNull("created_at")) item.put("createdAt", m.optString("created_at", ""));
+                        item.put("joinUrl", m.optString("join_url", ""));
+                        if (m.has("status") && !m.isNull("status")) item.put("status", m.optString("status", ""));
+                        safeMeetings.put(item);
+                    }
+                }
+
+                JSObject okOut = new JSObject();
+                okOut.put("ok", true);
+                okOut.put("httpStatus", 200);
+                okOut.put("meetings", safeMeetings);
+                String outNextToken = parsed.optString("next_page_token", "");
+                okOut.put("nextPageToken", outNextToken != null ? outNextToken.trim() : "");
+                okOut.put("pageCount", parsed.optInt("page_count", 1));
+                okOut.put("pageSize", parsed.optInt("page_size", pageSize));
+                okOut.put("totalRecords", parsed.optInt("total_records", safeMeetings.length()));
+                String hostEmail = creds.optString("hostEmail", "");
+                okOut.put("hostEmail", !hostEmail.isEmpty() ? hostEmail : JSONObject.NULL);
+                okOut.put("hostScope", "single_connected_host");
+                call.resolve(okOut);
+            } catch (Exception ex) {
+                JSObject errOut = new JSObject();
+                errOut.put("ok", false);
+                errOut.put("httpStatus", 502);
+                errOut.put("error", "Invalid JSON returned by Zoom while listing meetings.");
+                call.resolve(errOut);
+            }
+        });
+    }
+
+    @PluginMethod
     public void getMeeting(final PluginCall call) {
         final Context context = getContext();
         if (context == null) {
@@ -1024,11 +1136,15 @@ public class ZoomSecureBridgePlugin extends Plugin {
             try {
                 HttpResult apiRes = performZoomApiWithRefresh(creds, "/meetings/" + meetingId, "GET", null);
                 if (apiRes.status < 200 || apiRes.status >= 300) {
+                    int outStatus = (apiRes.status == 401 || apiRes.status == 403 || apiRes.status == 404 || apiRes.status == 429 || apiRes.status >= 500)
+                        ? apiRes.status
+                        : 502;
                     JSObject errOut = new JSObject();
                     errOut.put("ok", false);
-                    errOut.put("httpStatus", apiRes.status == 404 ? 404 : 502);
+                    errOut.put("httpStatus", outStatus);
                     errOut.put("exists", apiRes.status != 404);
                     errOut.put("error", extractZoomApiErrorMessage(apiRes, "Zoom inspect error"));
+                    if (apiRes.retryAfter != null) errOut.put("retryAfter", apiRes.retryAfter);
                     call.resolve(errOut);
                     return;
                 }
@@ -1096,12 +1212,32 @@ public class ZoomSecureBridgePlugin extends Plugin {
         }
 
         ioExecutor.execute(() -> {
+            // Never pass occurrence_id so recurring series are deleted completely
             HttpResult apiRes = performZoomApiWithRefresh(creds, "/meetings/" + meetingId, "DELETE", null);
-            if (apiRes.status != 204 && (apiRes.status < 200 || apiRes.status >= 300) && apiRes.status != 404) {
+            if (apiRes.status == 404) {
+                JSObject notFoundOut = new JSObject();
+                notFoundOut.put("ok", false);
+                notFoundOut.put("httpStatus", 404);
+                notFoundOut.put("deleted", false);
+                notFoundOut.put("alreadyDeletedCandidate", true);
+                notFoundOut.put("zoomMeetingId", meetingId);
+                notFoundOut.put("error", extractZoomApiErrorMessage(apiRes, "Zoom meeting not found (404)"));
+                call.resolve(notFoundOut);
+                return;
+            }
+            if (apiRes.status != 204 && (apiRes.status < 200 || apiRes.status >= 300)) {
+                int outStatus = (apiRes.status == 401 || apiRes.status == 403 || apiRes.status == 429 || apiRes.status >= 500)
+                    ? apiRes.status
+                    : 502;
                 JSObject errOut = new JSObject();
                 errOut.put("ok", false);
-                errOut.put("httpStatus", 502);
+                errOut.put("httpStatus", outStatus);
+                errOut.put("deleted", false);
+                if (apiRes.status == 429) errOut.put("code", "RATE_LIMITED");
+                else if (apiRes.status == 401) errOut.put("code", "UNAUTHORIZED");
+                else if (apiRes.status == 403) errOut.put("code", "FORBIDDEN");
                 errOut.put("error", extractZoomApiErrorMessage(apiRes, "Zoom DELETE error"));
+                if (apiRes.retryAfter != null) errOut.put("retryAfter", apiRes.retryAfter);
                 call.resolve(errOut);
                 return;
             }

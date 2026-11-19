@@ -204,7 +204,7 @@ export const AndroidKeystoreSection: React.FC = () => {
 
       <div className="bg-surface border border-surface-border rounded-xl p-4 shadow-2xs space-y-3">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-primary-soft border border-primary-border flex items-center justify-center text-primary shrink-0">
             <ShieldCheck className="w-5 h-5" />
           </div>
           <div>

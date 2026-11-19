@@ -17,6 +17,7 @@ import {
   invokeAndroidZoomDisconnect,
   invokeAndroidZoomGetMeeting,
   invokeAndroidZoomGetStatus,
+  invokeAndroidZoomListMeetings,
   invokeAndroidZoomTestConnection,
   invokeAndroidZoomUpdateMeeting,
   invokeAndroidZoomUpdateSettings
@@ -281,6 +282,11 @@ export function sanitizeZoomRecordForStorage<T>(item: T): T {
     'clientSecret',
     'zoomAccessToken',
     'accessToken',
+    'refreshToken',
+    'refresh_token',
+    'idToken',
+    'id_token',
+    'oauthCode',
     'zoomAccountId',
     'accountId',
     'clientId',
@@ -553,11 +559,25 @@ async function callNativeOrElectronZoomBridge(
         timezone: String(bodyObj.timezone || DEFAULT_ZOOM_TIMEZONE),
         weeklyDay: Number(bodyObj.weeklyDay) || 2,
         repeatInterval: Number(bodyObj.repeatInterval) === 2 ? 2 : 1,
-        waitingRoom: bodyObj.waitingRoom !== false,
+        waitingRoom: bodyObj.waitingRoom === true,
         autoRecording: bodyObj.autoRecording === 'cloud' ? 'cloud' : 'none'
       };
       const res =
         runtime === 'android' ? await invokeAndroidZoomCreateMeeting(payload) : await electronZoom.createMeeting(payload);
+      return normalizeNativeZoomBridgeResult(res);
+    }
+
+    if ((path === '/api/zoom/meetings' || path.startsWith('/api/zoom/meetings?')) && method === 'GET') {
+      const qsRaw = path.includes('?') ? path.slice(path.indexOf('?') + 1) : '';
+      const sp = new URLSearchParams(qsRaw);
+      const rawType = sp.get('type') || 'scheduled';
+      const listType: 'scheduled' | 'live' | 'upcoming' =
+        rawType === 'live' || rawType === 'upcoming' || rawType === 'scheduled' ? rawType : 'scheduled';
+      const pageSize = Math.max(1, Math.min(300, Number(sp.get('page_size')) || 300));
+      const nextPageToken = sp.get('next_page_token') || undefined;
+      const payload = { type: listType, pageSize, nextPageToken };
+      const res =
+        runtime === 'android' ? await invokeAndroidZoomListMeetings(payload) : await electronZoom.listMeetings(payload);
       return normalizeNativeZoomBridgeResult(res);
     }
 
@@ -572,7 +592,8 @@ async function callNativeOrElectronZoomBridge(
           duration: Number(bodyObj.duration) || 60,
           timezone: String(bodyObj.timezone || DEFAULT_ZOOM_TIMEZONE),
           weeklyDay: Number(bodyObj.weeklyDay) || 2,
-          repeatInterval: Number(bodyObj.repeatInterval) === 2 ? 2 : 1
+          repeatInterval: Number(bodyObj.repeatInterval) === 2 ? 2 : 1,
+          waitingRoom: bodyObj.waitingRoom === true
         };
         const res =
           runtime === 'android' ? await invokeAndroidZoomUpdateMeeting(payload) : await electronZoom.updateMeeting(payload);
@@ -1002,7 +1023,8 @@ export async function createOrReplaceZoomMeetingForSession(params: {
       duration: params.session.durationMinutes,
       timezone: tz,
       weeklyDay: toZoomWeeklyDayNumber(params.session.weekday),
-      repeatInterval
+      repeatInterval,
+      waitingRoom: false
     })
   });
 
@@ -1188,7 +1210,8 @@ export async function updateZoomMeetingForSession(params: {
       duration: params.session.durationMinutes,
       timezone: tz,
       weeklyDay: toZoomWeeklyDayNumber(params.session.weekday),
-      repeatInterval
+      repeatInterval,
+      waitingRoom: false
     })
   });
 
@@ -1511,4 +1534,578 @@ export async function executeBulkZoomMigration(params: {
     errors,
     processedSessionIds
   };
+}
+
+export interface DisableWaitingRoomBulkResult {
+  totalTargeted: number;
+  updatedCount: number;
+  failedCount: number;
+  rateLimited: boolean;
+  sessions: GroupWeeklySession[];
+  records: ZoomMeetingRecord[];
+  history: ZoomMeetingHistory[];
+  errors: Array<{ sessionId: string; title: string; error: string }>;
+}
+
+/**
+ * Explicitly disables Zoom Waiting Room (`waiting_room: false`) across all existing
+ * active API-managed Zoom meetings via PATCH without changing meeting IDs or join URLs.
+ */
+export async function disableWaitingRoomForExistingZoomMeetings(params: {
+  sessions: GroupWeeklySession[];
+  records: ZoomMeetingRecord[];
+  history: ZoomMeetingHistory[];
+  timezone?: string;
+  onProgress?: (progress: { completed: number; total: number; currentTitle?: string }) => void;
+}): Promise<DisableWaitingRoomBulkResult> {
+  const tz = params.timezone || loadZoomUiMeta().defaultTimezone || DEFAULT_ZOOM_TIMEZONE;
+  let workingSessions = [...(params.sessions || [])];
+  let workingRecords = [...(params.records || [])];
+  let workingHistory = [...(params.history || [])];
+
+  const targets = workingSessions.filter(
+    (s) => s && !s.deleted && s.meetingSource === 'zoom_api' && Boolean(s.zoomMeetingId)
+  );
+
+  let completed = 0;
+  let updatedCount = 0;
+  let failedCount = 0;
+  let rateLimited = false;
+  const errors: Array<{ sessionId: string; title: string; error: string }> = [];
+
+  for (const session of targets) {
+    params.onProgress?.({
+      completed,
+      total: targets.length,
+      currentTitle: session.standardizedTitle
+    });
+
+    const res = await updateZoomMeetingForSession({
+      session,
+      sessions: workingSessions,
+      records: workingRecords,
+      history: workingHistory,
+      timezone: tz
+    });
+
+    workingSessions = res.sessions;
+    workingRecords = res.records;
+    workingHistory = res.history;
+
+    if (res.ok) {
+      updatedCount++;
+    } else {
+      failedCount++;
+      errors.push({
+        sessionId: session.id,
+        title: session.standardizedTitle,
+        error: res.error || 'Failed to disable Waiting Room'
+      });
+      if (res.rateLimited) {
+        rateLimited = true;
+        break;
+      }
+    }
+    completed++;
+  }
+
+  params.onProgress?.({
+    completed,
+    total: targets.length
+  });
+
+  return {
+    totalTargeted: targets.length,
+    updatedCount,
+    failedCount,
+    rateLimited,
+    sessions: workingSessions,
+    records: workingRecords,
+    history: workingHistory,
+    errors
+  };
+}
+
+export interface ZoomScheduledMeetingItem {
+  id: string;
+  uuid?: string;
+  hostId?: string;
+  topic: string;
+  type: number;
+  isRecurring: boolean;
+  startTime?: string;
+  duration?: number;
+  timezone?: string;
+  createdAt?: string;
+  joinUrl: string;
+  status?: string;
+  isLive?: boolean;
+}
+
+export interface ZoomListMeetingsPageResult {
+  ok: boolean;
+  status: number;
+  meetings: ZoomScheduledMeetingItem[];
+  nextPageToken: string;
+  pageCount: number;
+  pageSize: number;
+  totalRecords: number;
+  hostEmail?: string | null;
+  hostScope: 'single_connected_host';
+  rateLimited?: boolean;
+  authError?: boolean;
+  permissionError?: boolean;
+  error?: string;
+}
+
+export interface ZoomInventoryFetchResult {
+  ok: boolean;
+  status: number;
+  meetings: ZoomScheduledMeetingItem[];
+  liveMeetingIds: string[];
+  pagesFetched: number;
+  hostEmail?: string | null;
+  hostScope: 'single_connected_host';
+  rateLimited?: boolean;
+  authError?: boolean;
+  permissionError?: boolean;
+  error?: string;
+}
+
+export interface ZoomDeleteMeetingResult {
+  ok: boolean;
+  status: number;
+  meetingId: string;
+  deleted: boolean;
+  alreadyDeleted?: boolean;
+  rateLimited?: boolean;
+  authError?: boolean;
+  permissionError?: boolean;
+  error?: string;
+}
+
+function sleepMs(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeListedZoomMeeting(raw: any, forceLive = false): ZoomScheduledMeetingItem | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = String(raw.id ?? raw.zoomMeetingId ?? '').replace(/[^0-9]/g, '');
+  if (!id) return null;
+  const typeNum = Number(raw.type) || 0;
+  const statusStr = typeof raw.status === 'string' ? raw.status.trim() : undefined;
+  const isLive = forceLive || statusStr === 'started';
+  return {
+    id,
+    uuid: typeof raw.uuid === 'string' && raw.uuid.trim() ? raw.uuid.trim() : undefined,
+    hostId: typeof raw.hostId === 'string' ? raw.hostId : typeof raw.host_id === 'string' ? raw.host_id : undefined,
+    topic: typeof raw.topic === 'string' ? redactZoomSecrets(raw.topic) : '',
+    type: typeNum,
+    isRecurring: typeNum === 3 || typeNum === 8,
+    startTime: typeof raw.startTime === 'string' ? raw.startTime : typeof raw.start_time === 'string' ? raw.start_time : undefined,
+    duration: typeof raw.duration === 'number' ? raw.duration : undefined,
+    timezone: typeof raw.timezone === 'string' ? raw.timezone : undefined,
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : typeof raw.created_at === 'string' ? raw.created_at : undefined,
+    joinUrl: typeof raw.joinUrl === 'string'
+      ? redactZoomSecrets(raw.joinUrl)
+      : typeof raw.join_url === 'string'
+      ? redactZoomSecrets(raw.join_url)
+      : '',
+    status: statusStr,
+    isLive
+  };
+}
+
+/**
+ * Fetches one page of Zoom meetings for the single connected host (`/v2/users/me/meetings`).
+ * Uses bounded retries with backoff for HTTP 429 and transient 5xx/network failures.
+ * Never masks 401/403 as empty lists.
+ */
+export async function listZoomScheduledMeetingsPage(params: {
+  type?: 'scheduled' | 'live' | 'upcoming';
+  pageSize?: number;
+  nextPageToken?: string;
+  maxRetries?: number;
+  retryDelayMs?: number;
+} = {}): Promise<ZoomListMeetingsPageResult> {
+  const listType = params.type || 'scheduled';
+  const pageSize = Math.max(1, Math.min(300, Number(params.pageSize) || 300));
+  const maxRetries = Math.max(0, Math.min(4, params.maxRetries ?? 3));
+  const baseDelayMs = Math.max(0, params.retryDelayMs ?? 450);
+
+  const qs = new URLSearchParams({
+    type: listType,
+    page_size: String(pageSize)
+  });
+  if (params.nextPageToken && params.nextPageToken.trim()) {
+    qs.set('next_page_token', params.nextPageToken.trim());
+  }
+
+  let attempt = 0;
+  while (true) {
+    const res = await callZoomProxyJson(`/api/zoom/meetings?${qs.toString()}`, { method: 'GET' });
+    if (res.ok && res.data) {
+      const rawArr = Array.isArray(res.data.meetings) ? res.data.meetings : [];
+      const meetings = rawArr
+        .map((m: any) => normalizeListedZoomMeeting(m, listType === 'live'))
+        .filter((m: ZoomScheduledMeetingItem | null): m is ZoomScheduledMeetingItem => Boolean(m));
+      return {
+        ok: true,
+        status: res.status || 200,
+        meetings,
+        nextPageToken: typeof res.data.nextPageToken === 'string'
+          ? res.data.nextPageToken.trim()
+          : typeof res.data.next_page_token === 'string'
+          ? res.data.next_page_token.trim()
+          : '',
+        pageCount: Number(res.data.pageCount ?? res.data.page_count ?? 1) || 1,
+        pageSize: Number(res.data.pageSize ?? res.data.page_size ?? pageSize) || pageSize,
+        totalRecords: Number(res.data.totalRecords ?? res.data.total_records ?? meetings.length) || meetings.length,
+        hostEmail: typeof res.data.hostEmail === 'string' ? res.data.hostEmail : null,
+        hostScope: 'single_connected_host'
+      };
+    }
+
+    const isTransient = res.status === 429 || res.status >= 500 || res.status === 0;
+    if (isTransient && attempt < maxRetries) {
+      attempt++;
+      const retrySecMs = res.retryAfterSeconds ? Math.min(4000, res.retryAfterSeconds * 1000) : 0;
+      await sleepMs(Math.max(retrySecMs, baseDelayMs * attempt));
+      continue;
+    }
+
+    return {
+      ok: false,
+      status: res.status || 502,
+      meetings: [],
+      nextPageToken: '',
+      pageCount: 0,
+      pageSize,
+      totalRecords: 0,
+      hostScope: 'single_connected_host',
+      rateLimited: res.status === 429 || res.code === 'RATE_LIMITED',
+      authError: res.status === 401,
+      permissionError: res.status === 403,
+      error: res.error || `Failed to list Zoom ${listType} meetings (HTTP ${res.status || 502}).`
+    };
+  }
+}
+
+/**
+ * Fetches ALL pages of scheduled Zoom meetings for the single connected host (`type=scheduled&page_size=300`)
+ * following `next_page_token` until exhausted (preserving query params on every page), AND inspects
+ * `type=live` meetings so currently active live sessions are flagged and never deleted.
+ */
+export async function listAllZoomScheduledMeetings(options: {
+  includeLiveCheck?: boolean;
+  pageSize?: number;
+  maxPages?: number;
+  maxRetries?: number;
+  retryDelayMs?: number;
+} = {}): Promise<ZoomInventoryFetchResult> {
+  const pageSize = Math.max(1, Math.min(300, options.pageSize ?? 300));
+  const maxPages = Math.max(1, Math.min(100, options.maxPages ?? 50));
+  const byId = new Map<string, ZoomScheduledMeetingItem>();
+  const seenTokens = new Set<string>();
+  let nextPageToken = '';
+  let pagesFetched = 0;
+  let hostEmail: string | null | undefined = null;
+
+  while (pagesFetched < maxPages) {
+    const page = await listZoomScheduledMeetingsPage({
+      type: 'scheduled',
+      pageSize,
+      nextPageToken: nextPageToken || undefined,
+      maxRetries: options.maxRetries,
+      retryDelayMs: options.retryDelayMs
+    });
+
+    if (!page.ok) {
+      return {
+        ok: false,
+        status: page.status,
+        meetings: [],
+        liveMeetingIds: [],
+        pagesFetched,
+        hostEmail,
+        hostScope: 'single_connected_host',
+        rateLimited: page.rateLimited,
+        authError: page.authError,
+        permissionError: page.permissionError,
+        error: page.error
+      };
+    }
+
+    pagesFetched++;
+    if (page.hostEmail) hostEmail = page.hostEmail;
+
+    for (const meeting of page.meetings) {
+      const existing = byId.get(meeting.id);
+      if (!existing) {
+        byId.set(meeting.id, meeting);
+      } else {
+        byId.set(meeting.id, {
+          ...existing,
+          ...meeting,
+          isLive: Boolean(existing.isLive || meeting.isLive)
+        });
+      }
+    }
+
+    const token = (page.nextPageToken || '').trim();
+    if (!token) break;
+    if (seenTokens.has(token)) {
+      return {
+        ok: false,
+        status: 502,
+        meetings: Array.from(byId.values()),
+        liveMeetingIds: [],
+        pagesFetched,
+        hostEmail,
+        hostScope: 'single_connected_host',
+        error: 'Zoom pagination returned a repeating next_page_token; aborting to avoid incomplete inventory.'
+      };
+    }
+    seenTokens.add(token);
+    nextPageToken = token;
+  }
+
+  // Live meeting detection so active meetings are never deleted unsafely
+  const liveIds = new Set<string>();
+  if (options.includeLiveCheck !== false) {
+    let liveToken = '';
+    const seenLiveTokens = new Set<string>();
+    let livePages = 0;
+    while (livePages < 20) {
+      const livePage = await listZoomScheduledMeetingsPage({
+        type: 'live',
+        pageSize: 300,
+        nextPageToken: liveToken || undefined,
+        maxRetries: options.maxRetries,
+        retryDelayMs: options.retryDelayMs
+      });
+      if (!livePage.ok) {
+        // Do not silently ignore auth/permission errors during live inspection
+        if (livePage.authError || livePage.permissionError) {
+          return {
+            ok: false,
+            status: livePage.status,
+            meetings: Array.from(byId.values()),
+            liveMeetingIds: Array.from(liveIds),
+            pagesFetched,
+            hostEmail,
+            hostScope: 'single_connected_host',
+            authError: livePage.authError,
+            permissionError: livePage.permissionError,
+            error: livePage.error
+          };
+        }
+        break;
+      }
+      livePages++;
+      for (const lm of livePage.meetings) {
+        liveIds.add(lm.id);
+        const existing = byId.get(lm.id);
+        if (existing) {
+          byId.set(lm.id, { ...existing, isLive: true, status: 'started' });
+        } else {
+          byId.set(lm.id, { ...lm, isLive: true, status: 'started' });
+        }
+      }
+      const nextTok = (livePage.nextPageToken || '').trim();
+      if (!nextTok || seenLiveTokens.has(nextTok)) break;
+      seenLiveTokens.add(nextTok);
+      liveToken = nextTok;
+    }
+  }
+
+  for (const m of byId.values()) {
+    if (m.status === 'started' || m.isLive) {
+      liveIds.add(m.id);
+      m.isLive = true;
+    }
+  }
+
+  return {
+    ok: true,
+    status: 200,
+    meetings: Array.from(byId.values()),
+    liveMeetingIds: Array.from(liveIds),
+    pagesFetched,
+    hostEmail,
+    hostScope: 'single_connected_host'
+  };
+}
+
+/**
+ * Inspects a single Zoom meeting by exact string ID (`GET /api/zoom/meetings/:meetingId`).
+ */
+export async function inspectZoomMeetingRemote(
+  meetingId: string,
+  options: { maxRetries?: number; retryDelayMs?: number } = {}
+): Promise<{
+  ok: boolean;
+  status: number;
+  exists: boolean;
+  isLive?: boolean;
+  meeting?: { zoomMeetingId: string; topic: string; joinUrl: string; status?: string };
+  rateLimited?: boolean;
+  authError?: boolean;
+  permissionError?: boolean;
+  error?: string;
+}> {
+  const cleanId = extractNumericZoomMeetingId(meetingId) || String(meetingId || '').replace(/[^0-9]/g, '');
+  if (cleanId.length < 8) {
+    return { ok: false, status: 400, exists: false, error: 'Valid numeric Zoom meetingId is required.' };
+  }
+  const maxRetries = Math.max(0, Math.min(4, options.maxRetries ?? 2));
+  const baseDelayMs = Math.max(0, options.retryDelayMs ?? 350);
+
+  let attempt = 0;
+  while (true) {
+    const res = await callZoomProxyJson(`/api/zoom/meetings/${encodeURIComponent(cleanId)}`, { method: 'GET' });
+    if (res.ok && res.data) {
+      const statusStr = typeof res.data.status === 'string' ? res.data.status : 'waiting';
+      return {
+        ok: true,
+        status: res.status || 200,
+        exists: true,
+        isLive: statusStr === 'started',
+        meeting: {
+          zoomMeetingId: String(res.data.zoomMeetingId || cleanId),
+          topic: String(res.data.topic || ''),
+          joinUrl: String(res.data.joinUrl || ''),
+          status: statusStr
+        }
+      };
+    }
+
+    if (res.status === 404) {
+      return { ok: true, status: 404, exists: false };
+    }
+
+    const isTransient = res.status === 429 || res.status >= 500 || res.status === 0;
+    if (isTransient && attempt < maxRetries) {
+      attempt++;
+      const retrySecMs = res.retryAfterSeconds ? Math.min(4000, res.retryAfterSeconds * 1000) : 0;
+      await sleepMs(Math.max(retrySecMs, baseDelayMs * attempt));
+      continue;
+    }
+
+    return {
+      ok: false,
+      status: res.status || 502,
+      exists: true,
+      rateLimited: res.status === 429 || res.code === 'RATE_LIMITED',
+      authError: res.status === 401,
+      permissionError: res.status === 403,
+      error: res.error || `Failed to inspect Zoom meeting ${cleanId} (HTTP ${res.status || 502}).`
+    };
+  }
+}
+
+/**
+ * Permanently deletes an entire Zoom meeting (or recurring meeting series — NEVER passing `occurrence_id`).
+ * - Bounded retry with backoff on 429 and transient 5xx/network errors.
+ * - On 404, verifies via `GET /api/zoom/meetings/:meetingId` before confirming `alreadyDeleted: true`.
+ * - NEVER treats 401 or 403 as already deleted.
+ */
+export async function deleteZoomMeetingSeriesRemote(
+  meetingId: string,
+  options: { maxRetries?: number; retryDelayMs?: number } = {}
+): Promise<ZoomDeleteMeetingResult> {
+  const cleanId = extractNumericZoomMeetingId(meetingId) || String(meetingId || '').replace(/[^0-9]/g, '');
+  if (cleanId.length < 8) {
+    return {
+      ok: false,
+      status: 400,
+      meetingId: cleanId,
+      deleted: false,
+      error: 'Valid numeric Zoom meetingId is required.'
+    };
+  }
+
+  const maxRetries = Math.max(0, Math.min(4, options.maxRetries ?? 3));
+  const baseDelayMs = Math.max(0, options.retryDelayMs ?? 450);
+
+  let attempt = 0;
+  while (true) {
+    const res = await callZoomProxyJson(`/api/zoom/meetings/${encodeURIComponent(cleanId)}`, {
+      method: 'DELETE'
+    });
+
+    if (res.ok && res.data?.deleted !== false) {
+      return {
+        ok: true,
+        status: res.status || 200,
+        meetingId: cleanId,
+        deleted: true,
+        alreadyDeleted: false
+      };
+    }
+
+    // Never treat auth/permission errors as deleted
+    if (res.status === 401 || res.status === 403) {
+      return {
+        ok: false,
+        status: res.status,
+        meetingId: cleanId,
+        deleted: false,
+        authError: res.status === 401,
+        permissionError: res.status === 403,
+        error:
+          res.error ||
+          (res.status === 401
+            ? 'Zoom authorization failed (401). Please verify Zoom credentials.'
+            : 'Zoom permission denied (403). Ensure meeting:write:admin scope is enabled.')
+      };
+    }
+
+    // 404 on DELETE: MUST verify via GET that the meeting truly does not exist before declaring already deleted
+    if (res.status === 404) {
+      const verified = await inspectZoomMeetingRemote(cleanId, {
+        maxRetries: 1,
+        retryDelayMs: baseDelayMs
+      });
+      if (verified.ok && !verified.exists) {
+        return {
+          ok: true,
+          status: 404,
+          meetingId: cleanId,
+          deleted: true,
+          alreadyDeleted: true
+        };
+      }
+      return {
+        ok: false,
+        status: verified.status || 502,
+        meetingId: cleanId,
+        deleted: false,
+        authError: verified.authError,
+        permissionError: verified.permissionError,
+        rateLimited: verified.rateLimited,
+        error: verified.exists
+          ? `Zoom DELETE returned 404 for meeting ${cleanId}, but GET verification indicates the meeting still exists.`
+          : verified.error || `Unable to verify 404 deletion for Zoom meeting ${cleanId}.`
+      };
+    }
+
+    const isTransient = res.status === 429 || res.status >= 500 || res.status === 0;
+    if (isTransient && attempt < maxRetries) {
+      attempt++;
+      const retrySecMs = res.retryAfterSeconds ? Math.min(4000, res.retryAfterSeconds * 1000) : 0;
+      await sleepMs(Math.max(retrySecMs, baseDelayMs * attempt));
+      continue;
+    }
+
+    return {
+      ok: false,
+      status: res.status || 502,
+      meetingId: cleanId,
+      deleted: false,
+      rateLimited: res.status === 429 || res.code === 'RATE_LIMITED',
+      error: res.error || `Failed to delete Zoom meeting ${cleanId} (HTTP ${res.status || 502}).`
+    };
+  }
 }

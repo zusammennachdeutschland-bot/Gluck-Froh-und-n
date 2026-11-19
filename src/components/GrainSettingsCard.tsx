@@ -238,7 +238,7 @@ export const GrainSettingsCard: React.FC = () => {
       {/* Header & Connection Status */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="p-2 rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20 shrink-0">
+          <div className="p-2 rounded-lg bg-primary-soft text-primary border border-primary-border shrink-0">
             <Video className="w-4 h-4" />
           </div>
           <div className="min-w-0">
@@ -298,7 +298,7 @@ export const GrainSettingsCard: React.FC = () => {
       <form onSubmit={handleSaveToken} className="space-y-2 pt-1 border-t border-surface-border/70">
         <div className="flex items-center justify-between text-[11px]">
           <label className="font-bold text-text-main flex items-center gap-1.5">
-            <Key className="w-3.5 h-3.5 text-violet-500" />
+            <Key className="w-3.5 h-3.5 text-primary" />
             <span>{_t('توكن Grain الشخصي (Personal Access Token):', 'Grain Personal Access Token:', 'Grain Personal Access Token:')}</span>
           </label>
           {meta.maskedToken && (
@@ -326,7 +326,7 @@ export const GrainSettingsCard: React.FC = () => {
           <button
             type="submit"
             disabled={!meta.enabled || !meta.secureStorageAvailable || !tokenInput.trim() || isSaving}
-            className="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-black transition-all disabled:opacity-50 cursor-pointer shrink-0"
+            className="px-3 py-1.5 bg-primary hover:bg-primary-hover text-primary-fg rounded-lg text-xs font-black transition-all disabled:opacity-50 cursor-pointer shrink-0"
           >
             {isSaving
               ? _t('جاري الحفظ...', 'Saving...', 'Speichern...')
@@ -367,7 +367,7 @@ export const GrainSettingsCard: React.FC = () => {
           <button
             type="button"
             onClick={() => setActiveTab('grainRecordings')}
-            className="px-2.5 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 rounded-lg text-[11px] font-black flex items-center gap-1.5 cursor-pointer"
+            className="px-2.5 py-1.5 bg-primary-soft hover:bg-primary/20 text-primary border border-primary-border rounded-lg text-[11px] font-black flex items-center gap-1.5 cursor-pointer"
           >
             <Video className="w-3.5 h-3.5" />
             <span>

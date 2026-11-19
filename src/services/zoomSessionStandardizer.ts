@@ -2,6 +2,7 @@ import {
   Group,
   GroupScheduleSlot,
   GroupWeeklySession,
+  Lesson,
   ScheduleRecurrence,
   ZoomMeetingHistory,
   ZoomMeetingRecord
@@ -720,4 +721,139 @@ export function buildZoomMeetingRecordFromSession(
     updatedAt: nowMs,
     deleted: false
   };
+}
+
+function parseIsoDateWeekday(dateStr?: string | null): number {
+  const clean = String(dateStr || '').trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(clean);
+  if (!match) return -1;
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10) - 1;
+  const day = parseInt(match[3], 10);
+  const d = new Date(year, month, day);
+  if (isNaN(d.getTime())) return -1;
+  return d.getDay();
+}
+
+function timeToMinutes(hhmm?: string | null): number {
+  const norm = normalize24HourTime(hhmm, '');
+  if (!norm) return -1;
+  const [h, m] = norm.split(':').map((x) => parseInt(x, 10));
+  if (isNaN(h) || isNaN(m)) return -1;
+  return h * 60 + m;
+}
+
+function rankWeeklySessionForZoomLink(session: GroupWeeklySession): number {
+  let score = 0;
+  if (session.meetingSource === 'zoom_api') score += 40;
+  else if (session.meetingSource === 'manual') score += 25;
+  else score += 10;
+
+  if (session.syncState === 'synced') score += 20;
+  else if (session.syncState === 'needs_update') score += 10;
+
+  if (session.zoomJoinUrl?.trim()) score += 5;
+  return score;
+}
+
+/**
+ * Resolves the single authoritative active GroupWeeklySession (with a usable join URL)
+ * for a given group/lesson/slot, prioritizing exact (weekday + time) match, then same weekday,
+ * then same time, then highest-priority active Zoom API session for the group.
+ */
+export function resolveActiveWeeklySessionForLesson(params: {
+  group?: Partial<Group> | null;
+  groupId?: string | null;
+  lesson?: Partial<Lesson> | null;
+  groupWeeklySessions?: GroupWeeklySession[] | null;
+  targetDay?: string | number | null;
+  targetTime?: string | null;
+}): GroupWeeklySession | null {
+  const groupId = params.group?.id || params.groupId || params.lesson?.groupId;
+  if (!groupId || !Array.isArray(params.groupWeeklySessions) || params.groupWeeklySessions.length === 0) {
+    return null;
+  }
+
+  const candidates = params.groupWeeklySessions.filter(
+    (s) =>
+      Boolean(s) &&
+      !s.deleted &&
+      s.groupId === groupId &&
+      Boolean((s.zoomJoinUrl || s.manualFallbackUrl || '').trim())
+  );
+  if (candidates.length === 0) return null;
+
+  const weekdayFromDate = parseIsoDateWeekday(params.lesson?.date);
+  const targetWeekday =
+    weekdayFromDate >= 0 ? weekdayFromDate : normalizeWeekdayIndex(params.targetDay);
+  const targetTimeHm = normalize24HourTime(params.lesson?.time || params.targetTime, '');
+  const targetMins = timeToMinutes(targetTimeHm);
+
+  const byRankDesc = (a: GroupWeeklySession, b: GroupWeeklySession) =>
+    rankWeeklySessionForZoomLink(b) - rankWeeklySessionForZoomLink(a) ||
+    (b.updatedAt || 0) - (a.updatedAt || 0);
+
+  // 1. Exact weekday + start time match
+  if (targetWeekday >= 0 && targetTimeHm) {
+    const exact = candidates
+      .filter((s) => s.weekday === targetWeekday && normalize24HourTime(s.startTime, '') === targetTimeHm)
+      .sort(byRankDesc);
+    if (exact.length > 0) return exact[0];
+  }
+
+  // 2. Same weekday match (prefer closest start time, then highest rank)
+  if (targetWeekday >= 0) {
+    const sameDay = candidates
+      .filter((s) => s.weekday === targetWeekday)
+      .sort((a, b) => {
+        if (targetMins >= 0) {
+          const diffA = Math.abs(timeToMinutes(a.startTime) - targetMins);
+          const diffB = Math.abs(timeToMinutes(b.startTime) - targetMins);
+          if (diffA !== diffB) return diffA - diffB;
+        }
+        return byRankDesc(a, b);
+      });
+    if (sameDay.length > 0) return sameDay[0];
+  }
+
+  // 3. Same start time match
+  if (targetTimeHm) {
+    const sameTime = candidates
+      .filter((s) => normalize24HourTime(s.startTime, '') === targetTimeHm)
+      .sort(byRankDesc);
+    if (sameTime.length > 0) return sameTime[0];
+  }
+
+  // 4. Fallback to highest-priority active session for this group
+  const sorted = [...candidates].sort(byRankDesc);
+  return sorted[0] || null;
+}
+
+/**
+ * Single source of truth for resolving an online lesson/group's active Zoom link.
+ * Always prioritizes the active standardized GroupWeeklySession join URL (created by
+ * Zoom S2S OAuth sync / Cleanup & Rebuild) over stale legacy group.zoomLink or lesson.meetingLink.
+ */
+export function resolveActiveZoomLinkForLesson(params: {
+  group?: Partial<Group> | null;
+  groupId?: string | null;
+  lesson?: Partial<Lesson> | null;
+  groupWeeklySessions?: GroupWeeklySession[] | null;
+  targetDay?: string | number | null;
+  targetTime?: string | null;
+  defaultZoomLink?: string | null;
+}): string {
+  const activeSession = resolveActiveWeeklySessionForLesson(params);
+  const sessionUrl = (activeSession?.zoomJoinUrl || activeSession?.manualFallbackUrl || '').trim();
+  if (sessionUrl) {
+    return sessionUrl;
+  }
+
+  return (
+    params.group?.zoomLink?.trim() ||
+    params.lesson?.meetingLink?.trim() ||
+    params.group?.meetLink?.trim() ||
+    params.defaultZoomLink?.trim() ||
+    ''
+  );
 }

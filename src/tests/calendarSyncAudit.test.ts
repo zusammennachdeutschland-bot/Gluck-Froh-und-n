@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { Group, GroupWeeklySession } from '../types';
 import {
   DEFAULT_ZOOM_TIMEZONE,
@@ -7,11 +9,23 @@ import {
   reconcileGroupWeeklySessions
 } from '../services/zoomSessionStandardizer';
 import {
+  __resetCalendarOAuthStateForTesting,
   __setCalendarFetchForTesting,
+  __setWebCalendarAuthTestAdapter,
+  __simulateColdRestartForTesting,
+  disconnectGoogleCalendar,
   generateSessionsIcsContent,
+  getCalendarOAuthDiagnostics,
+  getGoogleCalendarConnectionState,
+  getInMemoryGoogleCalendarToken,
+  handleCalendarOAuthDeepLinkCallback,
+  processPendingWebCalendarRedirectResult,
+  requestGoogleCalendarAccessToken,
   syncSessionsToGoogleCalendar,
-  syncSingleSessionToGoogleCalendar
+  syncSingleSessionToGoogleCalendar,
+  verifyOrSilentlyReauthorizeGoogleCalendar
 } from '../services/calendarSyncService';
+import { __setNativeAuthTestAdapter } from '../shared/googleCredentialAuthPlugin';
 import { setManualZoomLinkForSession } from '../services/zoomService';
 
 
@@ -497,7 +511,427 @@ async function runCalendarAuditTests() {
   }
 }
 
-runCalendarAuditTests().catch((err) => {
-  console.error('❌ Google Calendar Live Sync Audit Test Failed:', err);
+function installMockBrowserStorage() {
+  const localMap = new Map<string, string>();
+  const sessionMap = new Map<string, string>();
+  const makeStorage = (map: Map<string, string>) => ({
+    getItem: (k: string) => (map.has(k) ? map.get(k)! : null),
+    setItem: (k: string, v: string) => {
+      map.set(k, String(v));
+    },
+    removeItem: (k: string) => {
+      map.delete(k);
+    },
+    clear: () => {
+      map.clear();
+    },
+    key: (i: number) => Array.from(map.keys())[i] ?? null,
+    get length() {
+      return map.size;
+    }
+  });
+  const localStorageMock = makeStorage(localMap);
+  const sessionStorageMock = makeStorage(sessionMap);
+  const previousWindow = (globalThis as any).window;
+  (globalThis as any).window = {
+    ...(previousWindow || {}),
+    localStorage: localStorageMock,
+    sessionStorage: sessionStorageMock,
+    location: { protocol: 'https:', origin: 'https://localhost' }
+  };
+  return {
+    localMap,
+    sessionMap,
+    restore: () => {
+      if (previousWindow === undefined) {
+        delete (globalThis as any).window;
+      } else {
+        (globalThis as any).window = previousWindow;
+      }
+    }
+  };
+}
+
+async function runCalendarOAuthFlowTests() {
+  console.log('\n=== Starting Google Calendar OAuth Flow Tests (Android Native vs Web) ===');
+  const mockStorage = installMockBrowserStorage();
+  const SENSITIVE_SECRETS = [
+    'ya29.android_secret_token_alpha',
+    'ya29.expired_token_beta',
+    'ya29.fresh_reauth_token_gamma',
+    'ya29.reopen_silent_token_delta',
+    'ya29.web_redirect_token_epsilon',
+    'SECRET_OAUTH_CODE_987654'
+  ];
+
+  try {
+    // -------------------------------------------------------------------------
+    // 7A. ANDROID CAPACITOR: NATIVE AUTHORIZATION CLIENT (ZERO WEB POPUP/REDIRECT)
+    // -------------------------------------------------------------------------
+    console.log('7A. Testing Android native Google Calendar consent approval, verification & memory-only token storage...');
+    __resetCalendarOAuthStateForTesting();
+
+    let webPopupCalls = 0;
+    let webRedirectCalls = 0;
+    let nativeAuthCalls = 0;
+    let lastNativeOptions: any = null;
+
+    __setWebCalendarAuthTestAdapter({
+      popupAuthorize: async () => {
+        webPopupCalls++;
+        throw new Error('Web popup MUST NEVER be called on Android Capacitor!');
+      },
+      redirectAuthorize: async () => {
+        webRedirectCalls++;
+        throw new Error('Web redirect MUST NEVER be called on Android Capacitor!');
+      }
+    });
+
+    __setNativeAuthTestAdapter({
+      isAndroidNative: () => true,
+      authorizeCalendar: async (options) => {
+        nativeAuthCalls++;
+        lastNativeOptions = options;
+        return {
+          cancelled: false,
+          accessToken: 'ya29.android_secret_token_alpha',
+          grantedScopes: ['https://www.googleapis.com/auth/calendar.events'],
+          scopeVerified: true,
+          email: 'teacher@glueck.app',
+          stage: 'native_consent_approved',
+          packageName: 'com.glueck.teacher'
+        };
+      }
+    });
+
+    let verifyApiCalls = 0;
+    __setCalendarFetchForTesting(async (input) => {
+      const url = String(input);
+      assert.ok(
+        url.includes('/calendar/v3/calendars/primary/events?maxResults=1&fields=summary,timeZone,accessRole'),
+        `Expected calendar.events-compatible events.list verification URL, got: ${url}`
+      );
+      verifyApiCalls++;
+      return new Response(
+        JSON.stringify({
+          summary: 'teacher@glueck.app',
+          timeZone: 'Africa/Cairo',
+          accessRole: 'owner',
+          items: []
+        }),
+        { status: 200 }
+      );
+    });
+
+    const androidApprove = await requestGoogleCalendarAccessToken(false);
+    assert.equal(androidApprove.ok, true);
+    assert.equal(androidApprove.platform, 'android_native');
+    assert.equal(androidApprove.accountEmail, 'teacher@glueck.app');
+    assert.equal(androidApprove.scopeVerified, true);
+    assert.equal(androidApprove.readVerified, true);
+    assert.equal(androidApprove.writeVerified, false);
+    assert.equal(nativeAuthCalls, 1);
+    assert.equal(verifyApiCalls, 1);
+    assert.equal(webPopupCalls, 0, 'Web popup must NEVER execute on Android');
+    assert.equal(webRedirectCalls, 0, 'Web redirect must NEVER execute on Android');
+    assert.equal(getInMemoryGoogleCalendarToken(), 'ya29.android_secret_token_alpha');
+
+    // Second call uses in-memory cache without re-prompting or duplicating connections
+    const androidCached = await requestGoogleCalendarAccessToken(false);
+    assert.equal(androidCached.ok, true);
+    assert.equal(nativeAuthCalls, 1, 'In-memory cache must avoid duplicate native OAuth prompts');
+
+    // Verify ZERO tokens written to localStorage / sessionStorage
+    const allStoredValues = [
+      ...Array.from(mockStorage.localMap.values()),
+      ...Array.from(mockStorage.sessionMap.values())
+    ].join('\n');
+    for (const secret of SENSITIVE_SECRETS) {
+      assert.equal(
+        allStoredValues.includes(secret),
+        false,
+        `Sensitive token/code MUST NEVER be stored in browser storage: ${secret}`
+      );
+    }
+
+    // -------------------------------------------------------------------------
+    // 7B. REOPENING GLÜCK AFTER AUTHORIZATION (COLD START -> needs_verification -> SILENT GRANT)
+    // -------------------------------------------------------------------------
+    console.log('7B. Testing reopening Glück after successful authorization...');
+    __simulateColdRestartForTesting();
+    const afterReopenState = getGoogleCalendarConnectionState();
+    assert.equal(
+      afterReopenState.status,
+      'needs_verification',
+      'Cold restart must downgrade persisted connected metadata to needs_verification until token is verified'
+    );
+    assert.equal(afterReopenState.accountEmail, 'teacher@glueck.app');
+    assert.equal(afterReopenState.hasInMemoryToken, false, 'In-memory token must start empty on cold restart');
+
+    __setNativeAuthTestAdapter({
+      isAndroidNative: () => true,
+      authorizeCalendar: async (options) => {
+        nativeAuthCalls++;
+        lastNativeOptions = options;
+        return {
+          cancelled: false,
+          accessToken: 'ya29.reopen_silent_token_delta',
+          grantedScopes: ['https://www.googleapis.com/auth/calendar.events'],
+          scopeVerified: true,
+          email: 'teacher@glueck.app',
+          stage: 'native_immediate_grant'
+        };
+      }
+    });
+
+    const silentReopenAuth = await verifyOrSilentlyReauthorizeGoogleCalendar();
+    assert.equal(silentReopenAuth.ok, true);
+    assert.equal(lastNativeOptions?.silentOnly, true, 'Mount verification must use silentOnly=true');
+    assert.equal(lastNativeOptions?.accountEmail, 'teacher@glueck.app', 'Reopen should pass previously verified account hint');
+    assert.equal(lastNativeOptions?.forceAccountSelection, false);
+    assert.equal(getGoogleCalendarConnectionState().status, 'connected');
+    assert.equal(getGoogleCalendarConnectionState().hasInMemoryToken, true);
+
+    // -------------------------------------------------------------------------
+    // 7C. ANDROID CANCELLED CONSENT
+    // -------------------------------------------------------------------------
+    console.log('7C. Testing Android cancelled Google Calendar consent...');
+    __setNativeAuthTestAdapter({
+      isAndroidNative: () => true,
+      authorizeCalendar: async () => ({
+        cancelled: true,
+        stage: 'native_consent_cancelled',
+        reason: 'Google Calendar consent was cancelled by the user.'
+      })
+    });
+
+    const androidCancelled = await requestGoogleCalendarAccessToken(true);
+    assert.equal(androidCancelled.ok, false);
+    assert.equal(androidCancelled.cancelled, true);
+    assert.equal(androidCancelled.code, 'USER_CANCELLED');
+    assert.equal(getGoogleCalendarConnectionState().status, 'cancelled');
+    assert.equal(getInMemoryGoogleCalendarToken(), null);
+
+    // -------------------------------------------------------------------------
+    // 7D. EXPIRED / INVALID AUTHORIZATION (401) & AWAITED clearToken AUTO-RETRY
+    // -------------------------------------------------------------------------
+    console.log('7D. Testing expired/invalid Calendar authorization (401) and awaited AuthorizationClient.clearToken retry...');
+    let attempt = 0;
+    let clearedStaleTokenArg: string | undefined;
+
+    __setNativeAuthTestAdapter({
+      isAndroidNative: () => true,
+      clearCalendarToken: async ({ accessToken }) => {
+        clearedStaleTokenArg = accessToken;
+        return { cleared: true };
+      },
+      authorizeCalendar: async () => {
+        attempt++;
+        if (attempt === 1) {
+          return {
+            cancelled: false,
+            accessToken: 'ya29.expired_token_beta',
+            grantedScopes: ['https://www.googleapis.com/auth/calendar.events'],
+            scopeVerified: true,
+            email: 'teacher@glueck.app',
+            stage: 'native_immediate_grant'
+          };
+        }
+        return {
+          cancelled: false,
+          accessToken: 'ya29.fresh_reauth_token_gamma',
+          grantedScopes: ['https://www.googleapis.com/auth/calendar.events'],
+          scopeVerified: true,
+          email: 'teacher@glueck.app',
+          stage: 'native_consent_approved'
+        };
+      }
+    });
+
+    __setCalendarFetchForTesting(async (_input, init) => {
+      const authHeader = String((init?.headers as any)?.Authorization || '');
+      if (authHeader.includes('ya29.expired_token_beta')) {
+        return new Response(JSON.stringify({ error: { code: 401, message: 'Invalid Credentials' } }), { status: 401 });
+      }
+      return new Response(
+        JSON.stringify({ summary: 'teacher@glueck.app', timeZone: 'Africa/Cairo', accessRole: 'owner', items: [] }),
+        { status: 200 }
+      );
+    });
+
+    const recoveredRes = await requestGoogleCalendarAccessToken(false);
+    assert.equal(recoveredRes.ok, true);
+    assert.equal(
+      clearedStaleTokenArg,
+      'ya29.expired_token_beta',
+      '401 recovery must await native clearCalendarToken with the stale Play Services token before retrying'
+    );
+    assert.equal(attempt, 2);
+    assert.equal(getGoogleCalendarConnectionState().status, 'connected');
+    assert.equal(getInMemoryGoogleCalendarToken(), 'ya29.fresh_reauth_token_gamma');
+
+    // Disconnect clears memory token and invokes native clearCalendarToken + revokeCalendarAccess
+    let clearedNativeToken = false;
+    let revokedNativeAccess = false;
+    __setNativeAuthTestAdapter({
+      isAndroidNative: () => true,
+      clearCalendarToken: async () => {
+        clearedNativeToken = true;
+        return { cleared: true };
+      },
+      revokeCalendarAccess: async () => {
+        revokedNativeAccess = true;
+        return { revoked: true };
+      }
+    });
+    await disconnectGoogleCalendar();
+    assert.equal(clearedNativeToken, true);
+    assert.equal(revokedNativeAccess, true);
+    assert.equal(getInMemoryGoogleCalendarToken(), null);
+    assert.equal(getGoogleCalendarConnectionState().status, 'disconnected');
+
+    // -------------------------------------------------------------------------
+    // 7E. WEB BUILD FLOW: POPUP BLOCKED -> REDIRECT FALLBACK -> SINGLE-SHOT STARTUP RESULT
+    // -------------------------------------------------------------------------
+    console.log('7E. Testing Web build popup-blocked redirect fallback and single-shot startup getRedirectResult...');
+    __resetCalendarOAuthStateForTesting();
+
+    let redirectStarted = false;
+    let redirectConsumedCount = 0;
+
+    __setNativeAuthTestAdapter({
+      isAndroidNative: () => false,
+      authorizeCalendar: async () => {
+        throw new Error('Native Android plugin MUST NEVER be invoked on Web build!');
+      }
+    });
+
+    __setWebCalendarAuthTestAdapter({
+      popupAuthorize: async () => {
+        throw Object.assign(new Error('Popup blocked by browser'), { code: 'auth/popup-blocked' });
+      },
+      redirectAuthorize: async () => {
+        redirectStarted = true;
+      },
+      consumeRedirectResult: async () => {
+        redirectConsumedCount++;
+        return {
+          accessToken: 'ya29.web_redirect_token_epsilon',
+          email: 'webteacher@glueck.app'
+        };
+      }
+    });
+
+    __setCalendarFetchForTesting(async () =>
+      new Response(
+        JSON.stringify({
+          summary: 'webteacher@glueck.app',
+          timeZone: 'Africa/Cairo',
+          accessRole: 'owner',
+          items: []
+        }),
+        { status: 200 }
+      )
+    );
+
+    const webRedirectStart = await requestGoogleCalendarAccessToken(false);
+    assert.equal(webRedirectStart.ok, false);
+    assert.equal(webRedirectStart.redirected, true);
+    assert.equal(redirectStarted, true);
+    assert.equal(getGoogleCalendarConnectionState().status, 'pending_redirect');
+
+    // Startup processing after returning from Google consent redirect
+    const startup1 = await processPendingWebCalendarRedirectResult();
+    assert.equal(startup1.handled, true);
+    assert.equal(startup1.ok, true);
+    assert.equal(startup1.shouldOpenIntegrations, true);
+    assert.equal(startup1.accountEmail, 'webteacher@glueck.app');
+    assert.equal(getGoogleCalendarConnectionState().status, 'connected');
+    assert.equal(getInMemoryGoogleCalendarToken(), 'ya29.web_redirect_token_epsilon');
+
+    // Second startup invocation must NOT re-consume redirect result
+    const startup2 = await processPendingWebCalendarRedirectResult();
+    assert.equal(startup2.ok, true);
+    assert.equal(redirectConsumedCount, 1, 'Web redirect result must be processed at most once');
+
+    // -------------------------------------------------------------------------
+    // 7F. ANDROID DEEP-LINK CALLBACK SINGLE-SHOT DEDUPLICATION & ZERO SECRET LEAKAGE
+    // -------------------------------------------------------------------------
+    console.log('7F. Testing Android deep-link callback single-shot handling & zero secret leakage in diagnostics...');
+    const cbUrl = 'glueck://oauth/calendar/callback?status=ok&code=SECRET_OAUTH_CODE_987654&state=abc123456';
+    const cbFirst = handleCalendarOAuthDeepLinkCallback(cbUrl);
+    assert.equal(cbFirst.matched, true);
+    assert.equal(cbFirst.alreadyHandled, false);
+    assert.equal(cbFirst.shouldOpenIntegrations, true);
+
+    const cbSecond = handleCalendarOAuthDeepLinkCallback(cbUrl);
+    assert.equal(cbSecond.matched, true);
+    assert.equal(cbSecond.alreadyHandled, true, 'Duplicate callback URL must be ignored (handled exactly once)');
+
+    const cbCancelled = handleCalendarOAuthDeepLinkCallback(
+      'glueck://oauth/calendar/callback?error=access_denied&state=cancel_99'
+    );
+    assert.equal(cbCancelled.matched, true);
+    assert.equal(cbCancelled.status, 'cancelled');
+    assert.equal(cbCancelled.shouldOpenIntegrations, true);
+
+    const diagJson = JSON.stringify(getCalendarOAuthDiagnostics());
+    for (const secret of SENSITIVE_SECRETS) {
+      assert.equal(
+        diagJson.includes(secret),
+        false,
+        `Diagnostic logs MUST NEVER contain OAuth codes or tokens: ${secret}`
+      );
+    }
+
+    // -------------------------------------------------------------------------
+    // 7G. STATIC VERIFICATION OF ANDROID PLUGIN, GRADLE, MANIFEST & APP DEEP LINKS
+    // -------------------------------------------------------------------------
+    console.log('7G. Verifying native Android plugin, Gradle dependency, manifest intent filter & App routing...');
+    const rootDir = process.cwd();
+    const pluginJava = fs.readFileSync(
+      path.join(rootDir, 'android/app/src/main/java/com/glueck/app/GoogleCredentialAuthPlugin.java'),
+      'utf8'
+    );
+    const appGradle = fs.readFileSync(path.join(rootDir, 'android/app/build.gradle'), 'utf8');
+    const manifestXml = fs.readFileSync(
+      path.join(rootDir, 'android/app/src/main/AndroidManifest.xml'),
+      'utf8'
+    );
+    const appTsx = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8');
+
+    assert.ok(appGradle.includes('com.google.android.gms:play-services-auth:21.4.0'));
+    assert.equal(pluginJava.includes('GoogleAuthUtil.clearToken'), false);
+    assert.ok(pluginJava.includes('public void authorizeCalendar(final PluginCall call)'));
+    assert.ok(pluginJava.includes('AuthorizationClient'));
+    assert.ok(pluginJava.includes('ClearTokenRequest'));
+    assert.ok(pluginJava.includes('RevokeAccessRequest'));
+    assert.ok(pluginJava.includes('StartIntentSenderForResult'));
+    assert.ok(pluginJava.includes('https://www.googleapis.com/auth/calendar.events'));
+    assert.ok(pluginJava.includes('public void clearCalendarToken(final PluginCall call)'));
+    assert.ok(pluginJava.includes('public void revokeCalendarAccess(final PluginCall call)'));
+    assert.ok(manifestXml.includes('android:scheme="glueck"'));
+    assert.ok(appTsx.includes('handleCalendarOAuthDeepLinkCallback'));
+    assert.ok(appTsx.includes('processPendingWebCalendarRedirectResult'));
+    assert.ok(appTsx.includes('subscribeNativeCalendarAuthProcessRestored'));
+    assert.ok(appTsx.includes('openSettingsIntegrations'));
+
+    console.log('✅ All Google Calendar OAuth Flow Tests Passed!');
+  } finally {
+    __setNativeAuthTestAdapter(null);
+    __setWebCalendarAuthTestAdapter(null);
+    __setCalendarFetchForTesting(null);
+    __resetCalendarOAuthStateForTesting();
+    mockStorage.restore();
+  }
+}
+
+async function runAll() {
+  await runCalendarAuditTests();
+  await runCalendarOAuthFlowTests();
+}
+
+runAll().catch((err) => {
+  console.error('❌ Google Calendar Live Sync & OAuth Audit Test Failed:', err);
   process.exit(1);
 });

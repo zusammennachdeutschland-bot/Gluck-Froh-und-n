@@ -92,7 +92,7 @@ import { syncAllWidgetsToNative } from '../services/widgetService';
 import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesService';
 import { loadGrainGroupLearningRecords, saveGrainGroupLearningRecords, sanitizeGrainGroupLearningRecord } from '../services/grainService';
 import { loadZoomUiMeta, sanitizeZoomRecordForStorage } from '../services/zoomService';
-import { DEFAULT_ZOOM_TIMEZONE, reconcileGroupWeeklySessions } from '../services/zoomSessionStandardizer';
+import { DEFAULT_ZOOM_TIMEZONE, reconcileGroupWeeklySessions, resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
 
 export const DEFAULT_BOTTOM_NAV_ORDER = [
   'home',
@@ -1910,6 +1910,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       setGroupWeeklySessions(cleaned);
       storage.setItem('glueck_group_weekly_sessions_v1', cleaned);
       autoSyncEngine.notifyMutation('groupWeeklySessions', 'bulk_zoom_update');
+
+      // Automatically refresh meetingLink on upcoming/in-progress online lessons so every
+      // reminder, schedule card, and open-Zoom button immediately reflects rebuilt links
+      // without touching completed/cancelled historical lessons.
+      const refreshLessonMeetingLink = (l: Lesson): Lesson => {
+        if (l.deleted || l.type !== 'online' || !l.groupId) return l;
+        if (l.status !== 'scheduled' && l.status !== 'in_progress') return l;
+        const resolved = resolveActiveZoomLinkForLesson({
+          groupId: l.groupId,
+          lesson: l,
+          groupWeeklySessions: cleaned
+        });
+        if (!resolved || resolved === l.meetingLink) return l;
+        return wrapMutation({
+          ...l,
+          meetingLink: resolved
+        } as Lesson);
+      };
+
+      setLessons((prev) => {
+        let changed = false;
+        const next = prev.map((l) => {
+          const updated = refreshLessonMeetingLink(l);
+          if (updated !== l) changed = true;
+          return updated;
+        });
+        return changed ? next : prev;
+      });
+      void updateFullLessonsStorage((all) => {
+        let changed = false;
+        const next = all.map((l) => {
+          const updated = refreshLessonMeetingLink(l);
+          if (updated !== l) changed = true;
+          return updated;
+        });
+        return changed ? next : all;
+      });
     }
     if (snapshot.records) {
       const cleaned = snapshot.records.map((x) => sanitizeZoomRecordForStorage(x));
@@ -1932,7 +1969,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       autoSyncEngine.notifyMutation('grainRecordingMatches', 'bulk_zoom_update');
     }
     bumpSyncRevision();
-  }, []);
+  }, [updateFullLessonsStorage]);
 
   const reconcileGroupSessionsState = useCallback((group: Group) => {
     const tz = profile.defaultZoomTimezone || loadZoomUiMeta().defaultTimezone || DEFAULT_ZOOM_TIMEZONE;
@@ -2935,7 +2972,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               paymentStatus: 'pending',
               amountDue: perSessionPrice,
               amountPaid: 0,
-              meetingLink: group.type === 'online' ? (group.zoomLink || profile.defaultZoomLink) : undefined,
+              meetingLink: group.type === 'online'
+                ? resolveActiveZoomLinkForLesson({
+                    group,
+                    lesson: { groupId: group.id, date: dateStr, time: sessionTime },
+                    groupWeeklySessions: groupWeeklySessionsRef.current,
+                    defaultZoomLink: profile.defaultZoomLink
+                  })
+                : undefined,
               locationAddress: group.type === 'offline' ? (group.address || 'Cairo Center') : undefined,
               scheduleRecurrence: group.scheduleRecurrence || 'weekly',
               biweeklyWeek: getAlternatingWeek(d),
@@ -3435,7 +3479,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               paymentStatus: 'pending',
               amountDue: perSessionPrice,
               amountPaid: 0,
-              meetingLink: updatedGroup.type === 'online' ? (updatedGroup.zoomLink || profile.defaultZoomLink) : undefined,
+              meetingLink: updatedGroup.type === 'online'
+                ? resolveActiveZoomLinkForLesson({
+                    group: updatedGroup,
+                    lesson: { groupId: updatedGroup.id, date: dateStr, time: sessionTime },
+                    groupWeeklySessions: groupWeeklySessionsRef.current,
+                    defaultZoomLink: profile.defaultZoomLink
+                  })
+                : undefined,
               locationAddress: updatedGroup.type === 'offline' ? (updatedGroup.address || 'Cairo Center') : undefined,
               scheduleRecurrence: updatedGroup.scheduleRecurrence || 'weekly',
               biweeklyWeek: getAlternatingWeek(d)
@@ -3467,7 +3518,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           type: updatedGroup.type || l.type,
           scheduleRecurrence: updatedGroup.scheduleRecurrence || 'weekly',
           biweeklyWeek: l.date ? getAlternatingWeek(l.date) : l.biweeklyWeek,
-          meetingLink: updatedGroup.type === 'online' ? (updatedGroup.zoomLink || profile.defaultZoomLink || l.meetingLink) : undefined,
+          meetingLink: updatedGroup.type === 'online'
+            ? (resolveActiveZoomLinkForLesson({
+                group: updatedGroup,
+                lesson: l,
+                groupWeeklySessions: groupWeeklySessionsRef.current,
+                defaultZoomLink: profile.defaultZoomLink
+              }) || l.meetingLink)
+            : undefined,
           locationAddress: updatedGroup.type === 'offline' ? (updatedGroup.address || l.locationAddress) : undefined,
           durationMinutes: updatedGroup.lessonDurationMinutes || l.durationMinutes || 60,
           totalSessionsInPackage: isPerLesson ? 1 : mergedSessionCount,
@@ -3541,7 +3599,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           groupName: updatedGroup.name,
           grade: updatedGroup.grade || l.grade,
           type: updatedGroup.type || l.type,
-          meetingLink: updatedGroup.type === 'online' ? (updatedGroup.zoomLink || profile.defaultZoomLink || l.meetingLink) : undefined,
+          meetingLink: updatedGroup.type === 'online'
+            ? (resolveActiveZoomLinkForLesson({
+                group: updatedGroup,
+                lesson: l,
+                groupWeeklySessions: groupWeeklySessionsRef.current,
+                defaultZoomLink: profile.defaultZoomLink
+              }) || l.meetingLink)
+            : undefined,
           locationAddress: updatedGroup.type === 'offline' ? (updatedGroup.address || l.locationAddress) : undefined,
           durationMinutes: updatedGroup.lessonDurationMinutes || l.durationMinutes || 60,
           totalSessionsInPackage: isPerLesson ? 1 : mergedSessionCount,
@@ -5145,7 +5210,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           date: dateStr,
           sessionNumber: 1,
           totalSessionsInPackage: totalSessions,
-          meetingLink: lessonData.type === 'online' ? (targetGroup?.zoomLink || profile.defaultZoomLink) : undefined,
+          meetingLink: lessonData.type === 'online'
+            ? resolveActiveZoomLinkForLesson({
+                group: targetGroup,
+                lesson: { groupId: targetGroup?.id || lessonData.groupId, date: dateStr, time: lessonData.time, meetingLink: lessonData.meetingLink },
+                groupWeeklySessions: groupWeeklySessionsRef.current,
+                defaultZoomLink: profile.defaultZoomLink
+              })
+            : undefined,
           locationAddress: lessonData.type === 'offline' ? (lessonData.locationAddress || targetGroup?.address || '') : undefined,
           scheduleRecurrence: effectiveRecurrence,
           biweeklyWeek: getAlternatingWeek(lessonDate)
@@ -5988,7 +6060,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               paymentStatus: 'pending',
               amountDue: perSessionPrice,
               amountPaid: 0,
-              meetingLink: targetGroup.type === 'online' ? (targetGroup.zoomLink || profile.defaultZoomLink) : undefined,
+              meetingLink: targetGroup.type === 'online'
+                ? resolveActiveZoomLinkForLesson({
+                    group: targetGroup,
+                    lesson: { groupId: targetGroup.id, date: dateStr, time: sessionTime },
+                    groupWeeklySessions: groupWeeklySessionsRef.current,
+                    defaultZoomLink: profile.defaultZoomLink
+                  })
+                : undefined,
               locationAddress: targetGroup.type === 'offline' ? (targetGroup.address || 'Cairo Center') : undefined,
               scheduleRecurrence: targetGroup.scheduleRecurrence || 'weekly',
               biweeklyWeek: getAlternatingWeek(d)

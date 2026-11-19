@@ -59,6 +59,12 @@ import {
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { Toast } from '@capacitor/toast';
+import {
+  handleCalendarOAuthDeepLinkCallback,
+  processPendingWebCalendarRedirectResult,
+  verifyOrSilentlyReauthorizeGoogleCalendar
+} from './services/calendarSyncService';
+import { subscribeNativeCalendarAuthProcessRestored } from './shared/googleCredentialAuthPlugin';
 
 function MainApp() {
   useLessonReminders();
@@ -90,7 +96,8 @@ function MainApp() {
     saveLernstudioSet,
     deleteLernstudioSet,
     groups,
-    profile
+    profile,
+    triggerToast
   } = useApp();
 
   // Ensure notification channels and system permissions are properly configured for outside-the-app alerts
@@ -116,10 +123,79 @@ function MainApp() {
   const [quickTransactionType, setQuickTransactionType] = useState<'income' | 'expense' | 'transfer' | null>(null);
   const [pendingLessonId, setPendingLessonId] = useState<string | null>(null);
 
+  const openSettingsIntegrations = useCallback(() => {
+    try {
+      (window as any).__glueckPendingSettingsCategory = 'grain';
+    } catch {}
+    setActiveTab('settings');
+    try {
+      window.dispatchEvent(new CustomEvent('glueck:open-integrations'));
+    } catch {}
+  }, [setActiveTab]);
+
+  // Process pending Web Firebase Calendar OAuth redirect results exactly once on startup,
+  // and recover gracefully if Android recreated the process while native Google consent was open.
+  useEffect(() => {
+    let active = true;
+    processPendingWebCalendarRedirectResult()
+      .then((res) => {
+        if (!active || !res.handled) return;
+        if (res.shouldOpenIntegrations) {
+          openSettingsIntegrations();
+        }
+        if (res.message) {
+          triggerToast(res.message);
+        }
+      })
+      .catch(() => {});
+
+    const unsubRestored = subscribeNativeCalendarAuthProcessRestored((evt) => {
+      if (!active) return;
+      openSettingsIntegrations();
+      if (evt.status === 'approved') {
+        verifyOrSilentlyReauthorizeGoogleCalendar({ forceSilentCheck: true })
+          .then((res) => {
+            if (!active) return;
+            triggerToast(
+              res.ok
+                ? res.accountEmail
+                  ? `Google Calendar connected (${res.accountEmail}).`
+                  : 'Google Calendar connected.'
+                : res.error || 'Please tap Reconnect Google Calendar to finish verification.'
+            );
+          })
+          .catch(() => {});
+      } else if (evt.status === 'cancelled') {
+        triggerToast('Google Calendar authorization was cancelled.');
+      } else {
+        triggerToast(evt.reason || 'Google Calendar authorization did not finish. Please reconnect.');
+      }
+    });
+
+    return () => {
+      active = false;
+      unsubRestored();
+    };
+  }, [openSettingsIntegrations, triggerToast]);
+
   // Deep Link handler
   const handleDeepLink = useCallback((url: string) => {
     if (!url) return;
-    console.log('Handling deep link URL:', url);
+    // Never log query strings or fragments that could contain OAuth codes or tokens
+    const safeUrlForLog = url.split('?')[0].split('#')[0];
+    console.log('Handling deep link route:', safeUrlForLog);
+
+    // Handle Google Calendar OAuth callbacks and Integrations deep links first (single-shot)
+    const calendarCallback = handleCalendarOAuthDeepLinkCallback(url);
+    if (calendarCallback.matched) {
+      if (calendarCallback.shouldOpenIntegrations) {
+        openSettingsIntegrations();
+      }
+      if (!calendarCallback.alreadyHandled && calendarCallback.message) {
+        triggerToast(calendarCallback.message);
+      }
+      return;
+    }
 
     // 0. Handle Homework Short Links (/Herr-Abdul-rahman/{SHORT_ID}) and Long Links (/homework/{id})
     const shortMatch = url.match(/(\/Herr-Abdul-rahman\/[^/?#]+(?:\?[^#]*)?)/i);
@@ -192,6 +268,9 @@ function MainApp() {
           case 'settings':
             setActiveTab('settings');
             break;
+          case 'integrations':
+            openSettingsIntegrations();
+            break;
           case 'freetime':
           case 'free_time':
             setActiveTab('freeTime');
@@ -224,7 +303,7 @@ function MainApp() {
         }
       }
     }
-  }, [lessons, openLessonControl, setActiveTab, setIsAddLessonModalOpen, setIsAddQuickLessonModalOpen, setIsAddStudentModalOpen, setIsAddGroupModalOpen, setIsStartLessonNowModalOpen]);
+  }, [lessons, openLessonControl, openSettingsIntegrations, triggerToast, setActiveTab, setIsAddLessonModalOpen, setIsAddQuickLessonModalOpen, setIsAddStudentModalOpen, setIsAddGroupModalOpen, setIsStartLessonNowModalOpen]);
 
   const handleDeepLinkRef = useRef(handleDeepLink);
   useEffect(() => {

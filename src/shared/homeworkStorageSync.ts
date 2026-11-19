@@ -1249,6 +1249,24 @@ export function markAssignmentManuallyDeletedLocally(
   }
 }
 
+export function clearAssignmentManuallyDeletedLocally(
+  assignmentId: string,
+  explicitUid?: string | null
+): void {
+  if (typeof window === 'undefined' || !assignmentId) return;
+  try {
+    const key = getManualDeletedAssignmentsStorageKey(explicitUid);
+    const manualSet = getManualDeletedAssignmentIds(explicitUid);
+    const safeId = sanitizeDocId(assignmentId);
+    const hadAny = manualSet.delete(assignmentId) || manualSet.delete(safeId);
+    if (hadAny) {
+      localStorage.setItem(key, JSON.stringify(Array.from(manualSet).slice(-500)));
+    }
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
 export function getLocalAssignments(explicitUid?: string | null): HomeworkAssignment[] {
   if (typeof window === 'undefined') return [];
   try {
@@ -1818,6 +1836,32 @@ function findAssignmentAcrossLocalScopes(assignmentId: string): HomeworkAssignme
   return null;
 }
 
+function findAssignmentByShortIdAcrossLocalScopes(shortId: string): HomeworkAssignment | null {
+  if (typeof window === 'undefined' || !shortId) return null;
+  const cleanShortId = shortId.trim();
+  if (!cleanShortId) return null;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith('glueck_hw_assignments_v3_')) continue;
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const list: HomeworkAssignment[] = JSON.parse(raw);
+      if (!Array.isArray(list)) continue;
+      const found = list.find(
+        (a) =>
+          a &&
+          ((a.shortId || '').trim() === cleanShortId ||
+            (a.originalShortId || '').trim() === cleanShortId)
+      );
+      if (found) return found;
+    }
+  } catch {
+    // Ignore storage inspection errors
+  }
+  return null;
+}
+
 /**
  * Restores the original short-link ID (`originalShortId` or `shortId`) for an existing online assignment
  * if its Firestore short-link record was accidentally deleted or superseded.
@@ -2367,6 +2411,470 @@ export async function regenerateHomeworkShortLink(
   } finally {
     inFlightAssignmentSaves.delete(existing.id);
     inFlightAssignmentSaves.delete(safeId);
+  }
+}
+
+export interface ParsedManualHomeworkLink {
+  kind: 'short' | 'legacy' | 'invalid';
+  shortId?: string;
+  assignmentId?: string;
+  rawUrl?: string;
+}
+
+/**
+ * Parses a manually pasted homework link or code from WhatsApp/clipboard:
+ * - Short link: `https://.../Herr-Abdul-rahman/{SHORT_ID}` or `/?shortId={SHORT_ID}` or raw `{SHORT_ID}`
+ * - Legacy link: `https://.../homework/{assignmentId}?...`
+ * Safely strips surrounding WhatsApp text or trailing punctuation.
+ */
+export function parseManualHomeworkLinkInput(rawInput?: string | null): ParsedManualHomeworkLink {
+  const input = String(rawInput || '').trim();
+  if (!input) return { kind: 'invalid' };
+
+  // Extract URL token if user pasted a full WhatsApp message containing the link
+  const urlMatch = input.match(/https?:\/\/[^\s<>"'`]+/i);
+  const candidateToken = (urlMatch ? urlMatch[0] : input)
+    .replace(/^[("'<\s]+/, '')
+    .replace(/[.,;:!?)'"\s]+$/, '')
+    .trim();
+
+  if (!candidateToken) return { kind: 'invalid' };
+
+  // 1. Short route: /Herr-Abdul-rahman/{SHORT_ID}
+  const shortRouteMatch = candidateToken.match(/(?:^|\/)Herr-Abdul-rahman\/([A-Za-z0-9]{6,10})(?:[/?#]|$)/i);
+  if (shortRouteMatch && shortRouteMatch[1] && isValidHomeworkShortId(shortRouteMatch[1])) {
+    return {
+      kind: 'short',
+      shortId: shortRouteMatch[1].trim(),
+      rawUrl: candidateToken
+    };
+  }
+
+  // 2. Query param: ?shortId={SHORT_ID}
+  const queryShortMatch = candidateToken.match(/[?&#]shortId=([A-Za-z0-9]{6,10})(?:[&#]|$)/i);
+  if (queryShortMatch && queryShortMatch[1] && isValidHomeworkShortId(queryShortMatch[1])) {
+    return {
+      kind: 'short',
+      shortId: queryShortMatch[1].trim(),
+      rawUrl: candidateToken
+    };
+  }
+
+  // 3. Legacy route: /homework/{assignmentId}
+  const legacyMatch = candidateToken.match(/(?:^|\/)homework\/([A-Za-z0-9_-]{3,128})(?:[/?#]|$)/i);
+  if (legacyMatch && legacyMatch[1]) {
+    return {
+      kind: 'legacy',
+      assignmentId: decodeURIComponent(legacyMatch[1]).trim(),
+      rawUrl: candidateToken
+    };
+  }
+
+  // 4. Raw short code directly (e.g. `Ab3Xy9Z`)
+  if (isValidHomeworkShortId(candidateToken)) {
+    return {
+      kind: 'short',
+      shortId: candidateToken,
+      rawUrl: buildShortHomeworkShareUrl(candidateToken)
+    };
+  }
+
+  return { kind: 'invalid' };
+}
+
+/**
+ * Manually links/re-binds a teacher-supplied online homework URL (short link or legacy URL),
+ * ensures both `homework_assignments/{id}` and `homework_short_links/{shortId}` are active and
+ * published in Firestore under that exact link so students can open & submit immediately,
+ * clears local deleted/revoked tombstones, and pulls the latest submissions right away.
+ */
+export async function linkManualHomeworkUrl(params: {
+  rawInput: string;
+  currentAssignmentId?: string | null;
+  expectedGroupId?: string | null;
+  explicitOwnerUid?: string;
+}): Promise<HomeworkLinkManagementResult> {
+  const parsed = parseManualHomeworkLinkInput(params.rawInput);
+  if (parsed.kind === 'invalid') {
+    return {
+      success: false,
+      status: 'invalid_id',
+      error:
+        'الرابط غير صالح. برجاء لصق رابط الواجب الأونلاين مثل https://.../Herr-Abdul-rahman/XXXXXXX أو كود الرابط المختصر.'
+    };
+  }
+
+  const activeUid =
+    params.explicitOwnerUid !== undefined
+      ? (params.explicitOwnerUid || '').trim()
+      : (getCurrentHomeworkOwnerUid() || '').trim();
+
+  if (!activeUid) {
+    return {
+      success: false,
+      status: 'unauthorized',
+      error: 'يرجى تسجيل الدخول بحساب المعلم أولاً لربط وتفعيل رابط الواجب.'
+    };
+  }
+
+  const localScoped = getLocalAssignments(activeUid);
+  const currentHwId = (params.currentAssignmentId || '').trim();
+  const safeCurrentHwId = currentHwId ? sanitizeDocId(currentHwId) : '';
+
+  const isOwnedByActive = (hw?: Partial<HomeworkAssignment> | null): boolean => {
+    if (!hw) return false;
+    const owner = (hw.ownerUid || '').trim();
+    return !owner || owner === activeUid;
+  };
+
+  let resolvedAssignment: HomeworkAssignment | null = null;
+  let unauthorizedDetected = false;
+
+  if (parsed.kind === 'short' && parsed.shortId) {
+    const targetShortId = parsed.shortId;
+
+    // 1. Check local storage (active scope first, then cross-scope owned by this teacher)
+    const localShortMatch =
+      localScoped.find(
+        (a) =>
+          (a.shortId || '').trim() === targetShortId ||
+          (a.originalShortId || '').trim() === targetShortId
+      ) || findAssignmentByShortIdAcrossLocalScopes(targetShortId);
+
+    if (localShortMatch) {
+      if (!isOwnedByActive(localShortMatch)) {
+        unauthorizedDetected = true;
+      } else {
+        resolvedAssignment = localShortMatch;
+      }
+    }
+
+    // 2. Check cloud short-link record directly (bypasses local revoked flag because teacher is explicitly restoring/linking)
+    if (!resolvedAssignment && !unauthorizedDetected) {
+      const cloudShortRes = await activeFetchShortLinkFromCloud(targetShortId).catch(() => null);
+      if (cloudShortRes) {
+        const cloudShortOwner = (cloudShortRes.assignment?.ownerUid || '').trim();
+        if (cloudShortOwner && cloudShortOwner !== activeUid) {
+          unauthorizedDetected = true;
+        } else {
+          const hintedAssignmentId = (
+            cloudShortRes.assignmentId ||
+            cloudShortRes.assignment?.id ||
+            ''
+          ).trim();
+
+          // Always prefer full teacher assignment record when available
+          if (hintedAssignmentId) {
+            const localById =
+              localScoped.find(
+                (a) =>
+                  a.id === hintedAssignmentId ||
+                  sanitizeDocId(a.id) === sanitizeDocId(hintedAssignmentId)
+              ) || findAssignmentAcrossLocalScopes(hintedAssignmentId);
+            if (localById) {
+              if (!isOwnedByActive(localById)) {
+                unauthorizedDetected = true;
+              } else {
+                resolvedAssignment = localById;
+              }
+            }
+            if (!resolvedAssignment && !unauthorizedDetected) {
+              const cloudFullHw = await activeFetchAssignmentFromCloud(hintedAssignmentId).catch(
+                () => null
+              );
+              if (cloudFullHw) {
+                if (!isOwnedByActive(cloudFullHw)) {
+                  unauthorizedDetected = true;
+                } else {
+                  resolvedAssignment = cloudFullHw;
+                }
+              }
+            }
+          }
+
+          if (!resolvedAssignment && !unauthorizedDetected && cloudShortRes.assignment) {
+            resolvedAssignment = cloudShortRes.assignment;
+          }
+        }
+      }
+    }
+
+    // 3. Check current lesson's assignmentId (binding this exact short link to the existing lesson assignment)
+    if (!resolvedAssignment && !unauthorizedDetected && currentHwId) {
+      const currentLocal =
+        localScoped.find((a) => a.id === currentHwId || sanitizeDocId(a.id) === safeCurrentHwId) ||
+        findAssignmentAcrossLocalScopes(currentHwId);
+      if (currentLocal) {
+        if (!isOwnedByActive(currentLocal)) {
+          unauthorizedDetected = true;
+        } else {
+          resolvedAssignment = currentLocal;
+        }
+      }
+      if (!resolvedAssignment && !unauthorizedDetected) {
+        const cloudCurrentHw = await activeFetchAssignmentFromCloud(currentHwId).catch(() => null);
+        if (cloudCurrentHw) {
+          if (!isOwnedByActive(cloudCurrentHw)) {
+            unauthorizedDetected = true;
+          } else {
+            resolvedAssignment = cloudCurrentHw;
+          }
+        }
+      }
+    }
+
+    // 4. Last-resort cloud sweep of teacher's own assignments
+    if (!resolvedAssignment && !unauthorizedDetected) {
+      const allCloudHw = await activeFetchAllAssignmentsFromCloud(activeUid).catch(() => []);
+      const cloudMatch = allCloudHw.find(
+        (a) =>
+          a &&
+          isOwnedByActive(a) &&
+          ((a.shortId || '').trim() === targetShortId ||
+            (a.originalShortId || '').trim() === targetShortId ||
+            (currentHwId && (a.id === currentHwId || sanitizeDocId(a.id) === safeCurrentHwId)))
+      );
+      if (cloudMatch) {
+        resolvedAssignment = cloudMatch;
+      }
+    }
+  } else if (parsed.kind === 'legacy' && parsed.assignmentId) {
+    const targetHwId = parsed.assignmentId;
+    const safeTargetId = sanitizeDocId(targetHwId);
+
+    const localMatch =
+      localScoped.find((a) => a.id === targetHwId || sanitizeDocId(a.id) === safeTargetId) ||
+      findAssignmentAcrossLocalScopes(targetHwId);
+    if (localMatch) {
+      if (!isOwnedByActive(localMatch)) {
+        unauthorizedDetected = true;
+      } else {
+        resolvedAssignment = localMatch;
+      }
+    }
+    if (!resolvedAssignment && !unauthorizedDetected) {
+      const cloudHw = await activeFetchAssignmentFromCloud(targetHwId).catch(() => null);
+      if (cloudHw) {
+        if (!isOwnedByActive(cloudHw)) {
+          unauthorizedDetected = true;
+        } else {
+          resolvedAssignment = cloudHw;
+        }
+      }
+    }
+  }
+
+  if (unauthorizedDetected) {
+    return {
+      success: false,
+      status: 'unauthorized',
+      error: 'هذا الرابط تابع لحساب معلم آخر ولا يمكن ربطه هنا.'
+    };
+  }
+
+  if (!resolvedAssignment) {
+    return {
+      success: false,
+      status: 'not_found',
+      error:
+        'تعذر العثور على بيانات هذا الواجب محلياً أو في السحابة. تأكد من الرابط أو أنشئ الواجب من Lernstudio أولاً.'
+    };
+  }
+
+  // Enforce group isolation when linking to a specific group lesson
+  const expectedGroup = (params.expectedGroupId || '').trim();
+  const hwMode = resolveAssignmentAudienceMode(resolvedAssignment);
+  const hwGroupId = (resolvedAssignment.groupId || '').trim();
+  if (
+    expectedGroup &&
+    expectedGroup !== 'quick_group' &&
+    hwMode === 'group' &&
+    hwGroupId &&
+    hwGroupId !== 'all' &&
+    hwGroupId !== expectedGroup
+  ) {
+    return {
+      success: false,
+      status: 'unauthorized',
+      error: `هذا الرابط مخصص لمجموعة أخرى (${resolvedAssignment.groupName || hwGroupId}). برجاء لصق رابط الواجب الخاص بهذه المجموعة.`
+    };
+  }
+
+  const safeResolvedId = sanitizeDocId(resolvedAssignment.id);
+  const previousShortId = (resolvedAssignment.shortId || '').trim();
+  const targetShortId =
+    parsed.kind === 'short' && parsed.shortId
+      ? parsed.shortId
+      : isValidHomeworkShortId(previousShortId)
+      ? previousShortId
+      : '';
+
+  // Check local assignments for shortId collision with a DIFFERENT assignment
+  if (targetShortId) {
+    const localCollision = localScoped.some(
+      (a) =>
+        a.id !== resolvedAssignment!.id &&
+        sanitizeDocId(a.id) !== safeResolvedId &&
+        ((a.shortId || '').trim() === targetShortId ||
+          (a.originalShortId || '').trim() === targetShortId)
+    );
+    if (localCollision) {
+      return {
+        success: false,
+        status: 'collision',
+        shortId: targetShortId,
+        error: 'هذا الرابط مستخدم بالفعل في واجب آخر ولا يمكن إعادة تعيينه.'
+      };
+    }
+  }
+
+  const updatedHw: HomeworkAssignment = normalizeHomeworkAssignment({
+    ...resolvedAssignment,
+    ...(targetShortId
+      ? {
+          shortId: targetShortId,
+          originalShortId: resolvedAssignment.originalShortId || targetShortId
+        }
+      : {}),
+    ownerUid: activeUid,
+    deleted: false,
+    isActive: true,
+    status: 'active',
+    updatedAt: Date.now(),
+    cloudSynced: true,
+    cloudCreatePending: false
+  });
+
+  inFlightAssignmentSaves.add(updatedHw.id);
+  inFlightAssignmentSaves.add(safeResolvedId);
+  markAssignmentRecentlySaved(updatedHw.id);
+
+  try {
+    // Step 1: Publish/verify the exact short link in Firestore so students open it immediately
+    if (targetShortId) {
+      const shortRes = await activeSaveShortLinkToCloud(updatedHw, activeUid, {
+        forceVerifyAndWrite: true
+      });
+      if (shortRes.collision) {
+        return {
+          success: false,
+          status: 'collision',
+          shortId: targetShortId,
+          error: 'هذا الرابط محجوز لواجب آخر في السحابة ولا يمكن الكتابة فوقه.'
+        };
+      }
+      if (!shortRes.saved) {
+        return {
+          success: false,
+          status: 'failed',
+          shortId: targetShortId,
+          error: 'تعذر تفعيل الرابط في السحابة. يرجى التحقق من الاتصال بالإنترنت والمحاولة مرة أخرى.'
+        };
+      }
+    }
+
+    // Step 2: Ensure homework_assignments/{id} exists and is active in Firestore so student submissions succeed
+    let hwSaved = false;
+    try {
+      hwSaved = await activeSaveAssignmentToCloud(updatedHw, activeUid);
+    } catch (err: any) {
+      if (
+        err?.code === 'SHORT_ID_COLLISION' ||
+        String(err?.message || '').includes('SHORT_ID_COLLISION') ||
+        err?.status === 409
+      ) {
+        return {
+          success: false,
+          status: 'collision',
+          shortId: targetShortId || undefined,
+          error: 'هذا الرابط محجوز لواجب آخر في السحابة ولا يمكن الكتابة فوقه.'
+        };
+      }
+      hwSaved = false;
+    }
+
+    if (!hwSaved) {
+      return {
+        success: false,
+        status: 'failed',
+        shortId: targetShortId || undefined,
+        error: 'تعذر حفظ وتفعيل الواجب في السحابة. يرجى التحقق من الاتصال والمحاولة مجدداً.'
+      };
+    }
+
+    // Step 3: Clear local deleted/revoked tombstones and persist active assignment locally
+    clearAssignmentDeletedLocally(updatedHw.id, activeUid);
+    clearAssignmentDeletedLocally(updatedHw.id);
+    clearAssignmentManuallyDeletedLocally(updatedHw.id, activeUid);
+    clearAssignmentManuallyDeletedLocally(updatedHw.id);
+    if (targetShortId) clearShortIdRevokedLocally(targetShortId);
+    if (previousShortId && previousShortId !== targetShortId) {
+      clearShortIdRevokedLocally(previousShortId);
+    }
+    saveLocalAssignment(updatedHw, false);
+
+    // Step 4: Immediately pull latest student submissions for this assignment from cloud
+    let submissionsSyncedCount = 0;
+    try {
+      const cloudSubs = await Promise.race([
+        activeFetchSubmissionsForAssignmentFromCloud(updatedHw.id).catch(() => [] as HomeworkSubmission[]),
+        new Promise<HomeworkSubmission[]>((resolve) => setTimeout(() => resolve([]), 5000))
+      ]);
+      for (const sub of cloudSubs) {
+        if (!sub) continue;
+        if (sub.ownerUid && sub.ownerUid !== activeUid) continue;
+        saveLocalSubmission({ ...sub, cloudSynced: true }, false);
+        submissionsSyncedCount++;
+      }
+    } catch {
+      // Non-fatal: assignment is already active and linked; submissions can refresh on demand
+    }
+
+    const shareUrl = buildHomeworkShareUrl(updatedHw);
+    const relinkedToDifferentAssignment = Boolean(
+      currentHwId &&
+        updatedHw.id !== currentHwId &&
+        safeResolvedId !== safeCurrentHwId
+    );
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('gluck-homework-short-link-updated', {
+          detail: {
+            action: 'linked_manually',
+            assignmentId: updatedHw.id,
+            shortId: targetShortId || undefined,
+            previousShortId: previousShortId || undefined,
+            originalShortId: updatedHw.originalShortId,
+            shareUrl
+          }
+        })
+      );
+      window.dispatchEvent(
+        new CustomEvent('gluck-homework-restored', {
+          detail: { assignmentId: updatedHw.id, shortId: targetShortId || undefined }
+        })
+      );
+    }
+    notifyHomeworkSyncStateChanged({
+      assignmentsChanged: true,
+      submissionsChanged: true
+    });
+
+    return {
+      success: true,
+      status: 'linked_manually',
+      assignment: updatedHw,
+      shortId: targetShortId || undefined,
+      previousShortId: previousShortId || undefined,
+      originalShortId: updatedHw.originalShortId,
+      shareUrl,
+      submissionsSyncedCount,
+      relinkedToDifferentAssignment
+    };
+  } finally {
+    inFlightAssignmentSaves.delete(updatedHw.id);
+    inFlightAssignmentSaves.delete(safeResolvedId);
   }
 }
 

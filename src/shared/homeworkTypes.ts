@@ -198,6 +198,7 @@ export interface HomeworkAssignment {
 export type HomeworkLinkActionStatus =
   | 'restored'
   | 'regenerated'
+  | 'linked_manually'
   | 'collision'
   | 'unauthorized'
   | 'not_found'
@@ -213,6 +214,8 @@ export interface HomeworkLinkManagementResult {
   previousShortId?: string;
   originalShortId?: string;
   shareUrl?: string;
+  submissionsSyncedCount?: number;
+  relinkedToDifferentAssignment?: boolean;
   error?: string;
 }
 

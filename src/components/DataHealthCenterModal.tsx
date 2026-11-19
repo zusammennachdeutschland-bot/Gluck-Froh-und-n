@@ -39,6 +39,7 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
   const { 
     students, setStudents, 
     groups, 
+    groupWeeklySessions,
     lessons, setLessons, 
     payments, setPayments, 
     getHistoricalLessons, getHistoricalPayments,
@@ -285,7 +286,10 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
       if (!g.pricePerSession && !g.monthlyPackagePrice) {
         groupsWithoutPrice.push(g);
       }
-      if (g.type === 'online' && (!g.zoomLink || g.zoomLink.trim() === '')) {
+      const hasStandardizedSessionLink = (groupWeeklySessions || []).some(
+        (s) => !s.deleted && s.groupId === g.id && Boolean((s.zoomJoinUrl || s.manualFallbackUrl || '').trim())
+      );
+      if (g.type === 'online' && !hasStandardizedSessionLink && (!g.zoomLink || g.zoomLink.trim() === '')) {
         groupsWithoutZoomLink.push(g);
       }
       if (g.type === 'offline' && (!g.address || g.address.trim() === '')) {
@@ -310,7 +314,7 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
       groupsWithoutAddress,
       groupsWithMultipleStudentsWithoutWhatsApp
     };
-  }, [students, groups]);
+  }, [students, groups, groupWeeklySessions]);
 
   // Perform actual safe cleanup
   const executeCleanup = async (target: OrphanCategoryType | 'all', singleItemId?: string) => {

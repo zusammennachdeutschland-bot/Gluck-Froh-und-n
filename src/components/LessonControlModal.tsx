@@ -24,6 +24,7 @@ import { getTeacherArabicName, getTeacherEnglishName } from '../utils/teacherUti
 import { calculateSequentialSessionNumber, resolveLessonCycleNumber, computeStartingSessionNumberForTargetLesson, isGroupPerLesson, shouldShowLessonPaymentCollection } from '../utils/lessonUtils';
 import { getStudentCyclePricing } from '../utils/paymentUtils';
 import { isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
+import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
 
 export const LessonControlModal: React.FC = () => {
   const { 
@@ -37,6 +38,7 @@ export const LessonControlModal: React.FC = () => {
     profile, 
     groups, 
     lessons,
+    groupWeeklySessions,
     convertQuickLessonToStudent,
     activeLessonSession,
     startActiveLessonTimer,
@@ -1272,7 +1274,12 @@ export const LessonControlModal: React.FC = () => {
 
                 {selectedLesson.type === 'online' ? (
                   <a
-                    href={selectedLesson.meetingLink || targetGroup?.zoomLink || profile.defaultZoomLink}
+                    href={resolveActiveZoomLinkForLesson({
+                      group: targetGroup,
+                      lesson: selectedLesson,
+                      groupWeeklySessions,
+                      defaultZoomLink: profile.defaultZoomLink
+                    })}
                     target="_blank"
                     rel="noreferrer"
                     className="bg-primary hover:bg-primary-hover text-white font-bold text-xs py-2 px-2.5 rounded-lg transition-all flex items-center justify-center gap-1 shadow-2xs active:scale-95 min-w-0"

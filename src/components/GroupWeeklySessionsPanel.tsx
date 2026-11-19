@@ -274,7 +274,21 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
     try {
       let authRes = await requestGoogleCalendarAccessToken(forceReauth);
       if (!authRes.ok || !authRes.accessToken) {
-        triggerToast(authRes.error || _t('تم إلغاء تفويض Google Calendar', 'Google Calendar authorization failed', 'Google Kalender-Autorisierung fehlgeschlagen'));
+        if (authRes.redirected) {
+          triggerToast(
+            _t(
+              'جاري التحويل إلى Google لإتمام ربط التقويم...',
+              'Redirecting to Google to complete Calendar authorization...'
+            )
+          );
+          return;
+        }
+        triggerToast(
+          authRes.error ||
+            (authRes.cancelled
+              ? _t('تم إلغاء تفويض Google Calendar', 'Google Calendar authorization was cancelled.')
+              : _t('فشل تفويض Google Calendar', 'Google Calendar authorization failed', 'Google Kalender-Autorisierung fehlgeschlagen'))
+        );
         return;
       }
       const targetIds = calendarTargetSession

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { PendingFollowUp, SeparatedHomeworkTrackingLists } from '../utils/homeworkFollowUpUtils';
-import { X, Check, Send, BookOpen, User, Sparkles, AtSign, Phone, Copy, Users, CheckCircle2, Link as LinkIcon, ExternalLink, MessageSquare, AlertCircle, Clock } from 'lucide-react';
+import { X, Check, Send, BookOpen, User, Sparkles, AtSign, Phone, Copy, Users, CheckCircle2, Link as LinkIcon, ExternalLink, MessageSquare, AlertCircle, Clock, RefreshCw } from 'lucide-react';
 import { buildWhatsAppUrl, resolveStudentWhatsAppContact } from '../utils/phoneUtils';
 import { getStudentRoleLabel, isLikelyFemaleStudent } from '../utils/genderUtils';
 import { ReportLanguageToggle } from './ReportLanguageToggle';
@@ -10,7 +10,12 @@ import { isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
 import { useSyncedHomeworkData } from '../hooks/useSyncedHomeworkData';
 import { evaluateOnlineHomeworkFollowUp, resolveLinkedOnlineHomeworkForLesson } from '../utils/lessonHomeworkLinkUtils';
 import { normalizeName } from '../utils/lessonUtils';
-import { restoreOriginalHomeworkShortLink, regenerateHomeworkShortLink } from '../shared/homeworkStorageSync';
+import {
+  restoreOriginalHomeworkShortLink,
+  regenerateHomeworkShortLink,
+  linkManualHomeworkUrl,
+  fetchAssignmentDetailsWithSync
+} from '../shared/homeworkStorageSync';
 
 interface HomeworkFollowUpModalProps {
   pendingFollowUps: PendingFollowUp[];
@@ -57,6 +62,9 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({
   // Link management state
   const [linkActionLoading, setLinkActionLoading] = useState<string | null>(null);
   const [linkActionMessage, setLinkActionMessage] = useState<{ text: string; isError: boolean } | null>(null);
+  const [showManualLinkInput, setShowManualLinkInput] = useState<boolean>(false);
+  const [manualLinkInput, setManualLinkInput] = useState<string>('');
+  const [isRefreshingOnlineData, setIsRefreshingOnlineData] = useState<boolean>(false);
 
   // Group WhatsApp Link editing state
   const [newGroupLinkInput, setNewGroupLinkInput] = useState<string>('');
@@ -113,6 +121,116 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({
       });
     } finally {
       setLinkActionLoading(null);
+    }
+  };
+
+  const handleLinkManualUrl = async (options: {
+    prevLesson: any;
+    currentAssignmentId?: string | null;
+    expectedGroupId?: string | null;
+  }) => {
+    const trimmed = manualLinkInput.trim();
+    if (!trimmed) return;
+    const actionKey = options.currentAssignmentId || '__manual_link__';
+    setLinkActionLoading(actionKey);
+    setLinkActionMessage(null);
+    try {
+      const res = await linkManualHomeworkUrl({
+        rawInput: trimmed,
+        currentAssignmentId: options.currentAssignmentId,
+        expectedGroupId: options.expectedGroupId,
+        explicitOwnerUid: currentOwnerUid || undefined
+      });
+      if (res.success && res.assignment) {
+        const linkedHw = res.assignment;
+        const lessonObj = options.prevLesson;
+        if (lessonObj?.id && !String(lessonObj.id).startsWith('online_hw_lesson_')) {
+          updateLesson(lessonObj.id, {
+            report: {
+              ...(lessonObj.report || { studentAttendance: {} }),
+              onlineHomeworkAssignmentId: linkedHw.id,
+              onlineHomeworkTitle: linkedHw.title,
+              onlineHomeworkShortId: linkedHw.shortId
+            }
+          });
+        }
+        setSelectedGroup((prev) => {
+          if (!prev) return prev;
+          const prevCompleted = prev.latestCompletedLesson;
+          return {
+            ...prev,
+            assignmentId: linkedHw.id,
+            hasOnlineHomework: true,
+            latestCompletedLesson: prevCompleted
+              ? {
+                  ...prevCompleted,
+                  report: {
+                    ...(prevCompleted.report || { studentAttendance: {} }),
+                    onlineHomeworkAssignmentId: linkedHw.id,
+                    onlineHomeworkTitle: linkedHw.title,
+                    onlineHomeworkShortId: linkedHw.shortId
+                  }
+                }
+              : prevCompleted
+          };
+        });
+        setManualLinkInput('');
+        setShowManualLinkInput(false);
+        const syncedCount = res.submissionsSyncedCount || 0;
+        setLinkActionMessage({
+          text:
+            syncedCount > 0
+              ? _t(
+                  `تم ربط وتفعيل الرابط وتحديث البيانات بنجاح (${syncedCount} إجابة)!`,
+                  `Link connected, homework activated & synced (${syncedCount} submissions)!`,
+                  `Link verbunden, Aufgabe aktiviert & synchronisiert (${syncedCount} Abgaben)!`
+                )
+              : _t(
+                  'تم ربط وتفعيل الرابط بنجاح! الواجب مفتوح الآن بنفس الرابط وجاهز لاستقبال الإجابات.',
+                  'Link connected & activated! Homework now opens with this exact link and receives new submissions.',
+                  'Link verbunden & aktiviert! Aufgabe öffnet nun mit diesem Link und empfängt neue Abgaben.'
+                ),
+          isError: false
+        });
+      } else {
+        setLinkActionMessage({
+          text:
+            res.error ||
+            _t(
+              'تعذر ربط الرابط اليدوي. تأكد من صحة الرابط وحاول مرة أخرى.',
+              'Failed to link manual URL. Please check the link and try again.',
+              'Manueller Link konnte nicht verknüpft werden.'
+            ),
+          isError: true
+        });
+      }
+    } catch (err: any) {
+      setLinkActionMessage({
+        text:
+          err?.message ||
+          _t(
+            'حدث خطأ أثناء ربط الرابط وتحديث البيانات.',
+            'Error connecting link and syncing data.',
+            'Fehler beim Verknüpfen und Synchronisieren.'
+          ),
+        isError: true
+      });
+    } finally {
+      setLinkActionLoading(null);
+    }
+  };
+
+  const handleRefreshOnlineHomeworkData = async (assignmentId: string) => {
+    if (!assignmentId || isRefreshingOnlineData) return;
+    setIsRefreshingOnlineData(true);
+    try {
+      await fetchAssignmentDetailsWithSync(assignmentId, undefined, undefined, {
+        refreshAssignment: true
+      });
+    } catch {
+      // Keep local snapshot if offline
+    } finally {
+      setIsRefreshingOnlineData(false);
     }
   };
 
@@ -445,6 +563,9 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({
                 onClick={() => {
                   setSelectedGroup(null);
                   setSentContacts(new Set());
+                  setShowManualLinkInput(false);
+                  setManualLinkInput('');
+                  setLinkActionMessage(null);
                 }}
                 className="text-[10px] sm:text-xs font-bold text-emerald-600 dark:text-emerald-400 mb-0.5 flex items-center hover:underline cursor-pointer"
               >
@@ -485,6 +606,80 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({
               </div>
             </div>
 
+            {/* Attach Manual Online Homework Link when no online homework is linked yet */}
+            {!activeOnlineValidation && prevLesson && (
+              <div className="bg-surface border border-surface-border p-3 rounded-xl space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-text-muted flex items-center gap-1.5">
+                    <LinkIcon className="w-3.5 h-3.5 text-primary shrink-0" />
+                    {_t('ربط واجب أونلاين برابط يدوي', 'Attach Online Homework Link Manually', 'Online-Aufgabe per Link verknüpfen')}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowManualLinkInput((prev) => !prev);
+                      setLinkActionMessage(null);
+                    }}
+                    className="text-[11px] font-black text-primary hover:underline cursor-pointer"
+                  >
+                    {showManualLinkInput
+                      ? _t('إخفاء', 'Hide', 'Ausblenden')
+                      : _t('+ إضافة رابط', '+ Add Link', '+ Link hinzufügen')}
+                  </button>
+                </div>
+
+                {linkActionMessage && (
+                  <div className={`p-2 rounded-lg text-xs font-bold ${linkActionMessage.isError ? 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300' : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'}`}>
+                    {linkActionMessage.text}
+                  </div>
+                )}
+
+                {showManualLinkInput && (
+                  <div className="space-y-2 pt-1">
+                    <input
+                      type="url"
+                      dir="ltr"
+                      value={manualLinkInput}
+                      onChange={(e) => setManualLinkInput(e.target.value)}
+                      placeholder="https://.../Herr-Abdul-rahman/XXXXXXX"
+                      className="w-full bg-background border border-surface-border rounded-lg px-3 py-2 text-xs font-mono text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    />
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={!manualLinkInput.trim() || linkActionLoading !== null}
+                        onClick={() =>
+                          handleLinkManualUrl({
+                            prevLesson,
+                            currentAssignmentId: null,
+                            expectedGroupId: !isPrivateScope ? selectedGroup.groupId : null
+                          })
+                        }
+                        className="flex-1 bg-primary hover:bg-primary-hover text-white font-black text-xs py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 min-h-[40px]"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>
+                          {linkActionLoading
+                            ? _t('جاري الربط والتحديث...', 'Linking & Syncing...', 'Wird verknüpft...')
+                            : _t('ربط وتحديث البيانات', 'Link & Sync Data', 'Verknüpfen & Synchronisieren')}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowManualLinkInput(false);
+                          setManualLinkInput('');
+                        }}
+                        className="px-3 py-2 rounded-lg border border-surface-border text-xs font-bold text-text-muted hover:text-text-main cursor-pointer min-h-[40px]"
+                      >
+                        {_t('إلغاء', 'Cancel', 'Abbrechen')}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Online Homework Status & Student Completion Breakdown */}
             {activeOnlineValidation && (
               <div className="bg-surface border border-surface-border p-3.5 rounded-xl space-y-3">
@@ -497,17 +692,30 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({
                       🎯 {activeOnlineValidation.title}
                     </h4>
                   </div>
-                  <span
-                    className={`text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 ${
-                      activeOnlineValidation.isValid
-                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
-                        : activeOnlineValidation.isPendingSync
-                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300'
-                        : 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300'
-                    }`}
-                  >
-                    {_t(activeOnlineValidation.statusLabelAr, activeOnlineValidation.statusLabelEn, activeOnlineValidation.statusLabelDe)}
-                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {activeOnlineValidation.isValid && activeOnlineValidation.assignmentId && (
+                      <button
+                        type="button"
+                        disabled={isRefreshingOnlineData}
+                        onClick={() => handleRefreshOnlineHomeworkData(activeOnlineValidation.assignmentId)}
+                        title={_t('تحديث نتائج الطلاب الآن', 'Refresh Student Results', 'Ergebnisse aktualisieren')}
+                        className="p-1 rounded-md bg-surface-hover hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingOnlineData ? 'animate-spin text-primary' : ''}`} />
+                      </button>
+                    )}
+                    <span
+                      className={`text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 ${
+                        activeOnlineValidation.isValid
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
+                          : activeOnlineValidation.isPendingSync
+                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300'
+                          : 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300'
+                      }`}
+                    >
+                      {_t(activeOnlineValidation.statusLabelAr, activeOnlineValidation.statusLabelEn, activeOnlineValidation.statusLabelDe)}
+                    </span>
+                  </div>
                 </div>
 
                 {activeOnlineValidation.isValid && activeOnlineValidation.shareUrl ? (
@@ -548,35 +756,111 @@ export const HomeworkFollowUpModal: React.FC<HomeworkFollowUpModalProps> = ({
                   </div>
                 )}
 
-                {/* Link Management Actions (Restore Original Link & Generate New Link) */}
-                {activeOnlineValidation.assignmentId && (
+                {/* Link Management Actions (Restore Original Link, Generate New Link & Add Link Manually) */}
+                {(activeOnlineValidation.assignmentId || prevLesson) && (
                   <div className="pt-2 border-t border-surface-border space-y-2">
                     {linkActionMessage && (
                       <div className={`p-2 rounded-lg text-xs font-bold ${linkActionMessage.isError ? 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300' : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'}`}>
                         {linkActionMessage.text}
                       </div>
                     )}
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <button
-                        type="button"
-                        disabled={linkActionLoading === activeOnlineValidation.assignmentId}
-                        onClick={() => handleRestoreLink(activeOnlineValidation.assignmentId)}
-                        className="flex-1 bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
-                      >
-                        <LinkIcon className="w-3.5 h-3.5 text-primary" />
-                        <span>{_t('استعادة الرابط الأصلي', 'Restore Original Link', 'Originalen Link wiederherstellen')}</span>
-                      </button>
+                    {activeOnlineValidation.assignmentId && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          disabled={linkActionLoading !== null}
+                          onClick={() => handleRestoreLink(activeOnlineValidation.assignmentId)}
+                          className="flex-1 bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 min-h-[40px]"
+                        >
+                          <LinkIcon className="w-3.5 h-3.5 text-primary shrink-0" />
+                          <span>{_t('استعادة الرابط الأصلي', 'Restore Original Link', 'Originalen Link wiederherstellen')}</span>
+                        </button>
 
+                        <button
+                          type="button"
+                          disabled={linkActionLoading !== null}
+                          onClick={() => handleRegenerateLink(activeOnlineValidation.assignmentId)}
+                          className="flex-1 bg-primary hover:bg-primary-hover text-white font-black text-xs py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs disabled:opacity-50 min-h-[40px]"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                          <span>{_t('توليد رابط جديد', 'Generate New Link', 'Neuen Link generieren')}</span>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Manual Link Entry Trigger & Inline Form */}
+                    {!showManualLinkInput ? (
                       <button
                         type="button"
-                        disabled={linkActionLoading === activeOnlineValidation.assignmentId}
-                        onClick={() => handleRegenerateLink(activeOnlineValidation.assignmentId)}
-                        className="flex-1 bg-primary hover:bg-primary-hover text-white font-black text-xs py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs disabled:opacity-50"
+                        disabled={linkActionLoading !== null}
+                        onClick={() => {
+                          setShowManualLinkInput(true);
+                          setLinkActionMessage(null);
+                        }}
+                        className="w-full bg-surface-hover/80 hover:bg-surface-hover border border-dashed border-primary/50 text-primary font-bold text-xs py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 min-h-[40px]"
                       >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>{_t('توليد رابط جديد', 'Generate New Link', 'Neuen Link generieren')}</span>
+                        <LinkIcon className="w-3.5 h-3.5 shrink-0" />
+                        <span>
+                          {_t(
+                            'إضافة الرابط يدوياً (تفعيل وتحديث البيانات)',
+                            'Add Link Manually (Activate & Sync Data)',
+                            'Link manuell hinzufügen (Aktivieren & Synchronisieren)'
+                          )}
+                        </span>
                       </button>
-                    </div>
+                    ) : (
+                      <div className="bg-surface-hover/60 border border-primary/30 rounded-xl p-2.5 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-black text-text-main">
+                            {_t(
+                              'الصق رابط الواجب (سيتم فتح الواجب بنفس الرابط وسحب الإجابات):',
+                              'Paste homework link (opens with this exact link & syncs results):',
+                              'Aufgaben-Link einfügen (öffnet mit diesem Link & synchronisiert):'
+                            )}
+                          </span>
+                        </div>
+                        <input
+                          type="url"
+                          dir="ltr"
+                          value={manualLinkInput}
+                          onChange={(e) => setManualLinkInput(e.target.value)}
+                          placeholder="https://.../Herr-Abdul-rahman/XXXXXXX"
+                          className="w-full bg-background border border-surface-border rounded-lg px-3 py-2 text-xs font-mono text-text-main focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={!manualLinkInput.trim() || linkActionLoading !== null}
+                            onClick={() =>
+                              handleLinkManualUrl({
+                                prevLesson,
+                                currentAssignmentId: activeOnlineValidation.assignmentId,
+                                expectedGroupId: !isPrivateScope ? selectedGroup.groupId : null
+                              })
+                            }
+                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 min-h-[40px]"
+                          >
+                            <Check className="w-3.5 h-3.5 shrink-0" />
+                            <span>
+                              {linkActionLoading
+                                ? _t('جاري التحديث والمزامنة...', 'Updating & Syncing...', 'Wird aktualisiert...')
+                                : _t('ربط وتحديث الآن', 'Link & Update Now', 'Jetzt verknüpfen')}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={linkActionLoading !== null}
+                            onClick={() => {
+                              setShowManualLinkInput(false);
+                              setManualLinkInput('');
+                            }}
+                            className="px-3 py-2 rounded-lg border border-surface-border bg-surface text-xs font-bold text-text-muted hover:text-text-main cursor-pointer min-h-[40px]"
+                          >
+                            {_t('إلغاء', 'Cancel', 'Abbrechen')}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 

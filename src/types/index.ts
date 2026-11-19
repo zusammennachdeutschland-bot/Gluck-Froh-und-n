@@ -1585,11 +1585,13 @@ export interface GrainDiscoveredRecording {
   rawShareState?: string;
   sourcePlatform: string; // e.g. 'zoom', 'google_meet', 'unknown'
   zoomMeetingUrl?: string; // Optional supporting evidence only
+  zoomMeetingId?: string; // Canonical numeric Zoom meeting ID when exposed
   calendarEventTitle?: string;
   calendarEventUid?: string;
   participantNames?: string[]; // Supplementary display only — NEVER modifies attendance (Rule 2)
   hasAiSummary?: boolean;
   aiSummaryExcerpt?: string; // Compact excerpt only
+  processingError?: string; // Non-sensitive processing/extraction error message if failed
   matchStatus: GrainMatchStatus;
   matchTier?: GrainMatchTier;
   confidenceLevel?: GrainConfidenceLevel;
@@ -1826,7 +1828,9 @@ export type ZoomHistoryAction =
   | 'schedule_changed'
   | 'group_renamed'
   | 'regenerated'
-  | 'unlinked';
+  | 'unlinked'
+  | 'cleanup_archived'
+  | 'cleanup_rebuilt';
 
 export type GrainMatchTier =
   | 'zoom_meeting_id'

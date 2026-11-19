@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { getTimeBasedGreeting } from '../utils/greetingUtils';
+import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
 
 interface LessonReminderModalProps {
   lesson?: Lesson | null;
@@ -37,7 +38,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   recipientPhone,
   onClose,
 }) => {
-  const { groups, students, lessons, profile, updateGroup, updateLesson, updateProfile, language, t, _t, reportLanguage, setReportLanguage, reportT } = useApp();
+  const { groups, students, lessons, groupWeeklySessions, profile, updateGroup, updateLesson, updateProfile, language, t, _t, reportLanguage, setReportLanguage, reportT } = useApp();
 
   const currentMsgLang = reportLanguage || 'ar';
   const msgT = (ar: string, en: string, de?: string) => {
@@ -82,8 +83,29 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   // Determine if lesson/group is online or offline
   const isOnline = lesson?.type === 'online' || targetGroup?.type === 'online';
 
-  // Extract initial zoom link (Strictly favor group settings first)
-  const initialZoomLink = targetGroup?.zoomLink || lesson?.meetingLink || profile.defaultZoomLink || '';
+  // Resolve active standardized Zoom link for this exact group + weekly session slot first,
+  // falling back to legacy group.zoomLink / lesson.meetingLink / profile.defaultZoomLink.
+  const effectiveTargetLesson = lesson || upcomingLesson;
+  const resolvedZoomLink = React.useMemo(() => {
+    if (!isOnline) return '';
+    return resolveActiveZoomLinkForLesson({
+      group: targetGroup,
+      lesson: effectiveTargetLesson,
+      groupWeeklySessions,
+      targetDay: upcomingSchedule?.day,
+      targetTime: lesson?.time || upcomingSchedule?.time,
+      defaultZoomLink: profile.defaultZoomLink
+    });
+  }, [
+    isOnline,
+    targetGroup,
+    effectiveTargetLesson,
+    groupWeeklySessions,
+    upcomingSchedule?.day,
+    upcomingSchedule?.time,
+    lesson?.time,
+    profile.defaultZoomLink
+  ]);
 
   // Resolve first student and target student
   const firstStudent = groupStudents.length > 0 
@@ -191,7 +213,8 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   );
 
   const [selectedArrivalTime, setSelectedArrivalTime] = useState('15');
-  const [zoomLink, setZoomLink] = useState(initialZoomLink);
+  const [zoomLink, setZoomLink] = useState(resolvedZoomLink);
+  const [hasManualZoomEdit, setHasManualZoomEdit] = useState(false);
   const [isSavingZoom, setIsSavingZoom] = useState(false);
   const [zoomSaveSuccess, setZoomSaveSuccess] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -257,6 +280,12 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
       setShowWhatsAppGroupSection(true);
     }
   }, [groupWhatsAppLink]);
+
+  useEffect(() => {
+    if (!hasManualZoomEdit) {
+      setZoomLink(resolvedZoomLink);
+    }
+  }, [resolvedZoomLink, hasManualZoomEdit]);
 
   useEffect(() => {
     if (detectedPreviousHomework && !previousHomework) {
@@ -863,6 +892,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                   type="url"
                   value={zoomLink}
                   onChange={(e) => {
+                    setHasManualZoomEdit(true);
                     setZoomLink(e.target.value);
                     setCustomMessage(null);
                   }}

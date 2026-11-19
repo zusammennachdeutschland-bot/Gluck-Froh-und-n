@@ -9,8 +9,10 @@ import {
   parseStandardizedZoomTopic,
   generateReadableSessionCode,
   generateStableCalendarUid,
-  reconcileGroupWeeklySessions
+  reconcileGroupWeeklySessions,
+  resolveActiveZoomLinkForLesson
 } from '../services/zoomSessionStandardizer';
+import { getProjectedLessonsForRange } from '../utils/scheduleUtils';
 import {
   __resetZoomServerVaultForTesting,
   __setZoomServerUpstreamFetchForTesting
@@ -31,6 +33,7 @@ import {
   disconnectZoomAccount,
   buildZoomMigrationPreview,
   executeBulkZoomMigration,
+  disableWaitingRoomForExistingZoomMeetings,
   sanitizeZoomRecordForStorage,
   redactZoomSecrets
 } from '../services/zoomService';
@@ -213,6 +216,7 @@ async function runZoomGrainV2Tests() {
       const parsed = JSON.parse(String(init.body || '{}'));
       assert.equal(parsed.type, 8, 'Recurring meetings must be created with type = 8');
       assert.equal(parsed.duration, 60, 'Requested session duration must NOT be truncated for Basic accounts');
+      assert.equal(parsed.settings?.waiting_room, false, 'New Zoom meetings must disable Waiting Room by default');
       createdZoomTopics.push(parsed.topic);
       zoomCreateCounter += 1;
       return jsonResp(201, {
@@ -236,7 +240,13 @@ async function runZoomGrainV2Tests() {
       });
     }
     if (url.startsWith('https://api.zoom.us/v2/meetings/') && init?.method === 'PATCH') {
-      return new Response('', { status: 204 });
+      const parsedPatch = JSON.parse(String(init.body || '{}'));
+      assert.equal(
+        parsedPatch.settings?.waiting_room,
+        false,
+        'Updated Zoom meetings must explicitly disable Waiting Room by default'
+      );
+      return new Response(null, { status: 204 });
     }
     return jsonResp(404, { message: 'Not found' });
   });
@@ -351,6 +361,26 @@ async function runZoomGrainV2Tests() {
     const hostStart = await fetchHostStartUrlForSession(migratedMon.zoomMeetingId!);
     assert.equal(hostStart.ok, true);
     assert.ok(hostStart.startUrl?.includes('EPHEMERAL_HOST_ZAK_TOKEN'));
+
+    // Bulk disable Waiting Room on all existing API-managed meetings (preserves meeting IDs & join URLs)
+    const disableWrRes = await disableWaitingRoomForExistingZoomMeetings({
+      sessions: resumedRes.sessions,
+      records: resumedRes.records,
+      history: resumedRes.history
+    });
+    assert.equal(disableWrRes.totalTargeted, 2);
+    assert.equal(disableWrRes.updatedCount, 2);
+    assert.equal(disableWrRes.failedCount, 0);
+    assert.equal(
+      disableWrRes.sessions.find((s) => s.id === migratedMon.id)?.zoomMeetingId,
+      migratedMon.zoomMeetingId,
+      'Disabling Waiting Room must preserve the exact existing Zoom meeting ID'
+    );
+    assert.equal(
+      disableWrRes.sessions.find((s) => s.id === migratedMon.id)?.zoomJoinUrl,
+      migratedMon.zoomJoinUrl,
+      'Disabling Waiting Room must preserve the exact existing Zoom join URL'
+    );
 
     // -------------------------------------------------------------------------
     // 5. 5-TIER GRAIN RECOGNITION + PART 1 / PART 2 PAIRING + FALLBACK EXTRACT
@@ -831,6 +861,7 @@ async function runZoomGrainV2Tests() {
     });
     assert.equal(androidCreateRes.ok, true);
     assert.equal(capturedAndroidCreatePayload.duration, 60, 'Android Zoom bridge must preserve full 60m duration');
+    assert.equal(capturedAndroidCreatePayload.waitingRoom, false, 'Android Zoom create must disable Waiting Room');
     assert.equal(androidCreateRes.updatedSession?.zoomMeetingId, '98765432109');
 
     const androidPatchRes = await updateZoomMeetingForSession({
@@ -841,6 +872,7 @@ async function runZoomGrainV2Tests() {
     });
     assert.equal(androidPatchRes.ok, true);
     assert.equal(capturedAndroidPatchPayload.duration, 90, 'Android PATCH must send updated 90m duration');
+    assert.equal(capturedAndroidPatchPayload.waitingRoom, false, 'Android PATCH must disable Waiting Room');
 
     const androidStartRes = await fetchHostStartUrlForSession('98765432109');
     assert.equal(androidStartRes.ok, true);
@@ -880,6 +912,8 @@ async function runZoomGrainV2Tests() {
     assert.ok(zoomJava.includes('@CapacitorPlugin(name = "ZoomSecureBridge")'));
     assert.ok(zoomJava.includes('AndroidKeyStore'));
     assert.ok(zoomJava.includes('application/x-www-form-urlencoded'));
+    assert.ok(zoomJava.includes('call.getBoolean("waitingRoom", false)'));
+    assert.ok(zoomJava.includes('settings.put("waiting_room", waitingRoom)'));
 
     const mainActivityJava = fs.readFileSync(
       path.join(rootDir, 'android/app/src/main/java/com/glueck/app/MainActivity.java'),
@@ -898,6 +932,155 @@ async function runZoomGrainV2Tests() {
       'utf8'
     );
     assert.ok(dataExtractXml.includes('com.glueck.app.zoom_secure_vault.xml'));
+
+    // -------------------------------------------------------------------------
+    // 9. AUTOMATIC STANDARDIZED ZOOM LINK RESOLUTION FOR REMINDERS & PROJECTIONS
+    // -------------------------------------------------------------------------
+    console.log('9. Testing automatic standardized Zoom link resolution for reminders & projections...');
+
+    const multiSlotGroup: Group = {
+      id: 'grp_bana_multi',
+      name: 'Bana Arwa Lojain',
+      grade: 'Grade 6',
+      type: 'online',
+      lessonDurationMinutes: 60,
+      monthlyPackagePrice: 1200,
+      sessionCount: 4,
+      color: '#6366F1',
+      zoomLink: 'https://zoom.us/j/11111111111?pwd=OLD_DELETED_LINK',
+      schedules: [
+        { day: 'Monday', time: '16:00' },
+        { day: 'Thursday', time: '17:30' }
+      ]
+    };
+
+    const standardizedSessions: GroupWeeklySession[] = [
+      {
+        id: 'gws_bana_old_deleted',
+        groupId: multiSlotGroup.id,
+        groupNameSnapshot: multiSlotGroup.name,
+        weekday: 4,
+        weekdayName: 'Thursday',
+        startTime: '17:30',
+        durationMinutes: 60,
+        timezone: DEFAULT_ZOOM_TIMEZONE,
+        recurrence: 'weekly',
+        sessionCode: 'BANA-THU-1730-OLD',
+        standardizedTitle: 'Thursday - 17:30 - Bana Arwa Lojain',
+        zoomMeetingId: '22222222222',
+        zoomJoinUrl: 'https://zoom.us/j/22222222222?pwd=ARCHIVED',
+        meetingSource: 'zoom_api',
+        syncState: 'synced',
+        calendarEventUid: generateStableCalendarUid('gws_bana_old_deleted'),
+        updatedAt: Date.now() - 10000,
+        deleted: true
+      },
+      {
+        id: 'gws_bana_mon',
+        groupId: multiSlotGroup.id,
+        groupNameSnapshot: multiSlotGroup.name,
+        weekday: 1,
+        weekdayName: 'Monday',
+        startTime: '16:00',
+        durationMinutes: 60,
+        timezone: DEFAULT_ZOOM_TIMEZONE,
+        recurrence: 'weekly',
+        sessionCode: 'BANA-MON-1600',
+        standardizedTitle: 'Monday - 16:00 - Bana Arwa Lojain',
+        zoomMeetingId: '88811112222',
+        zoomJoinUrl: 'https://us05web.zoom.us/j/88811112222?pwd=NEW_MON',
+        meetingSource: 'zoom_api',
+        syncState: 'synced',
+        calendarEventUid: generateStableCalendarUid('gws_bana_mon'),
+        updatedAt: Date.now(),
+        deleted: false
+      },
+      {
+        id: 'gws_bana_thu',
+        groupId: multiSlotGroup.id,
+        groupNameSnapshot: multiSlotGroup.name,
+        weekday: 4,
+        weekdayName: 'Thursday',
+        startTime: '17:30',
+        durationMinutes: 60,
+        timezone: DEFAULT_ZOOM_TIMEZONE,
+        recurrence: 'weekly',
+        sessionCode: 'BANA-THU-1730',
+        standardizedTitle: 'Thursday - 17:30 - Bana Arwa Lojain',
+        zoomMeetingId: '88833334444',
+        zoomJoinUrl: 'https://us05web.zoom.us/j/88833334444?pwd=NEW_THU',
+        meetingSource: 'zoom_api',
+        syncState: 'synced',
+        calendarEventUid: generateStableCalendarUid('gws_bana_thu'),
+        updatedAt: Date.now(),
+        deleted: false
+      }
+    ];
+
+    // Thursday 2026-11-19 17:30 lesson carrying stale meetingLink MUST resolve to new Thursday link
+    const staleThuLesson: Partial<Lesson> = {
+      id: 'lesson_thu_stale',
+      groupId: multiSlotGroup.id,
+      date: '2026-11-19', // Thursday
+      time: '17:30',
+      type: 'online',
+      meetingLink: 'https://zoom.us/j/11111111111?pwd=OLD_DELETED_LINK'
+    };
+    const resolvedThu = resolveActiveZoomLinkForLesson({
+      group: multiSlotGroup,
+      lesson: staleThuLesson,
+      groupWeeklySessions: standardizedSessions,
+      defaultZoomLink: 'https://zoom.us/j/99999999999'
+    });
+    assert.equal(
+      resolvedThu,
+      'https://us05web.zoom.us/j/88833334444?pwd=NEW_THU',
+      'Thursday reminder must automatically use the new standardized Thursday Zoom link, not stale group/lesson link'
+    );
+
+    // Monday 2026-11-16 16:00 lesson MUST resolve to new Monday link
+    const resolvedMon = resolveActiveZoomLinkForLesson({
+      group: multiSlotGroup,
+      lesson: { id: 'lesson_mon_stale', groupId: multiSlotGroup.id, date: '2026-11-16', time: '16:00', type: 'online', meetingLink: 'https://zoom.us/j/11111111111?pwd=OLD_DELETED_LINK' },
+      groupWeeklySessions: standardizedSessions,
+      defaultZoomLink: 'https://zoom.us/j/99999999999'
+    });
+    assert.equal(
+      resolvedMon,
+      'https://us05web.zoom.us/j/88811112222?pwd=NEW_MON',
+      'Monday reminder must automatically use the new standardized Monday Zoom link'
+    );
+
+    // Group-only reminder (no lesson prop, only targetDay/targetTime) MUST resolve to that slot's new link
+    const resolvedGroupOnly = resolveActiveZoomLinkForLesson({
+      group: multiSlotGroup,
+      groupWeeklySessions: standardizedSessions,
+      targetDay: 'Do',
+      targetTime: '17:30'
+    });
+    assert.equal(resolvedGroupOnly, 'https://us05web.zoom.us/j/88833334444?pwd=NEW_THU');
+
+    // Legacy group without standardized sessions still falls back gracefully
+    const resolvedLegacy = resolveActiveZoomLinkForLesson({
+      group: { id: 'grp_legacy', type: 'online', zoomLink: 'https://zoom.us/j/55566677788' },
+      groupWeeklySessions: standardizedSessions,
+      defaultZoomLink: 'https://zoom.us/j/99999999999'
+    });
+    assert.equal(resolvedLegacy, 'https://zoom.us/j/55566677788');
+
+    // Projected lessons automatically embed the exact per-slot standardized Zoom links
+    const projectedRange = getProjectedLessonsForRange(
+      '2026-11-16',
+      '2026-11-22',
+      [multiSlotGroup],
+      [],
+      'https://zoom.us/j/99999999999',
+      standardizedSessions
+    );
+    const projMon = projectedRange.find((l) => l.date === '2026-11-16');
+    const projThu = projectedRange.find((l) => l.date === '2026-11-19');
+    assert.equal(projMon?.meetingLink, 'https://us05web.zoom.us/j/88811112222?pwd=NEW_MON');
+    assert.equal(projThu?.meetingLink, 'https://us05web.zoom.us/j/88833334444?pwd=NEW_THU');
 
     console.log('✅ All Glück × Zoom × Grain V2.0 tests passed!');
   } finally {

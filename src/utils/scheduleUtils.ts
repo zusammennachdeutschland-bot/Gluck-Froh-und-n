@@ -1,4 +1,4 @@
-import { Group, GroupScheduleSlot, Lesson, ScheduleRecurrence } from '../types';
+import { Group, GroupScheduleSlot, GroupWeeklySession, Lesson, ScheduleRecurrence } from '../types';
 import { parseLocalDate, formatLocalDate } from './timeUtils';
 
 export const DAY_NAME_TO_NUM: Record<string, number> = {
@@ -256,7 +256,8 @@ export function getProjectedLessonsForRange(
   endDateStr: string,
   groups: Group[],
   explicitLessons: Lesson[],
-  defaultZoomLink?: string
+  defaultZoomLink?: string,
+  groupWeeklySessions?: GroupWeeklySession[]
 ): Lesson[] {
   const activeGroups = (groups || []).filter(g => !g.deleted && g.status !== 'archived');
   const activeGroupIds = new Set(activeGroups.map(g => g.id));
@@ -371,6 +372,25 @@ export function getProjectedLessonsForRange(
             ? group.pricePerSession
             : Math.round((group.monthlyPackagePrice || 1200) / (group.sessionCount || 8));
 
+          const projectedWeekday = cursor.getDay();
+          const matchingSession = (groupWeeklySessions || [])
+            .filter(
+              (s) =>
+                s &&
+                !s.deleted &&
+                s.groupId === group.id &&
+                Boolean((s.zoomJoinUrl || s.manualFallbackUrl || '').trim())
+            )
+            .sort((a, b) => {
+              const exactA = a.weekday === projectedWeekday && a.startTime === sessionTime ? 2 : a.weekday === projectedWeekday ? 1 : 0;
+              const exactB = b.weekday === projectedWeekday && b.startTime === sessionTime ? 2 : b.weekday === projectedWeekday ? 1 : 0;
+              if (exactB !== exactA) return exactB - exactA;
+              const srcA = a.meetingSource === 'zoom_api' ? 1 : 0;
+              const srcB = b.meetingSource === 'zoom_api' ? 1 : 0;
+              return srcB - srcA;
+            })[0];
+          const resolvedSessionLink = (matchingSession?.zoomJoinUrl || matchingSession?.manualFallbackUrl || '').trim();
+
           projected.push({
             id: `l_auto_${group.id}_${dateStr}_${sessionTime.replace(':', '')}`,
             groupId: group.id,
@@ -387,7 +407,7 @@ export function getProjectedLessonsForRange(
             paymentStatus: 'pending',
             amountDue: perSessionPrice,
             amountPaid: 0,
-            meetingLink: group.type === 'online' ? (group.zoomLink || defaultZoomLink) : undefined,
+            meetingLink: group.type === 'online' ? (resolvedSessionLink || group.zoomLink || defaultZoomLink) : undefined,
             locationAddress: group.type === 'offline' ? (group.address || 'Cairo Center') : undefined,
             scheduleRecurrence: group.scheduleRecurrence || 'weekly',
             biweeklyWeek: getAlternatingWeek(cursor)

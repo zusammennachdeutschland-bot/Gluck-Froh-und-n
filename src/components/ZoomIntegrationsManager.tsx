@@ -19,7 +19,8 @@ import {
   Clock,
   Globe,
   X,
-  PlusCircle
+  PlusCircle,
+  ShieldOff
 } from 'lucide-react';
 import { GroupWeeklySession } from '../types';
 import { useApp } from '../context/AppContext';
@@ -40,14 +41,21 @@ import {
   createOrReplaceZoomMeetingForSession,
   updateZoomMeetingForSession,
   buildZoomMigrationPreview,
-  executeBulkZoomMigration
+  executeBulkZoomMigration,
+  disableWaitingRoomForExistingZoomMeetings
 } from '../services/zoomService';
 import {
+  GoogleCalendarConnectionState,
   buildGoogleCalendarSyncPreview,
+  disconnectGoogleCalendar,
   downloadSessionsIcsFile,
+  getGoogleCalendarConnectionState,
   requestGoogleCalendarAccessToken,
-  syncSessionsToGoogleCalendar
+  subscribeGoogleCalendarConnectionState,
+  syncSessionsToGoogleCalendar,
+  verifyOrSilentlyReauthorizeGoogleCalendar
 } from '../services/calendarSyncService';
+import { ZoomCleanupRebuildSection } from './ZoomCleanupRebuildSection';
 
 const COMMON_TIMEZONES = [
   'Africa/Cairo',
@@ -97,11 +105,28 @@ export const ZoomIntegrationsManager: React.FC = () => {
   const [migrationResult, setMigrationResult] = useState<ZoomBulkMigrationResult | null>(null);
   const [resumeSkipIds, setResumeSkipIds] = useState<string[]>([]);
   const abortMigrationRef = useRef(false);
+  const [isDisablingWaitingRoom, setIsDisablingWaitingRoom] = useState(false);
+  const [waitingRoomProgress, setWaitingRoomProgress] = useState<{ completed: number; total: number } | null>(null);
 
   // Calendar sync confirmation modal state (null = all sessions, or 1 specific session for safe test/verify)
   const [calendarConfirmOpen, setCalendarConfirmOpen] = useState(false);
   const [calendarTargetSession, setCalendarTargetSession] = useState<GroupWeeklySession | null>(null);
   const [isSyncingCalendar, setIsSyncingCalendar] = useState(false);
+  const [isConnectingCalendar, setIsConnectingCalendar] = useState(false);
+  const [calendarConn, setCalendarConn] = useState<GoogleCalendarConnectionState>(() =>
+    getGoogleCalendarConnectionState()
+  );
+
+  useEffect(() => {
+    const unsub = subscribeGoogleCalendarConnectionState((next) => {
+      setCalendarConn(next);
+    });
+    // On reopen/mount, never treat persisted metadata as an active token; silently verify or require reconnect
+    if (getGoogleCalendarConnectionState().status === 'needs_verification') {
+      verifyOrSilentlyReauthorizeGoogleCalendar().catch(() => {});
+    }
+    return unsub;
+  }, []);
 
   // Directory filters & per-row modals
   const [searchQuery, setSearchQuery] = useState('');
@@ -176,6 +201,11 @@ export const ZoomIntegrationsManager: React.FC = () => {
   const basicPlanAffectedSessions = useMemo(
     () => livePreviewSummary.reconciledSessions.filter((s) => !s.deleted && s.durationMinutes >= 41),
     [livePreviewSummary.reconciledSessions]
+  );
+
+  const apiManagedSessionsCount = useMemo(
+    () => (groupWeeklySessions || []).filter((s) => s && !s.deleted && s.meetingSource === 'zoom_api' && Boolean(s.zoomMeetingId)).length,
+    [groupWeeklySessions]
   );
 
   const handleSaveCredentials = async (e: React.FormEvent) => {
@@ -339,13 +369,114 @@ export const ZoomIntegrationsManager: React.FC = () => {
     }
   };
 
+  const handleDisableWaitingRoomAll = async () => {
+    if (isDisablingWaitingRoom || apiManagedSessionsCount === 0) return;
+    setIsDisablingWaitingRoom(true);
+    setWaitingRoomProgress({ completed: 0, total: apiManagedSessionsCount });
+    try {
+      const res = await disableWaitingRoomForExistingZoomMeetings({
+        sessions: groupWeeklySessions,
+        records: zoomMeetingRecords,
+        history: zoomMeetingHistory,
+        timezone: timezoneInput || DEFAULT_ZOOM_TIMEZONE,
+        onProgress: (prog) => setWaitingRoomProgress({ completed: prog.completed, total: prog.total })
+      });
+
+      applyZoomWorkspaceSnapshot({
+        sessions: res.sessions,
+        records: res.records,
+        history: res.history
+      });
+
+      if (res.failedCount === 0) {
+        triggerToast(
+          _t(
+            `تم إلغاء غرفة الانتظار (Waiting Room) في ${res.updatedCount} اجتماع بدون تغيير الروابط`,
+            `Disabled Waiting Room on ${res.updatedCount} Zoom meeting(s) without changing links`
+          )
+        );
+      } else {
+        triggerToast(
+          _t(
+            `تم تحديث ${res.updatedCount} اجتماع وفشل ${res.failedCount}${res.rateLimited ? ' (حد Zoom API)' : ''}`,
+            `Updated ${res.updatedCount} meeting(s), ${res.failedCount} failed${res.rateLimited ? ' (Zoom rate limit)' : ''}`
+          )
+        );
+      }
+    } finally {
+      setIsDisablingWaitingRoom(false);
+      setWaitingRoomProgress(null);
+    }
+  };
+
+  const handleConnectGoogleCalendar = async (forcePrompt = false) => {
+    setIsConnectingCalendar(true);
+    try {
+      const authRes = await requestGoogleCalendarAccessToken(forcePrompt);
+      if (authRes.ok) {
+        triggerToast(
+          authRes.accountEmail
+            ? _t(
+                `تم ربط Google Calendar بنجاح (${authRes.accountEmail})`,
+                `Google Calendar connected (${authRes.accountEmail})`,
+                `Google Kalender verbunden (${authRes.accountEmail})`
+              )
+            : _t('تم ربط Google Calendar بنجاح', 'Google Calendar connected', 'Google Kalender verbunden')
+        );
+      } else if (authRes.redirected) {
+        triggerToast(
+          _t(
+            'جاري التحويل إلى Google لإتمام ربط التقويم...',
+            'Redirecting to Google to complete Calendar authorization...'
+          )
+        );
+      } else if (authRes.cancelled) {
+        triggerToast(
+          _t(
+            'تم إلغاء تفويض Google Calendar',
+            'Google Calendar authorization was cancelled.',
+            'Google Kalender-Autorisierung abgebrochen.'
+          )
+        );
+      } else {
+        triggerToast(
+          authRes.error ||
+            _t('فشل ربط Google Calendar', 'Google Calendar authorization failed')
+        );
+      }
+    } finally {
+      setIsConnectingCalendar(false);
+    }
+  };
+
+  const handleDisconnectGoogleCalendar = async () => {
+    await disconnectGoogleCalendar();
+    triggerToast(
+      _t('تم فصل جلسة Google Calendar', 'Google Calendar session disconnected')
+    );
+  };
+
   const handleConfirmGoogleCalendarSync = async (forceReauth = false) => {
     setIsSyncingCalendar(true);
     try {
       const sessionsToUse = livePreviewSummary.reconciledSessions;
       let authRes = await requestGoogleCalendarAccessToken(forceReauth);
       if (!authRes.ok || !authRes.accessToken) {
-        triggerToast(authRes.error || _t('تم إلغاء تفويض Google Calendar', 'Google Calendar authorization failed'));
+        if (authRes.redirected) {
+          triggerToast(
+            _t(
+              'جاري التحويل إلى Google لإتمام ربط التقويم...',
+              'Redirecting to Google to complete Calendar authorization...'
+            )
+          );
+          return;
+        }
+        triggerToast(
+          authRes.error ||
+            (authRes.cancelled
+              ? _t('تم إلغاء تفويض Google Calendar', 'Google Calendar authorization was cancelled.')
+              : _t('فشل تفويض Google Calendar', 'Google Calendar authorization failed'))
+        );
         return;
       }
 
@@ -756,6 +887,25 @@ export const ZoomIntegrationsManager: React.FC = () => {
               <span>{_t('إنشاء للجلسات الناقصة فقط', 'Create Zoom Meetings for Missing Sessions')}</span>
             </button>
 
+            {apiManagedSessionsCount > 0 && (
+              <button
+                type="button"
+                onClick={handleDisableWaitingRoomAll}
+                disabled={isDisablingWaitingRoom || isMigrating || !meta.hasCredentials}
+                className="px-2.5 py-1.5 rounded-lg bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 border border-surface-border text-text-main text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <ShieldOff className="w-3.5 h-3.5 text-primary" />
+                <span>
+                  {isDisablingWaitingRoom && waitingRoomProgress
+                    ? _t(
+                        `جاري التحديث (${waitingRoomProgress.completed}/${waitingRoomProgress.total})...`,
+                        `Updating (${waitingRoomProgress.completed}/${waitingRoomProgress.total})...`
+                      )
+                    : _t('إلغاء غرفة الانتظار للاجتماعات الحالية', 'Disable Waiting Room on All Meetings')}
+                </span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => downloadSessionsIcsFile(livePreviewSummary.reconciledSessions)}
@@ -773,6 +923,113 @@ export const ZoomIntegrationsManager: React.FC = () => {
               <Calendar className="w-3.5 h-3.5" />
               <span>{_t('مزامنة Google Calendar', 'Sync Google Calendar')}</span>
             </button>
+          </div>
+        </div>
+
+        {/* Google Calendar Live Sync Connection Status */}
+        <div className="p-2.5 rounded-lg bg-surface-hover/50 border border-surface-border flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-start gap-2 min-w-0">
+            <Calendar
+              className={`w-4 h-4 shrink-0 mt-0.5 ${
+                calendarConn.status === 'connected' && calendarConn.hasInMemoryToken && calendarConn.readVerified
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : calendarConn.status === 'error' ||
+                    calendarConn.status === 'expired' ||
+                    calendarConn.status === 'reconnect_required'
+                  ? 'text-rose-600 dark:text-rose-400'
+                  : 'text-text-muted'
+              }`}
+            />
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-black text-text-main">
+                  {_t('اتصال Google Calendar المباشر', 'Google Calendar Live Sync')}
+                </span>
+                {calendarConn.status === 'connected' && calendarConn.hasInMemoryToken && calendarConn.readVerified ? (
+                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-[10px] font-black">
+                    {calendarConn.writeVerified
+                      ? _t('متصل ومُتحقق للكتابة (calendar.events)', 'Connected & Write Verified')
+                      : calendarConn.scopeVerified
+                      ? _t('متصل ومُتحقق (calendar.events)', 'Connected (Scope & Read Verified)')
+                      : _t('متصل (قراءة مُتحققة)', 'Connected (Read Verified)')}
+                  </span>
+                ) : calendarConn.status === 'needs_verification' ? (
+                  <span className="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/30 text-[10px] font-black">
+                    {_t('جاري التحقق من الجلسة...', 'Verifying Authorization...')}
+                  </span>
+                ) : calendarConn.status === 'reconnect_required' ? (
+                  <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-[10px] font-black">
+                    {_t('مطلوب إعادة الربط', 'Reconnect Required')}
+                  </span>
+                ) : calendarConn.status === 'expired' ? (
+                  <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-[10px] font-black">
+                    {_t('انتهت الصلاحية — أعد الربط', 'Session Expired')}
+                  </span>
+                ) : calendarConn.status === 'cancelled' ? (
+                  <span className="px-1.5 py-0.5 rounded bg-slate-500/10 text-text-muted border border-surface-border text-[10px] font-bold">
+                    {_t('تم الإلغاء', 'Cancelled')}
+                  </span>
+                ) : calendarConn.status === 'error' ? (
+                  <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 text-[10px] font-black">
+                    {_t('خطأ تفويض', 'Auth Error')}
+                  </span>
+                ) : (
+                  <span className="px-1.5 py-0.5 rounded bg-slate-500/10 text-text-muted border border-surface-border text-[10px] font-bold">
+                    {_t('غير متصل', 'Not Connected')}
+                  </span>
+                )}
+              </div>
+              {calendarConn.accountEmail && (
+                <div className="text-[11px] text-text-muted truncate" dir="ltr">
+                  {calendarConn.accountEmail}
+                  {calendarConn.calendarTimeZone ? ` • ${calendarConn.calendarTimeZone}` : ''}
+                </div>
+              )}
+              {calendarConn.lastMessage &&
+                (calendarConn.status === 'error' ||
+                  calendarConn.status === 'expired' ||
+                  calendarConn.status === 'reconnect_required' ||
+                  calendarConn.status === 'cancelled' ||
+                  calendarConn.status === 'pending_redirect') && (
+                  <div className="text-[11px] text-rose-600 dark:text-rose-400 font-semibold mt-0.5">
+                    {calendarConn.lastMessage}
+                  </div>
+                )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              disabled={isConnectingCalendar || isSyncingCalendar}
+              onClick={() =>
+                handleConnectGoogleCalendar(
+                  calendarConn.status === 'connected' ||
+                    calendarConn.status === 'expired' ||
+                    calendarConn.status === 'reconnect_required'
+                )
+              }
+              className="px-2.5 py-1 rounded-lg bg-surface border border-surface-border hover:border-primary/40 text-text-main text-[11px] font-bold cursor-pointer disabled:opacity-50"
+            >
+              {isConnectingCalendar
+                ? _t('جاري التفويض...', 'Authorizing...')
+                : calendarConn.status === 'connected' && calendarConn.hasInMemoryToken
+                ? _t('إعادة التحقق / تبديل الحساب', 'Verify / Switch Account')
+                : calendarConn.status === 'reconnect_required' || calendarConn.status === 'expired'
+                ? _t('إعادة ربط Google Calendar', 'Reconnect Google Calendar')
+                : _t('ربط Google Calendar', 'Connect Google Calendar')}
+            </button>
+            {(calendarConn.status === 'connected' ||
+              calendarConn.status === 'needs_verification' ||
+              calendarConn.status === 'reconnect_required') && (
+              <button
+                type="button"
+                onClick={handleDisconnectGoogleCalendar}
+                className="px-2 py-1 rounded-lg text-rose-600 hover:bg-rose-500/10 text-[11px] font-bold cursor-pointer"
+              >
+                {_t('فصل', 'Disconnect')}
+              </button>
+            )}
           </div>
         </div>
 
@@ -800,6 +1057,14 @@ export const ZoomIntegrationsManager: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* 2.5 Clean & Rebuild Glück Meetings */}
+      <ZoomCleanupRebuildSection
+        timezone={timezoneInput || DEFAULT_ZOOM_TIMEZONE}
+        zoomConnected={meta.connected}
+        calendarConn={calendarConn}
+        onConnectCalendar={handleConnectGoogleCalendar}
+      />
 
       {/* 3. High-Density Weekly Sessions Directory */}
       <div className="bg-surface border border-surface-border rounded-xl p-3.5 sm:p-4 shadow-2xs space-y-3">

@@ -12,6 +12,7 @@ import { buildWhatsAppUrl, resolveStudentWhatsAppContact, cleanPhoneNumberForTel
 import { motion, AnimatePresence } from 'motion/react';
 import { GroupProfileModal } from './GroupProfileModal';
 import { SelectParentCallModal } from './SelectParentCallModal';
+import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
 
 const getLessonEndTime = (timeStr: string, durationMinutes: number = 60): string => {
   if (!timeStr) return '';
@@ -24,7 +25,7 @@ const getLessonEndTime = (timeStr: string, durationMinutes: number = 60): string
 };
 
 export const TodaysProgressTimeline: React.FC = () => {
-  const { lessons, groups, students, openLessonControl, saveLessonReport, cancelLesson, dismissedDashboardLessonIds, dismissLessonFromDashboard, t, _t, language } = useApp();
+  const { lessons, groups, students, groupWeeklySessions, profile, openLessonControl, saveLessonReport, cancelLesson, dismissedDashboardLessonIds, dismissLessonFromDashboard, t, _t, language } = useApp();
   const [now, setNow] = useState(new Date());
   const [isPastPendingExpanded, setIsPastPendingExpanded] = useState(false);
   const [showAllPastPending, setShowAllPastPending] = useState(false);
@@ -957,7 +958,12 @@ export const TodaysProgressTimeline: React.FC = () => {
                       {/* Join Online Video Meeting OR Open Google Maps Location Button */}
                       {(() => {
                         const isOfflineLesson = lesson.type === 'offline' || targetGroup?.type === 'offline';
-                        const meetingUrl = lesson.meetingLink || targetGroup?.zoomLink || targetGroup?.meetLink;
+                        const meetingUrl = resolveActiveZoomLinkForLesson({
+                          group: targetGroup,
+                          lesson,
+                          groupWeeklySessions,
+                          defaultZoomLink: profile.defaultZoomLink
+                        });
 
                         if (!isOfflineLesson && meetingUrl) {
                           return (

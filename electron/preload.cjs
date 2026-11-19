@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('electronBridge', {
     createMeeting: (payload) => ipcRenderer.invoke('zoom:createMeeting', payload),
     updateMeeting: (payload) => ipcRenderer.invoke('zoom:updateMeeting', payload),
     getMeeting: (meetingId) => ipcRenderer.invoke('zoom:getMeeting', { meetingId: String(meetingId || '') }),
-    deleteMeeting: (meetingId) => ipcRenderer.invoke('zoom:deleteMeeting', { meetingId: String(meetingId || '') })
+    deleteMeeting: (meetingId) => ipcRenderer.invoke('zoom:deleteMeeting', { meetingId: String(meetingId || '') }),
+    listMeetings: (options) => ipcRenderer.invoke('zoom:listMeetings', options || {})
   }
 });

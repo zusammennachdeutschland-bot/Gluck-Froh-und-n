@@ -179,22 +179,32 @@ export const BottomNav: React.FC = () => {
             </div>
 
             {/* CENTER Tactile Quick Action FAB */}
-            <div className="relative flex items-center justify-center shrink-0 -mt-7 select-none">
-              {/* Subtle glow */}
-              <div className="absolute inset-[-2px] bg-primary/15 dark:bg-primary/25 rounded-full blur-xs pointer-events-none" />
+            <div
+              className={`relative flex items-center justify-center shrink-0 select-none transition-all duration-150 ${
+                activeTab === 'grainRecordings' ? 'mt-0' : '-mt-7'
+              }`}
+            >
+              {/* Subtle glow (suppressed on grainRecordings so it never competes with recording actions) */}
+              {activeTab !== 'grainRecordings' && (
+                <div className="absolute inset-[-2px] bg-primary/15 dark:bg-primary/25 rounded-full blur-xs pointer-events-none" />
+              )}
               
               <button
                 onClick={() => {
                   setShowQuickMenu(prev => !prev);
                 }}
-                className={`w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-linear-to-tr from-primary to-primary-hover hover:from-primary hover:to-primary-hover text-white flex items-center justify-center shadow-lg shadow-primary/40 dark:shadow-primary/30 ring-[3.5px] sm:ring-[4px] ring-white/50 dark:ring-white/20 backdrop-blur-md relative z-10 cursor-pointer focus:outline-none transition-transform duration-150 active:scale-90 ${
+                className={`${
+                  activeTab === 'grainRecordings'
+                    ? 'w-10 h-10 bg-surface/90 dark:bg-slate-800/90 text-text-main border border-surface-border shadow-xs'
+                    : 'w-11 h-11 sm:w-12 sm:h-12 bg-linear-to-tr from-primary to-primary-hover hover:from-primary hover:to-primary-hover text-white shadow-lg shadow-primary/40 dark:shadow-primary/30 ring-[3.5px] sm:ring-[4px] ring-white/50 dark:ring-white/20 backdrop-blur-md'
+                } rounded-full flex items-center justify-center relative z-10 cursor-pointer focus:outline-none transition-transform duration-150 active:scale-90 ${
                   showQuickMenu ? 'rotate-45' : 'rotate-0'
                 }`}
                 style={{ WebkitTapHighlightColor: 'transparent', WebkitBackdropFilter: 'blur(12px)' }}
                 aria-label="Schnell-Eintrag / Quick Action"
                 title="Schnelle Aktionen anzeigen"
               >
-                <Plus className="w-5 h-5 sm:w-5.5 sm:h-5.5 stroke-[2.5]" />
+                <Plus className={`${activeTab === 'grainRecordings' ? 'w-4.5 h-4.5' : 'w-5 h-5 sm:w-5.5 sm:h-5.5'} stroke-[2.5]`} />
               </button>
 
               {/* Quick Action Popover Menu */}

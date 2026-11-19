@@ -23,12 +23,305 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 
 // server.ts
 var import_express2 = __toESM(require("express"), 1);
-var import_path = __toESM(require("path"), 1);
+var import_path3 = __toESM(require("path"), 1);
 var import_vite = require("vite");
 
 // src/api/expressApp.ts
 var import_express = __toESM(require("express"), 1);
-var import_crypto2 = __toESM(require("crypto"), 1);
+var import_crypto4 = __toESM(require("crypto"), 1);
+var import_genai = require("@google/genai");
+
+// src/shared/grammarEngine.ts
+var VALID_GRAMMAR_EXERCISE_TYPES = [
+  "multiple_choice",
+  "fill_blank",
+  "correct_mistake",
+  "choose_correct_sentence",
+  "sentence_ordering",
+  "short_answer"
+];
+function isValidGrammarExerciseType(val) {
+  return VALID_GRAMMAR_EXERCISE_TYPES.includes(String(val || "").trim());
+}
+function hasGrammarContent(set) {
+  if (!set) return false;
+  if (set.grammarContent) {
+    const gc = set.grammarContent;
+    if (gc.rules && gc.rules.length > 0 || gc.examples && gc.examples.length > 0 || gc.exercises && gc.exercises.length > 0 || Boolean(gc.explanationAr?.trim() || gc.explanationDe?.trim() || gc.explanationEn?.trim())) {
+      return true;
+    }
+  }
+  if (Array.isArray(set.customExercises) && set.customExercises.some((ex) => ex && isValidGrammarExerciseType(ex.type))) {
+    const hasNoItems = !Array.isArray(set.items) || set.items.length === 0;
+    return set.setKind === "grammar" || set.setKind === "mixed" || hasNoItems;
+  }
+  return false;
+}
+function inferSetKind(set) {
+  if (!set) return "vocab";
+  if (set.setKind === "verb_group") return "verb_group";
+  if (set.setKind === "grammar") {
+    if (Array.isArray(set.items) && set.items.length > 0 && hasGrammarContent(set)) {
+      return set.items.length >= 6 ? "mixed" : "grammar";
+    }
+    return "grammar";
+  }
+  if (set.setKind === "mixed") return "mixed";
+  const itemsCount = Array.isArray(set.items) ? set.items.length : 0;
+  if (hasGrammarContent(set)) {
+    return itemsCount > 0 ? "mixed" : "grammar";
+  }
+  return "vocab";
+}
+function normalizeGrammarRule(raw, index = 0) {
+  if (!raw || typeof raw !== "object") return null;
+  const title = String(raw.title || raw.titleAr || raw.titleDe || raw.titleEn || `\u0642\u0627\u0639\u062F\u0629 ${index + 1}`).trim();
+  const summaryAr = String(raw.summaryAr || raw.summary || raw.explanationAr || raw.explanation || "").trim();
+  const summaryDe = raw.summaryDe ? String(raw.summaryDe).trim() : void 0;
+  const summaryEn = raw.summaryEn ? String(raw.summaryEn).trim() : void 0;
+  if (!title && !summaryAr && !summaryDe && !summaryEn) return null;
+  let table;
+  if (raw.table && typeof raw.table === "object" && Array.isArray(raw.table.headers) && Array.isArray(raw.table.rows)) {
+    const headers = raw.table.headers.map((h) => String(h || "").trim());
+    const rows = raw.table.rows.filter((r) => Array.isArray(r)).map((r) => r.map((cell) => String(cell ?? "").trim()));
+    if (headers.length > 0 && rows.length > 0) {
+      table = { headers, rows };
+    }
+  }
+  return {
+    id: String(raw.id || `rule_${index + 1}`).trim(),
+    title,
+    ...raw.titleAr ? { titleAr: String(raw.titleAr).trim() } : {},
+    ...raw.titleDe ? { titleDe: String(raw.titleDe).trim() } : {},
+    ...raw.titleEn ? { titleEn: String(raw.titleEn).trim() } : {},
+    summaryAr: summaryAr || summaryDe || summaryEn || title,
+    ...summaryDe ? { summaryDe } : {},
+    ...summaryEn ? { summaryEn } : {},
+    ...raw.pattern ? { pattern: String(raw.pattern).trim() } : {},
+    ...table ? { table } : {},
+    ...raw.tipAr ? { tipAr: String(raw.tipAr).trim() } : {},
+    ...raw.tipDe ? { tipDe: String(raw.tipDe).trim() } : {},
+    ...raw.tipEn ? { tipEn: String(raw.tipEn).trim() } : {}
+  };
+}
+function normalizeGrammarExample(raw, index = 0) {
+  if (!raw || typeof raw !== "object") return null;
+  const german = String(raw.german || raw.de || raw.sentence || "").trim();
+  const arabic = String(raw.arabic || raw.ar || raw.translation || "").trim();
+  if (!german) return null;
+  return {
+    id: String(raw.id || `gex_${index + 1}`).trim(),
+    german,
+    arabic: arabic || (raw.english ? String(raw.english).trim() : german),
+    ...raw.english ? { english: String(raw.english).trim() } : {},
+    ...raw.highlight ? { highlight: String(raw.highlight).trim() } : {},
+    ...raw.noteAr ? { noteAr: String(raw.noteAr).trim() } : {},
+    ...raw.noteDe ? { noteDe: String(raw.noteDe).trim() } : {},
+    ...raw.noteEn ? { noteEn: String(raw.noteEn).trim() } : {}
+  };
+}
+function scrambleOrderingTokensDeterministic(tokens, seedStr, forbiddenOrder) {
+  const clean = (Array.isArray(tokens) ? tokens : []).map((t) => String(t || "").trim()).filter(Boolean);
+  if (clean.length <= 1) return clean;
+  let hash = 2166136261;
+  const s = `${seedStr}|${clean.join("|")}`;
+  for (let i = 0; i < s.length; i++) {
+    hash ^= s.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const nextRand = () => {
+    hash ^= hash << 13;
+    hash ^= hash >>> 17;
+    hash ^= hash << 5;
+    return (hash >>> 0) / 4294967296;
+  };
+  const out = [...clean];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(nextRand() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  const reference = forbiddenOrder && forbiddenOrder.length === out.length ? forbiddenOrder : clean;
+  const matchesReference = out.every((tok, idx) => tok.toLowerCase() === reference[idx]?.toLowerCase());
+  if (matchesReference) {
+    const diffIdx = out.findIndex((tok, idx) => tok.toLowerCase() !== reference[0]?.toLowerCase() && idx > 0);
+    const swapWith = diffIdx > 0 ? diffIdx : out.length - 1;
+    [out[0], out[swapWith]] = [out[swapWith], out[0]];
+  }
+  return out;
+}
+function normalizeGrammarExercise(raw, index = 0, defaultSource = "original", normalizeOptions) {
+  if (!raw || typeof raw !== "object") return null;
+  const allowAnswerless = Boolean(normalizeOptions?.allowAnswerless);
+  const question = String(raw.question || raw.sentenceWithBlank || raw.faultySentence || raw.prompt || "").trim();
+  const correctAnswer = String(raw.correctAnswer || "").trim();
+  if (!question || !correctAnswer && !allowAnswerless) return null;
+  const rawType = String(raw.type || "").trim();
+  const type = isValidGrammarExerciseType(rawType) ? rawType : rawType === "der_die_das" || rawType === "plural_match" ? "multiple_choice" : rawType === "sentence_builder" ? "sentence_ordering" : "multiple_choice";
+  let options = Array.isArray(raw.options) ? Array.from(new Set(raw.options.map((o) => String(o || "").trim()).filter(Boolean))) : void 0;
+  if (correctAnswer && (type === "multiple_choice" || type === "choose_correct_sentence") && options && options.length > 0) {
+    if (!options.some((o) => o.toLowerCase() === correctAnswer.toLowerCase())) {
+      options = [correctAnswer, ...options];
+    }
+  }
+  if (type === "short_answer" && options && options.length === 0) {
+    options = void 0;
+  }
+  let tokens = Array.isArray(raw.tokens) ? raw.tokens.map((t) => String(t || "").trim()).filter(Boolean) : void 0;
+  if (type === "sentence_ordering" && (!tokens || tokens.length < 2) && correctAnswer) {
+    const splitTokens = correctAnswer.split(/\s+/).filter(Boolean);
+    if (splitTokens.length >= 2) {
+      tokens = [...splitTokens];
+    }
+  }
+  const acceptedAnswers = correctAnswer && Array.isArray(raw.acceptedAnswers) ? Array.from(
+    new Set(
+      [correctAnswer, ...raw.acceptedAnswers.map((a) => String(a || "").trim())].filter(Boolean)
+    )
+  ) : void 0;
+  const source = raw.source === "generated" ? "generated" : raw.source === "original" ? "original" : defaultSource;
+  return {
+    id: String(raw.id || `gexq_${Date.now()}_${index}`).trim(),
+    type,
+    ...raw.prompt ? { prompt: String(raw.prompt).trim() } : {},
+    question,
+    ...raw.sentenceWithBlank ? { sentenceWithBlank: String(raw.sentenceWithBlank).trim() } : {},
+    ...raw.faultySentence ? { faultySentence: String(raw.faultySentence).trim() } : {},
+    ...tokens && tokens.length > 0 ? { tokens } : {},
+    ...options && options.length > 0 ? { options } : {},
+    correctAnswer,
+    ...acceptedAnswers && acceptedAnswers.length > 1 ? { acceptedAnswers } : {},
+    ...raw.explanation ? { explanation: String(raw.explanation).trim() } : {},
+    ...raw.explanationAr ? { explanationAr: String(raw.explanationAr).trim() } : {},
+    ...raw.explanationDe ? { explanationDe: String(raw.explanationDe).trim() } : {},
+    ...raw.explanationEn ? { explanationEn: String(raw.explanationEn).trim() } : {},
+    ...raw.ruleRef ? { ruleRef: String(raw.ruleRef).trim() } : {},
+    source,
+    ...raw.isUncertain ? { isUncertain: true } : {},
+    ...raw.uncertaintyReason ? { uncertaintyReason: String(raw.uncertaintyReason).trim() } : {}
+  };
+}
+function normalizeGrammarContent(raw, fallbackTitle = "\u062F\u0631\u0633 \u0642\u0648\u0627\u0639\u062F", fallbackTopic = "Grammatik", defaultOrigin = "teacher_created", normalizeOptions) {
+  if (!raw || typeof raw !== "object") return void 0;
+  const rules = Array.isArray(raw.rules) ? raw.rules.map((r, idx) => normalizeGrammarRule(r, idx)).filter((r) => Boolean(r)) : [];
+  const examples = Array.isArray(raw.examples) ? raw.examples.map((e, idx) => normalizeGrammarExample(e, idx)).filter((e) => Boolean(e)) : [];
+  const exercises = Array.isArray(raw.exercises) ? raw.exercises.map((ex, idx) => normalizeGrammarExercise(ex, idx, "original", normalizeOptions)).filter((ex) => Boolean(ex)) : [];
+  const pageImageRefs = Array.isArray(raw.pageImageRefs) ? raw.pageImageRefs.filter((p) => p && typeof p === "object" && p.id).map((p, idx) => ({
+    id: String(p.id).trim(),
+    fileName: String(p.fileName || `page_${idx + 1}.jpg`).trim(),
+    mimeType: String(p.mimeType || "image/jpeg").trim(),
+    ...typeof p.sizeBytes === "number" ? { sizeBytes: p.sizeBytes } : {},
+    ...typeof p.width === "number" ? { width: p.width } : {},
+    ...typeof p.height === "number" ? { height: p.height } : {},
+    pageOrder: Number.isFinite(Number(p.pageOrder)) ? Number(p.pageOrder) : idx + 1,
+    ...p.localStorageKey ? { localStorageKey: String(p.localStorageKey).trim() } : {},
+    ...p.checksum ? { checksum: String(p.checksum).trim() } : {}
+  })) : void 0;
+  const origin = raw.origin === "builtin" ? "builtin" : raw.origin === "teacher_created" ? "teacher_created" : defaultOrigin;
+  return {
+    lessonTitle: String(raw.lessonTitle || raw.lessonTitleAr || raw.lessonTitleDe || fallbackTitle).trim(),
+    ...raw.lessonTitleAr ? { lessonTitleAr: String(raw.lessonTitleAr).trim() } : {},
+    ...raw.lessonTitleDe ? { lessonTitleDe: String(raw.lessonTitleDe).trim() } : {},
+    ...raw.lessonTitleEn ? { lessonTitleEn: String(raw.lessonTitleEn).trim() } : {},
+    grammarTopic: String(raw.grammarTopic || raw.grammarTopicDe || raw.grammarTopicAr || fallbackTopic).trim(),
+    ...raw.grammarTopicAr ? { grammarTopicAr: String(raw.grammarTopicAr).trim() } : {},
+    ...raw.grammarTopicDe ? { grammarTopicDe: String(raw.grammarTopicDe).trim() } : {},
+    ...raw.grammarTopicEn ? { grammarTopicEn: String(raw.grammarTopicEn).trim() } : {},
+    explanationAr: String(raw.explanationAr || raw.explanation || raw.explanationDe || raw.explanationEn || "").trim(),
+    ...raw.explanationDe ? { explanationDe: String(raw.explanationDe).trim() } : {},
+    ...raw.explanationEn ? { explanationEn: String(raw.explanationEn).trim() } : {},
+    rules,
+    examples,
+    exercises,
+    origin,
+    ...pageImageRefs && pageImageRefs.length > 0 ? { pageImageRefs } : {},
+    ...raw.sourceBookInfo ? { sourceBookInfo: String(raw.sourceBookInfo).trim() } : {},
+    ...raw.extractionConfidenceNote ? { extractionConfidenceNote: String(raw.extractionConfidenceNote).trim() } : {}
+  };
+}
+function normalizeLernstudioSet(raw, normalizeOptions) {
+  const safeRaw = raw && typeof raw === "object" ? raw : {};
+  const title = String(safeRaw.title || "\u0645\u062C\u0645\u0648\u0639\u0629 \u0628\u062F\u0648\u0646 \u0627\u0633\u0645").trim();
+  const topic = String(safeRaw.topic || safeRaw.category || "Wortschatz").trim();
+  const items = Array.isArray(safeRaw.items) ? safeRaw.items : [];
+  const originDefault = String(safeRaw.id || "").startsWith("curric_") || safeRaw.contentOrigin === "builtin" ? "builtin" : "teacher_created";
+  const grammarContent = safeRaw.grammarContent ? normalizeGrammarContent(safeRaw.grammarContent, title, topic, originDefault, normalizeOptions) : void 0;
+  const allowAnswerless = Boolean(normalizeOptions?.allowAnswerless);
+  const customExercises = Array.isArray(safeRaw.customExercises) ? safeRaw.customExercises.filter(
+    (ex) => ex && typeof ex === "object" && ex.question && (ex.correctAnswer || allowAnswerless)
+  ) : void 0;
+  const candidate = {
+    ...safeRaw,
+    id: String(safeRaw.id || `set_${Date.now()}`),
+    title,
+    level: safeRaw.level || "A1",
+    topic,
+    difficulty: safeRaw.difficulty || "medium",
+    items,
+    ...customExercises ? { customExercises } : {},
+    ...grammarContent ? { grammarContent } : {},
+    contentOrigin: safeRaw.contentOrigin || originDefault,
+    createdAt: safeRaw.createdAt || (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: Number(safeRaw.updatedAt) || Date.now()
+  };
+  if (!candidate.setKind) {
+    candidate.setKind = inferSetKind(candidate);
+  }
+  return candidate;
+}
+function normalizeGermanGrammarAnswer(value, options) {
+  let s = String(value || "").replace(/[\u2018\u2019\u201A\u201B]/g, "'").replace(/[\u201C\u201D\u201E\u201F]/g, '"').replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim();
+  if (options?.ignoreTrailingPunctuation !== false) {
+    s = s.replace(/[.!?;:,]+$/g, "").trim();
+  }
+  return s.toLowerCase();
+}
+function evaluateNormalizedGrammarAnswer(studentAnswer, expected) {
+  const normStudent = normalizeGermanGrammarAnswer(studentAnswer, {
+    ignoreTrailingPunctuation: expected.ignoreTrailingPunctuation
+  });
+  if (!normStudent) return false;
+  const candidates = [expected.correctAnswer, ...expected.acceptedAnswers || []].filter(Boolean);
+  for (const cand of candidates) {
+    const normCand = normalizeGermanGrammarAnswer(cand, {
+      ignoreTrailingPunctuation: expected.ignoreTrailingPunctuation
+    });
+    if (normCand && normStudent === normCand) {
+      return true;
+    }
+  }
+  return false;
+}
+function stripHeavyGrammarMediaForSync(setObj) {
+  if (!setObj || typeof setObj !== "object") return setObj;
+  const copy = { ...setObj };
+  if (Array.isArray(copy.items)) {
+    copy.items = copy.items.map((item) => {
+      if (!item || typeof item !== "object") return item;
+      const itemCopy = { ...item };
+      for (const mediaKey of ["imageUrl", "imageDataUrl", "audioUrl", "audioDataUrl", "image"]) {
+        const val = itemCopy[mediaKey];
+        if (typeof val === "string" && (val.startsWith("data:") || val.length > 500)) {
+          delete itemCopy[mediaKey];
+        }
+      }
+      return itemCopy;
+    });
+  }
+  if (copy.grammarContent && typeof copy.grammarContent === "object") {
+    const gcCopy = { ...copy.grammarContent };
+    if (Array.isArray(gcCopy.pageImageRefs)) {
+      gcCopy.pageImageRefs = gcCopy.pageImageRefs.map((ref) => {
+        if (!ref || typeof ref !== "object") return ref;
+        const { base64Data: _b64, dataUrl: _du, ...rest } = ref;
+        return rest;
+      });
+    }
+    delete gcCopy.rawImages;
+    delete gcCopy.uploadedImagesBase64;
+    copy.grammarContent = gcCopy;
+  }
+  return copy;
+}
 
 // src/server/firebaseAdmin.ts
 var import_app2 = require("firebase-admin/app");
@@ -41,24 +334,6 @@ var import_auth = require("firebase/auth");
 // src/shared/googleCredentialAuthPlugin.ts
 var import_core = require("@capacitor/core");
 var NativeGoogleCredentialAuth = (0, import_core.registerPlugin)("GoogleCredentialAuth");
-var testAdapter = null;
-function isAndroidNativePlatform() {
-  if (testAdapter?.isAndroidNative) {
-    return testAdapter.isAndroidNative();
-  }
-  if (typeof window === "undefined") return false;
-  const cap = window.Capacitor;
-  if (cap) {
-    if (typeof cap.getPlatform === "function" && cap.getPlatform() === "android") {
-      return true;
-    }
-    if (typeof cap.isNativePlatform === "function" && cap.isNativePlatform()) {
-      return true;
-    }
-  }
-  const protocol = window.location?.protocol;
-  return protocol === "capacitor:" || protocol === "file:";
-}
 
 // src/shared/firebaseCloudSync.ts
 var import_firestore = require("firebase/firestore");
@@ -8568,15 +8843,6 @@ if (typeof window !== "undefined") {
       });
     });
   });
-  if (!isAndroidNativePlatform()) {
-    (0, import_auth.getRedirectResult)(auth).then((res) => {
-      if (res?.user) {
-        console.log("Redirect sign-in success:", res.user.email);
-      }
-    }).catch((e) => {
-      console.warn("Redirect result notice:", e);
-    });
-  }
 }
 
 // src/server/firebaseAdmin.ts
@@ -10064,6 +10330,1643 @@ async function saveAuthoritativeSubmission(submission, parentAssignment) {
   return { submission: storedResult, isIdempotentRetry };
 }
 
+// src/server/grainServerProxy.ts
+var import_crypto2 = __toESM(require("crypto"), 1);
+var import_fs = __toESM(require("fs"), 1);
+var import_path = __toESM(require("path"), 1);
+var GRAIN_API_ORIGIN = "https://api.grain.com";
+var GRAIN_API_VERSION = "2026-10-01";
+var SAFE_RECORDING_ID_REGEX = /^[a-zA-Z0-9_-]{4,128}$/;
+var ALLOWED_OPERATIONS = /* @__PURE__ */ new Set([
+  "token_info",
+  "list_recordings",
+  "recording_details",
+  "recording_transcript"
+]);
+function getMasterKeyFilePath() {
+  const dir = import_path.default.join(process.cwd(), ".aistudio");
+  return import_path.default.join(dir, "grain-vault-master.key");
+}
+function loadOrCreateVaultMasterKey() {
+  try {
+    const envKey = String(process.env.GRAIN_VAULT_MASTER_KEY || "").trim();
+    if (envKey) {
+      if (/^[0-9a-fA-F]{64}$/.test(envKey)) {
+        return Buffer.from(envKey, "hex");
+      }
+      const b64 = Buffer.from(envKey, "base64");
+      if (b64.length === 32) {
+        return b64;
+      }
+      return import_crypto2.default.createHash("sha256").update(envKey, "utf8").digest();
+    }
+    const keyPath = getMasterKeyFilePath();
+    if (import_fs.default.existsSync(keyPath)) {
+      const existingHex = import_fs.default.readFileSync(keyPath, "utf8").trim();
+      if (/^[0-9a-fA-F]{64}$/.test(existingHex)) {
+        return Buffer.from(existingHex, "hex");
+      }
+    }
+    const dir = import_path.default.dirname(keyPath);
+    if (!import_fs.default.existsSync(dir)) {
+      import_fs.default.mkdirSync(dir, { recursive: true, mode: 448 });
+    }
+    const randomKey = import_crypto2.default.randomBytes(32);
+    import_fs.default.writeFileSync(keyPath, randomKey.toString("hex"), { encoding: "utf8", mode: 384 });
+    return randomKey;
+  } catch {
+    return import_crypto2.default.randomBytes(32);
+  }
+}
+var vaultMasterKey = loadOrCreateVaultMasterKey();
+var forceMasterKeyUnavailableForTesting = false;
+var LOCAL_SESSION_HMAC_SECRET = import_crypto2.default.randomBytes(32);
+var SESSION_TTL_MS = 12 * 60 * 60 * 1e3;
+var activeGrainSessions = /* @__PURE__ */ new Map();
+var rateLimitBuckets = /* @__PURE__ */ new Map();
+var rateLimitMaxRequestsPerWindow = 60;
+var rateLimitWindowMs = 60 * 1e3;
+function checkGrainProxyRateLimit(bucketKey) {
+  const now = Date.now();
+  const cutoff = now - rateLimitWindowMs;
+  const existing = (rateLimitBuckets.get(bucketKey) || []).filter((ts) => ts > cutoff);
+  if (existing.length >= rateLimitMaxRequestsPerWindow) {
+    const oldest = existing[0] || now;
+    const retryAfterSeconds = Math.max(1, Math.ceil((oldest + rateLimitWindowMs - now) / 1e3));
+    rateLimitBuckets.set(bucketKey, existing);
+    return { allowed: false, retryAfterSeconds };
+  }
+  existing.push(now);
+  rateLimitBuckets.set(bucketKey, existing);
+  return { allowed: true };
+}
+var inMemoryEncryptedVault = /* @__PURE__ */ new Map();
+var customUpstreamFetch = null;
+function getVaultFilePath() {
+  const dir = import_path.default.join(process.cwd(), ".aistudio");
+  return import_path.default.join(dir, "grain-server-vault.enc.json");
+}
+function loadVaultFromDisk() {
+  try {
+    const filePath = getVaultFilePath();
+    if (!import_fs.default.existsSync(filePath)) return;
+    const raw = import_fs.default.readFileSync(filePath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      for (const [uid, entry] of Object.entries(parsed)) {
+        if (entry && typeof entry === "object" && entry.ciphertextB64) {
+          inMemoryEncryptedVault.set(uid, entry);
+        }
+      }
+    }
+  } catch {
+  }
+}
+function persistVaultToDisk() {
+  try {
+    const filePath = getVaultFilePath();
+    const dir = import_path.default.dirname(filePath);
+    if (!import_fs.default.existsSync(dir)) {
+      import_fs.default.mkdirSync(dir, { recursive: true, mode: 448 });
+    }
+    const obj = {};
+    for (const [uid, entry] of inMemoryEncryptedVault.entries()) {
+      obj[uid] = entry;
+    }
+    import_fs.default.writeFileSync(filePath, JSON.stringify(obj, null, 2), { encoding: "utf8", mode: 384 });
+  } catch {
+  }
+}
+loadVaultFromDisk();
+function normalizeServerGrainTokenInput(rawInput) {
+  let str = String(rawInput ?? "").replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF\u00A0]/g, "").trim();
+  str = str.replace(/^["'`]+|["'`]+$/g, "").trim();
+  str = str.replace(/^Authorization\s*:\s*/i, "").trim();
+  str = str.replace(/^Bearer\s+/i, "").trim();
+  str = str.replace(/^["'`]+|["'`]+$/g, "").trim();
+  const patMatch = str.match(/grain_pat_[A-Za-z0-9._~+/=-]+/i);
+  if (patMatch && patMatch[0]) {
+    return patMatch[0];
+  }
+  return str.replace(/\s+/g, "");
+}
+function maskGrainTokenString(token) {
+  const clean = normalizeServerGrainTokenInput(token);
+  if (clean.length <= 12) return "grain_pat_\u2022\u2022\u2022\u2022";
+  return `grain_pat_\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022${clean.slice(-4)}`;
+}
+function isServerVaultEncryptionAvailable() {
+  if (forceMasterKeyUnavailableForTesting) return false;
+  if (!vaultMasterKey || vaultMasterKey.length !== 32) {
+    vaultMasterKey = loadOrCreateVaultMasterKey();
+  }
+  return Boolean(vaultMasterKey && vaultMasterKey.length === 32);
+}
+function encryptGrainTokenForVault(rawToken) {
+  if (!isServerVaultEncryptionAvailable() || !vaultMasterKey) {
+    const err = new Error("Server encryption master key is unavailable; refusing to store plaintext token.");
+    err.code = "ENCRYPTION_UNAVAILABLE";
+    throw err;
+  }
+  const clean = String(rawToken || "").trim();
+  const iv = import_crypto2.default.randomBytes(12);
+  const cipher = import_crypto2.default.createCipheriv("aes-256-gcm", vaultMasterKey, iv);
+  const encrypted = Buffer.concat([cipher.update(clean, "utf8"), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return {
+    ivB64: iv.toString("base64"),
+    authTagB64: authTag.toString("base64"),
+    ciphertextB64: encrypted.toString("base64"),
+    maskedToken: maskGrainTokenString(clean),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+function decryptGrainTokenFromVault(entry) {
+  if (!isServerVaultEncryptionAvailable() || !vaultMasterKey) {
+    return null;
+  }
+  try {
+    const iv = Buffer.from(entry.ivB64, "base64");
+    const authTag = Buffer.from(entry.authTagB64, "base64");
+    const ciphertext = Buffer.from(entry.ciphertextB64, "base64");
+    const decipher = import_crypto2.default.createDecipheriv("aes-256-gcm", vaultMasterKey, iv);
+    decipher.setAuthTag(authTag);
+    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    return decrypted.toString("utf8");
+  } catch {
+    return null;
+  }
+}
+function createLocalTeacherSessionToken(deviceId) {
+  const cleanDevice = String(deviceId || "local_teacher").replace(/[^a-zA-Z0-9_-]/g, "_").trim().slice(0, 48) || "local_teacher";
+  const uid = `local_${cleanDevice}`;
+  const sessionId = import_crypto2.default.randomBytes(24).toString("hex");
+  const issuedAt = Date.now();
+  const expiresAt = issuedAt + SESSION_TTL_MS;
+  const payload = `${cleanDevice}.${sessionId}.${issuedAt}`;
+  const sig = import_crypto2.default.createHmac("sha256", LOCAL_SESSION_HMAC_SECRET).update(payload).digest("hex");
+  activeGrainSessions.set(sessionId, {
+    sessionId,
+    uid,
+    issuedAt,
+    expiresAt,
+    revoked: false
+  });
+  return `${payload}.${sig}`;
+}
+function revokeGrainSessionsForUser(uid) {
+  for (const [sid, record] of activeGrainSessions.entries()) {
+    if (record.uid === uid) {
+      record.revoked = true;
+      activeGrainSessions.delete(sid);
+    }
+  }
+}
+function verifyLocalTeacherSessionToken(token) {
+  const parts = String(token || "").trim().split(".");
+  if (parts.length !== 4) return { valid: false };
+  const [deviceId, sessionId, issuedAtStr, sig] = parts;
+  const issuedAt = Number(issuedAtStr);
+  if (!deviceId || !sessionId || !Number.isFinite(issuedAt)) return { valid: false };
+  const activeSession = activeGrainSessions.get(sessionId);
+  if (!activeSession || activeSession.revoked) {
+    return { valid: false };
+  }
+  const now = Date.now();
+  if (now > activeSession.expiresAt || Math.abs(now - issuedAt) > SESSION_TTL_MS) {
+    activeGrainSessions.delete(sessionId);
+    return { valid: false };
+  }
+  const expectedSig = import_crypto2.default.createHmac("sha256", LOCAL_SESSION_HMAC_SECRET).update(`${deviceId}.${sessionId}.${issuedAtStr}`).digest("hex");
+  try {
+    const a = Buffer.from(sig, "hex");
+    const b = Buffer.from(expectedSig, "hex");
+    if (a.length !== b.length || !import_crypto2.default.timingSafeEqual(a, b)) {
+      return { valid: false };
+    }
+    const expectedUid = `local_${deviceId}`;
+    if (activeSession.uid !== expectedUid) {
+      return { valid: false };
+    }
+    return { valid: true, uid: expectedUid };
+  } catch {
+    return { valid: false };
+  }
+}
+function isStrictLoopbackRequest(req) {
+  const socketIp = String(req.socket?.remoteAddress || "").trim();
+  const isLoopbackSocket = socketIp === "127.0.0.1" || socketIp === "::1" || socketIp === "::ffff:127.0.0.1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(socketIp) || /^::ffff:127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(socketIp);
+  if (!isLoopbackSocket) {
+    return false;
+  }
+  const xff = String(req.headers["x-forwarded-for"] || "").trim();
+  const xRealIp = String(req.headers["x-real-ip"] || "").trim();
+  const forwarded = String(req.headers["forwarded"] || "").trim();
+  if (xff || xRealIp || forwarded) {
+    const firstIp = xff.split(",")[0].trim() || xRealIp;
+    const forwardedIsLoopback = !forwarded && (firstIp === "127.0.0.1" || firstIp === "::1" || firstIp === "::ffff:127.0.0.1");
+    if (!forwardedIsLoopback) {
+      return false;
+    }
+  }
+  const originHeader = String(req.headers.origin || "").trim();
+  if (originHeader) {
+    try {
+      const parsedOrigin = new URL(originHeader);
+      const hn = parsedOrigin.hostname.toLowerCase();
+      if (hn !== "localhost" && hn !== "127.0.0.1" && hn !== "[::1]") {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+function isTrustedPreviewContainerRequest(req) {
+  const clientHeader = String(req.headers["x-grain-local-client"] || "").trim();
+  if (clientHeader !== "glueck-web") return false;
+  const originHeader = String(req.headers.origin || req.headers.referer || "").trim();
+  if (!originHeader) return true;
+  try {
+    const parsed = new URL(originHeader);
+    const hn = parsed.hostname.toLowerCase();
+    return hn === "localhost" || hn === "127.0.0.1" || hn === "[::1]" || hn.endsWith(".run.app");
+  } catch {
+    return false;
+  }
+}
+async function resolveAuthenticatedGrainUser(req, verifyFirebaseIdToken2) {
+  if (req.query?.token !== void 0 || req.query?.sessionToken !== void 0 || req.query?.access_token !== void 0) {
+    return {
+      authenticated: false,
+      status: 400,
+      error: "Credentials or session tokens in URL query parameters are strictly forbidden."
+    };
+  }
+  const authHeader = String(req.headers.authorization || "").trim();
+  const requestedOwnerUid = String(req.headers["x-owner-uid"] || req.body?.ownerUid || req.query?.ownerUid || "").trim();
+  if (authHeader.startsWith("Bearer ")) {
+    const idToken = authHeader.slice(7).trim();
+    if (!idToken) {
+      return { authenticated: false, status: 401, error: "Empty Bearer token" };
+    }
+    if (idToken.startsWith("grain_pat_")) {
+      return {
+        authenticated: false,
+        status: 401,
+        error: "Raw Grain tokens must never be sent in Authorization headers from the browser."
+      };
+    }
+    const verification = await verifyFirebaseIdToken2(idToken);
+    if (!verification.isValid || !verification.payload?.sub) {
+      return {
+        authenticated: false,
+        status: 401,
+        error: `Unauthorized: ${verification.error || "Invalid Firebase ID token"}`
+      };
+    }
+    const verifiedUid = verification.payload.sub;
+    if (requestedOwnerUid && requestedOwnerUid !== verifiedUid) {
+      return {
+        authenticated: false,
+        status: 403,
+        error: "Forbidden: requested ownerUid does not match authenticated Firebase user"
+      };
+    }
+    return { authenticated: true, uid: verifiedUid };
+  }
+  const localSessionToken = String(req.headers["x-grain-session-token"] || "").trim();
+  if (localSessionToken) {
+    if (!isStrictLoopbackRequest(req) && !isTrustedPreviewContainerRequest(req)) {
+      return {
+        authenticated: false,
+        status: 403,
+        error: "Forbidden: local session tokens are only accepted from verified loopback sockets."
+      };
+    }
+    const verifiedLocal = verifyLocalTeacherSessionToken(localSessionToken);
+    if (verifiedLocal.valid && verifiedLocal.uid) {
+      if (requestedOwnerUid && requestedOwnerUid !== verifiedLocal.uid) {
+        return {
+          authenticated: false,
+          status: 403,
+          error: "Forbidden: session UID mismatch"
+        };
+      }
+      return { authenticated: true, uid: verifiedLocal.uid };
+    }
+  }
+  return {
+    authenticated: false,
+    status: 401,
+    error: "Authentication required: provide a valid Firebase Bearer token or local teacher session token."
+  };
+}
+function getDecryptedTokenForUser(uid) {
+  const entry = inMemoryEncryptedVault.get(uid);
+  if (entry) {
+    const decrypted = decryptGrainTokenFromVault(entry);
+    if (decrypted) {
+      return { token: decrypted, maskedToken: entry.maskedToken };
+    }
+  }
+  return { token: null, maskedToken: null };
+}
+var UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var TOP_LEVEL_FORBIDDEN_FILTER_KEYS = [
+  "after_datetime",
+  "before_datetime",
+  "title_search",
+  "participant_scope",
+  "attendance",
+  "team",
+  "meeting_type"
+];
+var ALLOWED_LIST_RECORDINGS_TOP_KEYS = /* @__PURE__ */ new Set(["cursor", "filter", "include"]);
+var ALLOWED_RECORDING_DETAILS_TOP_KEYS = /* @__PURE__ */ new Set(["include"]);
+var ALLOWED_FILTER_KEYS = /* @__PURE__ */ new Set([
+  "before_datetime",
+  "after_datetime",
+  "participant_scope",
+  "title_search",
+  "team",
+  "meeting_type",
+  "attendance"
+]);
+var DOCUMENTED_BOOLEAN_INCLUDE_KEYS = [
+  "highlights",
+  "participants",
+  "ai_action_items",
+  "ai_summary",
+  "private_notes",
+  "calendar_event",
+  "hubspot",
+  "screenshares",
+  "sensitivity_matches"
+];
+var ALLOWED_INCLUDE_KEYS = /* @__PURE__ */ new Set([
+  ...DOCUMENTED_BOOLEAN_INCLUDE_KEYS,
+  "ai_template_sections"
+]);
+function normalizeGrainIso8601Timestamp(raw) {
+  if (typeof raw !== "string") return void 0;
+  const trimmed = raw.trim();
+  if (!trimmed) return void 0;
+  const ms = Date.parse(trimmed);
+  if (!Number.isFinite(ms)) return void 0;
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+function sanitizeGrainRecordingFilter(rawFilter) {
+  if (!rawFilter || typeof rawFilter !== "object" || Array.isArray(rawFilter)) {
+    return void 0;
+  }
+  const f = rawFilter;
+  const out = {};
+  const beforeDt = normalizeGrainIso8601Timestamp(f.before_datetime);
+  if (beforeDt) out.before_datetime = beforeDt;
+  const afterDt = normalizeGrainIso8601Timestamp(f.after_datetime);
+  if (afterDt) out.after_datetime = afterDt;
+  if (f.attendance === "hosted" || f.attendance === "attended") {
+    out.attendance = f.attendance;
+  }
+  if (f.participant_scope === "internal" || f.participant_scope === "external") {
+    out.participant_scope = f.participant_scope;
+  }
+  if (typeof f.title_search === "string" && f.title_search.trim()) {
+    out.title_search = f.title_search.trim();
+  }
+  if (typeof f.team === "string" && UUID_REGEX.test(f.team.trim())) {
+    out.team = f.team.trim();
+  }
+  if (typeof f.meeting_type === "string" && UUID_REGEX.test(f.meeting_type.trim())) {
+    out.meeting_type = f.meeting_type.trim();
+  }
+  return Object.keys(out).length > 0 ? out : void 0;
+}
+function sanitizeGrainRecordingInclude(rawInclude) {
+  if (!rawInclude || typeof rawInclude !== "object" || Array.isArray(rawInclude)) {
+    return void 0;
+  }
+  const inc = rawInclude;
+  const out = {};
+  for (const key of DOCUMENTED_BOOLEAN_INCLUDE_KEYS) {
+    if (typeof inc[key] === "boolean" && inc[key] === true) {
+      out[key] = true;
+    }
+  }
+  if (inc.ai_template_sections && typeof inc.ai_template_sections === "object" && !Array.isArray(inc.ai_template_sections)) {
+    const ats = inc.ai_template_sections;
+    const cleanAts = {};
+    if (ats.format === "json" || ats.format === "markdown" || ats.format === "text") {
+      cleanAts.format = ats.format;
+    } else {
+      cleanAts.format = "json";
+    }
+    if (Array.isArray(ats.allowed_sections)) {
+      const sections = ats.allowed_sections.filter((s) => typeof s === "string" && s.trim().length > 0).map((s) => s.trim());
+      if (sections.length > 0) {
+        cleanAts.allowed_sections = sections;
+      }
+    }
+    out.ai_template_sections = cleanAts;
+  } else if (inc.ai_template_sections === true) {
+    out.ai_template_sections = { format: "json" };
+  }
+  return Object.keys(out).length > 0 ? out : void 0;
+}
+function buildWhitelistedGrainTarget(options) {
+  const rawBody = options.rawRequestBody || {};
+  if (rawBody.url !== void 0 || rawBody.targetUrl !== void 0 || rawBody.host !== void 0 || rawBody.endpoint !== void 0 || rawBody.path !== void 0 || rawBody.method !== void 0) {
+    return {
+      valid: false,
+      code: "ARBITRARY_URL_FORBIDDEN",
+      error: "Arbitrary URLs, hosts, paths, or HTTP methods are strictly forbidden on the Grain proxy."
+    };
+  }
+  const operation = String(options.operation || "").trim();
+  if (!ALLOWED_OPERATIONS.has(operation)) {
+    return {
+      valid: false,
+      code: "UNSUPPORTED_OPERATION",
+      error: `Unsupported Grain operation: ${operation || "empty"}`
+    };
+  }
+  let endpointPath = "";
+  let method = "GET";
+  let sanitizedBody;
+  if (operation === "token_info") {
+    endpointPath = "/_/public-api/v2/token-info";
+    method = "GET";
+  } else if (operation === "list_recordings") {
+    endpointPath = "/_/public-api/v2/recordings";
+    method = "POST";
+    const p = options.bodyPayload && typeof options.bodyPayload === "object" && !Array.isArray(options.bodyPayload) ? options.bodyPayload : {};
+    for (const forbiddenTopKey of TOP_LEVEL_FORBIDDEN_FILTER_KEYS) {
+      if (p[forbiddenTopKey] !== void 0) {
+        return {
+          valid: false,
+          code: "INVALID_TOP_LEVEL_FILTER",
+          error: `Field "${forbiddenTopKey}" must be nested inside "filter", not sent as a top-level field.`
+        };
+      }
+    }
+    for (const key of Object.keys(p)) {
+      if (!ALLOWED_LIST_RECORDINGS_TOP_KEYS.has(key)) {
+        return {
+          valid: false,
+          code: "UNKNOWN_FIELD_FORBIDDEN",
+          error: `Unknown top-level field "${key}" is not allowed in list_recordings.`
+        };
+      }
+    }
+    if (p.filter !== void 0) {
+      if (!p.filter || typeof p.filter !== "object" || Array.isArray(p.filter)) {
+        return {
+          valid: false,
+          code: "INVALID_FILTER_OBJECT",
+          error: '"filter" must be a plain JSON object.'
+        };
+      }
+      for (const fKey of Object.keys(p.filter)) {
+        if (!ALLOWED_FILTER_KEYS.has(fKey)) {
+          return {
+            valid: false,
+            code: "UNKNOWN_FILTER_FIELD",
+            error: `Unknown filter field "${fKey}" is not allowed in Grain API v2.`
+          };
+        }
+      }
+    }
+    if (p.include !== void 0) {
+      if (!p.include || typeof p.include !== "object" || Array.isArray(p.include)) {
+        return {
+          valid: false,
+          code: "INVALID_INCLUDE_OBJECT",
+          error: '"include" must be a plain JSON object.'
+        };
+      }
+      for (const incKey of Object.keys(p.include)) {
+        if (!ALLOWED_INCLUDE_KEYS.has(incKey)) {
+          return {
+            valid: false,
+            code: "UNKNOWN_INCLUDE_FIELD",
+            error: `Unknown include field "${incKey}" is not allowed in Grain API v2.`
+          };
+        }
+      }
+    }
+    sanitizedBody = {};
+    if (typeof p.cursor === "string" && p.cursor.trim()) {
+      sanitizedBody.cursor = p.cursor.trim();
+    }
+    const cleanFilter = sanitizeGrainRecordingFilter(p.filter);
+    if (cleanFilter) {
+      sanitizedBody.filter = cleanFilter;
+    }
+    const cleanInclude = sanitizeGrainRecordingInclude(p.include);
+    if (cleanInclude) {
+      sanitizedBody.include = cleanInclude;
+    }
+  } else if (operation === "recording_details") {
+    const recId = String(options.recordingId || "").trim();
+    if (!SAFE_RECORDING_ID_REGEX.test(recId)) {
+      return {
+        valid: false,
+        code: "INVALID_RECORDING_ID",
+        error: "A valid alphanumeric recordingId is required for recording_details."
+      };
+    }
+    endpointPath = `/_/public-api/v2/recordings/${recId}`;
+    method = "POST";
+    const p = options.bodyPayload && typeof options.bodyPayload === "object" && !Array.isArray(options.bodyPayload) ? options.bodyPayload : {};
+    for (const key of Object.keys(p)) {
+      if (!ALLOWED_RECORDING_DETAILS_TOP_KEYS.has(key)) {
+        return {
+          valid: false,
+          code: "UNKNOWN_FIELD_FORBIDDEN",
+          error: `Unknown top-level field "${key}" is not allowed in recording_details.`
+        };
+      }
+    }
+    if (p.include !== void 0) {
+      if (!p.include || typeof p.include !== "object" || Array.isArray(p.include)) {
+        return {
+          valid: false,
+          code: "INVALID_INCLUDE_OBJECT",
+          error: '"include" must be a plain JSON object.'
+        };
+      }
+      for (const incKey of Object.keys(p.include)) {
+        if (!ALLOWED_INCLUDE_KEYS.has(incKey)) {
+          return {
+            valid: false,
+            code: "UNKNOWN_INCLUDE_FIELD",
+            error: `Unknown include field "${incKey}" is not allowed in Grain API v2.`
+          };
+        }
+      }
+    }
+    sanitizedBody = {};
+    const cleanInclude = sanitizeGrainRecordingInclude(p.include);
+    if (cleanInclude) {
+      sanitizedBody.include = cleanInclude;
+    }
+  } else if (operation === "recording_transcript") {
+    const recId = String(options.recordingId || "").trim();
+    if (!SAFE_RECORDING_ID_REGEX.test(recId)) {
+      return {
+        valid: false,
+        code: "INVALID_RECORDING_ID",
+        error: "A valid alphanumeric recordingId is required for recording_transcript."
+      };
+    }
+    endpointPath = `/_/public-api/v2/recordings/${recId}/transcript`;
+    method = "GET";
+  }
+  const resolvedUrl = new URL(endpointPath, GRAIN_API_ORIGIN);
+  if (resolvedUrl.origin !== GRAIN_API_ORIGIN || resolvedUrl.pathname.includes("..")) {
+    return {
+      valid: false,
+      code: "ARBITRARY_URL_FORBIDDEN",
+      error: "Resolved URL violates Grain origin policy."
+    };
+  }
+  return {
+    valid: true,
+    url: resolvedUrl.toString(),
+    method,
+    bodyString: method === "POST" ? JSON.stringify(sanitizedBody || {}) : void 0
+  };
+}
+async function executeUpstreamGrainRequest(options) {
+  const maxAttempts = 2;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12e3);
+    try {
+      const headers = {
+        Authorization: `Bearer ${options.token}`,
+        "Public-Api-Version": GRAIN_API_VERSION,
+        Accept: "application/json"
+      };
+      if (options.method === "POST") {
+        headers["Content-Type"] = "application/json";
+      }
+      if (customUpstreamFetch) {
+        const res = await customUpstreamFetch(options.url, {
+          method: options.method,
+          headers,
+          body: options.bodyString,
+          signal: controller.signal
+        });
+        if (res.status >= 300 && res.status < 400) {
+          return {
+            httpStatus: 502,
+            bodyText: JSON.stringify({
+              error: "Upstream redirect refused for security (Authorization header is never forwarded across redirects).",
+              code: "REDIRECT_FORBIDDEN"
+            })
+          };
+        }
+        const text = await res.text();
+        return {
+          httpStatus: res.status,
+          retryAfter: res.headers?.["retry-after"] || res.headers?.["Retry-After"],
+          bodyText: text
+        };
+      }
+      const response = await fetch(options.url, {
+        method: options.method,
+        headers,
+        body: options.bodyString,
+        redirect: "manual",
+        signal: controller.signal
+      });
+      if (response.status >= 300 && response.status < 400) {
+        return {
+          httpStatus: 502,
+          bodyText: JSON.stringify({
+            error: "Upstream redirect refused for security (Authorization header is never forwarded across redirects).",
+            code: "REDIRECT_FORBIDDEN"
+          })
+        };
+      }
+      const bodyText = await response.text();
+      const retryAfter = response.headers.get("retry-after") || void 0;
+      if ((response.status === 502 || response.status === 503 || response.status === 504) && attempt < maxAttempts) {
+        continue;
+      }
+      return {
+        httpStatus: response.status,
+        retryAfter,
+        bodyText
+      };
+    } catch {
+      if (attempt < maxAttempts) {
+        continue;
+      }
+      return {
+        httpStatus: 502,
+        bodyText: JSON.stringify({
+          error: "Network timeout or connection failure while contacting Grain API.",
+          code: "NETWORK_ERROR"
+        })
+      };
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+  return {
+    httpStatus: 502,
+    bodyText: JSON.stringify({ error: "Upstream Grain request failed.", code: "NETWORK_ERROR" })
+  };
+}
+function registerGrainServerRoutes(app3, verifyFirebaseIdToken2) {
+  app3.post("/api/grain/session", (req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    if (!isStrictLoopbackRequest(req) && !isTrustedPreviewContainerRequest(req)) {
+      return res.status(403).json({
+        error: "Local session tokens can only be issued to direct loopback connections. Use Firebase Bearer auth on remote hosts.",
+        code: "FORBIDDEN_REMOTE_SESSION"
+      });
+    }
+    const socketBucket = `session_ip:${req.socket?.remoteAddress || "local"}`;
+    const rate = checkGrainProxyRateLimit(socketBucket);
+    if (!rate.allowed) {
+      res.setHeader("Retry-After", String(rate.retryAfterSeconds || 60));
+      return res.status(429).json({
+        error: "Too many session token requests. Please wait before retrying.",
+        code: "RATE_LIMITED"
+      });
+    }
+    const deviceId = String(req.body?.deviceId || "local_teacher").replace(/[^a-zA-Z0-9_-]/g, "_").trim().slice(0, 48) || "local_teacher";
+    const sessionToken = createLocalTeacherSessionToken(deviceId);
+    return res.status(200).json({
+      sessionToken,
+      ownerUid: `local_${deviceId}`
+    });
+  });
+  app3.get("/api/grain/status", async (req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    const authResult = await resolveAuthenticatedGrainUser(req, verifyFirebaseIdToken2);
+    if (!authResult.authenticated || !authResult.uid) {
+      return res.status(authResult.status || 401).json({
+        error: authResult.error || "Unauthorized",
+        code: "UNAUTHORIZED"
+      });
+    }
+    const encryptionReady = isServerVaultEncryptionAvailable();
+    const { token, maskedToken } = encryptionReady ? getDecryptedTokenForUser(authResult.uid) : { token: null, maskedToken: null };
+    return res.status(200).json({
+      supported: encryptionReady,
+      secureStorageAvailable: encryptionReady,
+      runtime: "web",
+      hasToken: Boolean(token),
+      maskedToken: token ? maskedToken : null
+    });
+  });
+  app3.post("/api/grain/connect", async (req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    const authResult = await resolveAuthenticatedGrainUser(req, verifyFirebaseIdToken2);
+    if (!authResult.authenticated || !authResult.uid) {
+      return res.status(authResult.status || 401).json({
+        error: authResult.error || "Unauthorized",
+        code: "UNAUTHORIZED"
+      });
+    }
+    const rate = checkGrainProxyRateLimit(`connect:${authResult.uid}`);
+    if (!rate.allowed) {
+      res.setHeader("Retry-After", String(rate.retryAfterSeconds || 60));
+      return res.status(429).json({
+        saved: false,
+        error: "Rate limit exceeded for token connection attempts.",
+        code: "RATE_LIMITED"
+      });
+    }
+    if (!isServerVaultEncryptionAvailable()) {
+      return res.status(503).json({
+        saved: false,
+        error: "Server encryption master key is unavailable; refusing to store token insecurely.",
+        code: "SECURE_STORAGE_UNAVAILABLE"
+      });
+    }
+    const rawToken = normalizeServerGrainTokenInput(req.body?.token);
+    if (!rawToken || rawToken.length < 6) {
+      return res.status(400).json({
+        saved: false,
+        error: "Invalid Grain Personal Access Token format.",
+        code: "INVALID_TOKEN_FORMAT"
+      });
+    }
+    const encrypted = encryptGrainTokenForVault(rawToken);
+    inMemoryEncryptedVault.set(authResult.uid, encrypted);
+    persistVaultToDisk();
+    return res.status(200).json({
+      saved: true,
+      hasToken: true,
+      maskedToken: encrypted.maskedToken,
+      secureStorageAvailable: true
+    });
+  });
+  app3.post("/api/grain/disconnect", async (req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    const authResult = await resolveAuthenticatedGrainUser(req, verifyFirebaseIdToken2);
+    if (!authResult.authenticated || !authResult.uid) {
+      return res.status(authResult.status || 401).json({
+        error: authResult.error || "Unauthorized",
+        code: "UNAUTHORIZED"
+      });
+    }
+    inMemoryEncryptedVault.delete(authResult.uid);
+    revokeGrainSessionsForUser(authResult.uid);
+    persistVaultToDisk();
+    return res.status(200).json({
+      disconnected: true,
+      hasToken: false
+    });
+  });
+  app3.post("/api/grain/execute", async (req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    const authResult = await resolveAuthenticatedGrainUser(req, verifyFirebaseIdToken2);
+    if (!authResult.authenticated || !authResult.uid) {
+      return res.status(authResult.status || 401).json({
+        error: authResult.error || "Unauthorized",
+        code: "UNAUTHORIZED"
+      });
+    }
+    const rate = checkGrainProxyRateLimit(`exec:${authResult.uid}`);
+    if (!rate.allowed) {
+      res.setHeader("Retry-After", String(rate.retryAfterSeconds || 60));
+      return res.status(429).json({
+        error: "Too many Grain API requests. Please wait before retrying.",
+        code: "RATE_LIMITED"
+      });
+    }
+    const validation = buildWhitelistedGrainTarget({
+      operation: req.body?.operation,
+      recordingId: req.body?.recordingId,
+      bodyPayload: req.body?.payload,
+      rawRequestBody: req.body
+    });
+    if (!validation.valid || !validation.url || !validation.method) {
+      return res.status(400).json({
+        error: validation.error || "Invalid Grain proxy request",
+        code: validation.code || "BAD_REQUEST"
+      });
+    }
+    const { token } = getDecryptedTokenForUser(authResult.uid);
+    if (!token) {
+      return res.status(401).json({
+        error: "Grain Personal Access Token is not configured for this account.",
+        code: "TOKEN_MISSING"
+      });
+    }
+    const upstreamResult = await executeUpstreamGrainRequest({
+      url: validation.url,
+      method: validation.method,
+      token,
+      bodyString: validation.bodyString
+    });
+    return res.status(200).json({
+      httpStatus: upstreamResult.httpStatus,
+      retryAfter: upstreamResult.retryAfter,
+      bodyText: upstreamResult.bodyText
+    });
+  });
+}
+
+// src/server/zoomServerProxy.ts
+var import_crypto3 = __toESM(require("crypto"), 1);
+var import_fs2 = __toESM(require("fs"), 1);
+var import_path2 = __toESM(require("path"), 1);
+var ZOOM_OAUTH_TOKEN_URL = "https://zoom.us/oauth/token";
+var ZOOM_API_BASE_URL = "https://api.zoom.us/v2";
+var customZoomUpstreamFetch = null;
+var LOCAL_ZOOM_SESSION_HMAC_SECRET = import_crypto3.default.randomBytes(32);
+var SESSION_TTL_MS2 = 12 * 60 * 60 * 1e3;
+var activeZoomSessions = /* @__PURE__ */ new Map();
+var inMemoryZoomVault = /* @__PURE__ */ new Map();
+var cachedZoomAccessTokens = /* @__PURE__ */ new Map();
+var zoomRateLimitBuckets = /* @__PURE__ */ new Map();
+var ZOOM_RATE_LIMIT_MAX = 40;
+var ZOOM_RATE_LIMIT_WINDOW_MS = 60 * 1e3;
+function checkZoomRateLimit(bucketKey) {
+  const now = Date.now();
+  const cutoff = now - ZOOM_RATE_LIMIT_WINDOW_MS;
+  const existing = (zoomRateLimitBuckets.get(bucketKey) || []).filter((ts) => ts > cutoff);
+  if (existing.length >= ZOOM_RATE_LIMIT_MAX) {
+    const oldest = existing[0] || now;
+    const retryAfterSeconds = Math.max(1, Math.ceil((oldest + ZOOM_RATE_LIMIT_WINDOW_MS - now) / 1e3));
+    zoomRateLimitBuckets.set(bucketKey, existing);
+    return { allowed: false, retryAfterSeconds };
+  }
+  existing.push(now);
+  zoomRateLimitBuckets.set(bucketKey, existing);
+  return { allowed: true };
+}
+function getZoomMasterKeyFilePath() {
+  return import_path2.default.join(process.cwd(), ".aistudio", "zoom-vault-master.key");
+}
+function getZoomVaultFilePath() {
+  return import_path2.default.join(process.cwd(), ".aistudio", "zoom-server-vault.enc.json");
+}
+function loadOrCreateZoomMasterKey() {
+  try {
+    const envKey = String(process.env.ZOOM_VAULT_MASTER_KEY || process.env.GRAIN_VAULT_MASTER_KEY || "").trim();
+    if (envKey) {
+      if (/^[0-9a-fA-F]{64}$/.test(envKey)) {
+        return Buffer.from(envKey, "hex");
+      }
+      const b64 = Buffer.from(envKey, "base64");
+      if (b64.length === 32) return b64;
+      return import_crypto3.default.createHash("sha256").update(envKey, "utf8").digest();
+    }
+    const keyPath = getZoomMasterKeyFilePath();
+    if (import_fs2.default.existsSync(keyPath)) {
+      const existingHex = import_fs2.default.readFileSync(keyPath, "utf8").trim();
+      if (/^[0-9a-fA-F]{64}$/.test(existingHex)) {
+        return Buffer.from(existingHex, "hex");
+      }
+    }
+    const dir = import_path2.default.dirname(keyPath);
+    if (!import_fs2.default.existsSync(dir)) {
+      import_fs2.default.mkdirSync(dir, { recursive: true, mode: 448 });
+    }
+    const randomKey = import_crypto3.default.randomBytes(32);
+    import_fs2.default.writeFileSync(keyPath, randomKey.toString("hex"), { encoding: "utf8", mode: 384 });
+    return randomKey;
+  } catch {
+    return import_crypto3.default.randomBytes(32);
+  }
+}
+var zoomMasterKey = loadOrCreateZoomMasterKey();
+var forceZoomMasterKeyUnavailableForTesting = false;
+function isZoomVaultEncryptionAvailable() {
+  if (forceZoomMasterKeyUnavailableForTesting) return false;
+  if (!zoomMasterKey || zoomMasterKey.length !== 32) {
+    zoomMasterKey = loadOrCreateZoomMasterKey();
+  }
+  return Boolean(zoomMasterKey && zoomMasterKey.length === 32);
+}
+function normalizeZoomCredentialInput(rawInput) {
+  let str = String(rawInput ?? "").replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF\u00A0]/g, "").trim();
+  str = str.replace(/^["'`]+|["'`]+$/g, "").trim();
+  return str.replace(/\s+/g, "");
+}
+function maskCredentialValue(val) {
+  const clean = String(val || "").trim();
+  if (clean.length <= 6) return "\u2022\u2022\u2022\u2022\u2022\u2022";
+  return `${clean.slice(0, 3)}\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022${clean.slice(-4)}`;
+}
+function encryptZoomPayloadForVault(payload) {
+  if (!isZoomVaultEncryptionAvailable() || !zoomMasterKey) {
+    const err = new Error("Zoom server encryption master key unavailable.");
+    err.code = "ENCRYPTION_UNAVAILABLE";
+    throw err;
+  }
+  const iv = import_crypto3.default.randomBytes(12);
+  const cipher = import_crypto3.default.createCipheriv("aes-256-gcm", zoomMasterKey, iv);
+  const jsonText = JSON.stringify(payload);
+  const encrypted = Buffer.concat([cipher.update(jsonText, "utf8"), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return {
+    ivB64: iv.toString("base64"),
+    authTagB64: authTag.toString("base64"),
+    ciphertextB64: encrypted.toString("base64"),
+    maskedAccountId: maskCredentialValue(payload.accountId),
+    maskedClientId: maskCredentialValue(payload.clientId),
+    defaultTimezone: payload.defaultTimezone || "Africa/Cairo",
+    planType: payload.planType || "unknown",
+    isBasicPlan: payload.isBasicPlan,
+    hostEmail: payload.hostEmail,
+    updatedAt: payload.updatedAt
+  };
+}
+function decryptZoomPayloadFromVault(entry) {
+  if (!isZoomVaultEncryptionAvailable() || !zoomMasterKey) return null;
+  try {
+    const iv = Buffer.from(entry.ivB64, "base64");
+    const authTag = Buffer.from(entry.authTagB64, "base64");
+    const ciphertext = Buffer.from(entry.ciphertextB64, "base64");
+    const decipher = import_crypto3.default.createDecipheriv("aes-256-gcm", zoomMasterKey, iv);
+    decipher.setAuthTag(authTag);
+    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    return JSON.parse(decrypted.toString("utf8"));
+  } catch {
+    return null;
+  }
+}
+function loadZoomVaultFromDisk() {
+  try {
+    const filePath = getZoomVaultFilePath();
+    if (!import_fs2.default.existsSync(filePath)) return;
+    const raw = import_fs2.default.readFileSync(filePath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      for (const [uid, entry] of Object.entries(parsed)) {
+        if (entry && typeof entry === "object" && entry.ciphertextB64) {
+          inMemoryZoomVault.set(uid, entry);
+        }
+      }
+    }
+  } catch {
+  }
+}
+function persistZoomVaultToDisk() {
+  try {
+    const filePath = getZoomVaultFilePath();
+    const dir = import_path2.default.dirname(filePath);
+    if (!import_fs2.default.existsSync(dir)) {
+      import_fs2.default.mkdirSync(dir, { recursive: true, mode: 448 });
+    }
+    const obj = {};
+    for (const [uid, entry] of inMemoryZoomVault.entries()) {
+      obj[uid] = entry;
+    }
+    import_fs2.default.writeFileSync(filePath, JSON.stringify(obj, null, 2), { encoding: "utf8", mode: 384 });
+  } catch {
+  }
+}
+loadZoomVaultFromDisk();
+function isTrustedZoomPreviewRequest(req) {
+  const clientHeader = String(req.headers["x-zoom-local-client"] || req.headers["x-grain-local-client"] || "").trim();
+  if (clientHeader !== "glueck-web") return false;
+  const originHeader = String(req.headers.origin || req.headers.referer || "").trim();
+  if (!originHeader) return true;
+  try {
+    const parsed = new URL(originHeader);
+    const hn = parsed.hostname.toLowerCase();
+    return hn === "localhost" || hn === "127.0.0.1" || hn === "[::1]" || hn.endsWith(".run.app");
+  } catch {
+    return false;
+  }
+}
+function createLocalZoomSessionToken(deviceId) {
+  const cleanDevice = String(deviceId || "local_teacher").replace(/[^a-zA-Z0-9_-]/g, "_").trim().slice(0, 48) || "local_teacher";
+  const uid = `local_${cleanDevice}`;
+  const sessionId = import_crypto3.default.randomBytes(24).toString("hex");
+  const issuedAt = Date.now();
+  const expiresAt = issuedAt + SESSION_TTL_MS2;
+  const payload = `${cleanDevice}.${sessionId}.${issuedAt}`;
+  const sig = import_crypto3.default.createHmac("sha256", LOCAL_ZOOM_SESSION_HMAC_SECRET).update(payload).digest("hex");
+  activeZoomSessions.set(sessionId, {
+    sessionId,
+    uid,
+    issuedAt,
+    expiresAt,
+    revoked: false
+  });
+  return `${payload}.${sig}`;
+}
+function verifyLocalZoomSessionToken(token) {
+  const parts = String(token || "").trim().split(".");
+  if (parts.length !== 4) return { valid: false };
+  const [deviceId, sessionId, issuedAtStr, sig] = parts;
+  const issuedAt = Number(issuedAtStr);
+  if (!deviceId || !sessionId || !Number.isFinite(issuedAt)) return { valid: false };
+  const activeSession = activeZoomSessions.get(sessionId);
+  if (!activeSession || activeSession.revoked) return { valid: false };
+  const now = Date.now();
+  if (now > activeSession.expiresAt || Math.abs(now - issuedAt) > SESSION_TTL_MS2) {
+    activeZoomSessions.delete(sessionId);
+    return { valid: false };
+  }
+  const expectedSig = import_crypto3.default.createHmac("sha256", LOCAL_ZOOM_SESSION_HMAC_SECRET).update(`${deviceId}.${sessionId}.${issuedAtStr}`).digest("hex");
+  try {
+    const a = Buffer.from(sig, "hex");
+    const b = Buffer.from(expectedSig, "hex");
+    if (a.length !== b.length || !import_crypto3.default.timingSafeEqual(a, b)) return { valid: false };
+    const expectedUid = `local_${deviceId}`;
+    if (activeSession.uid !== expectedUid) return { valid: false };
+    return { valid: true, uid: expectedUid };
+  } catch {
+    return { valid: false };
+  }
+}
+async function resolveAuthenticatedZoomUser(req, verifyFirebaseIdToken2) {
+  if (req.query?.clientSecret !== void 0 || req.query?.access_token !== void 0) {
+    return {
+      authenticated: false,
+      status: 400,
+      error: "Credentials in query parameters are strictly forbidden."
+    };
+  }
+  const authHeader = String(req.headers.authorization || "").trim();
+  const requestedOwnerUid = String(req.headers["x-owner-uid"] || req.body?.ownerUid || "").trim();
+  if (authHeader.startsWith("Bearer ")) {
+    const idToken = authHeader.slice(7).trim();
+    if (!idToken) return { authenticated: false, status: 401, error: "Empty Bearer token" };
+    const verification = await verifyFirebaseIdToken2(idToken);
+    if (!verification.isValid || !verification.payload?.sub) {
+      return { authenticated: false, status: 401, error: verification.error || "Invalid Firebase ID token" };
+    }
+    const verifiedUid = verification.payload.sub;
+    if (requestedOwnerUid && requestedOwnerUid !== verifiedUid) {
+      return { authenticated: false, status: 403, error: "Forbidden: UID mismatch" };
+    }
+    return { authenticated: true, uid: verifiedUid };
+  }
+  const localSessionToken = String(
+    req.headers["x-zoom-session-token"] || req.headers["x-grain-session-token"] || ""
+  ).trim();
+  if (localSessionToken) {
+    if (!isStrictLoopbackRequest(req) && !isTrustedZoomPreviewRequest(req)) {
+      return { authenticated: false, status: 403, error: "Forbidden remote session token" };
+    }
+    const verifiedLocal = verifyLocalZoomSessionToken(localSessionToken);
+    if (verifiedLocal.valid && verifiedLocal.uid) {
+      return { authenticated: true, uid: verifiedLocal.uid };
+    }
+  }
+  return {
+    authenticated: false,
+    status: 401,
+    error: "Authentication required for Zoom backend operations."
+  };
+}
+async function performZoomFetch(url, init, retriesLeft = 2) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15e3);
+  try {
+    const fetcher = customZoomUpstreamFetch || fetch;
+    const resp = await fetcher(url, {
+      ...init,
+      signal: controller.signal
+    });
+    const text = await resp.text();
+    let retryAfter;
+    if (resp.headers) {
+      retryAfter = typeof resp.headers.get === "function" ? resp.headers.get("retry-after") || void 0 : resp.headers["retry-after"];
+    }
+    if ((resp.status === 429 || resp.status >= 502) && retriesLeft > 0) {
+      const waitMs = Math.min(3e3, Math.max(400, (Number(retryAfter) || 1) * 1e3));
+      await new Promise((r) => setTimeout(r, waitMs));
+      return performZoomFetch(url, init, retriesLeft - 1);
+    }
+    return { status: resp.status, bodyText: text, retryAfter };
+  } catch (err) {
+    if (retriesLeft > 0) {
+      await new Promise((r) => setTimeout(r, 450));
+      return performZoomFetch(url, init, retriesLeft - 1);
+    }
+    return {
+      status: 502,
+      bodyText: JSON.stringify({ message: err?.message || "Zoom network timeout" })
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+async function getZoomAccessTokenForUid(uid, creds, forceRefresh = false) {
+  const cached = cachedZoomAccessTokens.get(uid);
+  if (!forceRefresh && cached && cached.expiresAtMs > Date.now() + 5 * 60 * 1e3) {
+    return { ok: true, accessToken: cached.accessToken };
+  }
+  const basicAuth = Buffer.from(`${creds.clientId}:${creds.clientSecret}`, "utf8").toString("base64");
+  const formBody = `grant_type=account_credentials&account_id=${encodeURIComponent(creds.accountId)}`;
+  const res = await performZoomFetch(ZOOM_OAUTH_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${basicAuth}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json"
+    },
+    body: formBody
+  });
+  if (res.status < 200 || res.status >= 300) {
+    let zoomReason = "Zoom Server-to-Server OAuth authentication failed.";
+    try {
+      const parsed = JSON.parse(res.bodyText);
+      zoomReason = parsed.reason || parsed.error_description || parsed.message || zoomReason;
+    } catch {
+    }
+    const detailedError = `${zoomReason} (Tip: Ensure your Zoom Server-to-Server app is Activated in the Zoom App Marketplace, Account ID / Client ID / Client Secret are correctly placed in their respective fields, and required scopes like meeting:write:admin and user:read:admin are added).`;
+    return { ok: false, status: res.status, error: detailedError };
+  }
+  try {
+    const parsed = JSON.parse(res.bodyText);
+    const accessToken = String(parsed.access_token || "").trim();
+    const expiresInSec = Math.max(120, Number(parsed.expires_in) || 3600);
+    if (!accessToken) {
+      return { ok: false, status: 502, error: "Zoom OAuth response omitted access_token." };
+    }
+    cachedZoomAccessTokens.set(uid, {
+      accessToken,
+      expiresAtMs: Date.now() + expiresInSec * 1e3
+    });
+    return { ok: true, accessToken };
+  } catch {
+    return { ok: false, status: 502, error: "Invalid JSON response from Zoom OAuth server." };
+  }
+}
+async function probeZoomHostUserProfile(accessToken) {
+  const res = await performZoomFetch(`${ZOOM_API_BASE_URL}/users/me`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json"
+    }
+  });
+  if (res.status < 200 || res.status >= 300) {
+    let msg = `Zoom /users/me check returned HTTP ${res.status}`;
+    try {
+      const parsed = JSON.parse(res.bodyText);
+      msg = parsed.message || msg;
+    } catch {
+    }
+    return {
+      ok: res.status === 400 || res.status === 403 ? false : false,
+      planType: "unknown",
+      isBasicPlan: false,
+      status: res.status,
+      error: msg
+    };
+  }
+  try {
+    const u = JSON.parse(res.bodyText);
+    const userType = Number(u.type);
+    const planType = userType === 1 ? "basic" : userType >= 2 ? "licensed" : "unknown";
+    return {
+      ok: true,
+      email: typeof u.email === "string" ? u.email : void 0,
+      userId: typeof u.id === "string" ? u.id : void 0,
+      planType,
+      isBasicPlan: planType === "basic",
+      status: res.status
+    };
+  } catch {
+    return {
+      ok: true,
+      planType: "unknown",
+      isBasicPlan: false,
+      status: res.status
+    };
+  }
+}
+function registerZoomServerRoutes(app3, verifyFirebaseIdToken2) {
+  app3.post("/api/zoom/session", (req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    if (!isStrictLoopbackRequest(req) && !isTrustedZoomPreviewRequest(req)) {
+      return res.status(403).json({ error: "Forbidden remote session request", code: "FORBIDDEN_REMOTE_SESSION" });
+    }
+    const bucket = `zoom_sess:${req.socket?.remoteAddress || "local"}`;
+    const rate = checkZoomRateLimit(bucket);
+    if (!rate.allowed) {
+      res.setHeader("Retry-After", String(rate.retryAfterSeconds || 30));
+      return res.status(429).json({ error: "Too many session requests", code: "RATE_LIMITED" });
+    }
+    const deviceId = String(req.body?.deviceId || "local_teacher").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 48) || "local_teacher";
+    const sessionToken = createLocalZoomSessionToken(deviceId);
+    return res.status(200).json({ sessionToken, ownerUid: `local_${deviceId}` });
+  });
+  app3.get("/api/zoom/status", async (req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    const authResult = await resolveAuthenticatedZoomUser(req, verifyFirebaseIdToken2);
+    if (!authResult.authenticated || !authResult.uid) {
+      return res.status(authResult.status || 401).json({ error: authResult.error || "Unauthorized" });
+    }
+    const vaultReady = isZoomVaultEncryptionAvailable();
+    const entry = inMemoryZoomVault.get(authResult.uid);
+    if (!entry) {
+      return res.status(200).json({
+        secureStorageAvailable: vaultReady,
+        hasCredentials: false,
+        defaultTimezone: "Africa/Cairo",
+        planType: "unknown",
+        isBasicPlan: false,
+        maxMeetingMinutes: null
+      });
+    }
+    return res.status(200).json({
+      secureStorageAvailable: vaultReady,
+      hasCredentials: true,
+      maskedAccountId: entry.maskedAccountId,
+      maskedClientId: entry.maskedClientId,
+      defaultTimezone: entry.defaultTimezone || "Africa/Cairo",
+      planType: entry.planType || "unknown",
+      isBasicPlan: Boolean(entry.isBasicPlan),
+      maxMeetingMinutes: entry.isBasicPlan ? 40 : null,
+      hostEmail: entry.hostEmail || null,
+      updatedAt: entry.updatedAt
+    });
+  });
+  app3.post("/api/zoom/connect", async (req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    const authResult = await resolveAuthenticatedZoomUser(req, verifyFirebaseIdToken2);
+    if (!authResult.authenticated || !authResult.uid) {
+      return res.status(authResult.status || 401).json({ error: authResult.error || "Unauthorized" });
+    }
+    if (!isZoomVaultEncryptionAvailable()) {
+      return res.status(503).json({
+        saved: false,
+        error: "Server encryption master key unavailable; refusing insecure storage."
+      });
+    }
+    const accountId = normalizeZoomCredentialInput(req.body?.accountId);
+    const clientId = normalizeZoomCredentialInput(req.body?.clientId);
+    const clientSecret = normalizeZoomCredentialInput(req.body?.clientSecret);
+    const defaultTimezone = String(req.body?.defaultTimezone || "Africa/Cairo").trim() || "Africa/Cairo";
+    if (accountId.length < 6 || clientId.length < 6 || clientSecret.length < 8) {
+      return res.status(400).json({
+        saved: false,
+        error: "Account ID, Client ID, and Client Secret are required and appear too short."
+      });
+    }
+    const tempCreds = {
+      accountId,
+      clientId,
+      clientSecret,
+      defaultTimezone,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    cachedZoomAccessTokens.delete(authResult.uid);
+    const tokenRes = await getZoomAccessTokenForUid(authResult.uid, tempCreds, true);
+    if (!tokenRes.ok || !tokenRes.accessToken) {
+      return res.status(tokenRes.status === 400 || tokenRes.status === 401 ? 401 : 502).json({
+        saved: false,
+        connected: false,
+        error: tokenRes.error || "Zoom Server-to-Server OAuth verification failed."
+      });
+    }
+    const profileRes = await probeZoomHostUserProfile(tokenRes.accessToken);
+    const finalCreds = {
+      ...tempCreds,
+      planType: profileRes.ok ? profileRes.planType : "unknown",
+      isBasicPlan: profileRes.ok ? profileRes.isBasicPlan : false,
+      hostEmail: profileRes.email,
+      hostUserId: profileRes.userId
+    };
+    const encrypted = encryptZoomPayloadForVault(finalCreds);
+    inMemoryZoomVault.set(authResult.uid, encrypted);
+    persistZoomVaultToDisk();
+    return res.status(200).json({
+      saved: true,
+      connected: true,
+      maskedAccountId: encrypted.maskedAccountId,
+      maskedClientId: encrypted.maskedClientId,
+      defaultTimezone: finalCreds.defaultTimezone,
+      planType: finalCreds.planType,
+      isBasicPlan: Boolean(finalCreds.isBasicPlan),
+      maxMeetingMinutes: finalCreds.isBasicPlan ? 40 : null,
+      hostEmail: finalCreds.hostEmail || null
+    });
+  });
+  app3.post("/api/zoom/test-connection", async (req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    const authResult = await resolveAuthenticatedZoomUser(req, verifyFirebaseIdToken2);
+    if (!authResult.authenticated || !authResult.uid) {
+      return res.status(authResult.status || 401).json({ error: authResult.error || "Unauthorized" });
+    }
+    const entry = inMemoryZoomVault.get(authResult.uid);
+    if (!entry) {
+      return res.status(404).json({ connected: false, error: "Zoom credentials are not configured." });
+    }
+    const creds = decryptZoomPayloadFromVault(entry);
+    if (!creds) {
+      return res.status(500).json({ connected: false, error: "Failed to decrypt Zoom credentials." });
+    }
+    const tokenRes = await getZoomAccessTokenForUid(authResult.uid, creds, true);
+    if (!tokenRes.ok || !tokenRes.accessToken) {
+      return res.status(200).json({
+        connected: false,
+        error: tokenRes.error || "OAuth token refresh failed."
+      });
+    }
+    const profileRes = await probeZoomHostUserProfile(tokenRes.accessToken);
+    if (profileRes.ok) {
+      const updatedCreds = {
+        ...creds,
+        planType: profileRes.planType,
+        isBasicPlan: profileRes.isBasicPlan,
+        hostEmail: profileRes.email || creds.hostEmail,
+        hostUserId: profileRes.userId || creds.hostUserId
+      };
+      inMemoryZoomVault.set(authResult.uid, encryptZoomPayloadForVault(updatedCreds));
+      persistZoomVaultToDisk();
+    }
+    return res.status(200).json({
+      connected: true,
+      planType: profileRes.planType,
+      isBasicPlan: profileRes.isBasicPlan,
+      maxMeetingMinutes: profileRes.isBasicPlan ? 40 : null,
+      hostEmail: profileRes.email || creds.hostEmail || null,
+      defaultTimezone: creds.defaultTimezone || "Africa/Cairo",
+      profileCheckWarning: profileRes.ok ? null : profileRes.error
+    });
+  });
+  app3.patch("/api/zoom/settings", async (req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    const authResult = await resolveAuthenticatedZoomUser(req, verifyFirebaseIdToken2);
+    if (!authResult.authenticated || !authResult.uid) {
+      return res.status(authResult.status || 401).json({ error: authResult.error || "Unauthorized" });
+    }
+    const defaultTimezone = String(req.body?.defaultTimezone || "Africa/Cairo").trim() || "Africa/Cairo";
+    const entry = inMemoryZoomVault.get(authResult.uid);
+    if (!entry) {
+      return res.status(200).json({ saved: true, defaultTimezone });
+    }
+    const creds = decryptZoomPayloadFromVault(entry);
+    if (!creds) {
+      return res.status(500).json({ saved: false, error: "Failed to update settings in vault." });
+    }
+    const nextCreds = {
+      ...creds,
+      defaultTimezone,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    inMemoryZoomVault.set(authResult.uid, encryptZoomPayloadForVault(nextCreds));
+    persistZoomVaultToDisk();
+    return res.status(200).json({ saved: true, defaultTimezone });
+  });
+  app3.post("/api/zoom/disconnect", async (req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    const authResult = await resolveAuthenticatedZoomUser(req, verifyFirebaseIdToken2);
+    if (!authResult.authenticated || !authResult.uid) {
+      return res.status(authResult.status || 401).json({ error: authResult.error || "Unauthorized" });
+    }
+    inMemoryZoomVault.delete(authResult.uid);
+    cachedZoomAccessTokens.delete(authResult.uid);
+    persistZoomVaultToDisk();
+    return res.status(200).json({ disconnected: true, hasCredentials: false });
+  });
+  app3.post("/api/zoom/meetings/create", async (req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    const authResult = await resolveAuthenticatedZoomUser(req, verifyFirebaseIdToken2);
+    if (!authResult.authenticated || !authResult.uid) {
+      return res.status(authResult.status || 401).json({ error: authResult.error || "Unauthorized" });
+    }
+    const rate = checkZoomRateLimit(`create:${authResult.uid}`);
+    if (!rate.allowed) {
+      res.setHeader("Retry-After", String(rate.retryAfterSeconds || 30));
+      return res.status(429).json({ error: "Rate limit exceeded. Please wait briefly.", code: "RATE_LIMITED" });
+    }
+    const entry = inMemoryZoomVault.get(authResult.uid);
+    const creds = entry ? decryptZoomPayloadFromVault(entry) : null;
+    if (!creds) {
+      return res.status(401).json({ error: "Zoom credentials are not configured.", code: "CREDENTIALS_MISSING" });
+    }
+    const tokenRes = await getZoomAccessTokenForUid(authResult.uid, creds);
+    if (!tokenRes.ok || !tokenRes.accessToken) {
+      return res.status(502).json({ error: tokenRes.error || "OAuth token unavailable." });
+    }
+    const topic = String(req.body?.topic || "").trim().slice(0, 200);
+    const startTime = String(req.body?.startTime || "").trim();
+    const duration = Math.max(15, Math.min(300, Number(req.body?.duration) || 60));
+    const timezone = String(req.body?.timezone || creds.defaultTimezone || "Africa/Cairo").trim() || "Africa/Cairo";
+    const weeklyDay = Math.max(1, Math.min(7, Number(req.body?.weeklyDay) || 2));
+    const repeatInterval = Number(req.body?.repeatInterval) === 2 ? 2 : 1;
+    if (!topic || !startTime) {
+      return res.status(400).json({ error: "topic and startTime are required to create a Zoom meeting." });
+    }
+    const meetingBody = {
+      topic,
+      type: 8,
+      start_time: startTime,
+      duration,
+      timezone,
+      recurrence: {
+        type: 2,
+        repeat_interval: repeatInterval,
+        weekly_days: String(weeklyDay),
+        end_times: 50
+      },
+      settings: {
+        host_video: true,
+        participant_video: true,
+        join_before_host: false,
+        mute_upon_entry: true,
+        waiting_room: req.body?.waitingRoom !== false,
+        auto_recording: req.body?.autoRecording === "cloud" ? "cloud" : "none"
+      }
+    };
+    const apiRes = await performZoomFetch(`${ZOOM_API_BASE_URL}/users/me/meetings`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${tokenRes.accessToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json"
+      },
+      body: JSON.stringify(meetingBody)
+    });
+    if (apiRes.status < 200 || apiRes.status >= 300) {
+      let msg = `Zoom API error (HTTP ${apiRes.status})`;
+      try {
+        const errObj = JSON.parse(apiRes.bodyText);
+        msg = errObj.message || msg;
+      } catch {
+      }
+      return res.status(apiRes.status === 429 ? 429 : 502).json({ error: msg });
+    }
+    try {
+      const m = JSON.parse(apiRes.bodyText);
+      return res.status(200).json({
+        zoomMeetingId: String(m.id || ""),
+        joinUrl: String(m.join_url || ""),
+        startUrl: typeof m.start_url === "string" ? m.start_url : void 0,
+        meetingPasscode: typeof m.password === "string" ? m.password : void 0,
+        topic: String(m.topic || topic),
+        timezone: String(m.timezone || timezone),
+        hostEmail: creds.hostEmail || void 0,
+        planWarning40Min: Boolean(creds.isBasicPlan && duration >= 41)
+      });
+    } catch {
+      return res.status(502).json({ error: "Invalid JSON returned by Zoom API." });
+    }
+  });
+  app3.patch("/api/zoom/meetings/:meetingId", async (req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    const authResult = await resolveAuthenticatedZoomUser(req, verifyFirebaseIdToken2);
+    if (!authResult.authenticated || !authResult.uid) {
+      return res.status(authResult.status || 401).json({ error: authResult.error || "Unauthorized" });
+    }
+    const meetingId = String(req.params?.meetingId || "").replace(/[^0-9]/g, "");
+    if (!meetingId || meetingId.length < 8) {
+      return res.status(400).json({ error: "Valid numeric Zoom meetingId is required." });
+    }
+    const entry = inMemoryZoomVault.get(authResult.uid);
+    const creds = entry ? decryptZoomPayloadFromVault(entry) : null;
+    if (!creds) {
+      return res.status(401).json({ error: "Zoom credentials are not configured." });
+    }
+    const tokenRes = await getZoomAccessTokenForUid(authResult.uid, creds);
+    if (!tokenRes.ok || !tokenRes.accessToken) {
+      return res.status(502).json({ error: tokenRes.error || "OAuth token unavailable." });
+    }
+    const topic = String(req.body?.topic || "").trim().slice(0, 200);
+    const startTime = String(req.body?.startTime || "").trim();
+    const duration = Math.max(15, Math.min(300, Number(req.body?.duration) || 60));
+    const timezone = String(req.body?.timezone || creds.defaultTimezone || "Africa/Cairo").trim() || "Africa/Cairo";
+    const weeklyDay = Math.max(1, Math.min(7, Number(req.body?.weeklyDay) || 2));
+    const repeatInterval = Number(req.body?.repeatInterval) === 2 ? 2 : 1;
+    const patchBody = {
+      type: 8,
+      duration,
+      timezone,
+      recurrence: {
+        type: 2,
+        repeat_interval: repeatInterval,
+        weekly_days: String(weeklyDay),
+        end_times: 50
+      }
+    };
+    if (topic) patchBody.topic = topic;
+    if (startTime) patchBody.start_time = startTime;
+    const apiRes = await performZoomFetch(`${ZOOM_API_BASE_URL}/meetings/${encodeURIComponent(meetingId)}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${tokenRes.accessToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json"
+      },
+      body: JSON.stringify(patchBody)
+    });
+    if (apiRes.status < 200 || apiRes.status >= 300) {
+      let msg = `Zoom PATCH error (HTTP ${apiRes.status})`;
+      try {
+        const errObj = JSON.parse(apiRes.bodyText);
+        msg = errObj.message || msg;
+      } catch {
+      }
+      return res.status(apiRes.status === 404 ? 404 : 502).json({ error: msg, httpStatus: apiRes.status });
+    }
+    return res.status(200).json({
+      updated: true,
+      zoomMeetingId: meetingId,
+      topic: topic || void 0,
+      planWarning40Min: Boolean(creds.isBasicPlan && duration >= 41)
+    });
+  });
+  app3.get("/api/zoom/meetings/:meetingId", async (req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    const authResult = await resolveAuthenticatedZoomUser(req, verifyFirebaseIdToken2);
+    if (!authResult.authenticated || !authResult.uid) {
+      return res.status(authResult.status || 401).json({ error: authResult.error || "Unauthorized" });
+    }
+    const meetingId = String(req.params?.meetingId || "").replace(/[^0-9]/g, "");
+    if (!meetingId || meetingId.length < 8) {
+      return res.status(400).json({ error: "Valid numeric Zoom meetingId is required." });
+    }
+    const entry = inMemoryZoomVault.get(authResult.uid);
+    const creds = entry ? decryptZoomPayloadFromVault(entry) : null;
+    if (!creds) {
+      return res.status(401).json({ error: "Zoom credentials are not configured." });
+    }
+    const tokenRes = await getZoomAccessTokenForUid(authResult.uid, creds);
+    if (!tokenRes.ok || !tokenRes.accessToken) {
+      return res.status(502).json({ error: tokenRes.error || "OAuth token unavailable." });
+    }
+    const apiRes = await performZoomFetch(`${ZOOM_API_BASE_URL}/meetings/${encodeURIComponent(meetingId)}`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${tokenRes.accessToken}`,
+        Accept: "application/json"
+      }
+    });
+    if (apiRes.status < 200 || apiRes.status >= 300) {
+      let msg = `Zoom inspect error (HTTP ${apiRes.status})`;
+      try {
+        const errObj = JSON.parse(apiRes.bodyText);
+        msg = errObj.message || msg;
+      } catch {
+      }
+      return res.status(apiRes.status === 404 ? 404 : 502).json({ error: msg, exists: apiRes.status !== 404 });
+    }
+    try {
+      const m = JSON.parse(apiRes.bodyText);
+      return res.status(200).json({
+        exists: true,
+        zoomMeetingId: String(m.id || meetingId),
+        topic: String(m.topic || ""),
+        joinUrl: String(m.join_url || ""),
+        startUrl: typeof m.start_url === "string" ? m.start_url : void 0,
+        meetingPasscode: typeof m.password === "string" ? m.password : void 0,
+        timezone: typeof m.timezone === "string" ? m.timezone : void 0,
+        status: typeof m.status === "string" ? m.status : "waiting"
+      });
+    } catch {
+      return res.status(502).json({ error: "Invalid JSON returned from Zoom." });
+    }
+  });
+  app3.delete("/api/zoom/meetings/:meetingId", async (req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    const authResult = await resolveAuthenticatedZoomUser(req, verifyFirebaseIdToken2);
+    if (!authResult.authenticated || !authResult.uid) {
+      return res.status(authResult.status || 401).json({ error: authResult.error || "Unauthorized" });
+    }
+    const meetingId = String(req.params?.meetingId || "").replace(/[^0-9]/g, "");
+    if (!meetingId || meetingId.length < 8) {
+      return res.status(400).json({ error: "Valid numeric Zoom meetingId is required." });
+    }
+    const entry = inMemoryZoomVault.get(authResult.uid);
+    const creds = entry ? decryptZoomPayloadFromVault(entry) : null;
+    if (!creds) {
+      return res.status(401).json({ error: "Zoom credentials are not configured." });
+    }
+    const tokenRes = await getZoomAccessTokenForUid(authResult.uid, creds);
+    if (!tokenRes.ok || !tokenRes.accessToken) {
+      return res.status(502).json({ error: tokenRes.error || "OAuth token unavailable." });
+    }
+    const apiRes = await performZoomFetch(`${ZOOM_API_BASE_URL}/meetings/${encodeURIComponent(meetingId)}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${tokenRes.accessToken}`,
+        Accept: "application/json"
+      }
+    });
+    if (apiRes.status !== 204 && (apiRes.status < 200 || apiRes.status >= 300) && apiRes.status !== 404) {
+      let msg = `Zoom DELETE error (HTTP ${apiRes.status})`;
+      try {
+        const errObj = JSON.parse(apiRes.bodyText);
+        msg = errObj.message || msg;
+      } catch {
+      }
+      return res.status(502).json({ error: msg });
+    }
+    return res.status(200).json({ deleted: true, zoomMeetingId: meetingId });
+  });
+}
+
 // src/api/expressApp.ts
 var app2 = (0, import_express.default)();
 app2.use(import_express.default.json({ limit: "50mb" }));
@@ -10078,7 +11981,7 @@ app2.use((req, res, next) => {
     }
   }
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Owner-Uid");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Owner-Uid, X-Grain-Session-Token, X-Grain-Local-Client, X-Zoom-Session-Token, X-Zoom-Local-Client");
   if (req.method === "OPTIONS") {
     res.status(204).end();
     return;
@@ -10358,22 +12261,44 @@ function sanitizePublicSetSnapshot(rawSnapshot) {
     }
     return cleanItem;
   });
-  const rawExercises = Array.isArray(rawSnapshot.customExercises) ? rawSnapshot.customExercises : [];
-  const sanitizedExercises = rawExercises.map((ex) => {
+  const sanitizePublicExercise = (ex, idx, includeItemRef = false) => {
     if (!ex || typeof ex !== "object") return {};
+    const type = String(ex.type || "multiple_choice").trim();
     const cleanEx = {
       id: String(ex.id || ""),
-      type: ex.type || "multiple_choice",
-      question: String(ex.question || ex.prompt || "")
+      type,
+      question: String(ex.question || ex.sentenceWithBlank || ex.faultySentence || ex.prompt || "")
     };
+    if (ex.prompt) cleanEx.prompt = String(ex.prompt);
+    if (ex.sentenceWithBlank) cleanEx.sentenceWithBlank = String(ex.sentenceWithBlank);
+    if (ex.faultySentence) cleanEx.faultySentence = String(ex.faultySentence);
+    if (type === "sentence_ordering") {
+      const expectedOrder = String(ex.correctAnswer || "").trim().split(/\s+/).filter(Boolean);
+      const rawTokens = Array.isArray(ex.tokens) && ex.tokens.length >= 2 ? ex.tokens.map((t) => String(t || "").trim()).filter(Boolean) : expectedOrder;
+      if (rawTokens.length > 0) {
+        cleanEx.tokens = scrambleOrderingTokensDeterministic(
+          rawTokens,
+          String(ex.id || `ex_${idx}`),
+          expectedOrder.length >= 2 ? expectedOrder : void 0
+        );
+      }
+    } else if (Array.isArray(ex.tokens)) {
+      cleanEx.tokens = ex.tokens.map(String);
+    }
     if (Array.isArray(ex.options)) {
       cleanEx.options = ex.options.map(String);
     }
-    if (ex.itemRefId) {
+    if (includeItemRef && ex.itemRefId) {
       cleanEx.itemRefId = String(ex.itemRefId);
     }
+    if (ex.source) cleanEx.source = String(ex.source);
+    if (ex.ruleRef) cleanEx.ruleRef = String(ex.ruleRef);
+    if (ex.isUncertain) cleanEx.isUncertain = true;
+    if (ex.uncertaintyReason) cleanEx.uncertaintyReason = String(ex.uncertaintyReason);
     return cleanEx;
-  });
+  };
+  const rawExercises = Array.isArray(rawSnapshot.customExercises) ? rawSnapshot.customExercises : [];
+  const sanitizedExercises = rawExercises.map((ex, idx) => sanitizePublicExercise(ex, idx, true));
   const sanitizedSnapshot = {
     id: String(rawSnapshot.id || ""),
     title: String(rawSnapshot.title || ""),
@@ -10384,6 +12309,7 @@ function sanitizePublicSetSnapshot(rawSnapshot) {
   };
   if (rawSnapshot.category) sanitizedSnapshot.category = String(rawSnapshot.category);
   if (rawSnapshot.setKind) sanitizedSnapshot.setKind = String(rawSnapshot.setKind);
+  if (rawSnapshot.contentOrigin) sanitizedSnapshot.contentOrigin = String(rawSnapshot.contentOrigin);
   if (Array.isArray(rawSnapshot.verbIds)) {
     sanitizedSnapshot.verbIds = rawSnapshot.verbIds.map(String);
   }
@@ -10393,6 +12319,29 @@ function sanitizePublicSetSnapshot(rawSnapshot) {
   }
   if (sanitizedExercises.length > 0) {
     sanitizedSnapshot.customExercises = sanitizedExercises;
+  }
+  if (rawSnapshot.grammarContent && typeof rawSnapshot.grammarContent === "object") {
+    const gc = rawSnapshot.grammarContent;
+    const cleanGrammarExercises = Array.isArray(gc.exercises) ? gc.exercises.map((ex, idx) => sanitizePublicExercise(ex, idx, false)) : [];
+    sanitizedSnapshot.grammarContent = {
+      lessonTitle: String(gc.lessonTitle || rawSnapshot.title || ""),
+      ...gc.lessonTitleAr ? { lessonTitleAr: String(gc.lessonTitleAr) } : {},
+      ...gc.lessonTitleDe ? { lessonTitleDe: String(gc.lessonTitleDe) } : {},
+      ...gc.lessonTitleEn ? { lessonTitleEn: String(gc.lessonTitleEn) } : {},
+      grammarTopic: String(gc.grammarTopic || rawSnapshot.topic || ""),
+      ...gc.grammarTopicAr ? { grammarTopicAr: String(gc.grammarTopicAr) } : {},
+      ...gc.grammarTopicDe ? { grammarTopicDe: String(gc.grammarTopicDe) } : {},
+      ...gc.grammarTopicEn ? { grammarTopicEn: String(gc.grammarTopicEn) } : {},
+      explanationAr: String(gc.explanationAr || ""),
+      ...gc.explanationDe ? { explanationDe: String(gc.explanationDe) } : {},
+      ...gc.explanationEn ? { explanationEn: String(gc.explanationEn) } : {},
+      rules: Array.isArray(gc.rules) ? gc.rules : [],
+      examples: Array.isArray(gc.examples) ? gc.examples : [],
+      exercises: cleanGrammarExercises,
+      origin: gc.origin === "builtin" ? "builtin" : "teacher_created",
+      ...Array.isArray(gc.pageImageRefs) ? { pageImageRefs: gc.pageImageRefs } : {},
+      ...gc.sourceBookInfo ? { sourceBookInfo: String(gc.sourceBookInfo) } : {}
+    };
   }
   return sanitizedSnapshot;
 }
@@ -10806,9 +12755,13 @@ app2.all("/api/teacher/assignments", async (req, res) => {
     const requestedSetId = String(explicitSetId || normalized.setSnapshot?.id || "").trim();
     const hasInlineItems = Array.isArray(normalized.setSnapshot?.items) && normalized.setSnapshot.items.length > 0;
     const hasInlineExercises = Array.isArray(normalized.setSnapshot?.customExercises) && normalized.setSnapshot.customExercises.length > 0;
+    const hasInlineGrammar = Boolean(
+      normalized.setSnapshot?.grammarContent && (Array.isArray(normalized.setSnapshot.grammarContent.exercises) && normalized.setSnapshot.grammarContent.exercises.length > 0 || Array.isArray(normalized.setSnapshot.grammarContent.rules) && normalized.setSnapshot.grammarContent.rules.length > 0 || Array.isArray(normalized.setSnapshot.grammarContent.examples) && normalized.setSnapshot.grammarContent.examples.length > 0)
+    );
     const hasCallerSnapshot = Boolean(body.setSnapshot && typeof body.setSnapshot === "object");
     const isVerbOnlySource = normalized.contentSource === "verbs";
-    if (requestedSetId && !hasInlineItems && !hasInlineExercises && !isVerbOnlySource) {
+    const isGrammarSource = normalized.contentSource === "grammar";
+    if (requestedSetId && !hasInlineItems && !hasInlineExercises && !hasInlineGrammar && !isVerbOnlySource && !isGrammarSource) {
       try {
         const resolvedSet = await getAuthoritativePublishedSet(requestedSetId, { includeUnpublished: true });
         if (!resolvedSet) {
@@ -10978,6 +12931,14 @@ app2.all("/api/homework/submissions", async (req, res) => {
       });
     }
     const resolvedOwnerUid = hwOwnerUid || bodyOwnerUid || void 0;
+    const rawResponses = Array.isArray(body.responses) ? body.responses : [];
+    const graded = await gradeServerHomeworkResponses(targetHw, rawResponses);
+    if (!graded.valid) {
+      return res.status(graded.status || 400).json({
+        success: false,
+        error: graded.error || "Invalid question or exercise reference in submission"
+      });
+    }
     const cleanSub = {
       ...body,
       ...resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {},
@@ -10985,7 +12946,8 @@ app2.all("/api/homework/submissions", async (req, res) => {
       studentId: check.normalizedStudentId,
       participantId: check.normalizedParticipantId,
       groupId: check.normalizedGroupId,
-      studentName: check.normalizedStudentName
+      studentName: check.normalizedStudentName,
+      responses: graded.verifiedResponses
     };
     delete cleanSub.assignmentFallback;
     if (cleanSub.id) {
@@ -11106,8 +13068,235 @@ app2.get("/api/homework/info", async (req, res) => {
   }
   return res.json(sanitizePublicAssignmentInfo(found));
 });
-app2.post("/api/homework/submit", async (req, res) => {
+async function resolveAuthoritativeAssignmentSnapshot(targetHw) {
+  let setSnapshot = targetHw?.setSnapshot || {};
+  const fallbackSetId = String(targetHw?.setId || setSnapshot?.id || "").trim();
+  if (fallbackSetId && (!Array.isArray(setSnapshot?.items) || setSnapshot.items.length === 0) && (!Array.isArray(setSnapshot?.customExercises) || setSnapshot.customExercises.length === 0) && (!Array.isArray(setSnapshot?.grammarContent?.exercises) || setSnapshot.grammarContent.exercises.length === 0)) {
+    try {
+      const hydratedSet = await getAuthoritativePublishedSet(fallbackSetId);
+      if (hydratedSet) setSnapshot = hydratedSet;
+    } catch {
+    }
+  }
+  return setSnapshot;
+}
+async function gradeServerHomeworkResponses(targetHw, responses, options) {
+  const setSnapshot = await resolveAuthoritativeAssignmentSnapshot(targetHw);
+  const serverCustomExercises = Array.isArray(setSnapshot?.customExercises) ? setSnapshot.customExercises : [];
+  const serverGrammarExercises = Array.isArray(setSnapshot?.grammarContent?.exercises) ? setSnapshot.grammarContent.exercises : [];
+  const allExercises = [...serverGrammarExercises, ...serverCustomExercises].filter(
+    (ex) => ex && typeof ex === "object" && ex.id !== void 0 && ex.id !== null
+  );
+  const selectedGrammarIds = Array.isArray(targetHw?.selectedGrammarExerciseIds) ? targetHw.selectedGrammarExerciseIds.map((id) => String(id).trim()).filter(Boolean) : [];
+  const allowedExerciseIds = selectedGrammarIds.length > 0 && allExercises.some((ex) => selectedGrammarIds.includes(String(ex.id))) ? new Set(selectedGrammarIds) : null;
+  const serverItems = Array.isArray(setSnapshot?.items) ? setSnapshot.items : [];
+  const selectedItemIds = Array.isArray(targetHw?.selectedItemIds) ? targetHw.selectedItemIds.map((id) => String(id).trim()).filter(Boolean) : [];
+  const allowedItemIds = selectedItemIds.length > 0 && serverItems.some((it) => selectedItemIds.includes(String(it.id))) ? new Set(selectedItemIds) : null;
+  const findExerciseMatch = (r) => {
+    const exId = r.exerciseId !== void 0 && r.exerciseId !== null ? String(r.exerciseId).trim() : "";
+    const itId = r.itemId !== void 0 && r.itemId !== null ? String(r.itemId).trim() : "";
+    const qId = r.questionId !== void 0 && r.questionId !== null ? String(r.questionId).trim() : "";
+    const fallbackId = r.id !== void 0 && r.id !== null ? String(r.id).trim() : "";
+    return allExercises.find((ex) => {
+      const idStr = String(ex.id).trim();
+      if (!idStr) return false;
+      if (exId && exId === idStr) return true;
+      if (itId && itId === idStr) return true;
+      if (qId) {
+        if (qId === idStr || qId === `gram_${idStr}` || qId.startsWith(`gram_${idStr}_`)) return true;
+      }
+      if (fallbackId && (fallbackId === idStr || fallbackId === `gram_${idStr}`)) return true;
+      return false;
+    });
+  };
+  const verifiedResponses = [];
+  for (const r of responses) {
+    if (!r || typeof r !== "object") {
+      verifiedResponses.push(r);
+      continue;
+    }
+    const targetQId = r.exerciseId || r.questionId || r.itemId || r.id;
+    const qType = String(r.questionType || r.type || "");
+    const isVerbQ = Boolean(r.isVerbQuestion || qType === "verb_conjugation" || qType === "verb_sentence");
+    const matchedExercise = findExerciseMatch(r);
+    if (matchedExercise) {
+      if (allowedExerciseIds && !allowedExerciseIds.has(String(matchedExercise.id).trim())) {
+        return {
+          valid: false,
+          status: 400,
+          error: "Unassigned grammar exercise ID referenced in request",
+          verifiedResponses: []
+        };
+      }
+      if (matchedExercise.correctAnswer !== void 0 && matchedExercise.correctAnswer !== null) {
+        const studentAns = String(
+          r.selectedAnswer ?? r.studentAnswer ?? r.answer ?? r.submittedAnswer ?? r.text ?? ""
+        ).trim();
+        const isActuallyCorrect = evaluateNormalizedGrammarAnswer(studentAns, {
+          correctAnswer: String(matchedExercise.correctAnswer),
+          acceptedAnswers: Array.isArray(matchedExercise.acceptedAnswers) ? matchedExercise.acceptedAnswers.map(String) : void 0
+        });
+        const cleanedR = { ...r, isCorrect: isActuallyCorrect };
+        delete cleanedR.pendingServerGrading;
+        verifiedResponses.push(cleanedR);
+        continue;
+      }
+    } else if (!isVerbQ && (r.exerciseId || qType === "grammar_exercise" || r.grammarType || allExercises.length > 0 && serverItems.length === 0)) {
+      return {
+        valid: false,
+        status: 400,
+        error: "Unknown or unassigned grammar exercise ID",
+        verifiedResponses: []
+      };
+    }
+    if (isVerbQ) {
+      verifiedResponses.push({
+        ...r,
+        isVerbQuestion: true,
+        ...r.verbId ? { verbId: String(r.verbId) } : {},
+        ...r.infinitive ? { infinitive: String(r.infinitive) } : {},
+        ...r.subject ? { subject: String(r.subject) } : {},
+        ...r.sentence ? { sentence: String(r.sentence) } : {}
+      });
+      continue;
+    }
+    const itemLookupId = r.itemId || r.exerciseId || (r.expectedField ? targetQId : void 0);
+    if (itemLookupId && serverItems.length > 0 && (r.expectedField || typeof r.isCorrect !== "boolean" || options?.requireKnownQuestion)) {
+      const itemMatch = serverItems.find((it) => String(it.id) === String(itemLookupId));
+      if (!itemMatch) {
+        if (r.itemId || options?.requireKnownQuestion) {
+          return {
+            valid: false,
+            status: 400,
+            error: "Unknown or unassigned vocabulary item ID",
+            verifiedResponses: []
+          };
+        }
+      } else {
+        if (allowedItemIds && !allowedItemIds.has(String(itemMatch.id).trim())) {
+          return {
+            valid: false,
+            status: 400,
+            error: "Unassigned vocabulary item ID referenced in request",
+            verifiedResponses: []
+          };
+        }
+        const studentAns = String(
+          r.selectedAnswer ?? r.studentAnswer ?? r.answer ?? r.submittedAnswer ?? r.text ?? ""
+        ).trim();
+        const type = String(r.type || r.questionType || r.mode || "").toLowerCase();
+        let expected;
+        if (type.includes("article") || type.includes("der_die_das") || r.expectedField === "article") {
+          const explicitArticle = typeof itemMatch.article === "string" ? itemMatch.article.trim() : "";
+          const extractedMatch = !explicitArticle && typeof itemMatch.german === "string" ? itemMatch.german.trim().match(/^(der|die|das)\s+/i) : null;
+          expected = explicitArticle || (extractedMatch ? extractedMatch[1].toLowerCase() : void 0);
+        } else if (type.includes("missing") || r.expectedField === "missingLetterWord") {
+          expected = itemMatch.missingLetterWord || itemMatch.german;
+        } else if (type.includes("sentence") || type.includes("order") || r.expectedField === "exampleSentenceGerman") {
+          expected = itemMatch.exampleSentenceGerman || (Array.isArray(itemMatch.sentence4Elements) ? itemMatch.sentence4Elements.join(" ") : itemMatch.german);
+        } else if (type.includes("arabic") || r.expectedField === "arabic") {
+          expected = itemMatch.arabic;
+        } else if (type.includes("german") || type.includes("vocab") || type.includes("translation") || r.expectedField === "german") {
+          expected = itemMatch.german;
+        } else {
+          expected = itemMatch.german || itemMatch.arabic;
+        }
+        if (expected !== void 0 && expected !== null) {
+          const isActuallyCorrect = studentAns.toLowerCase() === String(expected).trim().toLowerCase();
+          const cleanedR = { ...r, isCorrect: isActuallyCorrect };
+          delete cleanedR.pendingServerGrading;
+          verifiedResponses.push(cleanedR);
+          continue;
+        }
+      }
+    }
+    if (options?.requireKnownQuestion) {
+      return {
+        valid: false,
+        status: 400,
+        error: "Question could not be resolved against assignment snapshot",
+        verifiedResponses: []
+      };
+    }
+    verifiedResponses.push(r);
+  }
+  return { valid: true, verifiedResponses };
+}
+app2.post("/api/homework/check-answer", async (req, res) => {
   const body = req.body || {};
+  const providedShortId = String(body.shortId || req.query.shortId || "").trim();
+  const assignmentId = String(body.assignmentId || body.homeworkId || "").trim();
+  let targetHw = null;
+  try {
+    if (assignmentId) {
+      targetHw = await getServerAssignment(assignmentId);
+    } else if (providedShortId) {
+      const resolved = await getAuthoritativeShortLink(providedShortId);
+      if (resolved.status === "resolved" && resolved.assignment) {
+        targetHw = resolved.assignment;
+      } else if (resolved.status === "revoked") {
+        return res.status(403).json({ success: false, error: "Assignment link revoked" });
+      }
+    }
+  } catch (err) {
+    return res.status(err?.status || 500).json({
+      success: false,
+      error: err?.message || "Failed to load assignment from database"
+    });
+  }
+  if (!targetHw) {
+    return res.status(404).json({ success: false, error: "Assignment not found" });
+  }
+  if (!isServerAssignmentOpen(targetHw)) {
+    return res.status(403).json({ success: false, error: "Assignment is closed or inactive" });
+  }
+  const configuredShareToken = targetHw.shareToken !== void 0 && targetHw.shareToken !== null ? String(targetHw.shareToken).trim() : "";
+  const configuredShortId = targetHw.shortId !== void 0 && targetHw.shortId !== null ? String(targetHw.shortId).trim() : "";
+  const shortIdAuthorized = Boolean(configuredShortId && providedShortId && providedShortId === configuredShortId);
+  if (configuredShareToken && !shortIdAuthorized) {
+    const providedToken = String(body.token || body.shareToken || req.query.token || "").trim();
+    if (!providedToken || providedToken !== configuredShareToken) {
+      return res.status(403).json({
+        success: false,
+        error: "Forbidden: Valid share token is required"
+      });
+    }
+  }
+  const studentAnswer = String(
+    body.selectedAnswer ?? body.studentAnswer ?? body.answer ?? body.submittedAnswer ?? ""
+  ).trim();
+  if (!studentAnswer) {
+    return res.status(400).json({ success: false, error: "Student answer is required" });
+  }
+  const graded = await gradeServerHomeworkResponses(
+    targetHw,
+    [
+      {
+        questionId: body.questionId,
+        exerciseId: body.exerciseId,
+        itemId: body.itemId,
+        questionType: body.questionType || body.type || "grammar_exercise",
+        grammarType: body.grammarType,
+        expectedField: body.expectedField,
+        selectedAnswer: studentAnswer
+      }
+    ],
+    { requireKnownQuestion: true }
+  );
+  if (!graded.valid) {
+    return res.status(graded.status || 400).json({
+      success: false,
+      error: graded.error || "Unknown or unassigned question"
+    });
+  }
+  return res.json({
+    success: true,
+    isCorrect: Boolean(graded.verifiedResponses[0]?.isCorrect)
+  });
+});
+app2.post("/api/homework/submit", async (req, res) => {
+  const rawBody = req.body || {};
+  const body = rawBody.submission && typeof rawBody.submission === "object" ? { ...rawBody, ...rawBody.submission, assignmentId: rawBody.submission.assignmentId || rawBody.submission.homeworkId || rawBody.assignmentId || rawBody.homeworkId } : { ...rawBody, assignmentId: rawBody.assignmentId || rawBody.homeworkId };
   const providedShortId = String(body.shortId || req.query.shortId || "").trim();
   let targetHw = null;
   try {
@@ -11170,74 +13359,14 @@ app2.post("/api/homework/submit", async (req, res) => {
     });
   }
   const responses = Array.isArray(body.responses) ? body.responses : [];
-  let setSnapshot = targetHw?.setSnapshot || {};
-  const fallbackSetId = String(targetHw?.setId || setSnapshot?.id || "").trim();
-  if (fallbackSetId && (!Array.isArray(setSnapshot?.items) || setSnapshot.items.length === 0) && (!Array.isArray(setSnapshot?.customExercises) || setSnapshot.customExercises.length === 0)) {
-    try {
-      const hydratedSet = await getAuthoritativePublishedSet(fallbackSetId);
-      if (hydratedSet) setSnapshot = hydratedSet;
-    } catch {
-    }
+  const graded = await gradeServerHomeworkResponses(targetHw, responses);
+  if (!graded.valid) {
+    return res.status(graded.status || 400).json({
+      success: false,
+      error: graded.error || "Invalid question or exercise reference in submission"
+    });
   }
-  const verifiedResponses = responses.map((r) => {
-    if (!r || typeof r !== "object") return r;
-    const targetQId = r.exerciseId || r.questionId || r.itemId || r.id;
-    const serverExercises = Array.isArray(setSnapshot?.customExercises) ? setSnapshot.customExercises : [];
-    if (targetQId && serverExercises.length > 0) {
-      const match = serverExercises.find((ex) => String(ex.id) === String(targetQId));
-      if (match && match.correctAnswer !== void 0 && match.correctAnswer !== null) {
-        const studentAns = String(r.selectedAnswer ?? r.answer ?? r.submittedAnswer ?? r.text ?? "").trim();
-        const expected = String(match.correctAnswer).trim();
-        const isActuallyCorrect = studentAns.toLowerCase() === expected.toLowerCase();
-        return {
-          ...r,
-          isCorrect: isActuallyCorrect
-        };
-      }
-    }
-    const qType = String(r.questionType || r.type || "");
-    if (r.isVerbQuestion || qType === "verb_conjugation" || qType === "verb_sentence") {
-      return {
-        ...r,
-        isVerbQuestion: true,
-        ...r.verbId ? { verbId: String(r.verbId) } : {},
-        ...r.infinitive ? { infinitive: String(r.infinitive) } : {},
-        ...r.subject ? { subject: String(r.subject) } : {},
-        ...r.sentence ? { sentence: String(r.sentence) } : {}
-      };
-    }
-    const serverItems = Array.isArray(setSnapshot?.items) ? setSnapshot.items : [];
-    const itemLookupId = r.itemId || r.exerciseId || (r.expectedField ? targetQId : void 0);
-    if (itemLookupId && serverItems.length > 0 && (r.expectedField || typeof r.isCorrect !== "boolean")) {
-      const itemMatch = serverItems.find((it) => String(it.id) === String(itemLookupId));
-      if (itemMatch) {
-        const studentAns = String(r.selectedAnswer ?? r.studentAnswer ?? r.answer ?? r.submittedAnswer ?? r.text ?? "").trim();
-        const type = String(r.type || r.questionType || r.mode || "").toLowerCase();
-        let expected;
-        if (type.includes("article") || type.includes("der_die_das") || r.expectedField === "article") {
-          expected = itemMatch.article;
-        } else if (type.includes("missing") || r.expectedField === "missingLetterWord") {
-          expected = itemMatch.missingLetterWord || itemMatch.german;
-        } else if (type.includes("sentence") || type.includes("order") || r.expectedField === "exampleSentenceGerman") {
-          expected = itemMatch.exampleSentenceGerman || (Array.isArray(itemMatch.sentence4Elements) ? itemMatch.sentence4Elements.join(" ") : itemMatch.german);
-        } else if (type.includes("arabic") || r.expectedField === "arabic") {
-          expected = itemMatch.arabic;
-        } else if (type.includes("german") || type.includes("vocab") || type.includes("translation") || r.expectedField === "german") {
-          expected = itemMatch.german;
-        } else {
-          expected = itemMatch.german || itemMatch.arabic;
-        }
-        if (expected !== void 0 && expected !== null) {
-          const isActuallyCorrect = studentAns.toLowerCase() === String(expected).trim().toLowerCase();
-          return {
-            ...r,
-            isCorrect: isActuallyCorrect
-          };
-        }
-      }
-    }
-    return r;
-  });
+  const verifiedResponses = graded.verifiedResponses;
   const isInProgress = body.status === "in_progress" && !body.completedAt;
   const correctCount = verifiedResponses.filter((r) => r && r.isCorrect).length;
   const totalQ = isInProgress ? Math.max(verifiedResponses.length, Number(body.totalQuestions) || 0) : verifiedResponses.length;
@@ -11388,7 +13517,7 @@ async function verifyFirebaseIdToken(token, expectedProjectId = "glueck-c8621", 
     };
   }
   try {
-    const verifier = import_crypto2.default.createVerify("RSA-SHA256");
+    const verifier = import_crypto4.default.createVerify("RSA-SHA256");
     verifier.update(`${parts[0]}.${parts[1]}`);
     const isSignatureValid = verifier.verify(cert2, parts[2], "base64url");
     if (!isSignatureValid) {
@@ -11534,14 +13663,14 @@ app2.post("/api/android/generate-keystore", async (req, res) => {
       error: "Key alias must contain only letters, numbers, underscores, or hyphens."
     });
   }
-  const fs = await import("fs");
+  const fs3 = await import("fs");
   const os = await import("os");
-  const path2 = await import("path");
+  const path4 = await import("path");
   const { execFileSync } = await import("child_process");
-  const tmpDir = fs.mkdtempSync(path2.join(os.tmpdir(), "glueck-ks-"));
-  const keyPemPath = path2.join(tmpDir, "key.pem");
-  const certPemPath = path2.join(tmpDir, "cert.pem");
-  const keystorePath = path2.join(tmpDir, "release.keystore");
+  const tmpDir = fs3.mkdtempSync(path4.join(os.tmpdir(), "glueck-ks-"));
+  const keyPemPath = path4.join(tmpDir, "key.pem");
+  const certPemPath = path4.join(tmpDir, "cert.pem");
+  const keystorePath = path4.join(tmpDir, "release.keystore");
   try {
     const envWithSecret = {
       ...process.env,
@@ -11601,7 +13730,7 @@ app2.post("/api/android/generate-keystore", async (req, res) => {
       ["x509", "-in", certPemPath, "-noout", "-fingerprint", "-sha256"],
       { encoding: "utf8" }
     ).trim();
-    const keystoreBuffer = fs.readFileSync(keystorePath);
+    const keystoreBuffer = fs3.readFileSync(keystorePath);
     const keystoreBase64 = keystoreBuffer.toString("base64").replace(/\s+/g, "");
     return res.status(200).json({
       success: true,
@@ -11617,11 +13746,333 @@ app2.post("/api/android/generate-keystore", async (req, res) => {
     });
   } finally {
     try {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      fs3.rmSync(tmpDir, { recursive: true, force: true });
     } catch {
     }
   }
 });
+function parseAndNormalizeExtractedGrammarSet(rawTextOrObj, options = {}) {
+  let parsed = rawTextOrObj;
+  if (typeof rawTextOrObj === "string") {
+    let clean = rawTextOrObj.trim();
+    if (clean.startsWith("```json")) clean = clean.slice(7);
+    else if (clean.startsWith("```")) clean = clean.slice(3);
+    if (clean.endsWith("```")) clean = clean.slice(0, -3);
+    clean = clean.trim();
+    try {
+      parsed = JSON.parse(clean);
+    } catch (err) {
+      return {
+        success: false,
+        warnings: [],
+        error: `Invalid JSON extracted from model output: ${err?.message || "parse error"}`
+      };
+    }
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return { success: false, warnings: [], error: "Extracted payload is not an object." };
+  }
+  const exerciseMode = options.exerciseMode || "original_and_similar";
+  const rawGrammar = parsed.grammarContent && typeof parsed.grammarContent === "object" ? parsed.grammarContent : parsed;
+  const rawExercises = Array.isArray(rawGrammar.exercises) ? rawGrammar.exercises : [];
+  const filteredExercises = exerciseMode === "original_only" ? rawExercises.filter((ex) => !ex || ex.source !== "generated") : rawExercises;
+  const warnings = [];
+  if (Array.isArray(parsed.warnings)) {
+    parsed.warnings.forEach((w) => {
+      if (typeof w === "string" && w.trim()) warnings.push(w.trim());
+    });
+  }
+  const normalizedGrammar = normalizeGrammarContent(
+    {
+      ...rawGrammar,
+      exercises: filteredExercises,
+      origin: "teacher_created"
+    },
+    parsed.title || options.title || "\u062F\u0631\u0633 \u0642\u0648\u0627\u0639\u062F \u0645\u0646 \u0627\u0644\u0643\u062A\u0627\u0628",
+    parsed.grammarTopic || rawGrammar.grammarTopic || parsed.topic || options.topic || "Grammatik",
+    "teacher_created"
+  );
+  if (!normalizedGrammar) {
+    return { success: false, warnings, error: "Model output lacked structured grammarContent." };
+  }
+  const uncertainCount = normalizedGrammar.exercises.filter((e) => e.isUncertain).length;
+  if (uncertainCount > 0) {
+    warnings.push(
+      `\u064A\u0648\u062C\u062F ${uncertainCount} \u062A\u0645\u0631\u064A\u0646/\u062A\u0645\u0627\u0631\u064A\u0646 \u063A\u064A\u0631 \u0648\u0627\u0636\u062D\u0629 \u062C\u0632\u0626\u064A\u0627\u064B \u0641\u064A \u0627\u0644\u0635\u0648\u0631\u0629 \u2014 \u064A\u0631\u062C\u0649 \u0645\u0631\u0627\u062C\u0639\u062A\u0647\u0627 \u0648\u062A\u0623\u0643\u064A\u062F \u0625\u062C\u0627\u0628\u0627\u062A\u0647\u0627 \u0642\u0628\u0644 \u0627\u0644\u062D\u0641\u0638.`
+    );
+  }
+  if (normalizedGrammar.exercises.length === 0 && normalizedGrammar.rules.length === 0) {
+    warnings.push("\u0644\u0645 \u064A\u062A\u0645 \u0627\u0644\u0639\u062B\u0648\u0631 \u0639\u0644\u0649 \u062A\u0645\u0627\u0631\u064A\u0646 \u0623\u0648 \u0642\u0648\u0627\u0639\u062F \u0648\u0627\u0636\u062D\u0629 \u0643\u0641\u0627\u064A\u0629 \u0641\u064A \u0627\u0644\u0635\u0648\u0631 \u0627\u0644\u0645\u0631\u0641\u0648\u0639\u0629.");
+  }
+  const rawItems = Array.isArray(parsed.items) ? parsed.items : [];
+  const resolvedSetKind = options.targetSetKind === "mixed" && rawItems.length > 0 ? "mixed" : "grammar";
+  const normalizedSet = stripHeavyGrammarMediaForSync(
+    normalizeLernstudioSet({
+      id: `set_gram_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      title: String(parsed.title || normalizedGrammar.lessonTitle || options.title || "\u062F\u0631\u0633 \u0642\u0648\u0627\u0639\u062F \u0645\u0633\u062A\u062E\u0631\u062C").trim(),
+      topic: String(parsed.topic || normalizedGrammar.grammarTopic || options.topic || "Grammatik").trim(),
+      level: parsed.level || options.level || "A1",
+      difficulty: parsed.difficulty || options.difficulty || "medium",
+      ...options.grade ? { grade: options.grade } : parsed.grade ? { grade: String(parsed.grade) } : {},
+      ...options.teacherName ? { createdByTeacherName: options.teacherName } : {},
+      description: String(
+        parsed.description || normalizedGrammar.explanationAr || normalizedGrammar.lessonTitle || ""
+      ).trim(),
+      setKind: resolvedSetKind,
+      contentOrigin: "teacher_created",
+      items: rawItems,
+      grammarContent: normalizedGrammar
+    })
+  );
+  return {
+    success: true,
+    extractedSet: normalizedSet,
+    warnings
+  };
+}
+app2.post("/api/lernstudio/extract-grammar", async (req, res) => {
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  const apiKey = String(process.env.GEMINI_API_KEY || "").trim();
+  if (!apiKey) {
+    return res.status(503).json({
+      success: false,
+      code: "AI_NOT_CONFIGURED",
+      error: "Gemini API key is not configured on the server (GEMINI_API_KEY missing).",
+      errorAr: "\u0645\u0641\u062A\u0627\u062D Gemini API \u063A\u064A\u0631 \u0645\u0636\u0628\u0648\u0637 \u0639\u0644\u0649 \u0627\u0644\u062E\u0627\u062F\u0645 (GEMINI_API_KEY). \u064A\u0645\u0643\u0646\u0643 \u0627\u0633\u062A\u062E\u062F\u0627\u0645 \u0645\u0648\u0644\u0651\u062F \u0627\u0644\u0628\u0631\u0648\u0645\u0628\u062A \u0648\u0644\u0635\u0642 \u0643\u0648\u062F JSON \u064A\u062F\u0648\u064A\u0627\u064B \u0628\u062F\u0648\u0646 \u062A\u0639\u0637\u064A\u0644."
+    });
+  }
+  const body = req.body || {};
+  const rawImages = Array.isArray(body.images) ? body.images : [];
+  if (rawImages.length === 0 || rawImages.length > 6) {
+    return res.status(400).json({
+      success: false,
+      code: "BAD_REQUEST",
+      error: "Please supply between 1 and 6 textbook or workbook page images.",
+      errorAr: "\u064A\u0631\u062C\u0649 \u0625\u0631\u0641\u0627\u0642 \u0645\u0646 \u0635\u0648\u0631\u0629 \u0648\u0627\u062D\u062F\u0629 \u0625\u0644\u0649 6 \u0635\u0648\u0631 \u0643\u062D\u062F \u0623\u0642\u0635\u0649."
+    });
+  }
+  const imageParts = [];
+  for (let i = 0; i < rawImages.length; i++) {
+    const img = rawImages[i];
+    if (!img || typeof img !== "object") continue;
+    let base64Data = typeof img.dataBase64 === "string" ? img.dataBase64.trim() : "";
+    let mimeType = typeof img.mimeType === "string" && img.mimeType.trim() ? img.mimeType.trim() : "image/jpeg";
+    if (!base64Data && typeof img.dataUrl === "string") {
+      const match = /^data:([^;]+);base64,(.+)$/i.exec(img.dataUrl.trim());
+      if (match) {
+        mimeType = match[1] || mimeType;
+        base64Data = match[2].trim();
+      }
+    }
+    if (base64Data) {
+      imageParts.push({
+        inlineData: {
+          mimeType,
+          data: base64Data
+        }
+      });
+    }
+  }
+  if (imageParts.length === 0) {
+    return res.status(400).json({
+      success: false,
+      code: "BAD_REQUEST",
+      error: "No valid base64 image data was found in the request.",
+      errorAr: "\u0644\u0645 \u064A\u062A\u0645 \u0627\u0644\u0639\u062B\u0648\u0631 \u0639\u0644\u0649 \u0628\u064A\u0627\u0646\u0627\u062A \u0635\u0648\u0631 \u0635\u0627\u0644\u062D\u0629 \u0641\u064A \u0627\u0644\u0637\u0644\u0628."
+    });
+  }
+  const exerciseMode = body.exerciseMode === "original_only" ? "original_only" : "original_and_similar";
+  const targetSetKind = body.targetSetKind === "mixed" ? "mixed" : "grammar";
+  const requestedLevel = String(body.level || "A1").trim();
+  const requestedTitle = typeof body.title === "string" ? body.title.trim() : "";
+  const requestedTopic = typeof body.topic === "string" ? body.topic.trim() : "";
+  const exerciseRuleSchema = {
+    type: import_genai.Type.OBJECT,
+    properties: {
+      id: { type: import_genai.Type.STRING },
+      title: { type: import_genai.Type.STRING },
+      titleAr: { type: import_genai.Type.STRING },
+      titleDe: { type: import_genai.Type.STRING },
+      titleEn: { type: import_genai.Type.STRING },
+      summaryAr: { type: import_genai.Type.STRING },
+      summaryDe: { type: import_genai.Type.STRING },
+      summaryEn: { type: import_genai.Type.STRING },
+      pattern: { type: import_genai.Type.STRING },
+      tipAr: { type: import_genai.Type.STRING },
+      tipDe: { type: import_genai.Type.STRING },
+      table: {
+        type: import_genai.Type.OBJECT,
+        properties: {
+          headers: { type: import_genai.Type.ARRAY, items: { type: import_genai.Type.STRING } },
+          rows: { type: import_genai.Type.ARRAY, items: { type: import_genai.Type.ARRAY, items: { type: import_genai.Type.STRING } } }
+        }
+      }
+    },
+    required: ["title", "summaryAr"]
+  };
+  const exampleSchema = {
+    type: import_genai.Type.OBJECT,
+    properties: {
+      id: { type: import_genai.Type.STRING },
+      german: { type: import_genai.Type.STRING },
+      arabic: { type: import_genai.Type.STRING },
+      english: { type: import_genai.Type.STRING },
+      highlight: { type: import_genai.Type.STRING },
+      noteAr: { type: import_genai.Type.STRING },
+      noteDe: { type: import_genai.Type.STRING }
+    },
+    required: ["german", "arabic"]
+  };
+  const exerciseSchema = {
+    type: import_genai.Type.OBJECT,
+    properties: {
+      id: { type: import_genai.Type.STRING },
+      type: {
+        type: import_genai.Type.STRING,
+        description: "One of: multiple_choice, fill_blank, correct_mistake, choose_correct_sentence, sentence_ordering, short_answer"
+      },
+      prompt: { type: import_genai.Type.STRING },
+      question: { type: import_genai.Type.STRING },
+      sentenceWithBlank: { type: import_genai.Type.STRING },
+      faultySentence: { type: import_genai.Type.STRING },
+      tokens: { type: import_genai.Type.ARRAY, items: { type: import_genai.Type.STRING } },
+      options: { type: import_genai.Type.ARRAY, items: { type: import_genai.Type.STRING } },
+      correctAnswer: { type: import_genai.Type.STRING },
+      acceptedAnswers: { type: import_genai.Type.ARRAY, items: { type: import_genai.Type.STRING } },
+      explanationAr: { type: import_genai.Type.STRING },
+      explanationDe: { type: import_genai.Type.STRING },
+      ruleRef: { type: import_genai.Type.STRING },
+      source: {
+        type: import_genai.Type.STRING,
+        description: '"original" if extracted directly from the uploaded page(s), "generated" if newly created practice'
+      },
+      isUncertain: { type: import_genai.Type.BOOLEAN },
+      uncertaintyReason: { type: import_genai.Type.STRING }
+    },
+    required: ["type", "question", "correctAnswer", "source"]
+  };
+  const responseSchema = {
+    type: import_genai.Type.OBJECT,
+    properties: {
+      title: { type: import_genai.Type.STRING },
+      topic: { type: import_genai.Type.STRING },
+      level: { type: import_genai.Type.STRING },
+      difficulty: { type: import_genai.Type.STRING },
+      description: { type: import_genai.Type.STRING },
+      warnings: { type: import_genai.Type.ARRAY, items: { type: import_genai.Type.STRING } },
+      grammarContent: {
+        type: import_genai.Type.OBJECT,
+        properties: {
+          lessonTitle: { type: import_genai.Type.STRING },
+          lessonTitleAr: { type: import_genai.Type.STRING },
+          lessonTitleDe: { type: import_genai.Type.STRING },
+          grammarTopic: { type: import_genai.Type.STRING },
+          grammarTopicAr: { type: import_genai.Type.STRING },
+          grammarTopicDe: { type: import_genai.Type.STRING },
+          explanationAr: { type: import_genai.Type.STRING },
+          explanationDe: { type: import_genai.Type.STRING },
+          explanationEn: { type: import_genai.Type.STRING },
+          sourceBookInfo: { type: import_genai.Type.STRING },
+          rules: { type: import_genai.Type.ARRAY, items: exerciseRuleSchema },
+          examples: { type: import_genai.Type.ARRAY, items: exampleSchema },
+          exercises: { type: import_genai.Type.ARRAY, items: exerciseSchema }
+        },
+        required: ["lessonTitle", "grammarTopic", "explanationAr", "rules", "examples", "exercises"]
+      },
+      items: {
+        type: import_genai.Type.ARRAY,
+        items: {
+          type: import_genai.Type.OBJECT,
+          properties: {
+            german: { type: import_genai.Type.STRING },
+            arabic: { type: import_genai.Type.STRING },
+            english: { type: import_genai.Type.STRING },
+            emoji: { type: import_genai.Type.STRING }
+          },
+          required: ["german", "arabic"]
+        }
+      }
+    },
+    required: ["title", "topic", "grammarContent"]
+  };
+  const promptText = [
+    "Analyze the uploaded German textbook / workbook page image(s) carefully.",
+    requestedTitle ? `Preferred set title: ${requestedTitle}` : "",
+    requestedTopic ? `Focus grammar topic: ${requestedTopic}` : "",
+    `Target CEFR level: ${requestedLevel}.`,
+    "1. Extract the German grammar lesson title, topic, clear explanation in Arabic (plus German/English), structured rules (including conjugation/grammar tables if visible), and authentic bilingual German-Arabic example sentences.",
+    '2. Extract ALL grammar exercises visible on the page(s) in order and mark each one with source: "original".',
+    "3. Do NOT guess or fabricate an unreadable line: if any exercise text, answer key, or handwritten blank is blurry or ambiguous, set isUncertain: true and explain briefly in uncertaintyReason (in Arabic).",
+    exerciseMode === "original_only" ? '4. ONLY return exercises visibly present on the uploaded page(s) with source: "original". Do NOT invent extra generated exercises.' : '4. After extracting all original page exercises (source: "original"), generate 3 to 5 additional similar practice exercises (covering fill_blank, multiple_choice, correct_mistake, choose_correct_sentence, sentence_ordering, or short_answer) clearly marked source: "generated".',
+    targetSetKind === "mixed" ? "5. Also extract key vocabulary items printed on the page into the items array if present." : "5. Keep items array empty ([]) unless essential anchor vocabulary is explicitly part of the lesson.",
+    "6. Ensure every exercise has a clear question, valid type (multiple_choice | fill_blank | correct_mistake | choose_correct_sentence | sentence_ordering | short_answer), accurate correctAnswer, options (for multiple_choice / choose_correct_sentence), tokens (for sentence_ordering), and a brief Arabic explanationAr."
+  ].filter(Boolean).join("\n");
+  try {
+    const ai = new import_genai.GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build"
+        }
+      }
+    });
+    const geminiGrammarModel = String(process.env.GEMINI_GRAMMAR_MODEL || "gemini-4-hydrogen").trim() || "gemini-4-hydrogen";
+    const response = await ai.models.generateContent({
+      model: geminiGrammarModel,
+      contents: {
+        parts: [...imageParts, { text: promptText }]
+      },
+      config: {
+        systemInstruction: "You are an expert German (DaF/DaZ) curriculum designer for Arabic-speaking students. Extract structured textbook grammar lessons faithfully without inventing unclear text.",
+        responseMimeType: "application/json",
+        responseSchema
+      }
+    });
+    const rawText = (response.text || "").trim();
+    if (!rawText) {
+      return res.status(502).json({
+        success: false,
+        code: "INVALID_RESPONSE",
+        error: "Gemini returned an empty response.",
+        errorAr: "\u0623\u0639\u0627\u062F \u0646\u0645\u0648\u0630\u062C \u0627\u0644\u0630\u0643\u0627\u0621 \u0627\u0644\u0627\u0635\u0637\u0646\u0627\u0639\u064A \u0627\u0633\u062A\u062C\u0627\u0628\u0629 \u0641\u0627\u0631\u063A\u0629. \u064A\u0631\u062C\u0649 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0645\u0631\u0629 \u0623\u062E\u0631\u0649."
+      });
+    }
+    const normalizedResult = parseAndNormalizeExtractedGrammarSet(rawText, {
+      title: requestedTitle || void 0,
+      topic: requestedTopic || void 0,
+      grade: typeof body.grade === "string" ? body.grade : void 0,
+      level: requestedLevel,
+      difficulty: typeof body.difficulty === "string" ? body.difficulty : "medium",
+      teacherName: typeof body.teacherName === "string" ? body.teacherName : void 0,
+      exerciseMode,
+      targetSetKind
+    });
+    if (!normalizedResult.success || !normalizedResult.extractedSet) {
+      return res.status(502).json({
+        success: false,
+        code: "INVALID_RESPONSE",
+        error: normalizedResult.error || "Failed to parse extracted grammar schema.",
+        errorAr: "\u062A\u0639\u0630\u0631 \u062A\u062D\u0644\u064A\u0644 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0645\u0633\u062A\u062E\u0631\u062C\u0629 \u0625\u0644\u0649 \u0628\u0646\u064A\u0629 \u062F\u0631\u0633 \u0642\u0648\u0627\u0639\u062F \u0635\u0627\u0644\u062D\u0629."
+      });
+    }
+    return res.status(200).json({
+      success: true,
+      modelUsed: geminiGrammarModel,
+      extractedSet: normalizedResult.extractedSet,
+      warnings: normalizedResult.warnings
+    });
+  } catch (err) {
+    const status = Number(err?.status) || 502;
+    return res.status(status >= 400 && status < 600 ? status : 502).json({
+      success: false,
+      code: "UPSTREAM_ERROR",
+      error: err?.message || "Failed to extract grammar content from image(s).",
+      errorAr: "\u062D\u062F\u062B \u062E\u0637\u0623 \u0623\u062B\u0646\u0627\u0621 \u062A\u062D\u0644\u064A\u0644 \u0627\u0644\u0635\u0648\u0631 \u0628\u0627\u0644\u0630\u0643\u0627\u0621 \u0627\u0644\u0627\u0635\u0637\u0646\u0627\u0639\u064A. \u062A\u062D\u0642\u0642 \u0645\u0646 \u0627\u0644\u0627\u062A\u0635\u0627\u0644 \u0623\u0648 \u0627\u0633\u062A\u062E\u062F\u0645 \u0627\u0633\u062A\u064A\u0631\u0627\u062F JSON \u0627\u0644\u064A\u062F\u0648\u064A."
+    });
+  }
+});
+registerGrainServerRoutes(app2, verifyFirebaseIdToken);
+registerZoomServerRoutes(app2, verifyFirebaseIdToken);
 var expressApp_default = app2;
 
 // server.ts
@@ -11636,10 +14087,10 @@ async function startServer() {
     });
     app3.use(vite.middlewares);
   } else {
-    const distPath = import_path.default.join(process.cwd(), "dist");
+    const distPath = import_path3.default.join(process.cwd(), "dist");
     app3.use(import_express2.default.static(distPath));
     app3.get("*", (req, res) => {
-      res.sendFile(import_path.default.join(distPath, "index.html"));
+      res.sendFile(import_path3.default.join(distPath, "index.html"));
     });
   }
   app3.listen(PORT, "0.0.0.0", () => {

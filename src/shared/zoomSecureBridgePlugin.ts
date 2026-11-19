@@ -38,9 +38,15 @@ export interface ZoomSecureBridgePlugin {
     timezone?: string;
     weeklyDay: number;
     repeatInterval?: number;
+    waitingRoom?: boolean;
   }): Promise<ZoomNativeResponse>;
   getMeeting(options: { meetingId: string }): Promise<ZoomNativeResponse>;
   deleteMeeting(options: { meetingId: string }): Promise<ZoomNativeResponse>;
+  listMeetings?(options?: {
+    type?: 'scheduled' | 'live' | 'upcoming';
+    pageSize?: number;
+    nextPageToken?: string;
+  }): Promise<ZoomNativeResponse>;
 }
 
 const NativeZoomSecureBridge = registerPlugin<ZoomSecureBridgePlugin>('ZoomSecureBridge');
@@ -75,9 +81,15 @@ export interface ZoomNativeTestAdapter {
     timezone?: string;
     weeklyDay: number;
     repeatInterval?: number;
+    waitingRoom?: boolean;
   }) => Promise<ZoomNativeResponse>;
   getMeeting?: (options: { meetingId: string }) => Promise<ZoomNativeResponse>;
   deleteMeeting?: (options: { meetingId: string }) => Promise<ZoomNativeResponse>;
+  listMeetings?: (options?: {
+    type?: 'scheduled' | 'live' | 'upcoming';
+    pageSize?: number;
+    nextPageToken?: string;
+  }) => Promise<ZoomNativeResponse>;
 }
 
 let zoomNativeTestAdapter: ZoomNativeTestAdapter | null = null;
@@ -154,6 +166,7 @@ export async function invokeAndroidZoomUpdateMeeting(options: {
   timezone?: string;
   weeklyDay: number;
   repeatInterval?: number;
+  waitingRoom?: boolean;
 }): Promise<ZoomNativeResponse> {
   if (zoomNativeTestAdapter?.updateMeeting) {
     return zoomNativeTestAdapter.updateMeeting(options);
@@ -173,4 +186,23 @@ export async function invokeAndroidZoomDeleteMeeting(meetingId: string): Promise
     return zoomNativeTestAdapter.deleteMeeting({ meetingId });
   }
   return NativeZoomSecureBridge.deleteMeeting({ meetingId });
+}
+
+export async function invokeAndroidZoomListMeetings(options: {
+  type?: 'scheduled' | 'live' | 'upcoming';
+  pageSize?: number;
+  nextPageToken?: string;
+} = {}): Promise<ZoomNativeResponse> {
+  if (zoomNativeTestAdapter?.listMeetings) {
+    return zoomNativeTestAdapter.listMeetings(options);
+  }
+  if (typeof NativeZoomSecureBridge.listMeetings !== 'function') {
+    return {
+      ok: false,
+      httpStatus: 501,
+      code: 'ANDROID_PLUGIN_UPDATE_REQUIRED',
+      error: 'Native Android ZoomSecureBridge plugin needs update to support listing Zoom meetings.'
+    };
+  }
+  return NativeZoomSecureBridge.listMeetings(options);
 }

@@ -139,13 +139,45 @@ export function getReadableTextForLightMode(hexStr: string): string {
   return hexStr;
 }
 
+// Apply dynamic surface tokens for Tinted Light & Dark modes so surfaces always match the active accent
+function syncThemeSurfaceTokens(root: HTMLElement, effectivePrimary: string, isDark: boolean) {
+  const isTinted = root.classList.contains('tinted');
+  const isAmoled = root.classList.contains('amoled') || root.getAttribute('data-amoled') === 'true';
+
+  if (isTinted && !isDark) {
+    root.style.setProperty('--background', `color-mix(in srgb, ${effectivePrimary} 7%, #f8fafc)`);
+    root.style.setProperty('--surface', `color-mix(in srgb, ${effectivePrimary} 3.5%, #ffffff)`);
+    root.style.setProperty('--surface-hover', `color-mix(in srgb, ${effectivePrimary} 8.5%, #f1f5f9)`);
+    root.style.setProperty('--surface-border', `color-mix(in srgb, ${effectivePrimary} 20%, #e2e8f0)`);
+    root.style.setProperty('--surface-border-soft', `color-mix(in srgb, ${effectivePrimary} 12%, #f1f5f9)`);
+    root.style.setProperty('--text-main', '#0f172a');
+    root.style.setProperty('--text-muted', `color-mix(in srgb, ${effectivePrimary} 30%, #64748b)`);
+  } else if (isDark && !isAmoled) {
+    root.style.setProperty('--surface', `color-mix(in srgb, ${effectivePrimary} 4%, #0a0c10)`);
+    root.style.setProperty('--surface-hover', `color-mix(in srgb, ${effectivePrimary} 8%, #12131a)`);
+    root.style.setProperty('--surface-border', `color-mix(in srgb, ${effectivePrimary} 15%, #1e293b)`);
+    root.style.setProperty('--surface-border-soft', `color-mix(in srgb, ${effectivePrimary} 8%, #161821)`);
+    root.style.removeProperty('--background');
+    root.style.removeProperty('--text-main');
+    root.style.removeProperty('--text-muted');
+  } else {
+    root.style.removeProperty('--background');
+    root.style.removeProperty('--surface');
+    root.style.removeProperty('--surface-hover');
+    root.style.removeProperty('--surface-border');
+    root.style.removeProperty('--surface-border-soft');
+    root.style.removeProperty('--text-main');
+    root.style.removeProperty('--text-muted');
+  }
+}
+
 // Apply accent color to document root (CSS variables or standard class)
 export function applyAccentToDocument(colorKeyOrHex: string) {
   const PRESET_CLASSES = [
     'accent-blue', 'accent-green', 'accent-purple', 'accent-orange', 'accent-red',
     'accent-teal', 'accent-indigo', 'accent-rose', 'accent-amber', 'accent-emerald',
     'accent-fuchsia', 'accent-cyan', 'accent-violet', 'accent-slate', 'accent-pink',
-    'accent-lime', 'accent-darkblue', 'accent-white'
+    'accent-lime', 'accent-darkblue', 'accent-white', 'accent-black'
   ];
 
   // Remove existing preset classes
@@ -173,6 +205,7 @@ export function applyAccentToDocument(colorKeyOrHex: string) {
     lime: '#84cc16',
     darkblue: '#1e40af',
     white: '#ffffff',
+    black: '#000000',
   };
 
   let hex = '#3b82f6';
@@ -198,46 +231,46 @@ export function applyAccentToDocument(colorKeyOrHex: string) {
 
   if (isWhiteAccent) {
     if (isDark) {
-      // Dark / AMOLED Mode + White Accent: White primary, black text on buttons
       root.style.setProperty('--primary', '#ffffff');
       root.style.setProperty('--primary-fg', '#000000');
       root.style.setProperty('--primary-hover', '#f1f5f9');
-      root.style.setProperty('--primary-soft', 'rgba(255, 255, 255, 0.18)');
-      root.style.setProperty('--primary-border', 'rgba(255, 255, 255, 0.35)');
+      root.style.setProperty('--primary-soft', 'rgba(255, 255, 255, 0.16)');
+      root.style.setProperty('--primary-border', 'rgba(255, 255, 255, 0.32)');
       root.style.setProperty('--primary-glow', '#ffffff');
       root.style.setProperty('--primary-text', '#ffffff');
+      syncThemeSurfaceTokens(root, '#94a3b8', true);
     } else {
-      // Light Mode + White Accent: Dark slate/black primary for contrast against white background
       root.style.setProperty('--primary', '#0f172a');
       root.style.setProperty('--primary-fg', '#ffffff');
       root.style.setProperty('--primary-hover', '#1e293b');
-      root.style.setProperty('--primary-soft', 'rgba(15, 23, 42, 0.12)');
-      root.style.setProperty('--primary-border', 'rgba(15, 23, 42, 0.25)');
+      root.style.setProperty('--primary-soft', 'rgba(15, 23, 42, 0.1)');
+      root.style.setProperty('--primary-border', 'rgba(15, 23, 42, 0.22)');
       root.style.setProperty('--primary-glow', '#0f172a');
       root.style.setProperty('--primary-text', '#0f172a');
+      syncThemeSurfaceTokens(root, '#475569', false);
     }
     return;
   }
 
   if (isBlackAccent) {
     if (isDark) {
-      // Dark / AMOLED Mode + Black Accent: Flips to High-Contrast White so elements & text are fully visible on dark bg
       root.style.setProperty('--primary', '#ffffff');
       root.style.setProperty('--primary-fg', '#000000');
       root.style.setProperty('--primary-hover', '#f1f5f9');
-      root.style.setProperty('--primary-soft', 'rgba(255, 255, 255, 0.18)');
-      root.style.setProperty('--primary-border', 'rgba(255, 255, 255, 0.35)');
+      root.style.setProperty('--primary-soft', 'rgba(255, 255, 255, 0.16)');
+      root.style.setProperty('--primary-border', 'rgba(255, 255, 255, 0.32)');
       root.style.setProperty('--primary-glow', '#ffffff');
       root.style.setProperty('--primary-text', '#ffffff');
+      syncThemeSurfaceTokens(root, '#94a3b8', true);
     } else {
-      // Light Mode + Black Accent: Pure black primary with crisp white text on light background
       root.style.setProperty('--primary', '#000000');
       root.style.setProperty('--primary-fg', '#ffffff');
       root.style.setProperty('--primary-hover', '#18181b');
-      root.style.setProperty('--primary-soft', 'rgba(0, 0, 0, 0.12)');
-      root.style.setProperty('--primary-border', 'rgba(0, 0, 0, 0.25)');
+      root.style.setProperty('--primary-soft', 'rgba(0, 0, 0, 0.1)');
+      root.style.setProperty('--primary-border', 'rgba(0, 0, 0, 0.22)');
       root.style.setProperty('--primary-glow', '#000000');
       root.style.setProperty('--primary-text', '#000000');
+      syncThemeSurfaceTokens(root, '#334155', false);
     }
     return;
   }
@@ -266,29 +299,12 @@ export function applyAccentToDocument(colorKeyOrHex: string) {
   root.style.setProperty('--primary', effectivePrimary);
   root.style.setProperty('--primary-fg', fg);
   root.style.setProperty('--primary-hover', hoverHex);
-  root.style.setProperty('--primary-soft', fg === '#000000' ? `rgba(${effRgb.r}, ${effRgb.g}, ${effRgb.b}, 0.25)` : `rgba(${effRgb.r}, ${effRgb.g}, ${effRgb.b}, 0.15)`);
-  root.style.setProperty('--primary-border', fg === '#000000' ? `rgba(${effRgb.r}, ${effRgb.g}, ${effRgb.b}, 0.35)` : `rgba(${effRgb.r}, ${effRgb.g}, ${effRgb.b}, 0.3)`);
+  root.style.setProperty('--primary-soft', fg === '#000000' ? `rgba(${effRgb.r}, ${effRgb.g}, ${effRgb.b}, 0.22)` : `rgba(${effRgb.r}, ${effRgb.g}, ${effRgb.b}, 0.12)`);
+  root.style.setProperty('--primary-border', fg === '#000000' ? `rgba(${effRgb.r}, ${effRgb.g}, ${effRgb.b}, 0.35)` : `rgba(${effRgb.r}, ${effRgb.g}, ${effRgb.b}, 0.26)`);
   root.style.setProperty('--primary-glow', effectivePrimary);
   root.style.setProperty('--primary-text', primaryText);
 
-  const isTinted = root.classList.contains('tinted');
-  if (isTinted) {
-    root.style.setProperty('--background', `color-mix(in srgb, ${effectivePrimary} 7%, #f8fafc)`);
-    root.style.setProperty('--surface', `color-mix(in srgb, ${effectivePrimary} 3.5%, #ffffff)`);
-    root.style.setProperty('--surface-hover', `color-mix(in srgb, ${effectivePrimary} 8.5%, #f1f5f9)`);
-    root.style.setProperty('--surface-border', `color-mix(in srgb, ${effectivePrimary} 20%, #e2e8f0)`);
-    root.style.setProperty('--surface-border-soft', `color-mix(in srgb, ${effectivePrimary} 12%, #f1f5f9)`);
-    root.style.setProperty('--text-main', '#0f172a');
-    root.style.setProperty('--text-muted', `color-mix(in srgb, ${effectivePrimary} 35%, #64748b)`);
-  } else {
-    root.style.removeProperty('--background');
-    root.style.removeProperty('--surface');
-    root.style.removeProperty('--surface-hover');
-    root.style.removeProperty('--surface-border');
-    root.style.removeProperty('--surface-border-soft');
-    root.style.removeProperty('--text-main');
-    root.style.removeProperty('--text-muted');
-  }
+  syncThemeSurfaceTokens(root, effectivePrimary, isDark);
 }
 
 // Comprehensive Huge Palette with Color Families, Shades & Tints

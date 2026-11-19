@@ -2755,6 +2755,53 @@ export function evaluateRecordingMatchAgainstLessons(
   const normRecTitle = normalizeNameForComparison(`${recording.title} ${recording.calendarEventTitle || ''}`);
   const normParticipants = (recording.participantNames || []).map(normalizeNameForComparison).filter(Boolean);
 
+  // Resolve global identifier owners across active/historical Zoom sessions to detect cross-identifier conflicts
+  const zoomIdActiveOwner = grainZoomMeetingId
+    ? weeklySessions.find((s) => s.zoomMeetingId === grainZoomMeetingId)
+    : undefined;
+  const zoomIdHistoryOwner =
+    grainZoomMeetingId && !zoomIdActiveOwner
+      ? zoomHistory.find(
+          (h) => h.previousZoomMeetingId === grainZoomMeetingId || h.newZoomMeetingId === grainZoomMeetingId
+        )
+      : undefined;
+  const zoomIdOwnerGroupId = zoomIdActiveOwner?.groupId || zoomIdHistoryOwner?.groupId;
+  const zoomIdOwnerSessionId = zoomIdActiveOwner?.id || zoomIdHistoryOwner?.sessionId;
+
+  const calendarUidOwner = cleanRecCalendarUid
+    ? weeklySessions.find((s) => s.calendarEventUid === cleanRecCalendarUid)
+    : undefined;
+
+  let parsedTopicOwnerGroupId: string | undefined;
+  let parsedTopicOwnerWeekday: number | undefined;
+  if (parsedStdTopic) {
+    const topicGroupNorm = normalizeNameForComparison(parsedStdTopic.groupName);
+    const topicFullLabel = normalizeNameForComparison(
+      `${parsedStdTopic.weekdayName} - ${parsedStdTopic.startTime} - ${parsedStdTopic.groupName}`
+    );
+    const matchedGroupsByTopic = activeGroups.filter((g) => {
+      const gNorm = normalizeNameForComparison(g.name);
+      if (gNorm && gNorm === topicGroupNorm) return true;
+      return zoomHistory.some(
+        (h) =>
+          h.groupId === g.id &&
+          (normalizeNameForComparison(h.previousTopic) === topicFullLabel ||
+            normalizeNameForComparison(h.newTopic) === topicFullLabel)
+      );
+    });
+    if (matchedGroupsByTopic.length === 1) {
+      parsedTopicOwnerGroupId = matchedGroupsByTopic[0].id;
+      parsedTopicOwnerWeekday = normalizeWeekdayIndex(parsedStdTopic.weekdayName);
+    }
+  }
+
+  const hasCrossIdentifierConflict = Boolean(
+    (zoomIdOwnerGroupId && parsedTopicOwnerGroupId && zoomIdOwnerGroupId !== parsedTopicOwnerGroupId) ||
+      (zoomIdOwnerGroupId && calendarUidOwner?.groupId && zoomIdOwnerGroupId !== calendarUidOwner.groupId) ||
+      (parsedTopicOwnerGroupId && calendarUidOwner?.groupId && parsedTopicOwnerGroupId !== calendarUidOwner.groupId) ||
+      (zoomIdOwnerSessionId && calendarUidOwner?.id && zoomIdOwnerSessionId !== calendarUidOwner.id)
+  );
+
   const candidates: GrainLessonMatchCandidate[] = [];
 
   for (const lesson of activeLessons) {
@@ -2814,32 +2861,60 @@ export function evaluateRecordingMatchAgainstLessons(
     let matchedFromHistory = false;
     let matchedZoomSession: GroupWeeklySession | undefined = matchedActiveSessionBySlot;
     let tier1ZoomIdMatched = false;
+    let sessionSlotZoomConflict = false;
 
     if (grainZoomMeetingId) {
-      const activeSessionMatch = groupSessions.find((s) => s.zoomMeetingId === grainZoomMeetingId);
-      if (activeSessionMatch) {
-        tier1ZoomIdMatched = true;
-        matchedZoomSession = activeSessionMatch;
+      const slotActiveMatch =
+        matchedActiveSessionBySlot && matchedActiveSessionBySlot.zoomMeetingId === grainZoomMeetingId
+          ? matchedActiveSessionBySlot
+          : undefined;
+      const anyActiveSessionMatch =
+        slotActiveMatch || groupSessions.find((s) => s.zoomMeetingId === grainZoomMeetingId);
+
+      if (anyActiveSessionMatch) {
+        // Distinguish multiple weekly sessions belonging to the same group
+        if (matchedActiveSessionBySlot && anyActiveSessionMatch.id !== matchedActiveSessionBySlot.id) {
+          sessionSlotZoomConflict = true;
+        } else {
+          tier1ZoomIdMatched = true;
+          matchedZoomSession = anyActiveSessionMatch;
+        }
       } else if (lesson.groupId) {
-        const historyMatch = zoomHistory.find(
+        const groupHistMatches = zoomHistory.filter(
           (h) =>
             h.groupId === lesson.groupId &&
             (h.previousZoomMeetingId === grainZoomMeetingId || h.newZoomMeetingId === grainZoomMeetingId)
         );
+        const slotHistoryMatch = matchedActiveSessionBySlot
+          ? groupHistMatches.find((h) => h.sessionId === matchedActiveSessionBySlot.id)
+          : undefined;
+        const historyMatch = slotHistoryMatch || groupHistMatches[0];
         if (historyMatch) {
-          tier1ZoomIdMatched = true;
-          matchedFromHistory = true;
-          matchedZoomSession =
-            groupSessions.find((s) => s.id === historyMatch.sessionId) || matchedActiveSessionBySlot;
+          if (
+            !slotHistoryMatch &&
+            matchedActiveSessionBySlot &&
+            historyMatch.sessionId &&
+            historyMatch.sessionId !== matchedActiveSessionBySlot.id &&
+            groupSessions.some((s) => s.id === historyMatch.sessionId)
+          ) {
+            sessionSlotZoomConflict = true;
+          } else {
+            tier1ZoomIdMatched = true;
+            matchedFromHistory = true;
+            matchedZoomSession =
+              groupSessions.find((s) => s.id === historyMatch.sessionId) || matchedActiveSessionBySlot;
+          }
         }
       }
-      if (!tier1ZoomIdMatched && effectiveLessonZoomId && effectiveLessonZoomId === grainZoomMeetingId) {
+      if (!tier1ZoomIdMatched && !sessionSlotZoomConflict && effectiveLessonZoomId && effectiveLessonZoomId === grainZoomMeetingId) {
         tier1ZoomIdMatched = true;
       }
     }
 
     let zoomLinkStatus: GrainZoomLinkVerificationStatus = 'not_exposed_by_grain';
-    if (tier1ZoomIdMatched) {
+    if (sessionSlotZoomConflict || hasCrossIdentifierConflict) {
+      zoomLinkStatus = 'mismatch';
+    } else if (tier1ZoomIdMatched) {
       zoomLinkStatus = 'verified_match';
     } else if (!normalizedLessonZoom && groupSessions.length === 0) {
       zoomLinkStatus = 'missing_on_lesson';
@@ -3088,7 +3163,17 @@ export function evaluateRecordingMatchAgainstLessons(
     const recommendedSlot: 'recordingLink' | 'recordingLink2' =
       detectedPartSlot === 'part2' ? 'recordingLink2' : 'recordingLink';
 
+    if (hasCrossIdentifierConflict) {
+      reasons.push('Conflicting identifiers detected across Zoom meeting ID, standardized topic, or calendar UID — review required');
+    } else if (sessionSlotZoomConflict) {
+      reasons.push('Zoom meeting ID belongs to a different weekly session of this group — review required');
+    } else if (parsedTopicOwnerWeekday !== undefined && parsedTopicOwnerWeekday !== lessonTime.weekday) {
+      reasons.push('Standardized topic weekday differs from scheduled lesson weekday');
+    }
+
     const hasStrongStandardizedEvidence =
+      !hasCrossIdentifierConflict &&
+      !sessionSlotZoomConflict &&
       ((tier1ZoomIdMatched && Boolean(matchedZoomSession || matchedFromHistory)) ||
         standardizedTopicMatched ||
         calendarUidMatched) &&
@@ -3097,6 +3182,8 @@ export function evaluateRecordingMatchAgainstLessons(
 
     const canAutoAssign = Boolean(
       !wasCorrectedAway &&
+        !hasCrossIdentifierConflict &&
+        !sessionSlotZoomConflict &&
         zoomLinkStatus !== 'mismatch' &&
         ((learnedRecurringRuleId && !scheduleChangedRequiresConfirmation && clampedScore >= 78) ||
           hasStrongStandardizedEvidence)
@@ -4624,6 +4711,31 @@ export function acceptPendingUpdatedLessonExtraction(lesson: Lesson): Partial<Le
 }
 
 /**
+ * Allows the teacher to dismiss a `pendingUpdatedExtraction` while keeping their manually edited content protected.
+ */
+export function dismissPendingUpdatedLessonExtraction(lesson: Lesson): Partial<Lesson> {
+  const existing = lesson.grainMeta?.extractedLessonContent;
+  if (!existing || !existing.pendingUpdatedExtraction) return {};
+
+  const nextExtracted: GrainExtractedLessonContent = {
+    ...existing,
+    pendingUpdatedExtraction: undefined
+  };
+
+  const nextMeta: GrainLessonMetadata = {
+    ...lesson.grainMeta!,
+    extractedLessonContent: nextExtracted
+  };
+
+  const patch: Partial<Lesson> = {
+    grainMeta: nextMeta,
+    ...(lesson.report ? { report: { ...lesson.report, grainMeta: nextMeta } } : {})
+  };
+  assertLessonAttendanceUnchanged(lesson, patch);
+  return patch;
+}
+
+/**
  * Applies automatic matching and two-part pairing across discovered recordings and lessons:
  * - Automatically attaches unambiguous `'automatically_matched'` Part 1 (`recordingLink`) and Part 2 (`recordingLink2`) links.
  * - Handles reverse import order (if Part 2 arrived in an earlier sync and was temporarily placed in `recordingLink`,
@@ -4638,6 +4750,8 @@ export function applyAutomaticGrainMatchesAndTwoPartPairs(options: {
   students: Student[];
   learningRecords?: GrainGroupLearningRecord[];
   part2Config?: Partial<GrainPart2DetectionConfig>;
+  weeklySessions?: GroupWeeklySession[];
+  zoomMeetingHistory?: ZoomMeetingHistory[];
 }): {
   recordings: GrainDiscoveredRecording[];
   updatedLessons: Lesson[];
@@ -4648,14 +4762,17 @@ export function applyAutomaticGrainMatchesAndTwoPartPairs(options: {
     options.learningRecords ||
     loadGrainGroupLearningRecords((options.groups || []).filter((g) => g && !g.deleted));
 
-  // Step 1: Evaluate all recordings against current lessons
+  // Step 1: Evaluate all recordings against current lessons (forwarding standardized Zoom sessions & history!)
   const evaluated = (options.recordings || []).map((rec) =>
     evaluateRecordingMatchAgainstLessons(
       rec,
       options.lessons,
       options.groups,
       options.students,
-      learningRecords
+      learningRecords,
+      cfg,
+      options.weeklySessions,
+      options.zoomMeetingHistory
     )
   );
 
@@ -4881,6 +4998,8 @@ export async function syncGrainRecordingsIncrementally(options: {
   lessons: Lesson[];
   groups: Group[];
   students: Student[];
+  weeklySessions?: GroupWeeklySession[];
+  zoomMeetingHistory?: ZoomMeetingHistory[];
   afterDatetime?: string;
   beforeDatetime?: string;
   titleSearch?: string;
@@ -5001,8 +5120,14 @@ export async function syncGrainRecordingsIncrementally(options: {
 
   const activeGroups = (options.groups || []).filter((g) => g && !g.deleted);
   const learningRecords = loadGrainGroupLearningRecords(activeGroups);
-  const weeklySessions = await loadGroupWeeklySessions();
-  const zoomHistory = await loadZoomMeetingHistory();
+  const weeklySessions =
+    Array.isArray(options.weeklySessions) && options.weeklySessions.length > 0
+      ? options.weeklySessions
+      : await loadGroupWeeklySessions();
+  const zoomHistory =
+    Array.isArray(options.zoomMeetingHistory) && options.zoomMeetingHistory.length > 0
+      ? options.zoomMeetingHistory
+      : await loadZoomMeetingHistory();
   const nowIso = new Date().toISOString();
 
   let newCount = 0;
@@ -5109,7 +5234,9 @@ export async function syncGrainRecordingsIncrementally(options: {
     groups: options.groups,
     students: options.students,
     learningRecords,
-    part2Config: options.part2Config
+    part2Config: options.part2Config,
+    weeklySessions,
+    zoomMeetingHistory: zoomHistory
   });
 
   const finalLessonPatches: Record<string, Partial<Lesson>> = { ...autoApplied.lessonPatches };
