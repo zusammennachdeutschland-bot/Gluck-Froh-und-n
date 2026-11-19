@@ -60,6 +60,7 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
   const [previewError, setPreviewError] = useState<string | null>(null);
 
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [confirmMode, setConfirmMode] = useState<'clean_and_rebuild' | 'clean_only'>('clean_and_rebuild');
   const [confirmChecked, setConfirmChecked] = useState(false);
 
   const [isExecuting, setIsExecuting] = useState(false);
@@ -129,6 +130,8 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
     if (isExecuting) return;
     if (mode === 'start' && !preview) return;
 
+    const cleanupOnly = mode === 'start' ? confirmMode === 'clean_only' : Boolean(operation?.cleanupOnly);
+
     pauseRequestedRef.current = false;
     setConfirmModalOpen(false);
     setConfirmChecked(false);
@@ -139,6 +142,7 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
       const currentCalToken = getInMemoryGoogleCalendarToken();
       const result = await executeZoomCalendarCleanupRebuild({
         mode,
+        cleanupOnly: mode === 'start' ? cleanupOnly : undefined,
         preview: mode === 'start' ? preview || undefined : undefined,
         groups,
         existingSessions: groupWeeklySessions,
@@ -180,12 +184,21 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
       });
 
       if (result.operation.state === 'completed') {
-        triggerToast(
-          _t(
-            `اكتمل التنظيف وإعادة البناء وتم التحقق: ${result.operation.report.newGluckZoomMeetingsCreated} اجتماع جديد`,
-            `Clean & Rebuild completed and verified: ${result.operation.report.newGluckZoomMeetingsCreated} new meetings`
-          )
-        );
+        if (result.operation.cleanupOnly) {
+          triggerToast(
+            _t(
+              `تم المسح بالكامل بنجاح بدون إعادة بناء (${result.operation.report.zoomMeetingsDeleted} اجتماع Zoom • ${result.operation.report.calendarEventsDeleted} حدث تقويم)`,
+              `Clean Only completed & verified (${result.operation.report.zoomMeetingsDeleted} Zoom & ${result.operation.report.calendarEventsDeleted} Calendar deleted, 0 rebuilt)`
+            )
+          );
+        } else {
+          triggerToast(
+            _t(
+              `اكتمل التنظيف وإعادة البناء وتم التحقق: ${result.operation.report.newGluckZoomMeetingsCreated} اجتماع جديد`,
+              `Clean & Rebuild completed and verified: ${result.operation.report.newGluckZoomMeetingsCreated} new meetings`
+            )
+          );
+        }
       } else if (result.operation.state === 'paused') {
         triggerToast(
           _t('تم إيقاف العملية بأمان — يمكنك الاستكمال من نفس النقطة', 'Operation paused safely — you can resume anytime')
@@ -231,93 +244,113 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
     (operation!.state === 'completed_with_errors' || operation!.state === 'failed');
 
   return (
-    <div className="bg-surface border border-rose-500/30 rounded-xl p-3.5 sm:p-4 shadow-2xs space-y-3">
+    <div className="bg-surface border border-surface-border rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-2xs">
       {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-2.5">
-        <div className="flex items-start gap-2.5">
-          <div className="p-2 rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 shrink-0">
-            <ShieldAlert className="w-4 h-4" />
-          </div>
-          <div>
-            <h4 className="text-xs sm:text-sm font-black text-text-main">
-              {_t(
-                'تنظيف وإعادة بناء اجتماعات Glück (Clean & Rebuild Glück Meetings)',
-                'Clean & Rebuild Glück Meetings',
-                'Glück-Meetings bereinigen & neu aufbauen'
-              )}
-            </h4>
-            <p className="text-[11px] text-text-muted mt-0.5">
-              {_t(
-                'حذف جميع اجتماعات Zoom المجدولة القديمة من حساب المضيف المتصل وأحداث Google Calendar المرتبطة بها فقط، ثم إعادة إنشاء اجتماعات مجموعات Glück الأونلاين النشطة ومزامنة التقويم مع التحقق النهائي.',
-                'Deletes all old scheduled Zoom meetings in the single connected Zoom host account and only confidently linked Google Calendar events, then rebuilds Glück active online group meetings and re-syncs Google Calendar with final verification.'
-              )}
-            </p>
-          </div>
+      <div className="flex items-start gap-3 min-w-0">
+        <div className="w-9 h-9 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+          <ShieldAlert className="w-4 h-4" />
         </div>
-
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <button
-            type="button"
-            disabled={!zoomConnected || isLoadingPreview || isExecuting}
-            onClick={handlePreviewCleanup}
-            className="px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-slate-200 dark:hover:bg-slate-800 border border-surface-border text-text-main text-xs font-black flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-          >
-            <Eye className={`w-3.5 h-3.5 text-primary ${isLoadingPreview ? 'animate-pulse' : ''}`} />
-            <span>
-              {isLoadingPreview
-                ? _t('جاري الفحص...', 'Scanning Zoom & Calendar...')
-                : _t('معاينة التنظيف', 'Preview Cleanup')}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            disabled={!zoomConnected || !preview || isLoadingPreview || isExecuting}
-            onClick={() => {
-              setConfirmChecked(false);
-              setConfirmModalOpen(true);
-            }}
-            className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>{_t('تنظيف وإعادة بناء', 'Clean & Rebuild')}</span>
-          </button>
+        <div className="min-w-0 flex-1">
+          <h4 className="text-sm font-bold text-text-main">
+            {_t(
+              'تنظيف وإعادة بناء اجتماعات Glück',
+              'Clean & Rebuild Glück Meetings',
+              'Glück-Meetings bereinigen & neu aufbauen'
+            )}
+          </h4>
+          <p className="text-xs text-text-muted mt-0.5 leading-relaxed">
+            {_t(
+              'حذف اجتماعات Zoom القديمة من حساب المضيف المتصل وأحداث Google Calendar المرتبطة بها فقط، ثم إعادة إنشاء اجتماعات مجموعات Glück النشطة ومزامنة التقويم.',
+              'Deletes old scheduled Zoom meetings in the connected Zoom host account and only confidently linked Google Calendar events, then rebuilds active Glück group meetings and re-syncs Calendar.'
+            )}
+          </p>
         </div>
       </div>
 
-      {/* Host Scope Disclosure + Safety Reminder */}
-      <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-900 dark:text-amber-200 space-y-1">
-        <div className="font-bold flex items-center gap-1.5">
-          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+      {/* Unified Action Row */}
+      <div className="flex flex-wrap items-center gap-2 pt-0.5">
+        <button
+          type="button"
+          disabled={!zoomConnected || isLoadingPreview || isExecuting}
+          onClick={handlePreviewCleanup}
+          className={`min-h-[40px] px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap transition-colors ${
+            preview
+              ? 'bg-surface-hover hover:bg-surface border border-surface-border text-text-main'
+              : 'bg-primary hover:bg-primary-hover text-primary-fg shadow-2xs'
+          }`}
+        >
+          <Eye className={`w-3.5 h-3.5 ${preview ? 'text-primary' : ''} ${isLoadingPreview ? 'animate-pulse' : ''}`} />
+          <span>
+            {isLoadingPreview
+              ? _t('جاري الفحص...', 'Scanning...')
+              : preview
+              ? _t('إعادة الفحص', 'Rescan Preview')
+              : _t('معاينة التنظيف', 'Preview Cleanup')}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          disabled={!zoomConnected || !preview || isLoadingPreview || isExecuting}
+          onClick={() => {
+            setConfirmMode('clean_only');
+            setConfirmChecked(false);
+            setConfirmModalOpen(true);
+          }}
+          className="min-h-[40px] px-3.5 rounded-xl bg-surface hover:bg-rose-500/10 border border-rose-500/40 text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap transition-colors"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          <span>{_t('مسح فقط (بدون بناء)', 'Clean Only (No Rebuild)')}</span>
+        </button>
+
+        <button
+          type="button"
+          disabled={!zoomConnected || !preview || isLoadingPreview || isExecuting}
+          onClick={() => {
+            setConfirmMode('clean_and_rebuild');
+            setConfirmChecked(false);
+            setConfirmModalOpen(true);
+          }}
+          className="min-h-[40px] px-3.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap transition-colors shadow-2xs"
+        >
+          <RefreshCw className="w-3.5 h-3.5" />
+          <span>{_t('تنظيف وإعادة بناء', 'Clean & Rebuild')}</span>
+        </button>
+      </div>
+
+      {/* Host Scope Disclosure + Calendar Connection Notice */}
+      <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-900 dark:text-amber-200 space-y-2">
+        <div className="flex items-start gap-2 leading-relaxed">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
           <span>
             {preview?.hostScopeDisclosure ||
               _t(
-                'النطاق: يتم فحص وتنظيف الاجتماعات المجدولة التابعة للمضيف المتصل فقط (/users/me/meetings). جميع بيانات الطلاب والحصص والمدفوعات والحضور وأحداث التقويم الشخصية غير المرتبطة محفوظة ولن تُمس.',
-                'Scope: Only scheduled meetings owned by the single connected Zoom host (/users/me/meetings) are cleaned. Students, groups, lessons, attendance, payments, Grain matches, and unrelated personal/school Calendar events are never deleted.'
+                'النطاق: يتم فحص الاجتماعات المجدولة التابعة للمضيف المتصل فقط. جميع بيانات الطلاب والحصص والمدفوعات والحضور وأحداث التقويم الشخصية غير المرتبطة محفوظة ولن تُمس.',
+                'Scope: Only scheduled meetings owned by the connected Zoom host are cleaned. Students, groups, lessons, attendance, payments, Grain matches, and unrelated personal Calendar events are never deleted.'
               )}
           </span>
         </div>
         {!hasCalendarToken && (
-          <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-amber-500/20">
-            <span>
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-amber-500/20">
+            <span className="text-[11.5px]">
               {_t(
-                'Google Calendar غير متصل حالياً — اتصل بالتقويم أولاً إذا كنت تريد تنظيف وإعادة بناء أحداث Google Calendar تلقائياً.',
-                'Google Calendar is not currently connected — connect Calendar first if you also want linked Google Calendar events cleaned and rebuilt.'
+                'Google Calendar غير متصل — اربطه أولاً إذا كنت تريد تنظيف وإعادة بناء أحداث التقويم أيضاً.',
+                'Google Calendar is not connected — connect first if you also want linked Calendar events cleaned and rebuilt.'
               )}
             </span>
             <button
               type="button"
               onClick={() => onConnectCalendar(calendarConn.status === 'reconnect_required' || calendarConn.status === 'expired')}
-              className="px-2 py-0.5 rounded bg-emerald-600 text-white font-bold text-[10.5px] cursor-pointer"
+              className="min-h-[36px] px-3.5 rounded-xl bg-primary hover:bg-primary-hover text-primary-fg font-bold text-xs cursor-pointer transition-colors"
             >
-              {_t('ربط Google Calendar', 'Connect Google Calendar')}
+              {_t('ربط Google Calendar', 'Connect Calendar')}
             </button>
           </div>
         )}
       </div>
 
       {previewError && (
-        <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center gap-1.5">
+        <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-semibold flex items-center gap-1.5">
           <XCircle className="w-4 h-4 shrink-0" />
           <span>{previewError}</span>
         </div>
@@ -325,18 +358,18 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
 
       {/* Active / Interrupted / Resumable Progress Banner */}
       {(isExecuting || canResume) && operation && (
-        <div className="p-3 rounded-xl bg-sky-500/10 border border-sky-500/30 space-y-2 text-xs">
+        <div className="p-3.5 rounded-xl bg-primary-soft border border-primary-border space-y-2 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2 font-black text-text-main">
-              <RefreshCw className={`w-3.5 h-3.5 text-sky-600 ${isExecuting ? 'animate-spin' : ''}`} />
+            <div className="flex items-center gap-2 font-bold text-text-main">
+              <RefreshCw className={`w-3.5 h-3.5 text-primary shrink-0 ${isExecuting ? 'animate-spin' : ''}`} />
               <span>
                 {progress?.phaseLabel ||
                   (operation.state === 'paused'
                     ? _t('العملية متوقفة مؤقتاً (قابلة للاستكمال)', 'Operation Paused (Resumable)')
                     : _t('عملية سابقة غير مكتملة (قابلة للاستكمال)', 'Interrupted Operation Found (Resumable)'))}
               </span>
-              <span className="px-1.5 py-0.5 rounded bg-surface border border-surface-border font-mono text-[10px]">
-                {operation.state}
+              <span className="text-[11px] font-medium text-text-muted">
+                · {operation.cleanupOnly ? _t('مسح فقط', 'Clean Only') : _t('تنظيف وبناء', 'Clean & Rebuild')}
               </span>
             </div>
 
@@ -347,25 +380,25 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
                   onClick={() => {
                     pauseRequestedRef.current = true;
                   }}
-                  className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-black flex items-center gap-1 cursor-pointer"
+                  className="min-h-[34px] px-3 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                 >
                   <PauseCircle className="w-3.5 h-3.5" />
-                  <span>{_t('إيقاف مؤقت آمن', 'Pause / Cancel')}</span>
+                  <span>{_t('إيقاف مؤقت آمن', 'Pause')}</span>
                 </button>
               ) : (
                 <>
                   <button
                     type="button"
                     onClick={() => runOperation('resume')}
-                    className="px-2.5 py-1 rounded-lg bg-primary hover:bg-primary-hover text-white text-[11px] font-black flex items-center gap-1 cursor-pointer"
+                    className="min-h-[34px] px-3 rounded-xl bg-primary hover:bg-primary-hover text-primary-fg text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                   >
                     <Play className="w-3.5 h-3.5" />
-                    <span>{_t('استكمال العملية', 'Resume Operation')}</span>
+                    <span>{_t('استكمال العملية', 'Resume')}</span>
                   </button>
                   <button
                     type="button"
                     onClick={handleDismissSavedOperation}
-                    className="px-2 py-1 rounded-lg border border-surface-border text-[11px] font-bold text-text-muted cursor-pointer"
+                    className="min-h-[34px] px-3 rounded-xl border border-surface-border bg-surface text-xs font-semibold text-text-muted hover:text-text-main cursor-pointer"
                   >
                     {_t('تجاهل', 'Dismiss')}
                   </button>
@@ -384,7 +417,7 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
               </div>
               <div className="w-full h-2 bg-surface rounded-full overflow-hidden border border-surface-border">
                 <div
-                  className="h-full bg-sky-600 transition-all"
+                  className="h-full bg-primary transition-all"
                   style={{
                     width: `${Math.min(100, Math.round((progress.completedSteps / Math.max(1, progress.totalSteps)) * 100))}%`
                   }}
@@ -397,58 +430,58 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
 
       {/* Preview Breakdown */}
       {preview && (
-        <div className="space-y-3 pt-2 border-t border-surface-border">
+        <div className="space-y-3 pt-2.5 border-t border-surface-border">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-xs font-black text-text-main">
-              {_t('نتائج معاينة التنظيف وإعادة البناء (لم يتم حذف أي شيء بعد)', 'Cleanup & Rebuild Preview (Read-Only — Nothing Deleted Yet)')}
+            <span className="text-xs font-bold text-text-main">
+              {_t('نتائج المعاينة (لم يتم حذف أي شيء بعد)', 'Cleanup Preview (Read-Only)')}
             </span>
-            <span className="text-[10.5px] font-mono text-text-muted" dir="ltr">
-              {preview.timezone} • {preview.hostEmail || 'connected host'}
+            <span className="text-[11px] font-mono text-text-muted" dir="ltr">
+              {preview.timezone} · {preview.hostEmail || 'connected host'}
             </span>
           </div>
 
-          {/* Required 7 Preview Counters */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 text-center text-xs">
-            <div className="p-2 rounded-lg bg-surface-hover border border-surface-border">
-              <span className="font-black text-text-main block tabular-nums">{preview.totalScheduledZoomMeetingsFound}</span>
-              <span className="text-[10px] text-text-muted">{_t('إجمالي اجتماعات Zoom', 'Zoom Found')}</span>
+          {/* Unified Hairline-Divided Metric Grid (No nested rainbow cards) */}
+          <div className="rounded-xl bg-surface-hover/40 border border-surface-border grid grid-cols-2 sm:grid-cols-4 divide-x divide-y divide-surface-border overflow-hidden text-center">
+            <div className="px-3 py-2.5">
+              <div className="text-base font-bold text-text-main tabular-nums">{preview.totalScheduledZoomMeetingsFound}</div>
+              <div className="text-[11px] text-text-muted">{_t('اجتماعات Zoom', 'Zoom Found')}</div>
             </div>
-            <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/25">
-              <span className="font-black text-rose-600 block tabular-nums">{preview.zoomMeetingsToDeleteCount}</span>
-              <span className="text-[10px] text-text-muted">{_t('Zoom ستحذف', 'Zoom to Delete')}</span>
+            <div className="px-3 py-2.5">
+              <div className="text-base font-bold text-rose-600 dark:text-rose-400 tabular-nums">{preview.zoomMeetingsToDeleteCount}</div>
+              <div className="text-[11px] text-text-muted">{_t('Zoom ستحذف', 'Zoom Delete')}</div>
             </div>
-            <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/25">
-              <span className="font-black text-emerald-600 block tabular-nums">{preview.activeGluckOnlineSessionsCount}</span>
-              <span className="text-[10px] text-text-muted">{_t('جلسات Glück ستُبنى', 'Sessions to Rebuild')}</span>
+            <div className="px-3 py-2.5">
+              <div className="text-base font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{preview.activeGluckOnlineSessionsCount}</div>
+              <div className="text-[11px] text-text-muted">{_t('جلسات ستُبنى', 'To Rebuild')}</div>
             </div>
-            <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/25">
-              <span className="font-black text-rose-600 block tabular-nums">{preview.calendarEventsToDeleteCount}</span>
-              <span className="text-[10px] text-text-muted">{_t('أحداث تقويم مرتبطة ستحذف', 'Cal Events to Delete')}</span>
+            <div className="px-3 py-2.5">
+              <div className="text-base font-bold text-rose-600 dark:text-rose-400 tabular-nums">{preview.calendarEventsToDeleteCount}</div>
+              <div className="text-[11px] text-text-muted">{_t('تقويم سيحذف', 'Cal Delete')}</div>
             </div>
-            <div className="p-2 rounded-lg bg-sky-500/10 border border-sky-500/25">
-              <span className="font-black text-sky-600 block tabular-nums">{preview.calendarEventsUntouchedCount}</span>
-              <span className="text-[10px] text-text-muted">{_t('أحداث تقويم لن تُمس', 'Cal Untouched')}</span>
+            <div className="px-3 py-2.5">
+              <div className="text-base font-bold text-primary tabular-nums">{preview.calendarEventsUntouchedCount}</div>
+              <div className="text-[11px] text-text-muted">{_t('تقويم لن يُمس', 'Cal Safe')}</div>
             </div>
-            <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/25">
-              <span className="font-black text-amber-600 block tabular-nums">{preview.liveMeetingsBlockedCount}</span>
-              <span className="text-[10px] text-text-muted">{_t('اجتماعات جارية الآن', 'Live (Protected)')}</span>
+            <div className="px-3 py-2.5">
+              <div className="text-base font-bold text-amber-600 dark:text-amber-400 tabular-nums">{preview.liveMeetingsBlockedCount}</div>
+              <div className="text-[11px] text-text-muted">{_t('جارية الآن', 'Live')}</div>
             </div>
-            <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/25">
-              <span className="font-black text-amber-700 dark:text-amber-300 block tabular-nums">{preview.manualResolutionItems.length}</span>
-              <span className="text-[10px] text-text-muted">{_t('تحتاج مراجعة يدوية', 'Manual Review')}</span>
+            <div className="px-3 py-2.5 col-span-2">
+              <div className="text-base font-bold text-amber-700 dark:text-amber-300 tabular-nums">{preview.manualResolutionItems.length}</div>
+              <div className="text-[11px] text-text-muted">{_t('مراجعة يدوية', 'Manual Review')}</div>
             </div>
           </div>
 
           {/* Manual Resolution / Live Meetings Warning Box */}
           {preview.manualResolutionItems.length > 0 && (
-            <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 space-y-1 text-[11px]">
-              <div className="font-black text-amber-800 dark:text-amber-300">
-                {_t('سجلات تتطلب انتباهاً أو مراجعة يدوية:', 'Items Requiring Attention / Manual Resolution:')}
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 space-y-1 text-xs">
+              <div className="font-bold text-amber-800 dark:text-amber-300">
+                {_t('سجلات تتطلب مراجعة يدوية:', 'Items Requiring Attention:')}
               </div>
-              <ul className="space-y-1 list-disc list-inside text-amber-900 dark:text-amber-200">
+              <ul className="space-y-1 list-disc list-inside text-amber-900 dark:text-amber-200 text-[11px]">
                 {preview.manualResolutionItems.map((item, idx) => (
                   <li key={`${item.category}_${item.id}_${idx}`}>
-                    <span className="font-bold">{item.title}:</span> {item.detail}
+                    <span className="font-semibold">{item.title}:</span> {item.detail}
                   </li>
                 ))}
               </ul>
@@ -460,7 +493,7 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
             <button
               type="button"
               onClick={() => setShowZoomDetails((v) => !v)}
-              className="w-full px-3 py-2 bg-surface-hover/60 flex items-center justify-between text-xs font-black text-text-main cursor-pointer"
+              className="w-full min-h-[40px] px-3 py-2 bg-surface-hover/50 hover:bg-surface-hover flex items-center justify-between text-xs font-bold text-text-main cursor-pointer transition-colors"
             >
               <span>
                 {_t(
@@ -468,43 +501,42 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
                   `Discovered Zoom Meetings (${preview.zoomMeetings.length})`
                 )}
               </span>
-              {showZoomDetails ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              {showZoomDetails ? <ChevronUp className="w-4 h-4 text-text-muted" /> : <ChevronDown className="w-4 h-4 text-text-muted" />}
             </button>
             {showZoomDetails && (
-              <div className="max-h-52 overflow-y-auto divide-y divide-surface-border text-[11px]">
+              <div className="max-h-52 overflow-y-auto divide-y divide-surface-border text-xs">
                 {preview.zoomMeetings.length === 0 ? (
                   <div className="p-3 text-text-muted text-center">
                     {_t('لا توجد اجتماعات Zoom مجدولة حالياً في هذا الحساب.', 'No scheduled Zoom meetings currently exist in this account.')}
                   </div>
                 ) : (
                   preview.zoomMeetings.map((m) => (
-                    <div key={m.id} className="px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+                    <div key={m.id} className="px-3 py-2.5 flex flex-wrap items-center justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="font-bold text-text-main truncate" dir="ltr">
+                        <div className="font-semibold text-text-main truncate" dir="ltr">
                           {m.topic}
                         </div>
-                        <div className="text-[10px] text-text-muted font-mono flex flex-wrap gap-2" dir="ltr">
-                          <span>ID: {m.id}</span>
-                          {m.startTime && <span>Start: {m.startTime}</span>}
-                          <span>{m.isRecurring ? 'Recurring Series' : `Type ${m.type}`}</span>
+                        <div className="text-[11px] text-text-muted font-mono flex flex-wrap gap-x-2 gap-y-0.5 tabular-nums" dir="ltr">
+                          <span>ID {m.id}</span>
+                          {m.startTime && <span>· {m.startTime}</span>}
+                          <span>· {m.isRecurring ? 'Recurring' : `Type ${m.type}`}</span>
                           {m.associatedGroupName ? (
-                            <span className="text-primary font-sans font-bold">
-                              Glück: {m.associatedGroupName}
-                              {m.associatedSessionCode ? ` (${m.associatedSessionCode})` : ''}
+                            <span className="text-primary font-sans font-semibold">
+                              · {m.associatedGroupName}
                             </span>
                           ) : (
-                            <span className="text-text-muted font-sans">External / Manual / Unreferenced</span>
+                            <span className="text-text-muted font-sans">· External / Manual</span>
                           )}
                         </div>
                       </div>
                       <span
-                        className={`px-1.5 py-0.5 rounded text-[10px] font-black border shrink-0 ${
+                        className={`text-xs font-semibold shrink-0 ${
                           m.isLive
-                            ? 'bg-amber-500/15 text-amber-700 border-amber-500/30'
-                            : 'bg-rose-500/15 text-rose-600 border-rose-500/30'
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-rose-600 dark:text-rose-400'
                         }`}
                       >
-                        {m.isLive ? _t('جارٍ الآن — لن يُحذف', 'LIVE — PROTECTED') : _t('سيتم حذفه', 'WILL DELETE')}
+                        {m.isLive ? _t('جارٍ الآن · محمي', 'Live · Protected') : _t('سيُحذف', 'Will delete')}
                       </span>
                     </div>
                   ))
@@ -518,18 +550,18 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
             <button
               type="button"
               onClick={() => setShowCalendarDetails((v) => !v)}
-              className="w-full px-3 py-2 bg-surface-hover/60 flex items-center justify-between text-xs font-black text-text-main cursor-pointer"
+              className="w-full min-h-[40px] px-3 py-2 bg-surface-hover/50 hover:bg-surface-hover flex items-center justify-between text-xs font-bold text-text-main cursor-pointer transition-colors"
             >
               <span>
                 {_t(
-                  `أحداث Google Calendar المرتبطة التي ستُحذف (${preview.calendarEventsToDeleteCount}) • غير مرتبطة محفوظة (${preview.calendarEventsUntouchedCount})`,
-                  `Linked Google Calendar Events to Delete (${preview.calendarEventsToDeleteCount}) • Untouched (${preview.calendarEventsUntouchedCount})`
+                  `أحداث التقويم المرتبطة (${preview.calendarEventsToDeleteCount}) · محفوظة (${preview.calendarEventsUntouchedCount})`,
+                  `Linked Calendar Events (${preview.calendarEventsToDeleteCount}) · Untouched (${preview.calendarEventsUntouchedCount})`
                 )}
               </span>
-              {showCalendarDetails ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              {showCalendarDetails ? <ChevronUp className="w-4 h-4 text-text-muted" /> : <ChevronDown className="w-4 h-4 text-text-muted" />}
             </button>
             {showCalendarDetails && (
-              <div className="max-h-48 overflow-y-auto divide-y divide-surface-border text-[11px]">
+              <div className="max-h-48 overflow-y-auto divide-y divide-surface-border text-xs">
                 {!preview.calendarConnected ? (
                   <div className="p-3 text-text-muted text-center">
                     {_t('Google Calendar غير متصل — لم يتم فحص أحداث التقويم.', 'Google Calendar is not connected — Calendar events were not scanned.')}
@@ -540,18 +572,16 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
                   </div>
                 ) : (
                   preview.calendarEventsToDelete.map((e) => (
-                    <div key={e.eventId} className="px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+                    <div key={e.eventId} className="px-3 py-2.5 flex flex-wrap items-center justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="font-bold text-text-main truncate" dir="ltr">{e.summary}</div>
-                        <div className="text-[10px] text-text-muted font-mono" dir="ltr">
-                          Event ID: {e.eventId}
-                          {e.startDateTime ? ` • ${e.startDateTime}` : ''}
-                          {e.isRecurringSeries ? ' • Recurring' : ''}
-                          {` • Signals: ${e.signals.join(', ')}`}
+                        <div className="font-semibold text-text-main truncate" dir="ltr">{e.summary}</div>
+                        <div className="text-[11px] text-text-muted font-mono tabular-nums" dir="ltr">
+                          {e.startDateTime || e.eventId}
+                          {e.isRecurringSeries ? ' · Recurring' : ''}
                         </div>
                       </div>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-rose-500/15 text-rose-600 border border-rose-500/30">
-                        {_t('سيُحذف', 'WILL DELETE')}
+                      <span className="text-xs font-semibold text-rose-600 dark:text-rose-400 shrink-0">
+                        {_t('سيُحذف', 'Will delete')}
                       </span>
                     </div>
                   ))
@@ -565,32 +595,33 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
             <button
               type="button"
               onClick={() => setShowRebuildDetails((v) => !v)}
-              className="w-full px-3 py-2 bg-surface-hover/60 flex items-center justify-between text-xs font-black text-text-main cursor-pointer"
+              className="w-full min-h-[40px] px-3 py-2 bg-surface-hover/50 hover:bg-surface-hover flex items-center justify-between text-xs font-bold text-text-main cursor-pointer transition-colors"
             >
               <span>
                 {_t(
-                  `جلسات Glück الأسبوعية التي ستُعاد بناؤها (${preview.activeGluckOnlineSessionsCount})`,
-                  `Active Glück Weekly Sessions to Rebuild (${preview.activeGluckOnlineSessionsCount})`
+                  `الحصص التي ستُعاد بناؤها (${preview.activeGluckOnlineSessionsCount})`,
+                  `Sessions to Rebuild (${preview.activeGluckOnlineSessionsCount})`
                 )}
               </span>
-              {showRebuildDetails ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              {showRebuildDetails ? <ChevronUp className="w-4 h-4 text-text-muted" /> : <ChevronDown className="w-4 h-4 text-text-muted" />}
             </button>
             {showRebuildDetails && (
-              <div className="max-h-48 overflow-y-auto divide-y divide-surface-border text-[11px]">
+              <div className="max-h-48 overflow-y-auto divide-y divide-surface-border text-xs">
                 {preview.activeSessionsToRebuild.map((s) => (
-                  <div key={s.sessionId} className="px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+                  <div key={s.sessionId} className="px-3 py-2.5 flex flex-wrap items-center justify-between gap-2">
                     <div className="min-w-0">
-                      <span className="font-mono font-bold text-text-muted mr-1.5">[{s.sessionCode}]</span>
-                      <span className="font-bold text-text-main" dir="ltr">{s.standardizedTitle}</span>
-                      <span className="ml-2 text-[10px] text-text-muted font-mono">
-                        {s.durationMinutes}m
+                      <span className="font-semibold text-text-main" dir="ltr">{s.standardizedTitle}</span>
+                      <span className="ms-2 text-[11px] text-text-muted tabular-nums">
+                        · {s.durationMinutes} {_t('د', 'm')}
                       </span>
                       {s.planWarning40Min && (
-                        <span className="ml-2 text-[10px] font-bold text-amber-600">(Basic 40m warning)</span>
+                        <span className="ms-2 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+                          · {_t('حد 40 د', '40m cap')}
+                        </span>
                       )}
                     </div>
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-emerald-500/15 text-emerald-600 border border-emerald-500/30">
-                      {_t('إعادة إنشاء', 'WILL REBUILD')}
+                    <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
+                      {_t('إعادة إنشاء', 'Will rebuild')}
                     </span>
                   </div>
                 ))}
@@ -600,26 +631,28 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
         </div>
       )}
 
-      {/* Final User Report (Always visible after completion, error, or verification) */}
+      {/* Final User Report */}
       {operation && (operation.state === 'completed' || operation.state === 'completed_with_errors' || operation.state === 'failed') && (
         <div
           className={`p-3.5 rounded-xl border space-y-3 ${
             operation.state === 'completed' && operation.report.verificationPassed
-              ? 'bg-emerald-500/10 border-emerald-500/30'
-              : 'bg-amber-500/10 border-amber-500/30'
+              ? 'bg-emerald-500/10 border-emerald-500/25'
+              : 'bg-amber-500/10 border-amber-500/25'
           }`}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               {operation.state === 'completed' && operation.report.verificationPassed ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
               ) : (
-                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
               )}
-              <span className="text-xs font-black text-text-main">
+              <span className="text-xs font-bold text-text-main">
                 {operation.state === 'completed' && operation.report.verificationPassed
-                  ? _t('التقرير النهائي: اكتمل التنظيف وإعادة البناء وتم التحقق بنجاح', 'Final Report: Clean & Rebuild Completed & Verified')
-                  : _t('التقرير النهائي: انتهت العملية مع مشاكل متبقية تحتاج إجراء', 'Final Report: Completed With Remaining Issues')}
+                  ? operation.cleanupOnly
+                    ? _t('تم المسح بالكامل بنجاح (بدون إعادة بناء)', 'Clean Only Completed & Verified')
+                    : _t('اكتمل التنظيف وإعادة البناء بنجاح', 'Clean & Rebuild Completed & Verified')
+                  : _t('انتهت العملية مع ملاحظات تحتاج مراجعة', 'Completed With Remaining Issues')}
               </span>
             </div>
 
@@ -628,129 +661,135 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
                 <button
                   type="button"
                   onClick={() => runOperation('retry_failed')}
-                  className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-black flex items-center gap-1 cursor-pointer"
+                  className="min-h-[34px] px-3 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  <span>{_t('إعادة محاولة العمليات الفاشلة', 'Retry Failed Operations')}</span>
+                  <span>{_t('إعادة محاولة الفاشلة', 'Retry Failed')}</span>
                 </button>
               )}
               <button
                 type="button"
                 onClick={handleDismissSavedOperation}
-                className="px-2 py-1 rounded-lg border border-surface-border bg-surface text-[11px] font-bold text-text-muted cursor-pointer"
+                className="min-h-[34px] px-3 rounded-xl border border-surface-border bg-surface text-xs font-semibold text-text-muted hover:text-text-main cursor-pointer"
               >
-                {_t('إغلاق التقرير', 'Clear Report')}
+                {_t('إغلاق التقرير', 'Dismiss')}
               </button>
             </div>
           </div>
 
-          {/* All Required Report Metrics */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 text-center text-xs">
-            <div className="p-2 rounded-lg bg-surface border border-surface-border">
-              <span className="font-black text-text-main block tabular-nums">{operation.report.zoomMeetingsFoundBeforeCleanup}</span>
-              <span className="text-[10px] text-text-muted">{_t('Zoom قبل التنظيف', 'Zoom Found Before')}</span>
+          {/* Hairline-Divided Report Summary */}
+          <div className="rounded-xl bg-surface border border-surface-border grid grid-cols-2 sm:grid-cols-4 divide-x divide-y divide-surface-border overflow-hidden text-center">
+            <div className="px-2.5 py-2">
+              <div className="text-sm font-bold text-text-main tabular-nums">{operation.report.zoomMeetingsFoundBeforeCleanup}</div>
+              <div className="text-[10.5px] text-text-muted">{_t('Zoom قبل المسح', 'Zoom Before')}</div>
             </div>
-            <div className="p-2 rounded-lg bg-surface border border-surface-border">
-              <span className="font-black text-emerald-600 block tabular-nums">{operation.report.zoomMeetingsDeleted}</span>
-              <span className="text-[10px] text-text-muted">{_t('Zoom محذوفة', 'Zoom Deleted')}</span>
+            <div className="px-2.5 py-2">
+              <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{operation.report.zoomMeetingsDeleted}</div>
+              <div className="text-[10.5px] text-text-muted">{_t('Zoom محذوفة', 'Zoom Deleted')}</div>
             </div>
-            <div className="p-2 rounded-lg bg-surface border border-surface-border">
-              <span className="font-black text-amber-600 block tabular-nums">{operation.report.zoomMeetingsSkippedOrFailed}</span>
-              <span className="text-[10px] text-text-muted">{_t('Zoom متخطى / فاشل', 'Zoom Skipped/Failed')}</span>
+            <div className="px-2.5 py-2">
+              <div className="text-sm font-bold text-amber-600 dark:text-amber-400 tabular-nums">{operation.report.zoomMeetingsSkippedOrFailed}</div>
+              <div className="text-[10.5px] text-text-muted">{_t('متخطى / فاشل', 'Skipped/Failed')}</div>
             </div>
-            <div className="p-2 rounded-lg bg-surface border border-surface-border">
-              <span className="font-black text-emerald-600 block tabular-nums">{operation.report.calendarEventsDeleted}</span>
-              <span className="text-[10px] text-text-muted">{_t('أحداث تقويم محذوفة', 'Cal Events Deleted')}</span>
+            <div className="px-2.5 py-2">
+              <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{operation.report.calendarEventsDeleted}</div>
+              <div className="text-[10.5px] text-text-muted">{_t('تقويم محذوف', 'Cal Deleted')}</div>
             </div>
-            <div className="p-2 rounded-lg bg-surface border border-surface-border">
-              <span className="font-black text-sky-600 block tabular-nums">{operation.report.calendarEventsUntouched}</span>
-              <span className="text-[10px] text-text-muted">{_t('أحداث تقويم محفوظة', 'Cal Untouched')}</span>
+            <div className="px-2.5 py-2">
+              <div className="text-sm font-bold text-primary tabular-nums">{operation.report.calendarEventsUntouched}</div>
+              <div className="text-[10.5px] text-text-muted">{_t('تقويم محفوظ', 'Cal Safe')}</div>
             </div>
-            <div className="p-2 rounded-lg bg-surface border border-surface-border">
-              <span className="font-black text-primary block tabular-nums">{operation.report.newGluckZoomMeetingsCreated}</span>
-              <span className="text-[10px] text-text-muted">{_t('اجتماعات Glück الجديدة', 'New Zoom Created')}</span>
-            </div>
-            <div className="p-2 rounded-lg bg-surface border border-surface-border">
-              <span className="font-black text-emerald-600 block tabular-nums">{operation.report.calendarEventsRecreatedOrUpdated}</span>
-              <span className="text-[10px] text-text-muted">{_t('أحداث التقويم المحدثة', 'Cal Recreated/Synced')}</span>
-            </div>
-            <div className="p-2 rounded-lg bg-surface border border-surface-border">
-              <span className={`font-black block tabular-nums ${operation.report.failedItemsCount > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+            {!operation.cleanupOnly && (
+              <>
+                <div className="px-2.5 py-2">
+                  <div className="text-sm font-bold text-primary tabular-nums">{operation.report.newGluckZoomMeetingsCreated}</div>
+                  <div className="text-[10.5px] text-text-muted">{_t('Zoom الجديد', 'New Zoom')}</div>
+                </div>
+                <div className="px-2.5 py-2">
+                  <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{operation.report.calendarEventsRecreatedOrUpdated}</div>
+                  <div className="text-[10.5px] text-text-muted">{_t('التقويم المحدث', 'Cal Synced')}</div>
+                </div>
+              </>
+            )}
+            <div className="px-2.5 py-2">
+              <div className={`text-sm font-bold tabular-nums ${operation.report.failedItemsCount > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
                 {operation.report.failedItemsCount}
-              </span>
-              <span className="text-[10px] text-text-muted">{_t('عناصر فاشلة', 'Failed Items')}</span>
+              </div>
+              <div className="text-[10.5px] text-text-muted">{_t('عناصر فاشلة', 'Failed')}</div>
             </div>
-            <div className="p-2 rounded-lg bg-surface border border-surface-border sm:col-span-2">
+            <div className="px-2.5 py-2 col-span-2 sm:col-span-4">
               <span
-                className={`font-black block ${
-                  operation.report.verificationPassed ? 'text-emerald-600' : 'text-rose-600'
+                className={`text-xs font-bold ${
+                  operation.report.verificationPassed ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
                 }`}
               >
                 {operation.report.verificationPassed
-                  ? _t('ناجح ✓ (Verification Passed)', 'PASSED ✓')
-                  : _t('فشل التحقق ✗ (Verification Failed)', 'FAILED ✗')}
-              </span>
-              <span className="text-[10px] text-text-muted">
-                {_t('حالة التحقق النهائي من Zoom والتقويم', 'Final Zoom & Calendar Inventory Verification')}
+                  ? _t('حالة التحقق النهائي: ناجح', 'Verification: Passed')
+                  : _t('حالة التحقق النهائي: غير مكتمل', 'Verification: Failed')}
               </span>
             </div>
           </div>
 
           {operation.report.remainingProblems.length > 0 && (
-            <div className="p-2.5 rounded-lg bg-surface border border-rose-500/30 text-[11px] space-y-1">
-              <div className="font-black text-rose-600 dark:text-rose-400">
-                {_t('المشاكل المتبقية المطلوب معالجتها:', 'Remaining Problems:')}
+            <div className="p-2.5 rounded-xl bg-surface border border-rose-500/25 text-xs space-y-1">
+              <div className="font-bold text-rose-600 dark:text-rose-400">
+                {_t('المشاكل المتبقية:', 'Remaining Problems:')}
               </div>
-              <ul className="list-disc list-inside space-y-0.5 text-text-main">
+              <ul className="list-disc list-inside space-y-0.5 text-text-main text-[11px]">
                 {operation.report.remainingProblems.map((prob, i) => (
                   <li key={i}>{prob}</li>
                 ))}
               </ul>
             </div>
           )}
-
-          <div className="text-[10px] font-mono text-text-muted flex flex-wrap gap-3" dir="ltr">
-            <span>Operation ID: {operation.operationId}</span>
-            <span>Recovery Snapshot: {operation.snapshotId}</span>
-          </div>
         </div>
       )}
 
       {/* Explicit Destructive Confirmation Modal */}
       {confirmModalOpen && preview && (
-        <div className="fixed inset-0 z-[130] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-surface border border-rose-500/40 rounded-2xl max-w-lg w-full p-4 sm:p-5 space-y-3.5 shadow-2xl">
+        <div className="fixed inset-0 z-[130] bg-black/55 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-surface border-t sm:border border-surface-border rounded-t-3xl sm:rounded-2xl max-w-lg w-full p-4 sm:p-5 pb-safe-bottom sm:pb-5 space-y-3.5 shadow-2xl">
+            <div className="w-10 h-1 bg-surface-border rounded-full mx-auto -mt-1 sm:hidden shrink-0" />
             <div className="flex items-center justify-between gap-2">
-              <h5 className="text-sm font-black text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
+              <h5 className="text-sm font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
                 <ShieldAlert className="w-4 h-4 shrink-0" />
-                <span>{_t('تأكيد نهائي: تنظيف وإعادة بناء اجتماعات Glück', 'Confirm Destructive Cleanup & Rebuild')}</span>
+                <span>
+                  {confirmMode === 'clean_only'
+                    ? _t('تأكيد: مسح اجتماعات Zoom والتقويم فقط', 'Confirm Clean Only (No Rebuild)')
+                    : _t('تأكيد: تنظيف وإعادة بناء اجتماعات Glück', 'Confirm Cleanup & Rebuild')}
+                </span>
               </h5>
               <button
                 type="button"
                 onClick={() => setConfirmModalOpen(false)}
-                className="p-1 text-text-muted cursor-pointer"
+                className="min-h-[38px] min-w-[38px] rounded-xl flex items-center justify-center text-text-muted hover:text-text-main hover:bg-surface-hover cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/25 text-xs space-y-1.5 text-text-main">
-              <p className="font-bold">
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs space-y-1.5 text-text-main leading-relaxed">
+              <p className="font-semibold">
                 {_t(
                   `سيتم حذف ${preview.zoomMeetingsToDeleteCount} اجتماع Zoom مجدول بشكل دائم (بما في ذلك السلاسل المتكررة بالكامل) من حساب المضيف المتصل، وحذف ${preview.calendarEventsToDeleteCount} حدث Google Calendar مرتبط فقط.`,
                   `This will permanently delete ${preview.zoomMeetingsToDeleteCount} scheduled Zoom meeting(s) (including full recurring series) in the connected host account and ${preview.calendarEventsToDeleteCount} confidently linked Google Calendar event(s).`
                 )}
               </p>
               <p className="text-[11px] text-text-muted">
-                {_t(
-                  `بعد التحقق من خلو Zoom من الاجتماعات القديمة، سيتم إنشاء ${preview.activeGluckOnlineSessionsCount} اجتماع Glück جديد وإعادة مزامنة تقويم Google. لن يتم حذف ${preview.calendarEventsUntouchedCount} حدث تقويم غير مرتبط أو أي بيانات طلاب أو حصص أو مدفوعات.`,
-                  `After verifying old Zoom meetings are empty, Glück will rebuild ${preview.activeGluckOnlineSessionsCount} active online session meeting(s) and re-sync Google Calendar. ${preview.calendarEventsUntouchedCount} unrelated Calendar event(s) and all student/lesson/payment/attendance records remain untouched.`
-                )}
+                {confirmMode === 'clean_only'
+                  ? _t(
+                      `وضع المسح فقط: سيتم مسح الروابط القديمة من الجلسات بعد التأكد من خلو Zoom مع أرشفتها لحماية سجلات Grain، ولن يتم إنشاء أي اجتماعات Zoom جديدة أو أحداث تقويم جديدة. لن يتم المساس بـ ${preview.calendarEventsUntouchedCount} حدث تقويم غير مرتبط أو أي بيانات طلاب أو حصص أو مدفوعات.`,
+                      `Clean Only Mode: Obsolete links will be archived (preserving Grain history) and cleared from Glück sessions, and ZERO new Zoom meetings or Calendar events will be created. ${preview.calendarEventsUntouchedCount} unrelated Calendar event(s) and all student/lesson/payment/attendance records remain untouched.`
+                    )
+                  : _t(
+                      `بعد التحقق من خلو Zoom من الاجتماعات القديمة، سيتم إنشاء ${preview.activeGluckOnlineSessionsCount} اجتماع Glück جديد وإعادة مزامنة تقويم Google. لن يتم حذف ${preview.calendarEventsUntouchedCount} حدث تقويم غير مرتبط أو أي بيانات طلاب أو حصص أو مدفوعات.`,
+                      `After verifying old Zoom meetings are empty, Glück will rebuild ${preview.activeGluckOnlineSessionsCount} active online session meeting(s) and re-sync Google Calendar. ${preview.calendarEventsUntouchedCount} unrelated Calendar event(s) and all student/lesson/payment/attendance records remain untouched.`
+                    )}
               </p>
             </div>
 
             {preview.liveMeetingsBlockedCount > 0 && (
-              <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-800 dark:text-amber-300 font-bold">
+              <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs text-amber-800 dark:text-amber-300 font-semibold">
                 {_t(
                   `تحذير: يوجد ${preview.liveMeetingsBlockedCount} اجتماع جارٍ (Live) حالياً ولن يتم حذفه، ولن تكتمل حالة النظافة الكاملة قبل إنهائه.`,
                   `Warning: ${preview.liveMeetingsBlockedCount} live Zoom meeting(s) are currently running. They will NOT be deleted, and cleanup will not be marked fully complete until they end.`
@@ -758,18 +797,23 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
               </div>
             )}
 
-            <label className="flex items-start gap-2 text-xs cursor-pointer select-none p-2 rounded-lg bg-surface-hover border border-surface-border">
+            <label className="flex items-start gap-2.5 text-xs cursor-pointer select-none p-3 rounded-xl bg-surface-hover border border-surface-border">
               <input
                 type="checkbox"
                 checked={confirmChecked}
                 onChange={(e) => setConfirmChecked(e.target.checked)}
-                className="mt-0.5 accent-rose-600"
+                className="mt-0.5 w-4 h-4 rounded accent-rose-600 shrink-0"
               />
-              <span className="font-bold text-text-main">
-                {_t(
-                  'أؤكد أنني راجعت المعاينة وأوافق على الحذف الدائم لاجتماعات Zoom القديمة وإعادة بناء اجتماعات مجموعات Glück.',
-                  'I have reviewed the preview and confirm permanent deletion of old scheduled Zoom meetings and linked Calendar events, followed by rebuilding Glück meetings.'
-                )}
+              <span className="font-semibold text-text-main leading-relaxed">
+                {confirmMode === 'clean_only'
+                  ? _t(
+                      'أؤكد أنني راجعت المعاينة وأوافق على الحذف الدائم لاجتماعات Zoom وأحداث التقويم المرتبطة فقط بدون إعادة بناء.',
+                      'I have reviewed the preview and confirm permanent deletion of scheduled Zoom meetings and linked Calendar events ONLY (without rebuilding).'
+                    )
+                  : _t(
+                      'أؤكد أنني راجعت المعاينة وأوافق على الحذف الدائم لاجتماعات Zoom القديمة وإعادة بناء اجتماعات مجموعات Glück.',
+                      'I have reviewed the preview and confirm permanent deletion of old scheduled Zoom meetings and linked Calendar events, followed by rebuilding Glück meetings.'
+                    )}
               </span>
             </label>
 
@@ -777,7 +821,7 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
               <button
                 type="button"
                 onClick={() => setConfirmModalOpen(false)}
-                className="px-3 py-1.5 rounded-lg border border-surface-border text-xs font-bold text-text-main cursor-pointer"
+                className="min-h-[42px] px-4 rounded-xl border border-surface-border text-xs font-semibold text-text-main hover:bg-surface-hover cursor-pointer"
               >
                 {_t('إلغاء', 'Cancel')}
               </button>
@@ -785,10 +829,19 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
                 type="button"
                 disabled={!confirmChecked || isExecuting}
                 onClick={() => runOperation('start')}
-                className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+                className="min-h-[42px] px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
               >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>{_t('تأكيد وبدء التنظيف وإعادة البناء', 'Confirm & Run Clean & Rebuild')}</span>
+                {confirmMode === 'clean_only' ? (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{_t('تأكيد وبدء المسح فقط', 'Confirm Clean Only')}</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>{_t('تأكيد التنظيف وإعادة البناء', 'Confirm Clean & Rebuild')}</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

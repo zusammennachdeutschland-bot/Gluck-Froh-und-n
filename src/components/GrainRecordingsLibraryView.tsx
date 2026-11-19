@@ -280,8 +280,8 @@ const MobileRecordingItem = React.memo<RecordingRowProps>(
             onClick={() => onPrimaryAction(entry)}
             className={`min-h-[44px] px-4 rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
               entry.primaryAction === 'retry' || entry.primaryAction === 'resolve_issue'
-                ? 'bg-primary hover:bg-primary-hover text-white'
-                : 'border border-surface-border bg-background hover:bg-surface-hover text-text-main'
+                ? 'bg-primary hover:bg-primary-hover text-primary-fg'
+                : 'border border-surface-border bg-surface hover:bg-surface-hover text-text-main'
             }`}
           >
             {isRetrying && entry.primaryAction === 'retry'
@@ -392,8 +392,8 @@ const DesktopRecordingRow = React.memo<RecordingRowProps>(
               onClick={() => onPrimaryAction(entry)}
               className={`min-h-[38px] px-3 rounded-lg text-xs font-semibold cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
                 entry.primaryAction === 'retry' || entry.primaryAction === 'resolve_issue'
-                  ? 'bg-primary hover:bg-primary-hover text-white'
-                  : 'border border-surface-border bg-background hover:bg-surface-hover text-text-main'
+                  ? 'bg-primary hover:bg-primary-hover text-primary-fg'
+                  : 'border border-surface-border bg-surface hover:bg-surface-hover text-text-main'
               }`}
             >
               {primaryLabel}
@@ -991,214 +991,154 @@ export const GrainRecordingsLibraryView: React.FC = () => {
     setOverflowEntryId(entry.id);
   }, []);
 
-  const filterTabs: Array<{ key: GrainLibraryFilterKey; label: string; count?: number }> = useMemo(
+  const openGrainSettings = useCallback(() => {
+    try {
+      (window as any).__glueckPendingSettingsCategory = 'grain';
+    } catch {}
+    setShowHeaderMenu(false);
+    setActiveTab('settings');
+  }, [setActiveTab]);
+
+  const filterTabs: Array<{ key: GrainLibraryFilterKey; label: string; count: number }> = useMemo(
     () => [
       { key: 'all', label: tr('الكل', 'All', 'Alle'), count: stats.total },
-      { key: 'processing', label: tr('قيد المعالجة', 'Processing', 'Verarbeitung'), count: stats.processing },
-      { key: 'completed', label: tr('مكتمل', 'Completed', 'Abgeschlossen'), count: stats.completed },
-      { key: 'pending_part2', label: tr('بانتظار الجزء 2', 'Pending Part 2', 'Teil 2 offen'), count: stats.pendingPart2 },
-      { key: 'review_required', label: tr('يتطلب مراجعة', 'Review Required', 'Prüfung nötig'), count: stats.reviewRequired },
-      { key: 'processing_failed', label: tr('فشل', 'Failed', 'Fehlgeschlagen'), count: stats.failed }
+      { key: 'processing', label: tr('المعالجة', 'Processing', 'Aktiv'), count: stats.processing },
+      { key: 'completed', label: tr('مكتمل', 'Completed', 'Fertig'), count: stats.completed },
+      { key: 'pending_part2', label: tr('الجزء 2', 'Part 2', 'Teil 2'), count: stats.pendingPart2 },
+      { key: 'review_required', label: tr('مراجعة', 'Review', 'Prüfen'), count: stats.reviewRequired },
+      { key: 'processing_failed', label: tr('فشل', 'Failed', 'Fehler'), count: stats.failed }
     ],
     [stats, tr]
   );
 
   return (
-    <div className="w-full min-w-0 space-y-3.5 pb-[calc(6.5rem+env(safe-area-inset-bottom,16px))] md:pb-8">
-      {/* Page Header & Compact Statistics */}
-      <header className="space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <h1 className="text-lg sm:text-xl font-bold tracking-tight text-text-main truncate">
-              {tr('تسجيلات Grain', 'Grain Recordings', 'Grain-Aufzeichnungen')}
-            </h1>
-            {lastSyncAt && (
-              <p className="text-xs text-text-muted tabular-nums mt-0.5">
-                {tr('آخر مزامنة:', 'Last synced:', 'Zuletzt synchronisiert:')}{' '}
-                {lastSyncAt.slice(0, 16).replace('T', ' ')}
-              </p>
-            )}
-          </div>
+    <div className="w-full min-w-0 space-y-2.5 pb-[calc(6rem+env(safe-area-inset-bottom,16px))] md:pb-8">
+      {/* Compact Top Action Bar (Header already displays the section title) */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0 text-xs text-text-muted truncate">
+          {!hasConnectedToken ? (
+            <span className="font-semibold text-amber-700 dark:text-amber-300">
+              {tr(
+                'Grain غير متصل بعد — اربط الحساب من الإعدادات',
+                'Grain is not connected yet — set up in Settings',
+                'Grain nicht verbunden — in Einstellungen einrichten'
+              )}
+            </span>
+          ) : lastSyncAt ? (
+            <span className="tabular-nums">
+              {tr('آخر مزامنة:', 'Last synced:', 'Zuletzt:')}{' '}
+              {lastSyncAt.slice(0, 16).replace('T', ' ')}
+            </span>
+          ) : (
+            <span>
+              {tr(
+                `${stats.total} تسجيل محفوظ`,
+                `${stats.total} saved recordings`,
+                `${stats.total} Aufzeichnungen`
+              )}
+            </span>
+          )}
+        </div>
 
-          <div className="flex items-center gap-1.5 shrink-0 relative">
+        <div className="flex items-center gap-1.5 shrink-0 relative">
+          {hasConnectedToken ? (
             <button
               type="button"
               onClick={() => handleSyncFromGrain(false)}
               disabled={isSyncing}
-              className="min-h-[44px] px-4 rounded-xl bg-primary hover:bg-primary-hover disabled:opacity-50 text-white text-xs sm:text-sm font-semibold flex items-center gap-2 cursor-pointer transition-colors whitespace-nowrap shrink-0"
+              className="min-h-[40px] px-3.5 rounded-xl bg-primary hover:bg-primary-hover disabled:opacity-50 text-primary-fg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap shrink-0 shadow-2xs"
             >
-              <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
               <span>{tr('مزامنة', 'Sync', 'Sync')}</span>
             </button>
-
+          ) : (
             <button
               type="button"
-              onClick={() => setShowHeaderMenu((prev) => !prev)}
-              aria-label={tr('خيارات المكتبة', 'Library options', 'Bibliotheksoptionen')}
-              aria-expanded={showHeaderMenu}
-              className="min-h-[44px] min-w-[44px] rounded-xl border border-surface-border bg-surface hover:bg-surface-hover text-text-muted hover:text-text-main flex items-center justify-center cursor-pointer transition-colors"
+              onClick={openGrainSettings}
+              className="min-h-[40px] px-3.5 rounded-xl bg-primary hover:bg-primary-hover text-primary-fg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap shrink-0 shadow-2xs"
             >
-              <MoreVertical className="w-5 h-5" />
+              <Settings className="w-3.5 h-3.5" />
+              <span>{tr('إعداد Grain', 'Configure Grain', 'Grain einrichten')}</span>
             </button>
+          )}
 
-            {showHeaderMenu && (
-              <>
-                <div
-                  className="fixed inset-0 z-40"
-                  onClick={() => setShowHeaderMenu(false)}
-                />
-                <div className="absolute top-12 end-0 z-50 w-56 rounded-2xl border border-surface-border bg-surface shadow-lg p-1.5 space-y-0.5">
+          <button
+            type="button"
+            onClick={() => setShowHeaderMenu((prev) => !prev)}
+            aria-label={tr('خيارات المكتبة', 'Library options', 'Bibliotheksoptionen')}
+            aria-expanded={showHeaderMenu}
+            className="min-h-[40px] min-w-[40px] rounded-xl border border-surface-border bg-surface hover:bg-surface-hover text-text-muted hover:text-text-main flex items-center justify-center cursor-pointer transition-colors"
+          >
+            <MoreVertical className="w-4 h-4" />
+          </button>
+
+          {showHeaderMenu && (
+            <>
+              <div
+                className="fixed inset-0 z-40"
+                onClick={() => setShowHeaderMenu(false)}
+              />
+              <div className="absolute top-11 end-0 z-50 w-56 rounded-2xl border border-surface-border bg-surface shadow-lg p-1.5 space-y-0.5">
+                {hasConnectedToken && (
                   <button
                     type="button"
                     disabled={isSyncing}
                     onClick={() => handleSyncFromGrain(true)}
-                    className="w-full min-h-[44px] px-3 rounded-xl flex items-center gap-2.5 text-start text-xs font-medium text-text-main hover:bg-surface-hover disabled:opacity-50 cursor-pointer"
+                    className="w-full min-h-[42px] px-3 rounded-xl flex items-center gap-2.5 text-start text-xs font-medium text-text-main hover:bg-surface-hover disabled:opacity-50 cursor-pointer"
                   >
                     <Download className="w-4 h-4 text-text-muted shrink-0" />
                     <span>{tr('استيراد جميع الصفحات', 'Import All Pages', 'Alle Seiten importieren')}</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleRestoreRemoved}
-                    className="w-full min-h-[44px] px-3 rounded-xl flex items-center gap-2.5 text-start text-xs font-medium text-text-main hover:bg-surface-hover cursor-pointer"
-                  >
-                    <RotateCcw className="w-4 h-4 text-text-muted shrink-0" />
-                    <span>{tr('استعادة المخفي محلياً', 'Restore Hidden Entries', 'Ausgeblendete wiederherstellen')}</span>
-                  </button>
-                  {!hasConnectedToken && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowHeaderMenu(false);
-                        setActiveTab('settings');
-                      }}
-                      className="w-full min-h-[44px] px-3 rounded-xl flex items-center gap-2.5 text-start text-xs font-semibold text-primary hover:bg-primary-soft cursor-pointer"
-                    >
-                      <Settings className="w-4 h-4 shrink-0" />
-                      <span>{tr('إعداد اتصال Grain', 'Configure Grain', 'Grain einrichten')}</span>
-                    </button>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
+                )}
+                <button
+                  type="button"
+                  onClick={handleRestoreRemoved}
+                  className="w-full min-h-[42px] px-3 rounded-xl flex items-center gap-2.5 text-start text-xs font-medium text-text-main hover:bg-surface-hover cursor-pointer"
+                >
+                  <RotateCcw className="w-4 h-4 text-text-muted shrink-0" />
+                  <span>{tr('استعادة المخفي محلياً', 'Restore Hidden Entries', 'Ausgeblendete wiederherstellen')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={openGrainSettings}
+                  className="w-full min-h-[42px] px-3 rounded-xl flex items-center gap-2.5 text-start text-xs font-semibold text-primary hover:bg-primary-soft cursor-pointer"
+                >
+                  <Settings className="w-4 h-4 shrink-0" />
+                  <span>{tr('إعدادات Grain و Zoom', 'Grain & Zoom Settings', 'Grain & Zoom Einstellungen')}</span>
+                </button>
+              </div>
+            </>
+          )}
         </div>
+      </div>
 
-        {/* Compact 4-Stat Strip (Neutral, high-density, clickable shortcuts — no oversized dashboard cards) */}
-        <div className="grid grid-cols-4 divide-x divide-surface-border rtl:divide-x-reverse rounded-2xl border border-surface-border bg-surface overflow-hidden">
+      {/* Inline Feedback Notice */}
+      {feedbackNotice && (
+        <div
+          role="status"
+          className={`px-3 py-2 rounded-xl border text-xs flex items-center justify-between gap-2 ${
+            feedbackNotice.kind === 'error'
+              ? 'border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+              : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300'
+          }`}
+        >
+          <span className="leading-snug">{feedbackNotice.text}</span>
           <button
             type="button"
-            onClick={() => setStatusFilter('all')}
-            className={`px-2 sm:px-3 py-2.5 text-start transition-colors cursor-pointer ${
-              statusFilter === 'all' ? 'bg-primary-soft/60' : 'hover:bg-surface-hover/60'
-            }`}
+            onClick={() => setFeedbackNotice(null)}
+            aria-label={tr('إغلاق الإشعار', 'Dismiss notice', 'Hinweis schließen')}
+            className="min-h-[32px] min-w-[32px] -me-1 flex items-center justify-center rounded-lg cursor-pointer shrink-0"
           >
-            <div className="text-base sm:text-lg font-bold text-text-main tabular-nums leading-tight">
-              {stats.total}
-            </div>
-            <div className="text-[11px] text-text-muted truncate mt-0.5">
-              {tr('الإجمالي', 'Total', 'Gesamt')}
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setStatusFilter('processing')}
-            className={`px-2 sm:px-3 py-2.5 text-start transition-colors cursor-pointer ${
-              statusFilter === 'processing' ? 'bg-primary-soft/60' : 'hover:bg-surface-hover/60'
-            }`}
-          >
-            <div className="text-base sm:text-lg font-bold text-primary tabular-nums leading-tight">
-              {stats.processing}
-            </div>
-            <div className="text-[11px] text-text-muted truncate mt-0.5">
-              {tr('قيد المعالجة', 'Processing', 'Aktiv')}
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setStatusFilter('completed')}
-            className={`px-2 sm:px-3 py-2.5 text-start transition-colors cursor-pointer ${
-              statusFilter === 'completed' ? 'bg-primary-soft/60' : 'hover:bg-surface-hover/60'
-            }`}
-          >
-            <div className="text-base sm:text-lg font-bold text-emerald-700 dark:text-emerald-400 tabular-nums leading-tight">
-              {stats.completed}
-            </div>
-            <div className="text-[11px] text-text-muted truncate mt-0.5">
-              {tr('مكتمل', 'Completed', 'Fertig')}
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setStatusFilter('review_required')}
-            className={`px-2 sm:px-3 py-2.5 text-start transition-colors cursor-pointer ${
-              statusFilter === 'review_required' ? 'bg-primary-soft/60' : 'hover:bg-surface-hover/60'
-            }`}
-          >
-            <div
-              className={`text-base sm:text-lg font-bold tabular-nums leading-tight ${
-                stats.reviewRequired > 0 ? 'text-amber-700 dark:text-amber-400' : 'text-text-main'
-              }`}
-            >
-              {stats.reviewRequired}
-            </div>
-            <div className="text-[11px] text-text-muted truncate mt-0.5">
-              {tr('مراجعة', 'Review', 'Prüfen')}
-            </div>
+            <X className="w-4 h-4" />
           </button>
         </div>
+      )}
 
-        {/* Unconnected Grain Banner */}
-        {!hasConnectedToken && (
-          <div className="px-3.5 py-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 flex items-center justify-between gap-2 text-xs text-amber-900 dark:text-amber-200">
-            <span>
-              {tr(
-                'لم يتم ربط حساب Grain بعد. قم بإعداد الاتصال لاستيراد التسجيلات تلقائياً.',
-                'Grain is not connected yet. Configure it in Settings to sync recordings automatically.',
-                'Grain ist noch nicht verbunden. In den Einstellungen einrichten.'
-              )}
-            </span>
-            <button
-              type="button"
-              onClick={() => setActiveTab('settings')}
-              className="min-h-[36px] px-3 rounded-lg bg-surface border border-surface-border text-text-main font-semibold whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              {tr('الإعدادات', 'Settings', 'Einstellungen')}
-            </button>
-          </div>
-        )}
-
-        {/* Inline Feedback Notice */}
-        {feedbackNotice && (
-          <div
-            role="status"
-            className={`px-3.5 py-2.5 rounded-xl border text-xs flex items-center justify-between gap-2 ${
-              feedbackNotice.kind === 'error'
-                ? 'border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300'
-                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300'
-            }`}
-          >
-            <span className="leading-snug">{feedbackNotice.text}</span>
-            <button
-              type="button"
-              onClick={() => setFeedbackNotice(null)}
-              aria-label={tr('إغلاق الإشعار', 'Dismiss notice', 'Hinweis schließen')}
-              className="min-h-[36px] min-w-[36px] -me-1.5 flex items-center justify-center rounded-lg cursor-pointer shrink-0"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-      </header>
-
-      {/* Compact Mobile-First Search & Filter Toolbar */}
-      <section className="space-y-2.5" aria-label={tr('البحث والتصفية', 'Search and filters', 'Suche und Filter')}>
-        <div className="flex items-center gap-2">
+      {/* Search + Single Unified Segmented Filter Toolbar */}
+      <section className="space-y-2" aria-label={tr('البحث والتصفية', 'Search and filters', 'Suche und Filter')}>
+        <div className="flex items-center gap-1.5">
           <div className="relative flex-1 min-w-0">
-            <Search className="w-4 h-4 text-text-muted absolute top-1/2 -translate-y-1/2 start-3 pointer-events-none" />
+            <Search className="w-3.5 h-3.5 text-text-muted/80 absolute top-1/2 -translate-y-1/2 start-3 pointer-events-none" />
             <input
               type="search"
               value={searchQuery}
@@ -1208,16 +1148,16 @@ export const GrainRecordingsLibraryView: React.FC = () => {
                 'Search recordings or groups...',
                 'Aufzeichnungen oder Gruppen suchen...'
               )}
-              className="w-full min-h-[44px] ps-9 pe-9 rounded-xl border border-surface-border bg-surface text-sm text-text-main placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/40"
+              className="w-full min-h-[40px] ps-8.5 pe-8.5 rounded-xl border border-surface-border bg-surface text-xs font-medium text-text-main placeholder:text-text-muted/70 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
                 aria-label={tr('مسح البحث', 'Clear search', 'Suche löschen')}
-                className="min-h-[36px] min-w-[36px] absolute top-1/2 -translate-y-1/2 end-1 flex items-center justify-center text-text-muted hover:text-text-main cursor-pointer"
+                className="min-h-[32px] min-w-[32px] absolute top-1/2 -translate-y-1/2 end-1 flex items-center justify-center text-text-muted hover:text-text-main cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
@@ -1226,13 +1166,13 @@ export const GrainRecordingsLibraryView: React.FC = () => {
             type="button"
             onClick={() => setShowAdvancedFilters(true)}
             aria-label={tr('فلاتر متقدمة', 'Advanced filters', 'Erweiterte Filter')}
-            className={`min-h-[44px] px-3 sm:px-3.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
+            className={`min-h-[40px] px-3 rounded-xl border text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
               advancedFilterCount > 0
                 ? 'border-primary bg-primary-soft text-primary'
                 : 'border-surface-border bg-surface text-text-main hover:bg-surface-hover'
             }`}
           >
-            <SlidersHorizontal className="w-4 h-4" />
+            <SlidersHorizontal className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">{tr('تصفية', 'Filters', 'Filter')}</span>
             {advancedFilterCount > 0 && (
               <span className="tabular-nums">({advancedFilterCount})</span>
@@ -1240,8 +1180,8 @@ export const GrainRecordingsLibraryView: React.FC = () => {
           </button>
         </div>
 
-        {/* Horizontally Scrollable Status Filter Tabs */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 -mx-0.5 px-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {/* Single Unified Status Segmented Bar (Counts + Filtering in one bar) */}
+        <div className="flex items-center gap-1 bg-surface-hover p-1 rounded-xl border border-surface-border overflow-x-auto hide-scrollbar">
           {filterTabs.map((tab) => {
             const isActive = statusFilter === tab.key;
             return (
@@ -1249,76 +1189,64 @@ export const GrainRecordingsLibraryView: React.FC = () => {
                 key={tab.key}
                 type="button"
                 onClick={() => setStatusFilter(tab.key)}
-                className={`min-h-[40px] px-3 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer flex items-center gap-1.5 ${
+                className={`min-h-[34px] px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap shrink-0 transition-all cursor-pointer flex items-center gap-1.5 border ${
                   isActive
-                    ? 'bg-primary text-white'
-                    : 'bg-surface border border-surface-border text-text-muted hover:text-text-main hover:bg-surface-hover'
+                    ? 'bg-surface text-primary border-surface-border shadow-2xs'
+                    : 'border-transparent text-text-muted hover:text-text-main hover:bg-surface/50'
                 }`}
               >
                 <span>{tab.label}</span>
-                {typeof tab.count === 'number' && tab.count > 0 && (
-                  <span
-                    className={`tabular-nums text-[11px] ${
-                      isActive ? 'text-white/85' : 'text-text-muted'
-                    }`}
-                  >
-                    {tab.count}
-                  </span>
-                )}
+                <span
+                  className={`tabular-nums text-[10.5px] ${
+                    isActive ? 'text-primary' : 'text-text-muted/80'
+                  }`}
+                >
+                  {tab.count}
+                </span>
               </button>
             );
           })}
-
-          {hasAnyActiveFilters && (
-            <button
-              type="button"
-              onClick={clearAllFilters}
-              className="min-h-[40px] px-3 rounded-xl text-xs font-medium text-primary hover:bg-primary-soft whitespace-nowrap shrink-0 cursor-pointer transition-colors"
-            >
-              {tr('مسح الكل', 'Clear Filters', 'Zurücksetzen')}
-            </button>
-          )}
         </div>
       </section>
 
       {/* Recording Library Content */}
-      <section className="rounded-2xl border border-surface-border bg-surface overflow-hidden">
+      <section className="rounded-2xl border border-surface-border bg-surface overflow-hidden shadow-2xs">
         {filteredEntries.length === 0 ? (
-          <div className="px-5 py-10 text-center space-y-2.5">
-            <p className="text-sm font-semibold text-text-main">
+          <div className="px-4 py-6 text-center space-y-2">
+            <div className="w-9 h-9 rounded-xl bg-primary-soft border border-primary-border/60 text-primary flex items-center justify-center mx-auto">
+              <Inbox className="w-4 h-4" />
+            </div>
+            <p className="text-xs sm:text-sm font-bold text-text-main">
               {libraryEntries.length === 0
                 ? tr('لا توجد تسجيلات مستوردة بعد', 'No recordings imported yet', 'Noch keine Aufzeichnungen importiert')
                 : tr('لا توجد تسجيلات مطابقة للتصفية الحالية', 'No recordings match your filters', 'Keine Aufzeichnungen entsprechen den Filtern')}
             </p>
-            <p className="text-xs text-text-muted max-w-sm mx-auto leading-relaxed">
+            <p className="text-[11px] text-text-muted max-w-sm mx-auto leading-relaxed">
               {libraryEntries.length === 0
-                ? tr(
-                    'اضغط على "مزامنة" لاستيراد التسجيلات من Grain والتعرّف تلقائياً على مجموعاتك وجلساتك.',
-                    'Tap "Sync" to import recordings from Grain and automatically associate them with your standardized Zoom groups.',
-                    'Tippen Sie auf "Sync", um Aufzeichnungen aus Grain zu importieren und automatisch zuzuordnen.'
-                  )
+                ? !hasConnectedToken
+                  ? tr(
+                      'اربط حساب Grain أولاً من الإعدادات لتظهر تسجيلات حصصك وتُطابق تلقائياً.',
+                      'Connect Grain in Settings first to automatically import and match your lesson recordings.',
+                      'Verbinden Sie Grain zuerst in den Einstellungen, um Aufzeichnungen automatisch zu importieren.'
+                    )
+                  : tr(
+                      'استخدم زر «مزامنة» بالأعلى لاستيراد تسجيلات Grain وربطها بمجموعاتك.',
+                      'Use Sync above to import your Grain recordings and match them with your Zoom groups.',
+                      'Tippen Sie oben auf Sync, um Grain-Aufzeichnungen zu importieren.'
+                    )
                 : tr(
                     'جرّب تغيير كلمات البحث أو مسح الفلاتر لعرض جميع التسجيلات.',
                     'Try adjusting your search or clearing filters to view all recordings.',
                     'Ändern Sie die Suche oder setzen Sie die Filter zurück.'
                   )}
             </p>
-            {hasAnyActiveFilters ? (
+            {hasAnyActiveFilters && (
               <button
                 type="button"
                 onClick={clearAllFilters}
-                className="min-h-[44px] px-4 rounded-xl border border-surface-border bg-background hover:bg-surface-hover text-xs font-semibold text-text-main cursor-pointer"
+                className="min-h-[38px] px-3.5 rounded-xl border border-surface-border bg-surface-hover hover:bg-surface text-xs font-bold text-text-main cursor-pointer"
               >
                 {tr('مسح الفلاتر', 'Clear Filters', 'Filter zurücksetzen')}
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={isSyncing}
-                onClick={() => handleSyncFromGrain(false)}
-                className="min-h-[44px] px-4 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-semibold cursor-pointer"
-              >
-                {tr('مزامنة التسجيلات الآن', 'Sync Recordings Now', 'Jetzt synchronisieren')}
               </button>
             )}
           </div>

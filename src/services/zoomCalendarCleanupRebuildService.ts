@@ -259,6 +259,8 @@ export interface CleanupRebuildFinalReport {
 export interface CleanupRebuildOperationRecord {
   operationId: string;
   snapshotId: string;
+  cleanupOnly?: boolean;
+  sessionIdsToClear?: string[];
   state: CleanupRebuildState;
   startedAtIso: string;
   updatedAtIso: string;
@@ -875,11 +877,16 @@ function buildInitialOperationRecord(params: {
   snapshotId: string;
   preview: CleanupRebuildPreview;
   includeGoogleCalendar: boolean;
+  cleanupOnly?: boolean;
 }): CleanupRebuildOperationRecord {
   const nowIso = new Date().toISOString();
+  const cleanupOnly = Boolean(params.cleanupOnly);
+  const sessionIdsToClear = params.preview.activeSessionsToRebuild.map((s) => s.sessionId);
   const op: CleanupRebuildOperationRecord = {
     operationId: params.operationId,
     snapshotId: params.snapshotId,
+    cleanupOnly,
+    sessionIdsToClear,
     state: 'cleanup_in_progress',
     startedAtIso: nowIso,
     updatedAtIso: nowIso,
@@ -916,20 +923,22 @@ function buildInitialOperationRecord(params: {
           attempts: 0
         }))
       : [],
-    rebuilds: params.preview.activeSessionsToRebuild.map((s) => ({
-      sessionId: s.sessionId,
-      sessionCode: s.sessionCode,
-      groupId: s.groupId,
-      groupName: s.groupName,
-      standardizedTitle: s.standardizedTitle,
-      weekdayName: s.weekdayName,
-      startTime: s.startTime,
-      durationMinutes: s.durationMinutes,
-      zoomStatus: 'pending',
-      zoomAttempts: 0,
-      calendarStatus: params.includeGoogleCalendar ? 'pending' : 'skipped_disconnected',
-      calendarAttempts: 0
-    })),
+    rebuilds: cleanupOnly
+      ? []
+      : params.preview.activeSessionsToRebuild.map((s) => ({
+          sessionId: s.sessionId,
+          sessionCode: s.sessionCode,
+          groupId: s.groupId,
+          groupName: s.groupName,
+          standardizedTitle: s.standardizedTitle,
+          weekdayName: s.weekdayName,
+          startTime: s.startTime,
+          durationMinutes: s.durationMinutes,
+          zoomStatus: 'pending',
+          zoomAttempts: 0,
+          calendarStatus: params.includeGoogleCalendar ? 'pending' : 'skipped_disconnected',
+          calendarAttempts: 0
+        })),
     manualResolutionItems: [...params.preview.manualResolutionItems],
     report: {
       zoomMeetingsFoundBeforeCleanup: params.preview.totalScheduledZoomMeetingsFound,
@@ -1004,6 +1013,7 @@ function phaseLabelForState(state: CleanupRebuildState): string {
 
 export interface ExecuteCleanupRebuildParams {
   mode: 'start' | 'resume' | 'retry_failed';
+  cleanupOnly?: boolean;
   preview?: CleanupRebuildPreview;
   groups: Group[];
   existingSessions: GroupWeeklySession[];
@@ -1065,9 +1075,10 @@ export async function executeZoomCalendarCleanupRebuild(
 
   if (params.mode === 'start') {
     if (!params.preview) {
-      throw new Error('Cleanup preview is required before starting Clean & Rebuild.');
+      throw new Error('Cleanup preview is required before starting cleanup.');
     }
-    const operationId = `cleanup_rebuild_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const cleanupOnly = Boolean(params.cleanupOnly);
+    const operationId = `${cleanupOnly ? 'cleanup_only' : 'cleanup_rebuild'}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const includeGoogleCalendar =
       params.includeGoogleCalendar !== undefined
         ? params.includeGoogleCalendar
@@ -1084,7 +1095,8 @@ export async function executeZoomCalendarCleanupRebuild(
       operationId,
       snapshotId: createdSnapshot.snapshotId,
       preview: params.preview,
-      includeGoogleCalendar
+      includeGoogleCalendar,
+      cleanupOnly
     });
     operation = await saveCleanupRebuildOperation(operation);
   } else {
@@ -1299,74 +1311,77 @@ export async function executeZoomCalendarCleanupRebuild(
           if (pacingDelayMs > 0) await sleepPacing(pacingDelayMs);
         }
       }
+    }
 
-      // ======================================================================
-      // PHASE B: Google Calendar Cleanup (Confidently Matched Events Only)
-      // ======================================================================
-      if (operation.includeGoogleCalendar && operation.calendarDeletions.some((c) => c.status === 'pending')) {
-        operation.state = 'calendar_cleanup_in_progress';
-        await emitProgress('Cleaning linked Google Calendar events');
+    // ========================================================================
+    // PHASE B: Google Calendar Cleanup (Confidently Matched Events Only)
+    // Runs on initial execution AND on retry_failed even if Zoom obsolete refs were already cleared
+    // ========================================================================
+    if (operation.includeGoogleCalendar && operation.calendarDeletions.some((c) => c.status === 'pending')) {
+      operation.state = 'calendar_cleanup_in_progress';
+      await emitProgress('Cleaning linked Google Calendar events');
 
-        if (!activeCalToken && params.onRenewCalendarToken) {
-          activeCalToken = await params.onRenewCalendarToken();
-        }
-
-        if (!activeCalToken) {
-          for (const cItem of operation.calendarDeletions) {
-            if (cItem.status === 'pending') {
-              cItem.status = 'failed';
-              cItem.lastError = 'Google Calendar authorization is missing or expired. Reconnect Google Calendar and retry.';
-            }
-          }
-          operation.lastError = 'Google Calendar token unavailable during Calendar cleanup.';
-          await emitProgress('Calendar cleanup blocked: not connected');
-        } else {
-          for (let i = 0; i < operation.calendarDeletions.length; i++) {
-            const cItem = operation.calendarDeletions[i];
-            if (cItem.status !== 'pending') continue;
-
-            if (params.shouldPause?.()) {
-              return await pauseAndReturn();
-            }
-
-            cItem.attempts += 1;
-            await emitProgress(`Deleting Calendar event: ${cItem.summary}`);
-
-            const delCalRes = await deleteGoogleCalendarEventForCleanup({
-              eventId: cItem.eventId,
-              accessToken: activeCalToken,
-              calendarId,
-              maxRetries: 3,
-              retryDelayMs,
-              onAuthExpiredRenew: async () => {
-                if (!params.onRenewCalendarToken) return null;
-                const fresh = await params.onRenewCalendarToken();
-                if (fresh) activeCalToken = fresh;
-                return fresh;
-              }
-            });
-
-            if (delCalRes.ok && delCalRes.deleted) {
-              cItem.status = delCalRes.alreadyDeleted ? 'already_deleted' : 'succeeded';
-              cItem.lastError = undefined;
-              cItem.completedAtIso = new Date().toISOString();
-            } else {
-              cItem.status = 'failed';
-              cItem.lastError = delCalRes.error || `Failed to delete Calendar event ${cItem.eventId}`;
-            }
-
-            await emitProgress(`Calendar event ${cItem.eventId}: ${cItem.status}`);
-
-            if (delCalRes.authExpired || delCalRes.permissionDenied) {
-              operation.lastError = delCalRes.error;
-              break;
-            }
-
-            if (pacingDelayMs > 0) await sleepPacing(pacingDelayMs);
-          }
-        }
+      if (!activeCalToken && params.onRenewCalendarToken) {
+        activeCalToken = await params.onRenewCalendarToken();
       }
 
+      if (!activeCalToken) {
+        for (const cItem of operation.calendarDeletions) {
+          if (cItem.status === 'pending') {
+            cItem.status = 'failed';
+            cItem.lastError = 'Google Calendar authorization is missing or expired. Reconnect Google Calendar and retry.';
+          }
+        }
+        operation.lastError = 'Google Calendar token unavailable during Calendar cleanup.';
+        await emitProgress('Calendar cleanup blocked: not connected');
+      } else {
+        for (let i = 0; i < operation.calendarDeletions.length; i++) {
+          const cItem = operation.calendarDeletions[i];
+          if (cItem.status !== 'pending') continue;
+
+          if (params.shouldPause?.()) {
+            return await pauseAndReturn();
+          }
+
+          cItem.attempts += 1;
+          await emitProgress(`Deleting Calendar event: ${cItem.summary}`);
+
+          const delCalRes = await deleteGoogleCalendarEventForCleanup({
+            eventId: cItem.eventId,
+            accessToken: activeCalToken,
+            calendarId,
+            maxRetries: 3,
+            retryDelayMs,
+            onAuthExpiredRenew: async () => {
+              if (!params.onRenewCalendarToken) return null;
+              const fresh = await params.onRenewCalendarToken();
+              if (fresh) activeCalToken = fresh;
+              return fresh;
+            }
+          });
+
+          if (delCalRes.ok && delCalRes.deleted) {
+            cItem.status = delCalRes.alreadyDeleted ? 'already_deleted' : 'succeeded';
+            cItem.lastError = undefined;
+            cItem.completedAtIso = new Date().toISOString();
+          } else {
+            cItem.status = 'failed';
+            cItem.lastError = delCalRes.error || `Failed to delete Calendar event ${cItem.eventId}`;
+          }
+
+          await emitProgress(`Calendar event ${cItem.eventId}: ${cItem.status}`);
+
+          if (delCalRes.authExpired || delCalRes.permissionDenied) {
+            operation.lastError = delCalRes.error;
+            break;
+          }
+
+          if (pacingDelayMs > 0) await sleepPacing(pacingDelayMs);
+        }
+      }
+    }
+
+    if (!operation.obsoleteReferencesCleared) {
       // ======================================================================
       // PHASE C: Verify Old Zoom Meetings Empty Before Clearing Active Refs
       // ======================================================================
@@ -1497,7 +1512,7 @@ export async function executeZoomCalendarCleanupRebuild(
           remainingOldLinkedCalendarEventIds: operation.calendarDeletions
             .filter((c) => c.status === 'failed' || c.status === 'pending')
             .map((c) => c.eventId),
-          missingCalendarSessionIds: operation.rebuilds.map((r) => r.sessionId),
+          missingCalendarSessionIds: operation.cleanupOnly ? [] : operation.rebuilds.map((r) => r.sessionId),
           unrelatedDeletedCalendarEventIds: [],
           issues
         };
@@ -1516,7 +1531,11 @@ export async function executeZoomCalendarCleanupRebuild(
 
       // Old scheduled Zoom meetings are VERIFIED EMPTY -> Archive & clear obsolete active references now!
       const nowMs = Date.now();
-      const targetSessionIds = new Set(operation.rebuilds.map((r) => r.sessionId));
+      const targetSessionIds = new Set(
+        operation.sessionIdsToClear && operation.sessionIdsToClear.length > 0
+          ? operation.sessionIdsToClear
+          : operation.rebuilds.map((r) => r.sessionId)
+      );
 
       for (const s of workingSessions) {
         if (!targetSessionIds.has(s.id)) continue;
@@ -1527,7 +1546,9 @@ export async function executeZoomCalendarCleanupRebuild(
             previousZoomMeetingId: s.zoomMeetingId,
             previousJoinUrl: s.zoomJoinUrl || s.manualFallbackUrl,
             previousTopic: s.standardizedTitle,
-            reason: `Archived before Clean & Rebuild (${operation.operationId})`,
+            reason: operation.cleanupOnly
+              ? `Archived before Clean Only (${operation.operationId})`
+              : `Archived before Clean & Rebuild (${operation.operationId})`,
             nowMs
           });
         }
@@ -1565,9 +1586,9 @@ export async function executeZoomCalendarCleanupRebuild(
     }
 
     // ========================================================================
-    // PHASE D: Rebuild New Glück-Managed Zoom Meetings (Sequential, Idempotent)
+    // PHASE D: Rebuild New Glück-Managed Zoom Meetings (Skipped in Clean Only mode)
     // ========================================================================
-    if (operation.rebuilds.some((r) => r.zoomStatus === 'pending')) {
+    if (!operation.cleanupOnly && operation.rebuilds.some((r) => r.zoomStatus === 'pending')) {
       operation.state = 'rebuilding_zoom_meetings';
       await emitProgress('Rebuilding standardized Zoom meetings');
 
@@ -1640,9 +1661,9 @@ export async function executeZoomCalendarCleanupRebuild(
     }
 
     // ========================================================================
-    // PHASE E: Sync Google Calendar Events for Rebuilt Sessions Only
+    // PHASE E: Sync Google Calendar Events for Rebuilt Sessions Only (Skipped in Clean Only mode)
     // ========================================================================
-    if (operation.includeGoogleCalendar) {
+    if (!operation.cleanupOnly && operation.includeGoogleCalendar) {
       const pendingCalRebuilds = operation.rebuilds.filter(
         (r) => r.zoomStatus === 'succeeded' && r.calendarStatus === 'pending'
       );
@@ -1838,14 +1859,18 @@ async function verifyCleanupAndRebuildOutcome(params: {
       );
     }
 
-    const missingSessionsInZoom = operation.rebuilds.filter(
-      (r) => r.zoomStatus !== 'succeeded' || !r.newZoomMeetingId || !remoteZoomIdSet.has(r.newZoomMeetingId)
-    );
-    everyActiveOnlineSessionHasOneMeeting = missingSessionsInZoom.length === 0;
-    if (!everyActiveOnlineSessionHasOneMeeting) {
-      issues.push(
-        `${missingSessionsInZoom.length} active online session(s) do not have a verified new Zoom meeting in Zoom.`
+    if (operation.cleanupOnly) {
+      everyActiveOnlineSessionHasOneMeeting = true;
+    } else {
+      const missingSessionsInZoom = operation.rebuilds.filter(
+        (r) => r.zoomStatus !== 'succeeded' || !r.newZoomMeetingId || !remoteZoomIdSet.has(r.newZoomMeetingId)
       );
+      everyActiveOnlineSessionHasOneMeeting = missingSessionsInZoom.length === 0;
+      if (!everyActiveOnlineSessionHasOneMeeting) {
+        issues.push(
+          `${missingSessionsInZoom.length} active online session(s) do not have a verified new Zoom meeting in Zoom.`
+        );
+      }
     }
   }
 
@@ -1855,28 +1880,30 @@ async function verifyCleanupAndRebuildOutcome(params: {
   let duplicateFound = false;
   let allNewLinksSavedInGluck = true;
 
-  for (const r of operation.rebuilds) {
-    const saved = sessions.find((s) => s.id === r.sessionId);
-    if (
-      r.zoomStatus !== 'succeeded' ||
-      !r.newZoomMeetingId ||
-      !r.newZoomJoinUrl ||
-      !saved ||
-      saved.zoomMeetingId !== r.newZoomMeetingId ||
-      saved.zoomJoinUrl !== r.newZoomJoinUrl ||
-      saved.meetingSource !== 'zoom_api' ||
-      saved.syncState !== 'synced'
-    ) {
-      allNewLinksSavedInGluck = false;
-    }
-    if (r.newZoomMeetingId) {
-      if (seenZoomIds.has(r.newZoomMeetingId)) duplicateFound = true;
-      seenZoomIds.add(r.newZoomMeetingId);
-    }
-    if (r.newZoomJoinUrl) {
-      const normUrl = r.newZoomJoinUrl.trim().toLowerCase();
-      if (seenJoinUrls.has(normUrl)) duplicateFound = true;
-      seenJoinUrls.add(normUrl);
+  if (!operation.cleanupOnly) {
+    for (const r of operation.rebuilds) {
+      const saved = sessions.find((s) => s.id === r.sessionId);
+      if (
+        r.zoomStatus !== 'succeeded' ||
+        !r.newZoomMeetingId ||
+        !r.newZoomJoinUrl ||
+        !saved ||
+        saved.zoomMeetingId !== r.newZoomMeetingId ||
+        saved.zoomJoinUrl !== r.newZoomJoinUrl ||
+        saved.meetingSource !== 'zoom_api' ||
+        saved.syncState !== 'synced'
+      ) {
+        allNewLinksSavedInGluck = false;
+      }
+      if (r.newZoomMeetingId) {
+        if (seenZoomIds.has(r.newZoomMeetingId)) duplicateFound = true;
+        seenZoomIds.add(r.newZoomMeetingId);
+      }
+      if (r.newZoomJoinUrl) {
+        const normUrl = r.newZoomJoinUrl.trim().toLowerCase();
+        if (seenJoinUrls.has(normUrl)) duplicateFound = true;
+        seenJoinUrls.add(normUrl);
+      }
     }
   }
 
@@ -1889,7 +1916,8 @@ async function verifyCleanupAndRebuildOutcome(params: {
   }
 
   // 3. Re-fetch Google Calendar inventory & verify Calendar invariants
-  let expectedCalendarEventsExistWithExactNewZoomUrl = !operation.includeGoogleCalendar;
+  let expectedCalendarEventsExistWithExactNewZoomUrl =
+    !operation.includeGoogleCalendar || Boolean(operation.cleanupOnly);
   let zeroUnrelatedCalendarEventsDeleted = true;
   let zeroOldLinkedCalendarEventsRemain = !operation.includeGoogleCalendar;
   const missingCalendarSessionIds: string[] = [];
@@ -1898,7 +1926,7 @@ async function verifyCleanupAndRebuildOutcome(params: {
 
   if (operation.includeGoogleCalendar) {
     if (!params.calendarAccessToken) {
-      expectedCalendarEventsExistWithExactNewZoomUrl = false;
+      expectedCalendarEventsExistWithExactNewZoomUrl = Boolean(operation.cleanupOnly);
       zeroOldLinkedCalendarEventsRemain = false;
       issues.push('Google Calendar access token unavailable for final Calendar verification.');
     } else {
@@ -1909,7 +1937,7 @@ async function verifyCleanupAndRebuildOutcome(params: {
       });
 
       if (!calInv.ok) {
-        expectedCalendarEventsExistWithExactNewZoomUrl = false;
+        expectedCalendarEventsExistWithExactNewZoomUrl = Boolean(operation.cleanupOnly);
         zeroOldLinkedCalendarEventsRemain = false;
         issues.push(`Final Google Calendar verification failed: ${calInv.error || 'Unknown Calendar API error'}`);
       } else {
@@ -1919,29 +1947,31 @@ async function verifyCleanupAndRebuildOutcome(params: {
         }
 
         // Check every rebuilt session has its expected Calendar event containing the exact new Zoom URL
-        for (const r of operation.rebuilds) {
-          const saved = sessions.find((s) => s.id === r.sessionId);
-          const expectedEventId =
-            r.newGoogleCalendarEventId ||
-            saved?.googleCalendarEventId ||
-            deriveDeterministicGoogleEventId(r.sessionId);
-          const evt = calById.get(expectedEventId);
-          const newUrl = r.newZoomJoinUrl || '';
-          const containsNewUrl = Boolean(
-            evt &&
-              newUrl &&
-              ((evt.location && evt.location.includes(newUrl)) ||
-                (evt.description && evt.description.includes(newUrl)))
-          );
-          if (r.calendarStatus !== 'succeeded' || !evt || !containsNewUrl) {
-            missingCalendarSessionIds.push(r.sessionId);
+        if (!operation.cleanupOnly) {
+          for (const r of operation.rebuilds) {
+            const saved = sessions.find((s) => s.id === r.sessionId);
+            const expectedEventId =
+              r.newGoogleCalendarEventId ||
+              saved?.googleCalendarEventId ||
+              deriveDeterministicGoogleEventId(r.sessionId);
+            const evt = calById.get(expectedEventId);
+            const newUrl = r.newZoomJoinUrl || '';
+            const containsNewUrl = Boolean(
+              evt &&
+                newUrl &&
+                ((evt.location && evt.location.includes(newUrl)) ||
+                  (evt.description && evt.description.includes(newUrl)))
+            );
+            if (r.calendarStatus !== 'succeeded' || !evt || !containsNewUrl) {
+              missingCalendarSessionIds.push(r.sessionId);
+            }
           }
-        }
-        expectedCalendarEventsExistWithExactNewZoomUrl = missingCalendarSessionIds.length === 0;
-        if (!expectedCalendarEventsExistWithExactNewZoomUrl) {
-          issues.push(
-            `${missingCalendarSessionIds.length} active online session(s) are missing a verified Google Calendar event with the exact new Zoom URL.`
-          );
+          expectedCalendarEventsExistWithExactNewZoomUrl = missingCalendarSessionIds.length === 0;
+          if (!expectedCalendarEventsExistWithExactNewZoomUrl) {
+            issues.push(
+              `${missingCalendarSessionIds.length} active online session(s) are missing a verified Google Calendar event with the exact new Zoom URL.`
+            );
+          }
         }
 
         // Check zero unrelated Calendar events were deleted

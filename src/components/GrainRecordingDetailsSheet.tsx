@@ -167,7 +167,7 @@ export const GrainRecordingDetailsSheet: React.FC<GrainRecordingDetailsSheetProp
         onClick={(e) => e.stopPropagation()}
       >
         {/* Mobile grab handle */}
-        <div className="md:hidden w-10 h-1 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto mt-2.5 mb-1 shrink-0" />
+        <div className="md:hidden w-10 h-1 bg-surface-border rounded-full mx-auto mt-2.5 mb-1 shrink-0" />
 
         {/* Sticky Sheet Header */}
         <div className="px-4 sm:px-5 py-3 border-b border-surface-border flex items-start justify-between gap-3 shrink-0">
@@ -327,7 +327,7 @@ export const GrainRecordingDetailsSheet: React.FC<GrainRecordingDetailsSheetProp
                   <button
                     type="button"
                     onClick={() => onOpenResolveIssue(entry)}
-                    className="min-h-[44px] px-4 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-semibold cursor-pointer transition-colors"
+                    className="min-h-[44px] px-4 rounded-xl bg-primary hover:bg-primary-hover text-primary-fg text-xs font-semibold cursor-pointer transition-colors"
                   >
                     {tr('تحديد الحصة وحل المشكلة', 'Resolve Issue', 'Problem lösen')}
                   </button>
@@ -505,7 +505,7 @@ export const GrainRecordingDetailsSheet: React.FC<GrainRecordingDetailsSheetProp
                   <button
                     type="button"
                     onClick={() => onAcceptPendingExtraction(entry)}
-                    className="min-h-[44px] px-3.5 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-semibold cursor-pointer transition-colors"
+                    className="min-h-[44px] px-3.5 rounded-xl bg-primary hover:bg-primary-hover text-primary-fg text-xs font-semibold cursor-pointer transition-colors"
                   >
                     {tr('اعتماد التحديث', 'Apply Updated Extraction', 'Aktualisierung übernehmen')}
                   </button>
@@ -659,7 +659,7 @@ export const GrainRecordingDetailsSheet: React.FC<GrainRecordingDetailsSheetProp
                       type="button"
                       disabled={isGeneratingDraft}
                       onClick={() => onGenerateDraft(entry)}
-                      className="min-h-[44px] px-4 rounded-xl bg-primary hover:bg-primary-hover disabled:opacity-50 text-white text-xs font-semibold cursor-pointer transition-colors"
+                      className="min-h-[44px] px-4 rounded-xl bg-primary hover:bg-primary-hover disabled:opacity-50 text-primary-fg text-xs font-semibold cursor-pointer transition-colors"
                     >
                       {isGeneratingDraft
                         ? tr('جارٍ التوليد...', 'Generating...', 'Wird erstellt...')
@@ -707,7 +707,7 @@ export const GrainRecordingDetailsSheet: React.FC<GrainRecordingDetailsSheetProp
                             <button
                               type="button"
                               onClick={() => onApproveDraftToLesson(entry)}
-                              className="min-h-[44px] px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                              className="min-h-[44px] px-3.5 rounded-xl border border-primary-border bg-primary-soft hover:bg-primary/15 text-primary text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
                             >
                               <BookOpen className="w-3.5 h-3.5" />
                               <span>{tr('حفظ في سجل الحصة', 'Save to Lesson', 'Im Unterricht speichern')}</span>
@@ -716,7 +716,7 @@ export const GrainRecordingDetailsSheet: React.FC<GrainRecordingDetailsSheetProp
                           <button
                             type="button"
                             onClick={() => onApproveLernstudioSet(entry)}
-                            className="min-h-[44px] px-3.5 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                            className="min-h-[44px] px-3.5 rounded-xl bg-primary hover:bg-primary-hover text-primary-fg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
                           >
                             <Gamepad2 className="w-3.5 h-3.5" />
                             <span>{tr('إنشاء مجموعة Lernstudio', 'Create Lernstudio Set', 'Lernstudio-Set erstellen')}</span>
@@ -757,7 +757,7 @@ export const GrainRecordingDetailsSheet: React.FC<GrainRecordingDetailsSheetProp
             <button
               type="button"
               onClick={onClose}
-              className="min-h-[44px] px-4 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-semibold cursor-pointer transition-colors"
+              className="min-h-[44px] px-4 rounded-xl bg-primary hover:bg-primary-hover text-primary-fg text-xs font-semibold cursor-pointer transition-colors"
             >
               {tr('تم', 'Done', 'Fertig')}
             </button>

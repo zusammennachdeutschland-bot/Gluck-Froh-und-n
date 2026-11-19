@@ -39,19 +39,22 @@ export interface CalendarSyncPreviewItem {
   timezone: string;
   recurrence: GroupWeeklySession['recurrence'];
   zoomJoinUrl?: string;
-  action: 'create' | 'update' | 'skip_synced';
+  action: 'create' | 'update' | 'delete' | 'skip_synced';
 }
 
 export interface CalendarSyncResult {
   success: boolean;
   authExpired?: boolean;
   scopeInsufficient?: boolean;
+  rateLimited?: boolean;
+  errorCode?: string;
   createdCount: number;
   updatedCount: number;
+  deletedCount?: number;
   skippedCount: number;
   failedCount: number;
   sessions: GroupWeeklySession[];
-  errors: Array<{ sessionId: string; title: string; error: string; status?: number }>;
+  errors: Array<{ sessionId: string; title: string; error: string; status?: number; code?: string }>;
 }
 
 export type CalendarOAuthStage =
@@ -98,6 +101,7 @@ export type GoogleCalendarConnectionStatus =
 export interface GoogleCalendarConnectionState {
   status: GoogleCalendarConnectionStatus;
   accountEmail?: string;
+  firebaseOwnerEmail?: string;
   calendarId?: string;
   calendarSummary?: string;
   calendarTimeZone?: string;
@@ -264,6 +268,7 @@ function readPersistedConnectionMeta(): Omit<GoogleCalendarConnectionState, 'has
     return {
       status: hydratedStatus,
       accountEmail: typeof parsed.accountEmail === 'string' ? parsed.accountEmail : undefined,
+      firebaseOwnerEmail: typeof parsed.firebaseOwnerEmail === 'string' ? parsed.firebaseOwnerEmail : undefined,
       calendarId: typeof parsed.calendarId === 'string' ? parsed.calendarId : undefined,
       calendarSummary: typeof parsed.calendarSummary === 'string' ? parsed.calendarSummary : undefined,
       calendarTimeZone: typeof parsed.calendarTimeZone === 'string' ? parsed.calendarTimeZone : undefined,
@@ -303,6 +308,7 @@ function persistAndEmitConnectionMeta(
   const safeMeta: Omit<GoogleCalendarConnectionState, 'hasInMemoryToken'> = {
     status: next.status,
     accountEmail: next.accountEmail,
+    firebaseOwnerEmail: next.firebaseOwnerEmail,
     calendarId: next.calendarId,
     calendarSummary: next.calendarSummary,
     calendarTimeZone: next.calendarTimeZone,
@@ -502,18 +508,27 @@ function handleFirebaseAccountIdentityChange(userEmail: string | null | undefine
   }
 
   const normalizedIncoming = userEmail.trim().toLowerCase();
+  const normalizedFirebaseOwner = currentConnectionMeta.firebaseOwnerEmail?.trim().toLowerCase();
   const normalizedTokenEmail = inMemoryTokenAccountEmail?.trim().toLowerCase();
   const normalizedMetaEmail = currentConnectionMeta.accountEmail?.trim().toLowerCase();
 
-  if (
-    (normalizedTokenEmail && normalizedTokenEmail !== normalizedIncoming) ||
-    (normalizedMetaEmail && normalizedMetaEmail !== normalizedIncoming)
-  ) {
+  // If the Calendar connection explicitly recorded the Firebase owner that authorized it,
+  // only invalidate when Firebase actually switches away from that owner — never loop-wipe
+  // when a teacher intentionally connects a separate teaching Google account for Calendar.
+  const hasSwitchedFirebaseAccount = normalizedFirebaseOwner
+    ? normalizedFirebaseOwner !== normalizedIncoming
+    : Boolean(
+        (normalizedTokenEmail && normalizedTokenEmail !== normalizedIncoming) ||
+          (normalizedMetaEmail && normalizedMetaEmail !== normalizedIncoming)
+      );
+
+  if (hasSwitchedFirebaseAccount) {
     clearInMemoryGoogleCalendarToken();
     lastInvalidatedAccessToken = null;
     persistAndEmitConnectionMeta({
       status: 'reconnect_required',
       accountEmail: undefined,
+      firebaseOwnerEmail: undefined,
       calendarId: undefined,
       calendarSummary: undefined,
       calendarTimeZone: undefined,
@@ -830,6 +845,7 @@ async function finalizeVerifiedCalendarToken(params: {
   persistAndEmitConnectionMeta({
     status: 'connected',
     accountEmail: verify.accountEmail,
+    firebaseOwnerEmail: getActiveFirebaseUserEmail(),
     calendarId: verify.calendarId,
     calendarSummary: verify.calendarSummary,
     calendarTimeZone: verify.calendarTimeZone,
@@ -940,10 +956,10 @@ async function executeAndroidNativeCalendarOAuth(
       }
     }
 
-    // Prefer the signed-in Firebase account email so switching accounts never reuses the old account hint
+    // Prefer the connected Calendar account email when silently refreshing; fall back to active Firebase email
     const accountHint = forcePrompt
       ? undefined
-      : activeFirebaseEmail || currentConnectionMeta.accountEmail || undefined;
+      : currentConnectionMeta.accountEmail || activeFirebaseEmail || undefined;
 
     const nativeRes = await invokeNativeGoogleCalendarAuthorize({
       accountEmail: accountHint,
@@ -1809,20 +1825,28 @@ export function downloadSessionsIcsFile(
  * Builds an explicit preview of Google Calendar mutations BEFORE calling write endpoints.
  */
 export function buildGoogleCalendarSyncPreview(
-  sessions: GroupWeeklySession[]
+  sessions: GroupWeeklySession[],
+  options: {
+    forceUpdateSynced?: boolean;
+    includeDeletedCleanup?: boolean;
+  } = {}
 ): {
   items: CalendarSyncPreviewItem[];
   createCount: number;
   updateCount: number;
+  deleteCount: number;
   skipSyncedCount: number;
 } {
+  const forceUpdateSynced = Boolean(options.forceUpdateSynced);
+  const includeDeletedCleanup = Boolean(options.includeDeletedCleanup);
+
   const active = (sessions || []).filter((s) => s && !s.deleted);
-  const items: CalendarSyncPreviewItem[] = active.map((s) => {
+  const activeItems: CalendarSyncPreviewItem[] = active.map((s) => {
     const uid = s.calendarEventUid || generateStableCalendarUid(s.id);
     const deterministicGoogleEventId = deriveDeterministicGoogleEventId(s.id);
     let action: CalendarSyncPreviewItem['action'] = 'create';
     if (s.googleCalendarEventId) {
-      action = s.calendarSyncStatus === 'synced' ? 'skip_synced' : 'update';
+      action = s.calendarSyncStatus === 'synced' && !forceUpdateSynced ? 'skip_synced' : 'update';
     }
     return {
       sessionId: s.id,
@@ -1842,10 +1866,34 @@ export function buildGoogleCalendarSyncPreview(
     };
   });
 
+  const deleteItems: CalendarSyncPreviewItem[] = includeDeletedCleanup
+    ? (sessions || [])
+        .filter((s) => s && s.deleted && Boolean(s.googleCalendarEventId))
+        .map((s) => ({
+          sessionId: s.id,
+          sessionCode: s.sessionCode,
+          standardizedTitle: s.standardizedTitle,
+          calendarEventUid: s.calendarEventUid || generateStableCalendarUid(s.id),
+          deterministicGoogleEventId: deriveDeterministicGoogleEventId(s.id),
+          googleCalendarEventId: s.googleCalendarEventId,
+          googleCalendarIcalUid: s.googleCalendarIcalUid,
+          weekdayName: s.weekdayName,
+          startTime: s.startTime,
+          durationMinutes: s.durationMinutes,
+          timezone: s.timezone || DEFAULT_ZOOM_TIMEZONE,
+          recurrence: s.recurrence,
+          zoomJoinUrl: s.zoomJoinUrl || s.manualFallbackUrl,
+          action: 'delete' as const
+        }))
+    : [];
+
+  const items = [...activeItems, ...deleteItems];
+
   return {
     items,
     createCount: items.filter((i) => i.action === 'create').length,
     updateCount: items.filter((i) => i.action === 'update').length,
+    deleteCount: items.filter((i) => i.action === 'delete').length,
     skipSyncedCount: items.filter((i) => i.action === 'skip_synced').length
   };
 }
@@ -1863,13 +1911,88 @@ function addMinutesToIsoWallClock(startIsoLocal: string, minutes: number): strin
   return `${yy}-${mo}-${da}T${ho}:${mi}:00`;
 }
 
+function isTransient403RateLimit(classified: ReturnType<typeof classifyGoogleCalendar403Error>): boolean {
+  return (
+    classified.code === 'CALENDAR_QUOTA_EXCEEDED' &&
+    (classified.reason === 'rateLimitExceeded' || classified.reason === 'userRateLimitExceeded')
+  );
+}
+
+async function fetchCalendarWithRetry(params: {
+  fetchFn: CalendarFetchFn;
+  url: string;
+  init: RequestInit;
+  maxRetries?: number;
+  baseDelayMs?: number;
+}): Promise<{ res: Response; classified403?: ReturnType<typeof classifyGoogleCalendar403Error> }> {
+  const maxRetries = Math.max(0, Math.min(4, params.maxRetries ?? 3));
+  const baseDelayMs =
+    typeof params.baseDelayMs === 'number'
+      ? Math.max(0, params.baseDelayMs)
+      : customCalendarFetchForTesting
+      ? 0
+      : 450;
+
+  const method = String(params.init?.method || 'GET').toUpperCase();
+  const isIdempotentMethod = method === 'GET' || method === 'HEAD' || method === 'PATCH' || method === 'DELETE';
+
+  let attempt = 0;
+  while (true) {
+    let res: Response;
+    try {
+      res = await params.fetchFn(params.url, params.init);
+    } catch (err) {
+      if (isIdempotentMethod && attempt < maxRetries) {
+        attempt++;
+        if (baseDelayMs > 0) await sleepCalendarMs(baseDelayMs * attempt);
+        continue;
+      }
+      throw err;
+    }
+
+    if (res.status === 403) {
+      const payload = await res
+        .clone()
+        .json()
+        .catch(() => null);
+      const classified403 = classifyGoogleCalendar403Error(payload);
+      if (isTransient403RateLimit(classified403) && attempt < maxRetries) {
+        attempt++;
+        const retryAfterHeader = res.headers?.get?.('Retry-After');
+        const retryAfterMs = retryAfterHeader ? Math.min(4000, Number(retryAfterHeader) * 1000 || 0) : 0;
+        const waitMs = Math.max(retryAfterMs, baseDelayMs * attempt);
+        if (waitMs > 0) await sleepCalendarMs(waitMs);
+        continue;
+      }
+      return { res, classified403 };
+    }
+
+    if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
+      attempt++;
+      const retryAfterHeader = res.headers?.get?.('Retry-After');
+      const retryAfterMs = retryAfterHeader ? Math.min(4000, Number(retryAfterHeader) * 1000 || 0) : 0;
+      const waitMs = Math.max(retryAfterMs, baseDelayMs * attempt);
+      if (waitMs > 0) await sleepCalendarMs(waitMs);
+      continue;
+    }
+
+    return { res };
+  }
+}
+
 async function resolveExistingGoogleEventId(params: {
   fetchFn: CalendarFetchFn;
   calendarId: string;
   accessToken: string;
   deterministicEventId: string;
   sessionId: string;
-}): Promise<{ eventId?: string; iCalUID?: string; authExpired?: boolean }> {
+  retryDelayMs?: number;
+}): Promise<{
+  eventId?: string;
+  iCalUID?: string;
+  authExpired?: boolean;
+  classified403?: ReturnType<typeof classifyGoogleCalendar403Error>;
+}> {
   const headers = {
     Authorization: `Bearer ${params.accessToken}`,
     Accept: 'application/json'
@@ -1877,9 +2000,17 @@ async function resolveExistingGoogleEventId(params: {
 
   // 1. Direct lookup using deterministic Google Calendar event.id (zero scanning of unrelated events)
   const directUrl = `https://www.googleapis.com/calendar/v3/calendars/${params.calendarId}/events/${encodeURIComponent(params.deterministicEventId)}`;
-  const directRes = await params.fetchFn(directUrl, { method: 'GET', headers });
+  const { res: directRes, classified403: direct403 } = await fetchCalendarWithRetry({
+    fetchFn: params.fetchFn,
+    url: directUrl,
+    init: { method: 'GET', headers },
+    baseDelayMs: params.retryDelayMs
+  });
   if (directRes.status === 401) {
     return { authExpired: true };
+  }
+  if (directRes.status === 403 && direct403) {
+    return { classified403: direct403 };
   }
   if (directRes.ok) {
     const evt = await directRes.json();
@@ -1895,9 +2026,17 @@ async function resolveExistingGoogleEventId(params: {
   // 2. Fallback lookup via supported privateExtendedProperty query parameter
   const propFilter = encodeURIComponent(`gluckSessionId=${params.sessionId}`);
   const propUrl = `https://www.googleapis.com/calendar/v3/calendars/${params.calendarId}/events?privateExtendedProperty=${propFilter}&showDeleted=true&maxResults=10`;
-  const propRes = await params.fetchFn(propUrl, { method: 'GET', headers });
+  const { res: propRes, classified403: prop403 } = await fetchCalendarWithRetry({
+    fetchFn: params.fetchFn,
+    url: propUrl,
+    init: { method: 'GET', headers },
+    baseDelayMs: params.retryDelayMs
+  });
   if (propRes.status === 401) {
     return { authExpired: true };
+  }
+  if (propRes.status === 403 && prop403) {
+    return { classified403: prop403 };
   }
   if (propRes.ok) {
     const json = await propRes.json();
@@ -1931,7 +2070,9 @@ export async function syncSessionsToGoogleCalendar(params: {
   accessToken: string;
   calendarId?: string;
   forceUpdateSynced?: boolean;
+  removeDeletedSessions?: boolean;
   referenceDate?: Date;
+  retryDelayMs?: number;
   onProgress?: (completed: number, total: number, title: string) => void;
 }): Promise<CalendarSyncResult> {
   const fetchFn = customCalendarFetchForTesting || fetch;
@@ -1947,17 +2088,49 @@ export async function syncSessionsToGoogleCalendar(params: {
     return true;
   });
 
+  // Clean up remote Google Calendar events for soft-deleted/archived Glück sessions that still carry an event ID
+  const shouldRemoveDeleted =
+    typeof params.removeDeletedSessions === 'boolean'
+      ? params.removeDeletedSessions
+      : !params.targetSessionIds;
+
+  const deletedTargets = shouldRemoveDeleted
+    ? workingSessions.filter((s) => {
+        if (!s || !s.deleted || !s.googleCalendarEventId) return false;
+        if (params.targetSessionIds && !params.targetSessionIds.has(s.id)) return false;
+        return true;
+      })
+    : [];
+
+  const totalWorkItems = targets.length + deletedTargets.length;
+  let completedWorkItems = 0;
+
   let createdCount = 0;
   let updatedCount = 0;
+  let deletedCount = 0;
   const skippedCount = workingSessions.filter((s) => !s.deleted).length - targets.length;
   let failedCount = 0;
   let authExpired = false;
   let scopeInsufficient = false;
-  const errors: Array<{ sessionId: string; title: string; error: string; status?: number }> = [];
+  let rateLimited = false;
+  let fatalErrorCode: string | undefined;
+  const errors: Array<{ sessionId: string; title: string; error: string; status?: number; code?: string }> = [];
+
+  const throwClassified403 = (classified: ReturnType<typeof classifyGoogleCalendar403Error>) => {
+    throw Object.assign(new Error(classified.error), {
+      status: 403,
+      classified403: classified
+    });
+  };
 
   for (let i = 0; i < targets.length; i++) {
     const session = targets[i];
-    params.onProgress?.(i, targets.length, session.standardizedTitle);
+    params.onProgress?.(completedWorkItems, totalWorkItems, session.standardizedTitle);
+
+    // Gentle pacing between rapid multi-session writes to stay comfortably below Google per-second burst quotas
+    if (i > 0 && !customCalendarFetchForTesting) {
+      await sleepCalendarMs(120);
+    }
 
     const uid = session.calendarEventUid || generateStableCalendarUid(session.id);
     const deterministicEventId = deriveDeterministicGoogleEventId(session.id);
@@ -2036,17 +2209,22 @@ export async function syncSessionsToGoogleCalendar(params: {
 
     const runPatch = async (targetEventId: string) => {
       const patchUrl = `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events/${encodeURIComponent(targetEventId)}`;
-      return fetchFn(patchUrl, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${params.accessToken}`,
-          'Content-Type': 'application/json',
-          Accept: 'application/json'
+      return fetchCalendarWithRetry({
+        fetchFn,
+        url: patchUrl,
+        init: {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${params.accessToken}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json'
+          },
+          body: JSON.stringify({
+            ...mutableEventBody,
+            status: 'confirmed'
+          })
         },
-        body: JSON.stringify({
-          ...mutableEventBody,
-          status: 'confirmed'
-        })
+        baseDelayMs: params.retryDelayMs
       });
     };
 
@@ -2059,7 +2237,8 @@ export async function syncSessionsToGoogleCalendar(params: {
           calendarId,
           accessToken: params.accessToken,
           deterministicEventId,
-          sessionId: session.id
+          sessionId: session.id,
+          retryDelayMs: params.retryDelayMs
         });
         if (lookup.authExpired) {
           clearInMemoryGoogleCalendarToken(true, params.accessToken);
@@ -2068,12 +2247,15 @@ export async function syncSessionsToGoogleCalendar(params: {
             status: 401
           });
         }
+        if (lookup.classified403) {
+          throwClassified403(lookup.classified403);
+        }
         existingEventId = lookup.eventId;
       }
 
       const nowMs = Date.now();
       if (existingEventId) {
-        const patchRes = await runPatch(existingEventId);
+        const { res: patchRes, classified403: patch403 } = await runPatch(existingEventId);
         if (patchRes.status === 401) {
           clearInMemoryGoogleCalendarToken(true, params.accessToken);
           authExpired = true;
@@ -2082,9 +2264,13 @@ export async function syncSessionsToGoogleCalendar(params: {
           });
         }
         if (patchRes.status === 403) {
-          throw Object.assign(
-            new Error('Google Calendar event write permission (calendar.events) was denied (403). Please reconnect and allow event editing.'),
-            { status: 403 }
+          throwClassified403(
+            patch403 || {
+              code: 'HTTP_403_WRITE_DENIED',
+              permissionDenied: true,
+              retryAfterClearToken: true,
+              error: 'Google Calendar event write permission (calendar.events) was denied (403). Please reconnect and allow event editing.'
+            }
           );
         }
         if (patchRes.ok) {
@@ -2105,6 +2291,7 @@ export async function syncSessionsToGoogleCalendar(params: {
             });
           }
           updatedCount++;
+          completedWorkItems++;
           continue;
         }
         // If stored ID returned 404/410, probe via safe deterministic/extended-property lookup before inserting
@@ -2114,14 +2301,29 @@ export async function syncSessionsToGoogleCalendar(params: {
             calendarId,
             accessToken: params.accessToken,
             deterministicEventId,
-            sessionId: session.id
+            sessionId: session.id,
+            retryDelayMs: params.retryDelayMs
           });
+          if (fallbackLookup.authExpired) {
+            clearInMemoryGoogleCalendarToken(true, params.accessToken);
+            authExpired = true;
+            throw Object.assign(new Error('Google Calendar OAuth token expired or unauthorized (401). Please reconnect.'), {
+              status: 401
+            });
+          }
+          if (fallbackLookup.classified403) {
+            throwClassified403(fallbackLookup.classified403);
+          }
           if (fallbackLookup.eventId && fallbackLookup.eventId !== existingEventId) {
-            const retryPatch = await runPatch(fallbackLookup.eventId);
+            const { res: retryPatch, classified403: retry403 } = await runPatch(fallbackLookup.eventId);
+            if (retryPatch.status === 403 && retry403) {
+              throwClassified403(retry403);
+            }
             if (retryPatch.ok) {
               const updatedEvent = await retryPatch.json();
               persistSyncedSession(updatedEvent, fallbackLookup.eventId, nowMs);
               updatedCount++;
+              completedWorkItems++;
               continue;
             }
           }
@@ -2136,17 +2338,22 @@ export async function syncSessionsToGoogleCalendar(params: {
 
       // Create using deterministic valid Google Calendar event.id (`^[a-v0-9]{5,1024}$`), NEVER custom iCalUID
       const createUrl = `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events`;
-      const createRes = await fetchFn(createUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${params.accessToken}`,
-          'Content-Type': 'application/json',
-          Accept: 'application/json'
+      const { res: createRes, classified403: create403 } = await fetchCalendarWithRetry({
+        fetchFn,
+        url: createUrl,
+        init: {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${params.accessToken}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json'
+          },
+          body: JSON.stringify({
+            id: deterministicEventId,
+            ...mutableEventBody
+          })
         },
-        body: JSON.stringify({
-          id: deterministicEventId,
-          ...mutableEventBody
-        })
+        baseDelayMs: params.retryDelayMs
       });
 
       if (createRes.status === 401) {
@@ -2158,9 +2365,13 @@ export async function syncSessionsToGoogleCalendar(params: {
       }
 
       if (createRes.status === 403) {
-        throw Object.assign(
-          new Error('Google Calendar event write permission (calendar.events) was denied (403). Please reconnect and allow event editing.'),
-          { status: 403 }
+        throwClassified403(
+          create403 || {
+            code: 'HTTP_403_WRITE_DENIED',
+            permissionDenied: true,
+            retryAfterClearToken: true,
+            error: 'Google Calendar event write permission (calendar.events) was denied (403). Please reconnect and allow event editing.'
+          }
         );
       }
 
@@ -2171,10 +2382,21 @@ export async function syncSessionsToGoogleCalendar(params: {
           calendarId,
           accessToken: params.accessToken,
           deterministicEventId,
-          sessionId: session.id
+          sessionId: session.id,
+          retryDelayMs: params.retryDelayMs
         });
+        if (conflictLookup.authExpired) {
+          clearInMemoryGoogleCalendarToken(true, params.accessToken);
+          authExpired = true;
+          throw Object.assign(new Error('Google Calendar OAuth token expired or unauthorized (401). Please reconnect.'), {
+            status: 401
+          });
+        }
+        if (conflictLookup.classified403) {
+          throwClassified403(conflictLookup.classified403);
+        }
         const recoverTargetId = conflictLookup.eventId || deterministicEventId;
-        const recoverPatch = await runPatch(recoverTargetId);
+        const { res: recoverPatch, classified403: recover403 } = await runPatch(recoverTargetId);
         if (recoverPatch.status === 401) {
           clearInMemoryGoogleCalendarToken(true, params.accessToken);
           authExpired = true;
@@ -2183,9 +2405,13 @@ export async function syncSessionsToGoogleCalendar(params: {
           });
         }
         if (recoverPatch.status === 403) {
-          throw Object.assign(
-            new Error('Google Calendar event write permission (calendar.events) was denied (403). Please reconnect and allow event editing.'),
-            { status: 403 }
+          throwClassified403(
+            recover403 || {
+              code: 'HTTP_403_WRITE_DENIED',
+              permissionDenied: true,
+              retryAfterClearToken: true,
+              error: 'Google Calendar event write permission (calendar.events) was denied (403). Please reconnect and allow event editing.'
+            }
           );
         }
         if (!recoverPatch.ok) {
@@ -2208,6 +2434,7 @@ export async function syncSessionsToGoogleCalendar(params: {
           });
         }
         updatedCount++;
+        completedWorkItems++;
         continue;
       }
 
@@ -2236,14 +2463,19 @@ export async function syncSessionsToGoogleCalendar(params: {
         });
       }
       createdCount++;
+      completedWorkItems++;
     } catch (err: any) {
       failedCount++;
-      const errMsg = err?.message || 'Calendar sync failed.';
+      completedWorkItems++;
+      const classified403: ReturnType<typeof classifyGoogleCalendar403Error> | undefined = err?.classified403;
+      const errMsg = sanitizeDiagnosticText(err?.message) || 'Calendar sync failed.';
+      const errCode = classified403?.code || (err?.status ? `HTTP_${err.status}` : undefined);
       errors.push({
         sessionId: session.id,
         title: session.standardizedTitle,
         error: errMsg,
-        ...(typeof err?.status === 'number' ? { status: err.status } : {})
+        ...(typeof err?.status === 'number' ? { status: err.status } : {}),
+        ...(errCode ? { code: errCode } : {})
       });
       const failIdx = workingSessions.findIndex((s) => s.id === session.id);
       if (failIdx >= 0) {
@@ -2268,38 +2500,133 @@ export async function syncSessionsToGoogleCalendar(params: {
           lastErrorCode: 'HTTP_401'
         });
         authExpired = true;
+        fatalErrorCode = 'HTTP_401';
         break;
       }
       if (err?.status === 403) {
-        lastInvalidatedAccessToken = params.accessToken;
-        clearInMemoryGoogleCalendarToken();
+        if (!classified403 || classified403.permissionDenied) {
+          lastInvalidatedAccessToken = params.accessToken;
+          clearInMemoryGoogleCalendarToken();
+          persistAndEmitConnectionMeta({
+            ...currentConnectionMeta,
+            status: 'reconnect_required',
+            scopeVerified: false,
+            readVerified: false,
+            writeVerified: false,
+            lastMessage:
+              classified403?.error ||
+              'Missing Google Calendar event write permission (calendar.events). Please reconnect and allow Calendar editing.',
+            lastErrorCode: classified403?.code || 'HTTP_403_WRITE_DENIED'
+          });
+          recordCalendarOAuthStage('calendar_oauth_write_permission_denied', {
+            ok: false,
+            code: classified403?.code || 'HTTP_403_WRITE_DENIED',
+            detail: classified403?.reason
+              ? `Event write endpoint returned 403 (${classified403.reason})`
+              : 'Event write endpoint returned 403 Forbidden'
+          });
+          scopeInsufficient = true;
+          fatalErrorCode = classified403?.code || 'HTTP_403_WRITE_DENIED';
+          break;
+        }
+
+        // Non-permission 403 (API disabled, not a Calendar user, or rate/quota limit):
+        // Preserve valid in-memory token and surface the exact root cause without false Reconnect Required.
+        if (classified403.code === 'CALENDAR_QUOTA_EXCEEDED') {
+          rateLimited = true;
+        }
+        fatalErrorCode = classified403.code;
         persistAndEmitConnectionMeta({
           ...currentConnectionMeta,
-          status: 'reconnect_required',
-          scopeVerified: false,
-          readVerified: false,
-          writeVerified: false,
-          lastMessage:
-            'Missing Google Calendar event write permission (calendar.events). Please reconnect and allow Calendar editing.',
-          lastErrorCode: 'HTTP_403_WRITE_DENIED'
+          status: 'error',
+          lastMessage: classified403.error,
+          lastErrorCode: classified403.code
         });
-        recordCalendarOAuthStage('calendar_oauth_write_permission_denied', {
+        recordCalendarOAuthStage('calendar_oauth_error', {
           ok: false,
-          code: 'HTTP_403_WRITE_DENIED',
-          detail: 'Event write endpoint returned 403 Forbidden'
+          code: classified403.code,
+          detail: classified403.reason || classified403.code
         });
-        scopeInsufficient = true;
         break;
+      }
+      if (err?.status === 429) {
+        rateLimited = true;
+        fatalErrorCode = 'HTTP_429';
       }
     }
   }
+
+  // Delete orphaned remote Google Calendar events for soft-deleted/archived Glück sessions
+  if (!authExpired && !scopeInsufficient && !fatalErrorCode && deletedTargets.length > 0) {
+    for (let j = 0; j < deletedTargets.length; j++) {
+      const delSession = deletedTargets[j];
+      const targetEventId = delSession.googleCalendarEventId;
+      if (!targetEventId) continue;
+
+      params.onProgress?.(completedWorkItems, totalWorkItems, `Removing deleted: ${delSession.standardizedTitle}`);
+      if (j > 0 && !customCalendarFetchForTesting) {
+        await sleepCalendarMs(120);
+      }
+
+      const delRes = await deleteGoogleCalendarEventForCleanup({
+        eventId: targetEventId,
+        accessToken: params.accessToken,
+        calendarId: params.calendarId,
+        retryDelayMs: params.retryDelayMs ?? (customCalendarFetchForTesting ? 0 : 450)
+      });
+      completedWorkItems++;
+
+      if (delRes.ok && delRes.deleted) {
+        const idx = workingSessions.findIndex((s) => s.id === delSession.id);
+        if (idx >= 0) {
+          workingSessions[idx] = {
+            ...workingSessions[idx],
+            googleCalendarEventId: undefined,
+            googleCalendarIcalUid: undefined,
+            calendarSyncStatus: 'not_synced',
+            calendarSyncError: undefined,
+            updatedAt: Date.now()
+          };
+        }
+        deletedCount++;
+      } else {
+        failedCount++;
+        const delErr = delRes.error || `Failed to remove deleted Calendar event (${delRes.status}).`;
+        errors.push({
+          sessionId: delSession.id,
+          title: delSession.standardizedTitle,
+          error: delErr,
+          ...(typeof delRes.status === 'number' ? { status: delRes.status } : {})
+        });
+        if (delRes.authExpired) {
+          authExpired = true;
+          fatalErrorCode = 'HTTP_401';
+          break;
+        }
+        if (delRes.permissionDenied) {
+          scopeInsufficient = true;
+          fatalErrorCode = 'HTTP_403_WRITE_DENIED';
+          break;
+        }
+        if (delRes.rateLimited) {
+          rateLimited = true;
+          break;
+        }
+      }
+    }
+  }
+
+  params.onProgress?.(totalWorkItems, totalWorkItems, '');
 
   return {
     success: failedCount === 0,
     ...(authExpired ? { authExpired: true } : {}),
     ...(scopeInsufficient ? { scopeInsufficient: true } : {}),
+    ...(rateLimited ? { rateLimited: true } : {}),
+    ...(fatalErrorCode ? { errorCode: fatalErrorCode } : {}),
     createdCount,
     updatedCount,
+    deletedCount,
     skippedCount,
     failedCount,
     sessions: workingSessions,
@@ -2593,13 +2920,23 @@ export async function listPrimaryGoogleCalendarEventsForCleanup(params: {
         };
       }
       if (res.status === 403) {
+        const payload = await res.json().catch(() => null);
+        const classified = classifyGoogleCalendar403Error(payload);
+        if (isTransient403RateLimit(classified) && attempt < maxRetries) {
+          attempt++;
+          const retryAfterHeader = res.headers?.get?.('Retry-After');
+          const retryAfterMs = retryAfterHeader ? Math.min(4000, Number(retryAfterHeader) * 1000 || 0) : 0;
+          await sleepCalendarMs(Math.max(retryAfterMs, baseDelayMs * attempt));
+          continue;
+        }
         return {
           ok: false,
           status: 403,
           events: [],
           pagesFetched,
-          permissionDenied: true,
-          error: 'Google Calendar permission denied (403). Ensure calendar.events scope is granted.'
+          permissionDenied: classified.permissionDenied,
+          rateLimited: classified.code === 'CALENDAR_QUOTA_EXCEEDED',
+          error: classified.error
         };
       }
       if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
@@ -2924,13 +3261,23 @@ export async function deleteGoogleCalendarEventForCleanup(params: {
     }
 
     if (res.status === 403) {
+      const payload = await res.json().catch(() => null);
+      const classified = classifyGoogleCalendar403Error(payload);
+      if (isTransient403RateLimit(classified) && attempt < maxRetries) {
+        attempt++;
+        const retryAfterHeader = res.headers?.get?.('Retry-After');
+        const retryAfterMs = retryAfterHeader ? Math.min(4000, Number(retryAfterHeader) * 1000 || 0) : 0;
+        await sleepCalendarMs(Math.max(retryAfterMs, baseDelayMs * attempt));
+        continue;
+      }
       return {
         ok: false,
         status: 403,
         eventId,
         deleted: false,
-        permissionDenied: true,
-        error: 'Google Calendar delete permission denied (403). Ensure calendar.events scope is granted.'
+        permissionDenied: classified.permissionDenied,
+        rateLimited: classified.code === 'CALENDAR_QUOTA_EXCEEDED',
+        error: classified.error
       };
     }
 

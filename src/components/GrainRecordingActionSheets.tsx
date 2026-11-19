@@ -54,7 +54,7 @@ export const GrainOverflowActionSheet: React.FC<OverflowSheetProps> = ({
         className="w-full md:max-w-sm rounded-t-3xl md:rounded-2xl bg-surface border-t md:border border-surface-border shadow-xl overflow-hidden pb-[max(1rem,env(safe-area-inset-bottom,16px))] md:pb-3"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="md:hidden w-10 h-1 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto mt-2.5 mb-1" />
+        <div className="md:hidden w-10 h-1 bg-surface-border rounded-full mx-auto mt-2.5 mb-1" />
 
         <div className="px-4 py-3 border-b border-surface-border flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -282,7 +282,7 @@ export const GrainAdvancedFiltersSheet: React.FC<AdvancedFiltersSheetProps> = ({
         className="w-full md:max-w-md rounded-t-3xl md:rounded-2xl bg-surface border-t md:border border-surface-border shadow-xl overflow-hidden pb-[max(1rem,env(safe-area-inset-bottom,16px))] md:pb-4"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="md:hidden w-10 h-1 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto mt-2.5 mb-1" />
+        <div className="md:hidden w-10 h-1 bg-surface-border rounded-full mx-auto mt-2.5 mb-1" />
 
         <div className="px-4 py-3 border-b border-surface-border flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
@@ -363,7 +363,7 @@ export const GrainAdvancedFiltersSheet: React.FC<AdvancedFiltersSheetProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="min-h-[44px] px-5 rounded-xl bg-primary hover:bg-primary-hover text-white text-sm font-semibold cursor-pointer transition-colors"
+            className="min-h-[44px] px-5 rounded-xl bg-primary hover:bg-primary-hover text-primary-fg text-sm font-semibold cursor-pointer transition-colors"
           >
             {tr('تطبيق', 'Apply', 'Anwenden')}
           </button>
@@ -478,7 +478,7 @@ export const GrainReviewResolveSheet: React.FC<ReviewResolveSheetProps> = ({
         className="w-full md:max-w-lg max-h-[88dvh] rounded-t-3xl md:rounded-2xl bg-surface border-t md:border border-surface-border shadow-xl flex flex-col overflow-hidden pb-[max(0.75rem,env(safe-area-inset-bottom,12px))] md:pb-0"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="md:hidden w-10 h-1 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto mt-2.5 mb-1 shrink-0" />
+        <div className="md:hidden w-10 h-1 bg-surface-border rounded-full mx-auto mt-2.5 mb-1 shrink-0" />
 
         <div className="px-4 py-3 border-b border-surface-border flex items-start justify-between gap-3 shrink-0">
           <div className="min-w-0">
@@ -589,7 +589,7 @@ export const GrainReviewResolveSheet: React.FC<ReviewResolveSheetProps> = ({
               setSelectedLessonId('');
               setLessonSearch('');
             }}
-            className="min-h-[44px] px-4 rounded-xl bg-primary hover:bg-primary-hover disabled:opacity-50 text-white text-sm font-semibold cursor-pointer transition-colors"
+            className="min-h-[44px] px-4 rounded-xl bg-primary hover:bg-primary-hover disabled:opacity-50 text-primary-fg text-sm font-semibold cursor-pointer transition-colors"
           >
             {isSubmitting
               ? tr('جارٍ الحفظ...', 'Saving...', 'Wird gespeichert...')

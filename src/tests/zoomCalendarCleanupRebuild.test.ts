@@ -1067,6 +1067,183 @@ async function runTests() {
     console.log('✓ Test 8: Partial Zoom success + Calendar failure -> Retry Failed keeps Zoom meetings, skips Calendar on Zoom fail, passes verification');
   }
 
+  // ==========================================================================
+  // TEST 9: Clean Only (without rebuild) -> deletes Zoom & linked Calendar, preserves Grain history & unrelated events, creates 0 meetings
+  // ==========================================================================
+  {
+    __resetZoomServiceMemoryForTesting();
+    __resetCalendarOAuthStateForTesting();
+    __resetCleanupRebuildMemoryForTesting();
+    const store = createPersistentTestStore();
+    __setCleanupStorageAdapterForTesting(store.adapter);
+    saveZoomUiMeta({ connected: true, hasCredentials: true, hostEmail: 'host@glueck.de' });
+
+    const groups = makeTestGroups();
+    const initialRec = reconcileGroupWeeklySessions({ group: groups[0], existingSessions: [] });
+    const seededSessions: GroupWeeklySession[] = [
+      {
+        ...initialRec.sessions[0],
+        zoomMeetingId: '66000000001',
+        zoomJoinUrl: 'https://zoom.us/j/66000000001',
+        googleCalendarEventId: 'old_linked_cal_evt_1',
+        calendarEventUid: 'stable-uid-keep-1',
+        calendarSyncStatus: 'synced',
+        syncState: 'synced'
+      }
+    ];
+
+    const zoomState = new Map<string, MockZoomMeeting>([
+      ['66000000001', { id: '66000000001', topic: 'Old Glück B1.1', type: 8, join_url: 'https://zoom.us/j/66000000001' }],
+      ['66000000002', { id: '66000000002', topic: 'Old Ad-hoc Call', type: 2, join_url: 'https://zoom.us/j/66000000002' }]
+    ]);
+
+    const calState = new Map<string, MockCalendarEvent>([
+      [
+        'old_linked_cal_evt_1',
+        {
+          id: 'old_linked_cal_evt_1',
+          summary: 'Old B1.1 Session',
+          location: 'https://zoom.us/j/66000000001',
+          extendedProperties: { private: { gluckSessionId: seededSessions[0].id } }
+        }
+      ],
+      [
+        'unrelated_personal_event',
+        {
+          id: 'unrelated_personal_event',
+          summary: 'Dentist Visit',
+          description: 'No Zoom link'
+        }
+      ]
+    ]);
+
+    let zoomCreateCalls = 0;
+    let calInsertCalls = 0;
+    let failCalendarDelete = true;
+
+    __setZoomProxyFetchForTesting(async (url, init) => {
+      if (url === '/api/zoom/session') return makeFakeResponse(200, { sessionToken: 'sess_tok' });
+      const method = (init?.method || 'GET').toUpperCase();
+      if (url.startsWith('/api/zoom/meetings?') && method === 'GET') {
+        const u = new URL(url, 'http://localhost');
+        if (u.searchParams.get('type') === 'live') {
+          return makeFakeResponse(200, { ok: true, meetings: [], nextPageToken: '', hostScope: 'single_connected_host' });
+        }
+        return makeFakeResponse(200, { ok: true, meetings: Array.from(zoomState.values()), nextPageToken: '', hostScope: 'single_connected_host' });
+      }
+      if (url.startsWith('/api/zoom/meetings/') && method === 'DELETE') {
+        const id = decodeURIComponent(url.split('/').pop()!);
+        zoomState.delete(id);
+        return makeFakeResponse(200, { ok: true, deleted: true, zoomMeetingId: id });
+      }
+      if (url === '/api/zoom/meetings/create' && method === 'POST') {
+        zoomCreateCalls++;
+        return makeFakeResponse(500, { error: 'Should NEVER be called in cleanupOnly mode' });
+      }
+      return makeFakeResponse(404, {});
+    });
+
+    __setCalendarFetchForTesting(async (url, init) => {
+      const u = String(url);
+      const method = (init?.method || 'GET').toUpperCase();
+      if (method === 'GET' && u.includes('/calendars/primary/events?')) {
+        return makeFakeResponse(200, { items: Array.from(calState.values()) });
+      }
+      if (method === 'DELETE' && /\/calendars\/primary\/events\/([^/?]+)/.test(u)) {
+        const eventId = decodeURIComponent(u.match(/\/events\/([^/?]+)/)![1]);
+        if (failCalendarDelete) {
+          return makeFakeResponse(500, { error: 'Calendar delete outage' });
+        }
+        calState.delete(eventId);
+        return makeFakeResponse(204, '');
+      }
+      if ((method === 'POST' || method === 'PATCH') && u.includes('/calendars/primary/events')) {
+        calInsertCalls++;
+        return makeFakeResponse(500, { error: 'Should NEVER recreate Calendar events in cleanupOnly mode' });
+      }
+      return makeFakeResponse(404, {});
+    });
+
+    const prev = await previewZoomCalendarCleanupRebuild({
+      groups,
+      existingSessions: seededSessions,
+      existingRecords: [],
+      existingHistory: [],
+      calendarAccessToken: 'tok_cal_ok',
+      retryDelayMs: 0
+    });
+    assert.equal(prev.ok, true);
+    assert.equal(prev.preview!.zoomMeetingsToDeleteCount, 2);
+    assert.equal(prev.preview!.calendarEventsToDeleteCount, 1);
+
+    const run1 = await executeZoomCalendarCleanupRebuild({
+      mode: 'start',
+      cleanupOnly: true,
+      preview: prev.preview!,
+      groups,
+      existingSessions: seededSessions,
+      existingRecords: [],
+      existingHistory: [],
+      includeGoogleCalendar: true,
+      calendarAccessToken: 'tok_cal_ok',
+      pacingDelayMs: 0,
+      retryDelayMs: 0
+    });
+
+    // Even after Calendar delete failure, zero meetings or calendar events were created
+    assert.equal(run1.ok, false);
+    assert.equal(run1.operation.cleanupOnly, true);
+    assert.equal(run1.operation.state, 'completed_with_errors');
+    assert.equal(zoomCreateCalls, 0);
+    assert.equal(calInsertCalls, 0);
+    assert.equal(zoomState.size, 0);
+
+    // Heal Calendar outage and retry failed Calendar deletion in Clean Only mode
+    failCalendarDelete = false;
+    const run2 = await executeZoomCalendarCleanupRebuild({
+      mode: 'retry_failed',
+      groups,
+      existingSessions: run1.sessions,
+      existingRecords: run1.records,
+      existingHistory: run1.history,
+      calendarAccessToken: 'tok_cal_ok',
+      pacingDelayMs: 0,
+      retryDelayMs: 0
+    });
+
+    assert.equal(run2.ok, true);
+    assert.equal(run2.operation.cleanupOnly, true);
+    assert.equal(run2.operation.state, 'completed');
+    assert.equal(run2.operation.report.verificationPassed, true);
+    assert.equal(run2.operation.report.zoomMeetingsDeleted, 2);
+    assert.equal(run2.operation.report.calendarEventsDeleted, 1);
+    assert.equal(run2.operation.report.calendarEventsUntouched, 1);
+    assert.equal(run2.operation.report.newGluckZoomMeetingsCreated, 0);
+    assert.equal(run2.operation.report.calendarEventsRecreatedOrUpdated, 0);
+    assert.equal(zoomCreateCalls, 0, 'Must NEVER call Zoom create in cleanupOnly mode');
+    assert.equal(calInsertCalls, 0, 'Must NEVER call Calendar insert/patch in cleanupOnly mode');
+    assert.equal(calState.has('unrelated_personal_event'), true);
+    assert.equal(calState.has('old_linked_cal_evt_1'), false);
+
+    // Verify Grain history archived & session active refs cleared cleanly while UID stays intact
+    assert.ok(
+      run2.history.some(
+        (h) => h.action === 'cleanup_archived' && h.previousZoomMeetingId === '66000000001'
+      ),
+      'Obsolete meeting link must be archived in ZoomMeetingHistory for Grain protection'
+    );
+    const clearedSession = run2.sessions.find((s) => s.id === seededSessions[0].id)!;
+    assert.equal(clearedSession.zoomMeetingId, undefined);
+    assert.equal(clearedSession.zoomJoinUrl, undefined);
+    assert.equal(clearedSession.googleCalendarEventId, undefined);
+    assert.equal(clearedSession.calendarEventUid, 'stable-uid-keep-1');
+    assert.equal(clearedSession.calendarSyncStatus, 'not_synced');
+    assert.equal(clearedSession.syncState, 'pending');
+
+    passed++;
+    console.log('✓ Test 9: Clean Only (no rebuild) deletes Zoom & linked Calendar, preserves Grain history & unrelated events, creates 0 meetings');
+  }
+
   // Cleanup test hooks
   __setZoomProxyFetchForTesting(null);
   __setCalendarFetchForTesting(null);

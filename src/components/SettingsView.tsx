@@ -2,8 +2,6 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { AppLanguage, Lesson } from '../types';
 import {
-  Search,
-  X,
   User,
   Globe,
   Moon,
@@ -43,8 +41,7 @@ import {
   Palette,
   FolderOpen,
   Cloud,
-  Video,
-  SlidersHorizontal
+  Video
 } from 'lucide-react';
 import { NotificationSettingsSection } from './NotificationSettingsSection';
 import { SmartBackupCenter } from './SmartBackupCenter';
@@ -85,7 +82,6 @@ type SettingsCategory =
   | 'danger';
 
 type SettingsGroupFilter =
-  | 'all'
   | 'teaching'
   | 'integrations'
   | 'personalize'
@@ -94,7 +90,7 @@ type SettingsGroupFilter =
 
 interface SettingsItemConfig {
   id: SettingsCategory;
-  group: Exclude<SettingsGroupFilter, 'all'>;
+  group: SettingsGroupFilter;
   title: string;
   description: string;
   icon: React.ElementType;
@@ -149,9 +145,7 @@ export const SettingsView: React.FC = () => {
     } catch {}
     return null;
   });
-  const [activeGroupFilter, setActiveGroupFilter] = useState<SettingsGroupFilter>('all');
   const [integrationTab, setIntegrationTab] = useState<'zoom' | 'grain'>('zoom');
-  const [searchQuery, setSearchQuery] = useState('');
   const [isContactsModalOpen, setIsContactsModalOpen] = useState(false);
   const [biweeklyCleanupPreview, setBiweeklyCleanupPreview] = useState<Lesson[] | null>(null);
   const [isBiweeklyCleanupLoading, setIsBiweeklyCleanupLoading] = useState(false);
@@ -302,12 +296,6 @@ export const SettingsView: React.FC = () => {
   const BackIcon = isRtl ? ArrowRight : ArrowLeft;
   const ForwardChevron = isRtl ? ChevronLeft : ChevronRight;
 
-  const teacherDisplayName =
-    (isRtl ? profile.displayNameAr || profile.nameAr : profile.displayNameEn || profile.nameEn) ||
-    profile.displayName ||
-    _t('المعلم', 'Teacher', 'Lehrer');
-  const teacherInitial = (teacherDisplayName || 'G').trim().charAt(0).toUpperCase();
-
   const triggerSaveToast = () => {
     setSavedSuccessToast(true);
     setTimeout(() => setSavedSuccessToast(false), 3000);
@@ -369,21 +357,12 @@ export const SettingsView: React.FC = () => {
     return [phone, instaPayId, vodafoneCashNumber, bankAccount, paymentLink].filter((v) => v?.trim()).length;
   }, [phone, instaPayId, vodafoneCashNumber, bankAccount, paymentLink]);
 
-  const settingsGroups: { id: Exclude<SettingsGroupFilter, 'all'>; label: string }[] = [
+  const settingsGroups: { id: SettingsGroupFilter; label: string }[] = [
     { id: 'teaching', label: _t('الحساب والتدريس', 'Account & Teaching', 'Konto & Unterricht') },
     { id: 'integrations', label: _t('التكاملات والتواصل', 'Integrations & Communication', 'Integrationen & Kommunikation') },
     { id: 'personalize', label: _t('المظهر والتخصيص', 'Appearance & Experience', 'Darstellung & Erlebnis') },
     { id: 'data', label: _t('الملفات والبيانات', 'Files & Data', 'Dateien & Daten') },
     { id: 'system', label: _t('النظام وحول التطبيق', 'System & About', 'System & Info') }
-  ];
-
-  const filterTabs: { id: SettingsGroupFilter; label: string }[] = [
-    { id: 'all', label: _t('الكل', 'All', 'Alle') },
-    { id: 'teaching', label: _t('الحساب والتدريس', 'Teaching', 'Unterricht') },
-    { id: 'integrations', label: _t('التكاملات', 'Integrations', 'Integrationen') },
-    { id: 'personalize', label: _t('التخصيص', 'Appearance', 'Design') },
-    { id: 'data', label: _t('البيانات', 'Data', 'Daten') },
-    { id: 'system', label: _t('النظام', 'System', 'System') }
   ];
 
   const settingsItems: SettingsItemConfig[] = [
@@ -602,27 +581,14 @@ export const SettingsView: React.FC = () => {
     }
   ];
 
-  const normalizedSearch = searchQuery.trim().toLowerCase();
-
-  const filteredItems = useMemo(() => {
-    return settingsItems.filter((item) => {
-      if (activeGroupFilter !== 'all' && item.group !== activeGroupFilter) {
-        return false;
-      }
-      if (!normalizedSearch) return true;
-      const haystack = `${item.title} ${item.description} ${item.keywords} ${item.metaText || ''}`.toLowerCase();
-      return haystack.includes(normalizedSearch);
-    });
-  }, [settingsItems, activeGroupFilter, normalizedSearch]);
-
   const groupedVisibleSections = useMemo(() => {
     return settingsGroups
       .map((grp) => ({
         ...grp,
-        items: filteredItems.filter((item) => item.group === grp.id)
+        items: settingsItems.filter((item) => item.group === grp.id)
       }))
       .filter((grp) => grp.items.length > 0);
-  }, [settingsGroups, filteredItems]);
+  }, [settingsGroups, settingsItems]);
 
   // Unified Subpage Header
   const renderSubPageHeader = (title: string, subtitle?: string, icon?: React.ElementType) => {
@@ -667,131 +633,11 @@ export const SettingsView: React.FC = () => {
           LEFT / MAIN SIDEBAR LIST VIEW
       ========================================== */}
       <div
-        className={`w-full lg:w-[360px] xl:w-[390px] shrink-0 lg:sticky lg:top-16 space-y-3.5 ${
+        className={`w-full lg:w-[360px] xl:w-[390px] shrink-0 lg:sticky lg:top-16 space-y-4 ${
           activeCategory !== null ? 'hidden lg:block' : 'block'
         }`}
       >
-        {/* 1. Compact Profile & Instant Theme Control Card */}
-        <div className="bg-surface border border-surface-border rounded-2xl overflow-hidden shadow-2xs">
-          {/* Top Teacher Identity Row */}
-          <button
-            type="button"
-            onClick={() => setActiveCategory('profile')}
-            className="w-full p-3.5 flex items-center gap-3 text-start hover:bg-surface-hover/70 transition-colors cursor-pointer group"
-          >
-            <div className="w-11 h-11 rounded-2xl bg-primary-soft border border-primary-border text-primary flex items-center justify-center font-black text-base shrink-0 transition-transform group-hover:scale-[1.02]">
-              {teacherInitial}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="text-sm font-black text-text-main truncate group-hover:text-primary transition-colors">
-                  {teacherDisplayName}
-                </h2>
-                <span className="text-[11px] font-mono text-text-muted tabular-nums shrink-0" dir="ltr">
-                  v{appVersionDisplay} · #{appBuildNumberDisplay}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5 text-[11px] text-text-muted mt-0.5 truncate">
-                <span className="truncate" dir="ltr">
-                  {cloudUser?.email || profile.email || _t('إعدادات الحساب والملف الشخصي', 'Account & teacher profile', 'Konto & Lehrerprofil')}
-                </span>
-                <span aria-hidden="true">·</span>
-                <span className={`shrink-0 font-bold ${cloudUser ? 'text-primary' : 'text-text-muted'}`}>
-                  {cloudUser
-                    ? _t('السحابة متصلة', 'Cloud ready', 'Cloud aktiv')
-                    : _t('محلي', 'Local', 'Lokal')}
-                </span>
-              </div>
-            </div>
-            <ForwardChevron className="w-4 h-4 text-text-muted/60 group-hover:text-primary shrink-0 transition-colors" />
-          </button>
-
-          {/* Quick Theme Mode Switcher + Accent Shortcut */}
-          <div className="px-3 py-2.5 bg-surface-hover/50 border-t border-surface-border/80 flex items-center gap-2">
-            <div className="grid grid-cols-4 gap-1 flex-1 bg-surface p-1 rounded-xl border border-surface-border/80">
-              {themeModes.map((mode) => {
-                const ModeIcon = mode.icon;
-                const isSelected = theme === mode.id;
-                return (
-                  <button
-                    key={mode.id}
-                    type="button"
-                    onClick={() => setTheme(mode.id)}
-                    className={`min-h-[34px] px-1.5 rounded-lg text-[10.5px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer whitespace-nowrap ${
-                      isSelected
-                        ? 'bg-primary text-primary-fg shadow-2xs'
-                        : 'text-text-muted hover:text-text-main hover:bg-surface-hover'
-                    }`}
-                    title={mode.label}
-                  >
-                    <ModeIcon className="w-3.5 h-3.5 shrink-0" />
-                    <span className="hidden sm:inline truncate">{mode.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setActiveCategory('language')}
-              className="min-h-[42px] px-2.5 rounded-xl bg-surface hover:bg-primary-soft border border-surface-border hover:border-primary-border text-text-main transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
-              title={_t('تغيير لون الثيم واللغة', 'Customize accent color & language', 'Akzentfarbe & Sprache')}
-            >
-              <span
-                className="w-4 h-4 rounded-full border border-surface-border shadow-2xs shrink-0"
-                style={{ backgroundColor: 'var(--primary)' }}
-              />
-              <SlidersHorizontal className="w-3.5 h-3.5 text-primary shrink-0" />
-            </button>
-          </div>
-        </div>
-
-        {/* 2. Search & Group Filter Controls */}
-        <div className="space-y-2">
-          <div className="relative">
-            <Search className="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted pointer-events-none" />
-            <input
-              type="text"
-              placeholder={_t('ابحث في الإعدادات (زووم، لون، واتساب، نسخة...)', 'Search settings (Zoom, theme, backup...)', 'Einstellungen durchsuchen...')}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full min-h-[42px] bg-surface border border-surface-border rounded-xl py-2 ps-9 pe-9 text-xs font-medium text-text-main placeholder:text-text-muted focus:outline-none focus:border-primary transition-colors"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                className="absolute end-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg hover:bg-surface-hover text-text-muted hover:text-text-main flex items-center justify-center cursor-pointer"
-                aria-label={_t('مسح البحث', 'Clear search', 'Suche leeren')}
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          {/* Interactive Group Filter Bar */}
-          <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar pb-0.5">
-            {filterTabs.map((tab) => {
-              const isSelected = activeGroupFilter === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveGroupFilter(tab.id)}
-                  className={`min-h-[34px] px-3 py-1.5 rounded-xl text-[11px] font-bold whitespace-nowrap shrink-0 transition-all cursor-pointer border ${
-                    isSelected
-                      ? 'bg-primary text-primary-fg border-primary shadow-2xs'
-                      : 'bg-surface text-text-muted border-surface-border hover:text-text-main hover:border-primary-border'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* 3. Grouped Inset Settings Lists */}
+        {/* Grouped Inset Settings Lists */}
         <div className="space-y-4">
           {groupedVisibleSections.map((group) => (
             <section key={group.id} className="space-y-1.5">
@@ -863,23 +709,6 @@ export const SettingsView: React.FC = () => {
               </div>
             </section>
           ))}
-
-          {groupedVisibleSections.length === 0 && (
-            <div className="bg-surface border border-surface-border rounded-2xl p-6 text-center space-y-2">
-              <Search className="w-5 h-5 text-text-muted mx-auto opacity-60" />
-              <p className="text-xs font-bold text-text-main">{t('auto_no_results_found')}</p>
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchQuery('');
-                  setActiveGroupFilter('all');
-                }}
-                className="text-[11px] font-bold text-primary hover:underline cursor-pointer"
-              >
-                {_t('عرض جميع الإعدادات', 'Show all settings', 'Alle Einstellungen anzeigen')}
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
@@ -979,14 +808,14 @@ export const SettingsView: React.FC = () => {
                   ),
                   Video
                 )}
-                <div className="flex items-center gap-1.5 p-1 bg-surface-hover rounded-xl border border-surface-border">
+                <div className="flex items-center gap-1 p-1 bg-surface-hover rounded-xl border border-surface-border">
                   <button
                     type="button"
                     onClick={() => setIntegrationTab('zoom')}
-                    className={`flex-1 min-h-[40px] py-2 px-3 rounded-lg text-xs font-black transition-all cursor-pointer whitespace-nowrap ${
+                    className={`flex-1 min-h-[38px] py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap border ${
                       integrationTab === 'zoom'
-                        ? 'bg-primary text-primary-fg shadow-xs'
-                        : 'text-text-muted hover:text-text-main'
+                        ? 'bg-surface text-primary border-surface-border shadow-2xs'
+                        : 'border-transparent text-text-muted hover:text-text-main'
                     }`}
                   >
                     {_t('مدير Zoom والتقويم', 'Zoom & Calendar', 'Zoom & Kalender')}
@@ -994,10 +823,10 @@ export const SettingsView: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setIntegrationTab('grain')}
-                    className={`flex-1 min-h-[40px] py-2 px-3 rounded-lg text-xs font-black transition-all cursor-pointer whitespace-nowrap ${
+                    className={`flex-1 min-h-[38px] py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap border ${
                       integrationTab === 'grain'
-                        ? 'bg-primary text-primary-fg shadow-xs'
-                        : 'text-text-muted hover:text-text-main'
+                        ? 'bg-surface text-primary border-surface-border shadow-2xs'
+                        : 'border-transparent text-text-muted hover:text-text-main'
                     }`}
                   >
                     {_t('تسجيلات Grain', 'Grain Recordings', 'Grain-Aufnahmen')}

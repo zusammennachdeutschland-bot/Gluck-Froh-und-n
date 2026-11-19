@@ -13,6 +13,8 @@ import {
   __setCalendarFetchForTesting,
   __setWebCalendarAuthTestAdapter,
   __simulateColdRestartForTesting,
+  __simulateFirebaseAccountChangeForTesting,
+  buildGoogleCalendarSyncPreview,
   disconnectGoogleCalendar,
   generateSessionsIcsContent,
   getCalendarOAuthDiagnostics,
@@ -1020,6 +1022,182 @@ async function runCalendarOAuthFlowTests() {
     assert.equal(scope403Revoked, true, 'Must await revokeCalendarAccess before interactive retry');
     assert.equal(getGoogleCalendarConnectionState().status, 'connected');
     assert.equal(getInMemoryGoogleCalendarToken(), 'ya29.fresh_after_403_token');
+
+    // -------------------------------------------------------------------------
+    // 7I. MID-SYNC 403 rateLimitExceeded RETRIES & SUCCEEDS WITHOUT WIPING TOKEN
+    // -------------------------------------------------------------------------
+    console.log('7I. Testing mid-sync 403 rateLimitExceeded retry & recovery without wiping valid token...');
+    let postRateLimitAttempts = 0;
+    const rateLimitSession: GroupWeeklySession = {
+      id: 'sess_ratelimit_1',
+      groupId: 'grp_rl_1',
+      groupNameSnapshot: 'RateLimit Group',
+      weekday: 2,
+      weekdayName: 'Tuesday',
+      startTime: '18:00',
+      durationMinutes: 60,
+      timezone: DEFAULT_ZOOM_TIMEZONE,
+      recurrence: 'weekly',
+      sessionCode: 'RL-TUE-1800',
+      standardizedTitle: 'Tuesday - 18:00 - RateLimit Group',
+      meetingSource: 'zoom_api',
+      syncState: 'synced',
+      zoomJoinUrl: 'https://zoom.us/j/1122334455',
+      calendarEventUid: 'gluck-session-sess_ratelimit_1@glueck.app',
+      calendarSyncStatus: 'not_synced',
+      version: 1,
+      updatedAt: Date.now()
+    };
+
+    __setCalendarFetchForTesting(async (input, init) => {
+      const url = String(input);
+      const method = (init?.method || 'GET').toUpperCase();
+      if (method === 'GET' && /\/events\/[^/?]+$/.test(url)) {
+        return new Response(JSON.stringify({ error: { code: 404 } }), { status: 404 });
+      }
+      if (method === 'GET' && url.includes('privateExtendedProperty')) {
+        return new Response(JSON.stringify({ items: [] }), { status: 200 });
+      }
+      if (method === 'POST') {
+        postRateLimitAttempts++;
+        if (postRateLimitAttempts <= 2) {
+          return new Response(
+            JSON.stringify({
+              error: {
+                code: 403,
+                message: 'Rate Limit Exceeded',
+                errors: [{ domain: 'usageLimits', reason: 'rateLimitExceeded' }]
+              }
+            }),
+            { status: 403 }
+          );
+        }
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        return new Response(JSON.stringify({ id: body.id || 'rl001', iCalUID: 'rl001@google.com' }), { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    });
+
+    const rlSyncRes = await syncSessionsToGoogleCalendar({
+      allSessions: [rateLimitSession],
+      accessToken: 'ya29.fresh_after_403_token',
+      retryDelayMs: 0
+    });
+    assert.equal(rlSyncRes.success, true, 'Transient 403 rateLimitExceeded must retry and succeed');
+    assert.equal(rlSyncRes.createdCount, 1);
+    assert.equal(postRateLimitAttempts, 3, 'Should have retried twice and succeeded on 3rd attempt');
+    assert.equal(getInMemoryGoogleCalendarToken(), 'ya29.fresh_after_403_token', 'Valid token must NOT be wiped on rate limit');
+    assert.equal(getGoogleCalendarConnectionState().status, 'connected');
+
+    // -------------------------------------------------------------------------
+    // 7J. MID-SYNC 403 accessNotConfigured SURFACES CALENDAR_API_DISABLED WITHOUT WIPING TOKEN
+    // -------------------------------------------------------------------------
+    console.log('7J. Testing mid-sync 403 accessNotConfigured preserves token and reports CALENDAR_API_DISABLED...');
+    __setCalendarFetchForTesting(async () => {
+      return new Response(
+        JSON.stringify({
+          error: {
+            code: 403,
+            message: 'Google Calendar API has not been used in project glueck-c8621 before or it is disabled.',
+            errors: [{ domain: 'usageLimits', reason: 'accessNotConfigured' }]
+          }
+        }),
+        { status: 403 }
+      );
+    });
+    const disabledMidSync = await syncSessionsToGoogleCalendar({
+      allSessions: [rateLimitSession],
+      accessToken: 'ya29.fresh_after_403_token',
+      retryDelayMs: 0
+    });
+    assert.equal(disabledMidSync.success, false);
+    assert.equal(disabledMidSync.scopeInsufficient, undefined, 'API disabled must NOT be flagged as scopeInsufficient');
+    assert.equal(disabledMidSync.errorCode, 'CALENDAR_API_DISABLED');
+    assert.equal(getInMemoryGoogleCalendarToken(), 'ya29.fresh_after_403_token', 'API disabled must NOT wipe valid token');
+    assert.equal(getGoogleCalendarConnectionState().status, 'error');
+
+    // -------------------------------------------------------------------------
+    // 7K. DELETED SESSION ORPHAN CLEANUP DURING NORMAL CALENDAR SYNC & PREVIEW
+    // -------------------------------------------------------------------------
+    console.log('7K. Testing deleted session remote Calendar event cleanup and preview deleteCount...');
+    const deletedOrphanSession: GroupWeeklySession = {
+      ...rateLimitSession,
+      id: 'sess_deleted_orphan_1',
+      standardizedTitle: 'Wednesday - 17:00 - Archived Group',
+      deleted: true,
+      googleCalendarEventId: 'evtdel12345',
+      calendarSyncStatus: 'synced'
+    };
+    const previewWithDel = buildGoogleCalendarSyncPreview([deletedOrphanSession], {
+      includeDeletedCleanup: true
+    });
+    assert.equal(previewWithDel.deleteCount, 1, 'Preview must count soft-deleted sessions with googleCalendarEventId');
+    assert.equal(previewWithDel.items[0].action, 'delete');
+
+    const deletedEventIdsCalled: string[] = [];
+    __setCalendarFetchForTesting(async (input, init) => {
+      const url = String(input);
+      const method = (init?.method || 'GET').toUpperCase();
+      if (method === 'DELETE' && url.includes('/events/evtdel12345')) {
+        deletedEventIdsCalled.push('evtdel12345');
+        return new Response(null, { status: 204 });
+      }
+      return new Response('{}', { status: 404 });
+    });
+
+    const cleanupSyncRes = await syncSessionsToGoogleCalendar({
+      allSessions: [deletedOrphanSession],
+      accessToken: 'ya29.fresh_after_403_token',
+      removeDeletedSessions: true,
+      retryDelayMs: 0
+    });
+    assert.equal(cleanupSyncRes.success, true);
+    assert.equal(cleanupSyncRes.deletedCount, 1, 'Deleted session remote Calendar event must be removed');
+    assert.deepEqual(deletedEventIdsCalled, ['evtdel12345']);
+    assert.equal(cleanupSyncRes.sessions[0].googleCalendarEventId, undefined, 'googleCalendarEventId must be cleared after deletion');
+
+    // -------------------------------------------------------------------------
+    // 7L. SEPARATE TEACHING CALENDAR ACCOUNT VS ACTUAL FIREBASE ACCOUNT SWITCH
+    // -------------------------------------------------------------------------
+    console.log('7L. Testing intentional separate Calendar account does NOT wipe-loop while actual Firebase switch still invalidates...');
+    __resetCalendarOAuthStateForTesting();
+    // User is signed into Firebase with Account A
+    __simulateFirebaseAccountChangeForTesting('firebase.owner@gmail.com');
+    __setNativeAuthTestAdapter({
+      isAndroidNative: () => true,
+      authorizeCalendar: async () => ({
+        cancelled: false,
+        accessToken: 'ya29.separate_teaching_cal_token',
+        grantedScopes: ['https://www.googleapis.com/auth/calendar.events'],
+        scopeVerified: true,
+        email: 'teaching.calendar@gmail.com',
+        stage: 'native_consent_approved'
+      })
+    });
+    __setCalendarFetchForTesting(async () =>
+      new Response(
+        JSON.stringify({ summary: 'teaching.calendar@gmail.com', timeZone: 'Africa/Cairo', accessRole: 'owner', items: [] }),
+        { status: 200 }
+      )
+    );
+
+    const sepConnect = await requestGoogleCalendarAccessToken(true);
+    assert.equal(sepConnect.ok, true);
+    assert.equal(sepConnect.accountEmail, 'teaching.calendar@gmail.com');
+    assert.equal(getGoogleCalendarConnectionState().firebaseOwnerEmail, 'firebase.owner@gmail.com');
+
+    // Calling requestGoogleCalendarAccessToken again while Firebase is STILL firebase.owner@gmail.com MUST NOT wipe!
+    const sepReuse = await requestGoogleCalendarAccessToken(false);
+    assert.equal(sepReuse.ok, true);
+    assert.equal(sepReuse.accessToken, 'ya29.separate_teaching_cal_token');
+    assert.equal(getGoogleCalendarConnectionState().status, 'connected');
+
+    // Now actually switch Firebase to a different user -> MUST invalidate & require reconnect!
+    __simulateFirebaseAccountChangeForTesting('different.firebase.user@gmail.com');
+    assert.equal(getInMemoryGoogleCalendarToken(), null);
+    assert.equal(getGoogleCalendarConnectionState().status, 'reconnect_required');
+    assert.equal(getGoogleCalendarConnectionState().lastErrorCode, 'ACCOUNT_SWITCHED');
+    __simulateFirebaseAccountChangeForTesting(null);
 
     console.log('✅ All Google Calendar OAuth Flow Tests Passed!');
   } finally {

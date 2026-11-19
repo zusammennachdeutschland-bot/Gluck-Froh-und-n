@@ -240,29 +240,31 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
           </div>
         </div>
 
-        {/* Tab Navigation (Responsive Horizontal Scroll) */}
-        <div className="flex items-center gap-1.5 border-b border-surface-border bg-surface px-4 py-2 overflow-x-auto no-scrollbar">
-          {tabs.map(({ key, label, icon: Icon }) => {
-            const isActive = activeTab === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => {
-                  setActiveTab(key as any);
-                  setIsPairingOpen(false);
-                }}
-                className={`flex items-center gap-2 py-2 px-3.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
-                  isActive
-                    ? 'bg-primary text-white shadow-xs'
-                    : 'bg-background hover:bg-surface-hover text-text-muted hover:text-text-main border border-surface-border/60'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span>{label}</span>
-              </button>
-            );
-          })}
+        {/* Tab Navigation (Unified Segmented Strip) */}
+        <div className="border-b border-surface-border bg-surface px-4 py-2">
+          <div className="flex items-center gap-1 bg-surface-hover p-1 rounded-xl border border-surface-border overflow-x-auto no-scrollbar">
+            {tabs.map(({ key, label, icon: Icon }) => {
+              const isActive = activeTab === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => {
+                    setActiveTab(key as any);
+                    setIsPairingOpen(false);
+                  }}
+                  className={`min-h-[36px] flex items-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer border ${
+                    isActive
+                      ? 'bg-surface text-primary border-surface-border shadow-2xs'
+                      : 'border-transparent text-text-muted hover:text-text-main hover:bg-surface/50'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Content Area */}
@@ -294,28 +296,26 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
               {activeTab === 'overview' && (
                 <div className="space-y-6">
                   {/* Status Banner */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-primary text-white shadow-lg relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-2xl -mr-16 -mt-16 pointer-events-none" />
-                    
-                    <div className="flex items-center gap-4 relative z-10">
-                      <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center backdrop-blur-xs shrink-0 shadow-inner">
-                        <Wifi className="w-6 h-6 text-white" />
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 sm:p-5 rounded-2xl bg-primary text-primary-fg shadow-xs relative overflow-hidden">
+                    <div className="flex items-center gap-3.5 relative z-10">
+                      <div className="w-11 h-11 rounded-2xl bg-surface/15 flex items-center justify-center shrink-0">
+                        <Wifi className="w-5 h-5" />
                       </div>
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="text-base font-black">
+                          <h3 className="text-base font-bold">
                             {syncStatus === 'syncing' 
                               ? _t('جارٍ المزامنة الآن...', 'Synchronizing...', 'Wird synchronisiert...') 
                               : connectionState === 'SYNC_READY' || connectionState === 'BROKER_CONNECTED' 
                               ? _t('النظام جاهز ونشط', 'System Healthy & Ready', 'System betriebsbereit') 
                               : _t('النظام في وضع الاستعداد', 'System Standby', 'System im Standby')}
                           </h3>
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-white/20 uppercase tracking-wider">
-                            {connectionState}
+                          <span className="text-[11px] font-mono opacity-85">
+                            · {connectionState}
                           </span>
                         </div>
-                        <p className="text-xs text-white/90 mt-1">
-                          {_t('آخر مزامنة ناجحة:', 'Last successful sync:', 'Letzte Synchronisation:')} <strong className="text-white">{lastSyncTime}</strong>
+                        <p className="text-xs opacity-90 mt-0.5">
+                          {_t('آخر مزامنة ناجحة:', 'Last successful sync:', 'Letzte Synchronisation:')} <strong className="font-bold">{lastSyncTime}</strong>
                         </p>
                       </div>
                     </div>
@@ -325,31 +325,31 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
                         type="button"
                         onClick={() => onForceSync()}
                         disabled={syncStatus === 'syncing'}
-                        className="px-5 py-2.5 rounded-xl bg-white text-primary hover:bg-white/90 font-extrabold text-xs shadow-md transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+                        className="min-h-[40px] px-4 rounded-xl bg-surface text-text-main hover:bg-surface-hover font-bold text-xs shadow-2xs transition-colors flex items-center gap-2 disabled:opacity-50 cursor-pointer"
                       >
-                        <RefreshCw className={`w-4 h-4 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
+                        <RefreshCw className={`w-4 h-4 text-primary ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
                         <span>{_t('مزامنة الكل الآن', 'Sync All Now', 'Jetzt alles synchronisieren')}</span>
                       </button>
                     </div>
                   </div>
 
                   {/* Dual Synchronization Architecture Status (P2P vs Homework Cloud) */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                     {/* System 1: P2P Sync */}
-                    <div className="p-4 rounded-2xl border border-surface-border bg-surface space-y-2">
+                    <div className="p-4 rounded-2xl border border-surface-border bg-surface space-y-2 shadow-2xs">
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
                           <Wifi className={`w-4 h-4 ${onlineCount > 0 || syncStatus === 'connected' ? 'text-emerald-500' : 'text-text-muted'}`} />
-                          <span className="text-xs font-black text-text-main">
+                          <span className="text-xs font-bold text-text-main">
                             {_t('مزامنة الأجهزة P2P (كل بيانات التطبيق)', 'P2P Device Sync (All App Data)', 'P2P Geräte-Sync (Alle App-Daten)')}
                           </span>
                         </div>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                        <span className={`text-[11px] font-bold ${
                           syncStatus === 'syncing'
-                            ? 'bg-blue-500/15 text-blue-600'
+                            ? 'text-primary'
                             : onlineCount > 0 || syncStatus === 'connected'
-                            ? 'bg-emerald-500/15 text-emerald-600'
-                            : 'bg-slate-500/15 text-text-muted'
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : 'text-text-muted'
                         }`}>
                           {syncStatus === 'syncing'
                             ? _t('جاري المزامنة', 'Synchronization in progress', 'Synchronisation läuft')
@@ -358,7 +358,7 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
                             : _t('غير متصل P2P', 'P2P Disconnected', 'P2P Getrennt')}
                         </span>
                       </div>
-                      <p className="text-[11px] text-text-muted">
+                      <p className="text-xs text-text-muted leading-relaxed">
                         {outbox.totalCount > 0
                           ? _t(`يوجد ${outbox.totalCount} تعديل محلي معلق بانتظار المزامنة مع الأجهزة المقترنة.`, `Pending local changes: ${outbox.totalCount} queued for paired devices.`, `${outbox.totalCount} lokale Änderungen ausstehend.`)
                           : _t('تمت مزامنة جميع بيانات التطبيق (الطلاب، الحصص، الغياب، المالية، الذهب، الواجبات).', 'Synchronization completed across all local datasets.', 'Synchronisation abgeschlossen.')}
@@ -366,22 +366,22 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
                     </div>
 
                     {/* System 2: Homework Cloud */}
-                    <div className="p-4 rounded-2xl border border-surface-border bg-surface space-y-2">
+                    <div className="p-4 rounded-2xl border border-surface-border bg-surface space-y-2 shadow-2xs">
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
                           {hwCloudAvailable ? (
-                            <Cloud className="w-4 h-4 text-indigo-500" />
+                            <Cloud className="w-4 h-4 text-primary" />
                           ) : (
                             <CloudOff className="w-4 h-4 text-amber-500" />
                           )}
-                          <span className="text-xs font-black text-text-main">
+                          <span className="text-xs font-bold text-text-main">
                             {_t('سحابة الواجبات فقط (Online Homework)', 'Homework Cloud Only', 'Nur Hausaufgaben-Cloud')}
                           </span>
                         </div>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                        <span className={`text-[11px] font-bold ${
                           hwCloudAvailable
-                            ? 'bg-indigo-500/15 text-indigo-600'
-                            : 'bg-amber-500/15 text-amber-600'
+                            ? 'text-primary'
+                            : 'text-amber-600 dark:text-amber-400'
                         }`}>
                           {hwCloudAvailable
                             ? _t('سحابة الواجبات متصلة', 'Homework cloud connected', 'Hausaufgaben-Cloud verbunden')
@@ -389,7 +389,7 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
                         </span>
                       </div>
                       <div className="flex items-center justify-between gap-2">
-                        <p className="text-[11px] text-text-muted">
+                        <p className="text-xs text-text-muted leading-relaxed">
                           {pendingHwCount > 0
                             ? _t(`تحديثات واجبات معلقة للرفع: ${pendingHwCount}`, `Pending homework uploads or results: ${pendingHwCount}`, `Ausstehende Hausaufgaben-Uploads: ${pendingHwCount}`)
                             : _t('مخصصة فقط لنشر روابط الواجبات واستقبال إجابات الطلاب عند الطلب.', 'Dedicated strictly to online homework links & on-demand submissions.', 'Nur für Online-Hausaufgaben & Ergebnisse auf Abruf.')}
@@ -398,7 +398,7 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
                           type="button"
                           onClick={handleSyncHomeworkCloudNow}
                           disabled={isSyncingHwCloud || !hwCloudAvailable}
-                          className="px-2.5 py-1 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 text-[10px] font-bold shrink-0 disabled:opacity-40 cursor-pointer flex items-center gap-1"
+                          className="min-h-[32px] px-3 rounded-xl bg-primary-soft hover:bg-primary/20 border border-primary-border text-primary text-[11px] font-bold shrink-0 disabled:opacity-40 cursor-pointer flex items-center gap-1 transition-colors"
                         >
                           <RefreshCw className={`w-3 h-3 ${isSyncingHwCloud ? 'animate-spin' : ''}`} />
                           <span>{_t('تحديث الواجبات', 'Refresh', 'Aktualisieren')}</span>
@@ -407,60 +407,60 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Summary Metric Cards */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-                    <div className="p-4 rounded-2xl border border-surface-border bg-surface">
-                      <span className="text-[10px] uppercase font-black text-text-muted block mb-1">
+                  {/* Unified Hairline-Divided Summary Metric Strip */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 rounded-2xl border border-surface-border bg-surface divide-x divide-y sm:divide-y-0 divide-surface-border overflow-hidden shadow-2xs">
+                    <div className="p-3.5">
+                      <span className="text-[11px] font-semibold text-text-muted block mb-1">
                         {_t('الأجهزة النشطة', 'Online Devices', 'Aktive Geräte')}
                       </span>
-                      <span className="text-xl font-black text-text-main">
+                      <span className="text-lg font-bold text-text-main tabular-nums">
                         {onlineCount} / {typedPeers.length}
                       </span>
                     </div>
 
-                    <div className="p-4 rounded-2xl border border-surface-border bg-surface">
-                      <span className="text-[10px] uppercase font-black text-text-muted block mb-1">
+                    <div className="p-3.5">
+                      <span className="text-[11px] font-semibold text-text-muted block mb-1">
                         {_t('تعديلات معلقة', 'Pending Outbox', 'Ausstehend')}
                       </span>
-                      <span className="text-xl font-black text-primary">
+                      <span className="text-lg font-bold text-primary tabular-nums">
                         {outbox.totalCount} {_t('تعديل', 'changes', 'Änderungen')}
                       </span>
                     </div>
 
-                    <div className="p-4 rounded-2xl border border-surface-border bg-surface">
-                      <span className="text-[10px] uppercase font-black text-text-muted block mb-1">
+                    <div className="p-3.5">
+                      <span className="text-[11px] font-semibold text-text-muted block mb-1">
                         {_t('المزامنة التلقائية', 'Auto-Sync Loop', 'Auto-Sync')}
                       </span>
-                      <span className="text-xl font-black text-text-main">
+                      <span className="text-lg font-bold text-text-main">
                         {autoSyncEnabled ? _t('مفعلة', 'Active', 'Aktiv') : _t('معطلة', 'Disabled', 'Deaktiviert')}
                       </span>
                     </div>
 
-                    <div className="p-4 rounded-2xl border border-surface-border bg-surface">
-                      <span className="text-[10px] uppercase font-black text-text-muted block mb-1">
+                    <div className="p-3.5">
+                      <span className="text-[11px] font-semibold text-text-muted block mb-1">
                         {_t('متوسط الاستجابة', 'Avg Transfer', 'Durchschnitt')}
                       </span>
-                      <span className="text-xl font-black text-text-main">
+                      <span className="text-lg font-bold text-text-main tabular-nums">
                         ~18 ms
                       </span>
                     </div>
                   </div>
 
                   {/* Quick Action Cards */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="p-5 rounded-2xl border border-surface-border bg-surface flex flex-col justify-between space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div className="p-4 sm:p-5 rounded-2xl border border-surface-border bg-surface flex flex-col justify-between space-y-3 shadow-2xs">
                       <div>
-                        <h4 className="text-sm font-extrabold text-text-main">
+                        <h4 className="text-sm font-bold text-text-main">
                           {_t('ربط جهاز جديد', 'Link New Companion Device', 'Neues Gerät verbinden')}
                         </h4>
-                        <p className="text-xs text-text-muted mt-1">
+                        <p className="text-xs text-text-muted mt-1 leading-relaxed">
                           {_t('استخدم رمز QR أو كود PIN المكون من 6 أرقام لربط هاتفك أو جهازك اللوحي.', 'Use QR code scanner or 6-digit PIN code to pair your phone or tablet.', 'QR-Code scannen oder 6-stelligen PIN eingeben, um Tablet oder Smartphone zu koppeln.')}
                         </p>
                       </div>
                       <button
                         type="button"
                         onClick={() => setIsPairingOpen(true)}
-                        className="w-full py-2.5 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-2"
+                        className="w-full min-h-[40px] py-2 rounded-xl bg-primary hover:bg-primary-hover text-primary-fg text-xs font-bold shadow-2xs transition-colors cursor-pointer flex items-center justify-center gap-2"
                       >
                         <Sparkles className="w-4 h-4" />
                         <span>{_t('بدء معالج الاقتران', 'Open Pairing Wizard', 'Kopplungs-Assistent öffnen')}</span>
