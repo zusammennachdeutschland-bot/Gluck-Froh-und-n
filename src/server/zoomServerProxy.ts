@@ -422,14 +422,15 @@ async function getZoomAccessTokenForUid(
   });
 
   if (res.status < 200 || res.status >= 300) {
-    let message = 'Zoom Server-to-Server OAuth authentication failed.';
+    let zoomReason = 'Zoom Server-to-Server OAuth authentication failed.';
     try {
       const parsed = JSON.parse(res.bodyText);
-      message = parsed.reason || parsed.error_description || parsed.message || message;
+      zoomReason = parsed.reason || parsed.error_description || parsed.message || zoomReason;
     } catch {
       // Ignore non-JSON body
     }
-    return { ok: false, status: res.status, error: message };
+    const detailedError = `${zoomReason} (Tip: Ensure your Zoom Server-to-Server app is Activated in the Zoom App Marketplace, Account ID / Client ID / Client Secret are correctly placed in their respective fields, and required scopes like meeting:write:admin and user:read:admin are added).`;
+    return { ok: false, status: res.status, error: detailedError };
   }
 
   try {
