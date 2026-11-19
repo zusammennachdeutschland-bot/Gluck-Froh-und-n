@@ -2,4 +2,5 @@
 <full-backup-content>
     <include domain="sharedpref" path="." />
     <exclude domain="sharedpref" path="com.glueck.app.grain_secure_vault.xml" />
+    <exclude domain="sharedpref" path="com.glueck.app.zoom_secure_vault.xml" />
 </full-backup-content>

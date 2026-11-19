@@ -7,6 +7,20 @@ import {
   GrainRecordingMatch
 } from '../types';
 import { auth } from '../shared/firebaseCloudSync';
+import { isAndroidNativePlatform } from '../shared/googleCredentialAuthPlugin';
+import {
+  __getZoomNativeTestAdapter,
+  ZoomNativeResponse,
+  invokeAndroidZoomConnect,
+  invokeAndroidZoomCreateMeeting,
+  invokeAndroidZoomDeleteMeeting,
+  invokeAndroidZoomDisconnect,
+  invokeAndroidZoomGetMeeting,
+  invokeAndroidZoomGetStatus,
+  invokeAndroidZoomTestConnection,
+  invokeAndroidZoomUpdateMeeting,
+  invokeAndroidZoomUpdateSettings
+} from '../shared/zoomSecureBridgePlugin';
 import {
   DEFAULT_ZOOM_TIMEZONE,
   buildZoomMeetingRecordFromSession,
@@ -17,6 +31,8 @@ import {
   toZoomWeeklyDayNumber
 } from './zoomSessionStandardizer';
 import { storage } from './storageService';
+
+export type ZoomRuntimeType = 'android' | 'electron' | 'web';
 
 export interface ZoomUiMetaState {
   defaultTimezone: string;
@@ -129,6 +145,34 @@ export function __resetZoomServiceMemoryForTesting(): void {
   inMemoryRecordsFallback = [];
   inMemoryHistoryFallback = [];
   inMemoryMatchesFallback = [];
+}
+
+/**
+ * Strips invisible Unicode directional/zero-width marks, surrounding quotes, and whitespace
+ * commonly introduced by Android/Arabic mobile clipboards.
+ */
+export function normalizeZoomCredentialInput(rawInput: unknown): string {
+  let str = String(rawInput ?? '')
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF\u00A0]/g, '')
+    .trim();
+  str = str.replace(/^["'`]+|["'`]+$/g, '').trim();
+  return str.replace(/\s+/g, '');
+}
+
+export function detectZoomRuntime(): ZoomRuntimeType {
+  if (__getZoomNativeTestAdapter()?.isAndroidNative?.()) {
+    return 'android';
+  }
+  if (typeof window !== 'undefined') {
+    const win = window as any;
+    if (win.electronBridge && win.electronBridge.isElectron && win.electronBridge.zoom) {
+      return 'electron';
+    }
+    if (isAndroidNativePlatform()) {
+      return 'android';
+    }
+  }
+  return 'web';
 }
 
 /**
@@ -373,9 +417,12 @@ async function buildZoomProxyAuthHeaders(forceRefreshSession = false): Promise<R
   try {
     const currentUser = auth?.currentUser;
     if (currentUser && typeof currentUser.getIdToken === 'function') {
-      const idToken = await currentUser.getIdToken();
+      const idToken = await currentUser.getIdToken(forceRefreshSession);
       if (idToken) {
         headers['Authorization'] = `Bearer ${idToken}`;
+        if (currentUser.uid) {
+          headers['X-Owner-Uid'] = currentUser.uid;
+        }
         return headers;
       }
     }
@@ -415,6 +462,162 @@ async function buildZoomProxyAuthHeaders(forceRefreshSession = false): Promise<R
   return headers;
 }
 
+function normalizeNativeZoomBridgeResult(nativeRes: ZoomNativeResponse | null | undefined): {
+  ok: boolean;
+  status: number;
+  code?: string;
+  data?: any;
+  error?: string;
+  retryAfterSeconds?: number;
+} {
+  if (!nativeRes || typeof nativeRes !== 'object') {
+    return {
+      ok: false,
+      status: 500,
+      code: 'NATIVE_BRIDGE_EMPTY',
+      error: 'Native Zoom bridge returned an empty response.'
+    };
+  }
+  const status = typeof nativeRes.httpStatus === 'number' ? nativeRes.httpStatus : nativeRes.ok ? 200 : 500;
+  if (!nativeRes.ok) {
+    const retrySec = nativeRes.retryAfter ? Number(nativeRes.retryAfter) || 30 : undefined;
+    return {
+      ok: false,
+      status,
+      code: nativeRes.code || (status === 429 ? 'RATE_LIMITED' : 'ZOOM_NATIVE_ERROR'),
+      data: nativeRes,
+      error: redactZoomSecrets(nativeRes.error || `Zoom request failed (HTTP ${status})`),
+      retryAfterSeconds: retrySec
+    };
+  }
+  return { ok: true, status, data: nativeRes };
+}
+
+async function callNativeOrElectronZoomBridge(
+  runtime: 'android' | 'electron',
+  path: string,
+  init: RequestInit = {}
+): Promise<{
+  ok: boolean;
+  status: number;
+  code?: string;
+  data?: any;
+  error?: string;
+  retryAfterSeconds?: number;
+}> {
+  const method = String(init.method || 'GET').toUpperCase();
+  let bodyObj: Record<string, any> = {};
+  if (typeof init.body === 'string' && init.body.trim()) {
+    try {
+      bodyObj = JSON.parse(init.body);
+    } catch {
+      bodyObj = {};
+    }
+  }
+
+  try {
+    const electronZoom = runtime === 'electron' ? (window as any).electronBridge?.zoom : null;
+
+    if (path === '/api/zoom/status' && method === 'GET') {
+      const res = runtime === 'android' ? await invokeAndroidZoomGetStatus() : await electronZoom.getStatus();
+      return normalizeNativeZoomBridgeResult(res);
+    }
+    if (path === '/api/zoom/connect' && method === 'POST') {
+      const payload = {
+        accountId: String(bodyObj.accountId || ''),
+        clientId: String(bodyObj.clientId || ''),
+        clientSecret: String(bodyObj.clientSecret || ''),
+        defaultTimezone: String(bodyObj.defaultTimezone || DEFAULT_ZOOM_TIMEZONE)
+      };
+      const res = runtime === 'android' ? await invokeAndroidZoomConnect(payload) : await electronZoom.connect(payload);
+      return normalizeNativeZoomBridgeResult(res);
+    }
+    if (path === '/api/zoom/test-connection' && method === 'POST') {
+      const res = runtime === 'android' ? await invokeAndroidZoomTestConnection() : await electronZoom.testConnection();
+      return normalizeNativeZoomBridgeResult(res);
+    }
+    if (path === '/api/zoom/settings' && method === 'PATCH') {
+      const tz = String(bodyObj.defaultTimezone || DEFAULT_ZOOM_TIMEZONE);
+      const res = runtime === 'android' ? await invokeAndroidZoomUpdateSettings(tz) : await electronZoom.updateSettings(tz);
+      return normalizeNativeZoomBridgeResult(res);
+    }
+    if (path === '/api/zoom/disconnect' && method === 'POST') {
+      const res = runtime === 'android' ? await invokeAndroidZoomDisconnect() : await electronZoom.disconnect();
+      return normalizeNativeZoomBridgeResult(res);
+    }
+    if (path === '/api/zoom/meetings/create' && method === 'POST') {
+      const payload = {
+        topic: String(bodyObj.topic || ''),
+        startTime: String(bodyObj.startTime || ''),
+        duration: Number(bodyObj.duration) || 60,
+        timezone: String(bodyObj.timezone || DEFAULT_ZOOM_TIMEZONE),
+        weeklyDay: Number(bodyObj.weeklyDay) || 2,
+        repeatInterval: Number(bodyObj.repeatInterval) === 2 ? 2 : 1,
+        waitingRoom: bodyObj.waitingRoom !== false,
+        autoRecording: bodyObj.autoRecording === 'cloud' ? 'cloud' : 'none'
+      };
+      const res =
+        runtime === 'android' ? await invokeAndroidZoomCreateMeeting(payload) : await electronZoom.createMeeting(payload);
+      return normalizeNativeZoomBridgeResult(res);
+    }
+
+    const meetingMatch = path.match(/^\/api\/zoom\/meetings\/([^/?#]+)$/);
+    if (meetingMatch) {
+      const meetingId = decodeURIComponent(meetingMatch[1]);
+      if (method === 'PATCH') {
+        const payload = {
+          meetingId,
+          topic: bodyObj.topic ? String(bodyObj.topic) : undefined,
+          startTime: bodyObj.startTime ? String(bodyObj.startTime) : undefined,
+          duration: Number(bodyObj.duration) || 60,
+          timezone: String(bodyObj.timezone || DEFAULT_ZOOM_TIMEZONE),
+          weeklyDay: Number(bodyObj.weeklyDay) || 2,
+          repeatInterval: Number(bodyObj.repeatInterval) === 2 ? 2 : 1
+        };
+        const res =
+          runtime === 'android' ? await invokeAndroidZoomUpdateMeeting(payload) : await electronZoom.updateMeeting(payload);
+        return normalizeNativeZoomBridgeResult(res);
+      }
+      if (method === 'GET') {
+        const res = runtime === 'android' ? await invokeAndroidZoomGetMeeting(meetingId) : await electronZoom.getMeeting(meetingId);
+        return normalizeNativeZoomBridgeResult(res);
+      }
+      if (method === 'DELETE') {
+        const res =
+          runtime === 'android' ? await invokeAndroidZoomDeleteMeeting(meetingId) : await electronZoom.deleteMeeting(meetingId);
+        return normalizeNativeZoomBridgeResult(res);
+      }
+    }
+
+    return {
+      ok: false,
+      status: 400,
+      code: 'UNSUPPORTED_OPERATION',
+      error: `Unsupported native Zoom route: ${method} ${path}`
+    };
+  } catch (err: any) {
+    const rawMsg = String(err?.message || err || '');
+    const isUnimplemented =
+      String(err?.code || '').toUpperCase() === 'UNIMPLEMENTED' ||
+      /not implemented|plugin is not implemented/i.test(rawMsg);
+    if (runtime === 'android' && isUnimplemented) {
+      return {
+        ok: false,
+        status: 501,
+        code: 'ANDROID_PLUGIN_UPDATE_REQUIRED',
+        error:
+          'Native Android ZoomSecureBridge plugin is not present in this APK build. Please install the updated Android APK containing ZoomSecureBridgePlugin.'
+      };
+    }
+    return {
+      ok: false,
+      status: 0,
+      code: 'NATIVE_BRIDGE_ERROR',
+      error: redactZoomSecrets(rawMsg || 'Failed to invoke native Zoom secure bridge.')
+    };
+  }
+}
+
 async function callZoomProxyJson(
   path: string,
   init: RequestInit = {}
@@ -426,6 +629,13 @@ async function callZoomProxyJson(
   error?: string;
   retryAfterSeconds?: number;
 }> {
+  if (!customZoomProxyFetchForTesting) {
+    const runtime = detectZoomRuntime();
+    if (runtime === 'android' || runtime === 'electron') {
+      return callNativeOrElectronZoomBridge(runtime, path, init);
+    }
+  }
+
   try {
     let headers = await buildZoomProxyAuthHeaders(false);
     let res = await performProxyFetch(path, {
@@ -436,7 +646,7 @@ async function callZoomProxyJson(
       }
     });
 
-    if (res.status === 401 && !headers['Authorization']) {
+    if (res.status === 401) {
       headers = await buildZoomProxyAuthHeaders(true);
       res = await performProxyFetch(path, {
         ...init,
@@ -463,6 +673,16 @@ async function callZoomProxyJson(
         data: parsed,
         error: redactZoomSecrets(parsed?.error || `Zoom request failed (HTTP ${res.status})`),
         retryAfterSeconds: retryHeader ? Number(retryHeader) || 30 : undefined
+      };
+    }
+
+    if (!parsed || typeof parsed !== 'object') {
+      return {
+        ok: false,
+        status: res.status,
+        code: 'NON_JSON_RESPONSE',
+        error:
+          `Zoom backend returned a non-JSON response (HTTP ${res.status}). On Android, ensure the updated APK with native ZoomSecureBridge is installed.`
       };
     }
 
@@ -505,9 +725,9 @@ export async function connectZoomAccount(params: {
   const res = await callZoomProxyJson('/api/zoom/connect', {
     method: 'POST',
     body: JSON.stringify({
-      accountId: params.accountId.trim(),
-      clientId: params.clientId.trim(),
-      clientSecret: params.clientSecret.trim(),
+      accountId: normalizeZoomCredentialInput(params.accountId),
+      clientId: normalizeZoomCredentialInput(params.clientId),
+      clientSecret: normalizeZoomCredentialInput(params.clientSecret),
       defaultTimezone: params.defaultTimezone?.trim() || loadZoomUiMeta().defaultTimezone || DEFAULT_ZOOM_TIMEZONE
     })
   });
@@ -515,7 +735,7 @@ export async function connectZoomAccount(params: {
   if (!res.ok || !res.data?.saved) {
     const state = saveZoomUiMeta({
       connected: false,
-      lastError: res.error || 'Failed to connect Zoom Server-to-Server OAuth app.'
+      lastError: res.error || res.data?.error || 'Failed to connect Zoom Server-to-Server OAuth app.'
     });
     return { ok: false, state, error: state.lastError || undefined };
   }

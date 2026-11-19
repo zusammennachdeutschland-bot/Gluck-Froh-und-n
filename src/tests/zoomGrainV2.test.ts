@@ -15,17 +15,26 @@ import {
   __resetZoomServerVaultForTesting,
   __setZoomServerUpstreamFetchForTesting
 } from '../server/zoomServerProxy';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   __setZoomProxyFetchForTesting,
   __resetZoomServiceMemoryForTesting,
+  detectZoomRuntime,
+  normalizeZoomCredentialInput,
   connectZoomAccount,
+  testZoomConnection,
   getZoomConnectionStatus,
   fetchHostStartUrlForSession,
+  createOrReplaceZoomMeetingForSession,
+  updateZoomMeetingForSession,
+  disconnectZoomAccount,
   buildZoomMigrationPreview,
   executeBulkZoomMigration,
   sanitizeZoomRecordForStorage,
   redactZoomSecrets
 } from '../services/zoomService';
+import { __setZoomNativeTestAdapter } from '../shared/zoomSecureBridgePlugin';
 import {
   generateSessionsIcsContent,
   syncSessionsToGoogleCalendar,
@@ -676,8 +685,223 @@ async function runZoomGrainV2Tests() {
     assert.equal(cloudPartition.core_crm.groupWeeklySessions[0].clientSecret, undefined);
     assert.equal(cloudPartition.core_crm.groupWeeklySessions[0].transcript, undefined);
 
+    // -------------------------------------------------------------------------
+    // 8. ANDROID NATIVE ZOOM SECURE BRIDGE, CLIPBOARD NORMALIZATION & DIAGNOSTICS
+    // -------------------------------------------------------------------------
+    console.log('8. Testing Android native ZoomSecureBridge, clipboard normalization & non-JSON diagnostics...');
+
+    // 8a. Clipboard invisible Unicode / RTL mark / quote normalization
+    assert.equal(
+      normalizeZoomCredentialInput('\u200F "abc123\u200Bdef456" \u00A0'),
+      'abc123def456',
+      'normalizeZoomCredentialInput must strip RTL/zero-width/quote/whitespace artifacts'
+    );
+
+    // 8b. Non-JSON HTML 200 response (such as Capacitor static WebView fallback) must NOT return opaque generic error
+    __setZoomProxyFetchForTesting(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new SyntaxError('Unexpected token < in JSON');
+      }
+    }));
+    const htmlErrRes = await connectZoomAccount({
+      accountId: 'acc_12345678',
+      clientId: 'cli_12345678',
+      clientSecret: 'sec_1234567890'
+    });
+    assert.equal(htmlErrRes.ok, false);
+    assert.ok(
+      htmlErrRes.error?.includes('non-JSON response'),
+      `Expected explicit non-JSON diagnostic error, got: ${htmlErrRes.error}`
+    );
+
+    // 8c. Full Android native ZoomSecureBridge lifecycle (no /api/zoom/* HTTP fetch needed!)
+    __setZoomProxyFetchForTesting(null);
+    let capturedAndroidConnectPayload: any = null;
+    let capturedAndroidCreatePayload: any = null;
+    let capturedAndroidPatchPayload: any = null;
+    let androidDisconnected = false;
+
+    __setZoomNativeTestAdapter({
+      isAndroidNative: () => true,
+      connect: async (opts) => {
+        capturedAndroidConnectPayload = opts;
+        return {
+          ok: true,
+          httpStatus: 200,
+          saved: true,
+          connected: true,
+          maskedAccountId: 'acc••••••••5678',
+          maskedClientId: 'cli••••••••5678',
+          defaultTimezone: opts.defaultTimezone || 'Africa/Cairo',
+          planType: 'basic',
+          isBasicPlan: true,
+          maxMeetingMinutes: 40,
+          hostEmail: 'android-teacher@glueck.app'
+        };
+      },
+      getStatus: async () => ({
+        ok: true,
+        httpStatus: 200,
+        secureStorageAvailable: true,
+        hasCredentials: !androidDisconnected,
+        maskedAccountId: androidDisconnected ? null : 'acc••••••••5678',
+        maskedClientId: androidDisconnected ? null : 'cli••••••••5678',
+        defaultTimezone: 'Africa/Cairo',
+        planType: 'basic',
+        isBasicPlan: true,
+        maxMeetingMinutes: 40,
+        hostEmail: 'android-teacher@glueck.app'
+      }),
+      testConnection: async () => ({
+        ok: true,
+        httpStatus: 200,
+        connected: true,
+        planType: 'basic',
+        isBasicPlan: true,
+        maxMeetingMinutes: 40,
+        hostEmail: 'android-teacher@glueck.app',
+        defaultTimezone: 'Africa/Cairo'
+      }),
+      createMeeting: async (opts) => {
+        capturedAndroidCreatePayload = opts;
+        return {
+          ok: true,
+          httpStatus: 200,
+          zoomMeetingId: '98765432109',
+          joinUrl: 'https://zoom.us/j/98765432109?pwd=droid',
+          startUrl: 'https://zoom.us/s/98765432109?zak=DROID_EPHEMERAL_ZAK',
+          meetingPasscode: 'droid',
+          topic: opts.topic,
+          timezone: opts.timezone || 'Africa/Cairo',
+          hostEmail: 'android-teacher@glueck.app',
+          planWarning40Min: opts.duration >= 41
+        };
+      },
+      updateMeeting: async (opts) => {
+        capturedAndroidPatchPayload = opts;
+        return {
+          ok: true,
+          httpStatus: 200,
+          updated: true,
+          zoomMeetingId: opts.meetingId,
+          topic: opts.topic,
+          planWarning40Min: opts.duration >= 41
+        };
+      },
+      getMeeting: async (opts) => ({
+        ok: true,
+        httpStatus: 200,
+        exists: true,
+        zoomMeetingId: opts.meetingId,
+        joinUrl: `https://zoom.us/j/${opts.meetingId}?pwd=droid`,
+        startUrl: `https://zoom.us/s/${opts.meetingId}?zak=FRESH_DROID_ZAK`
+      }),
+      disconnect: async () => {
+        androidDisconnected = true;
+        return { ok: true, httpStatus: 200, disconnected: true, hasCredentials: false };
+      }
+    });
+
+    assert.equal(detectZoomRuntime(), 'android', 'detectZoomRuntime must identify Android native runtime');
+
+    const androidConnectRes = await connectZoomAccount({
+      accountId: ' \u200Facc_12345678 ',
+      clientId: '"cli_12345678"',
+      clientSecret: 'sec_1234567890\u200B',
+      defaultTimezone: 'Africa/Cairo'
+    });
+    assert.equal(androidConnectRes.ok, true, `Android connect failed: ${androidConnectRes.error}`);
+    assert.equal(capturedAndroidConnectPayload.accountId, 'acc_12345678');
+    assert.equal(capturedAndroidConnectPayload.clientId, 'cli_12345678');
+    assert.equal(capturedAndroidConnectPayload.clientSecret, 'sec_1234567890');
+    assert.equal(androidConnectRes.state.connected, true);
+    assert.equal(androidConnectRes.state.hostEmail, 'android-teacher@glueck.app');
+
+    const androidTestRes = await testZoomConnection();
+    assert.equal(androidTestRes.ok, true);
+    assert.equal(androidTestRes.state.isBasicPlan, true);
+
+    const androidCreateRes = await createOrReplaceZoomMeetingForSession({
+      session: { ...monSession, durationMinutes: 60 },
+      sessions: [monSession],
+      records: [],
+      history: []
+    });
+    assert.equal(androidCreateRes.ok, true);
+    assert.equal(capturedAndroidCreatePayload.duration, 60, 'Android Zoom bridge must preserve full 60m duration');
+    assert.equal(androidCreateRes.updatedSession?.zoomMeetingId, '98765432109');
+
+    const androidPatchRes = await updateZoomMeetingForSession({
+      session: { ...androidCreateRes.updatedSession!, durationMinutes: 90 },
+      sessions: androidCreateRes.sessions,
+      records: androidCreateRes.records,
+      history: androidCreateRes.history
+    });
+    assert.equal(androidPatchRes.ok, true);
+    assert.equal(capturedAndroidPatchPayload.duration, 90, 'Android PATCH must send updated 90m duration');
+
+    const androidStartRes = await fetchHostStartUrlForSession('98765432109');
+    assert.equal(androidStartRes.ok, true);
+    assert.ok(androidStartRes.startUrl?.includes('FRESH_DROID_ZAK'));
+
+    const androidDiscState = await disconnectZoomAccount();
+    assert.equal(androidDiscState.connected, false);
+    assert.equal(androidDisconnected, true);
+
+    // 8d. Unimplemented native plugin in older APK must return actionable update guidance
+    __setZoomNativeTestAdapter({
+      isAndroidNative: () => true,
+      connect: async () => {
+        const err: any = new Error('Plugin "ZoomSecureBridge" is not implemented on android');
+        err.code = 'UNIMPLEMENTED';
+        throw err;
+      }
+    });
+    const staleApkRes = await connectZoomAccount({
+      accountId: 'acc_12345678',
+      clientId: 'cli_12345678',
+      clientSecret: 'sec_1234567890'
+    });
+    assert.equal(staleApkRes.ok, false);
+    assert.ok(
+      staleApkRes.error?.includes('ZoomSecureBridgePlugin'),
+      `Expected actionable APK update error, got: ${staleApkRes.error}`
+    );
+    __setZoomNativeTestAdapter(null);
+
+    // 8e. Static verification of native Android plugin registration & backup exclusions
+    const rootDir = process.cwd();
+    const zoomJava = fs.readFileSync(
+      path.join(rootDir, 'android/app/src/main/java/com/glueck/app/ZoomSecureBridgePlugin.java'),
+      'utf8'
+    );
+    assert.ok(zoomJava.includes('@CapacitorPlugin(name = "ZoomSecureBridge")'));
+    assert.ok(zoomJava.includes('AndroidKeyStore'));
+    assert.ok(zoomJava.includes('application/x-www-form-urlencoded'));
+
+    const mainActivityJava = fs.readFileSync(
+      path.join(rootDir, 'android/app/src/main/java/com/glueck/app/MainActivity.java'),
+      'utf8'
+    );
+    assert.ok(mainActivityJava.includes('registerPlugin(ZoomSecureBridgePlugin.class)'));
+
+    const backupRulesXml = fs.readFileSync(
+      path.join(rootDir, 'android/app/src/main/res/xml/backup_rules.xml'),
+      'utf8'
+    );
+    assert.ok(backupRulesXml.includes('com.glueck.app.zoom_secure_vault.xml'));
+
+    const dataExtractXml = fs.readFileSync(
+      path.join(rootDir, 'android/app/src/main/res/xml/data_extraction_rules.xml'),
+      'utf8'
+    );
+    assert.ok(dataExtractXml.includes('com.glueck.app.zoom_secure_vault.xml'));
+
     console.log('✅ All Glück × Zoom × Grain V2.0 tests passed!');
   } finally {
+    __setZoomNativeTestAdapter(null);
     __setZoomProxyFetchForTesting(null);
     __setZoomServerUpstreamFetchForTesting(null);
     __setCalendarFetchForTesting(null);

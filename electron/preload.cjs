@@ -25,5 +25,16 @@ contextBridge.exposeInMainWorld('electronBridge', {
         payloadJson: options?.payloadJson ? String(options.payloadJson) : '{}'
       });
     }
+  },
+  zoom: {
+    getStatus: () => ipcRenderer.invoke('zoom:status'),
+    connect: (payload) => ipcRenderer.invoke('zoom:connect', payload),
+    testConnection: () => ipcRenderer.invoke('zoom:testConnection'),
+    updateSettings: (defaultTimezone) => ipcRenderer.invoke('zoom:updateSettings', { defaultTimezone: String(defaultTimezone || '') }),
+    disconnect: () => ipcRenderer.invoke('zoom:disconnect'),
+    createMeeting: (payload) => ipcRenderer.invoke('zoom:createMeeting', payload),
+    updateMeeting: (payload) => ipcRenderer.invoke('zoom:updateMeeting', payload),
+    getMeeting: (meetingId) => ipcRenderer.invoke('zoom:getMeeting', { meetingId: String(meetingId || '') }),
+    deleteMeeting: (meetingId) => ipcRenderer.invoke('zoom:deleteMeeting', { meetingId: String(meetingId || '') })
   }
 });

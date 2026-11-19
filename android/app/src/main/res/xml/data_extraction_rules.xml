@@ -3,9 +3,11 @@
     <cloud-backup>
         <include domain="sharedpref" path="." />
         <exclude domain="sharedpref" path="com.glueck.app.grain_secure_vault.xml" />
+        <exclude domain="sharedpref" path="com.glueck.app.zoom_secure_vault.xml" />
     </cloud-backup>
     <device-transfer>
         <include domain="sharedpref" path="." />
         <exclude domain="sharedpref" path="com.glueck.app.grain_secure_vault.xml" />
+        <exclude domain="sharedpref" path="com.glueck.app.zoom_secure_vault.xml" />
     </device-transfer>
 </data-extraction-rules>

@@ -153,6 +153,14 @@ export function isZoomVaultEncryptionAvailable(): boolean {
   return Boolean(zoomMasterKey && zoomMasterKey.length === 32);
 }
 
+function normalizeZoomCredentialInput(rawInput: unknown): string {
+  let str = String(rawInput ?? '')
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF\u00A0]/g, '')
+    .trim();
+  str = str.replace(/^["'`]+|["'`]+$/g, '').trim();
+  return str.replace(/\s+/g, '');
+}
+
 function maskCredentialValue(val: string): string {
   const clean = String(val || '').trim();
   if (clean.length <= 6) return '••••••';
@@ -409,16 +417,16 @@ async function getZoomAccessTokenForUid(
   }
 
   const basicAuth = Buffer.from(`${creds.clientId}:${creds.clientSecret}`, 'utf8').toString('base64');
-  const url = `${ZOOM_OAUTH_TOKEN_URL}?grant_type=account_credentials&account_id=${encodeURIComponent(
-    creds.accountId
-  )}`;
+  const formBody = `grant_type=account_credentials&account_id=${encodeURIComponent(creds.accountId)}`;
 
-  const res = await performZoomFetch(url, {
+  const res = await performZoomFetch(ZOOM_OAUTH_TOKEN_URL, {
     method: 'POST',
     headers: {
       Authorization: `Basic ${basicAuth}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
       Accept: 'application/json'
-    }
+    },
+    body: formBody
   });
 
   if (res.status < 200 || res.status >= 300) {
@@ -580,9 +588,9 @@ export function registerZoomServerRoutes(
       });
     }
 
-    const accountId = String(req.body?.accountId || '').trim();
-    const clientId = String(req.body?.clientId || '').trim();
-    const clientSecret = String(req.body?.clientSecret || '').trim();
+    const accountId = normalizeZoomCredentialInput(req.body?.accountId);
+    const clientId = normalizeZoomCredentialInput(req.body?.clientId);
+    const clientSecret = normalizeZoomCredentialInput(req.body?.clientSecret);
     const defaultTimezone = String(req.body?.defaultTimezone || 'Africa/Cairo').trim() || 'Africa/Cairo';
 
     if (accountId.length < 6 || clientId.length < 6 || clientSecret.length < 8) {
