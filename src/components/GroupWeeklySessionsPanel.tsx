@@ -141,7 +141,7 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
   };
 
   const handleCopyJoinUrl = async (session: GroupWeeklySession) => {
-    const url = session.zoomJoinUrl || session.manualFallbackUrl;
+    const url = session.zoomJoinUrl;
     if (!url) return;
     try {
       await navigator.clipboard.writeText(url);
@@ -156,7 +156,7 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
   const handleCreateOrSyncZoom = async (session: GroupWeeklySession, forceConfirmManual = false) => {
     const hasManual =
       (session.meetingSource === 'manual' || session.meetingSource === 'legacy_migrated') &&
-      Boolean(session.zoomJoinUrl || session.manualFallbackUrl);
+      Boolean(session.zoomJoinUrl);
 
     if (hasManual && !forceConfirmManual) {
       setConfirmReplaceSession(session);
@@ -550,7 +550,7 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
       ) : (
         <div className="rounded-2xl bg-surface border border-surface-border divide-y divide-surface-border overflow-hidden">
           {groupSessions.map((session) => {
-            const joinUrl = session.zoomJoinUrl || session.manualFallbackUrl;
+            const joinUrl = session.zoomJoinUrl;
             const isBusy = busySessionId === session.id;
             const showBasicWarning = (zoomMeta.isBasicPlan || session.planWarning40Min) && session.durationMinutes >= 41;
             const hostStartUrl = hostLaunchMap[session.id];

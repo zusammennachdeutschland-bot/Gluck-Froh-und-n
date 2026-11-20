@@ -14,18 +14,42 @@ import {
 } from '../../utils/lernstudioAiUtils';
 import { auth } from '../firebaseCloudSync';
 import {
-  extractGrammarSetFromImages,
-  ExtractionPageInput,
-  GrammarExtractionExerciseMode,
-  preparePageImagesForExtraction
-} from '../grammarExtractionClient';
-import {
   normalizeGrammarContent,
   normalizeLernstudioSet,
   stripHeavyGrammarMediaForSync,
   VALID_GRAMMAR_EXERCISE_TYPES
 } from '../grammarEngine';
 import { deletePageImageRecord } from '../lernstudioPageImageStore';
+
+export type GrammarExtractionExerciseMode = 'original_only' | 'original_and_similar';
+export interface ExtractionPageInput {
+  id?: string;
+  fileName: string;
+  mimeType: string;
+  dataUrl: string;
+  pageOrder?: number;
+}
+
+async function preparePageImagesForExtraction(files: File[], startIndex: number) {
+  const inputs: ExtractionPageInput[] = [];
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    inputs.push({
+      id: `page_${Date.now()}_${i}`,
+      fileName: file.name,
+      mimeType: file.type || 'image/jpeg',
+      dataUrl,
+      pageOrder: startIndex + i
+    });
+  }
+  return { inputs };
+}
 import {
   AlertCircle,
   AlertTriangle,
@@ -251,35 +275,13 @@ export const LernstudioAiModal: React.FC<Props> = ({
     setExtractionWarnings([]);
     setExtractedDraft(null);
 
-    const resolvedTeacherName =
-      creatorTeacherName.trim() ||
-      teacherName?.trim() ||
-      auth?.currentUser?.displayName?.trim() ||
-      undefined;
-
-    const result = await extractGrammarSetFromImages({
-      images: uploadedPages,
-      title: grammarTitleInput.trim() || undefined,
-      topic: grammarTopicInput.trim() || undefined,
-      level,
-      difficulty,
-      teacherName: resolvedTeacherName,
-      exerciseMode,
-      targetSetKind: targetImageSetKind
-    });
-
+    await new Promise((r) => setTimeout(r, 400));
     setIsExtractingImages(false);
-    if (!result.success || !result.extractedSet) {
-      setExtractionError(
-        isRtl
-          ? result.errorAr || result.error || 'فشل استخراج القواعد من الصور.'
-          : result.error || 'Failed to extract grammar content from images.'
-      );
-      return;
-    }
-
-    setExtractedDraft(result.extractedSet);
-    setExtractionWarnings(result.warnings || []);
+    setExtractionError(
+      isRtl
+        ? 'تم إيقاف خدمة استخراج القواعد التلقائي من الصور. يرجى استخدام مولّد البرومبت ولصق كود JSON للاستيراد الفوري.'
+        : 'Automated AI image extraction has been discontinued. Please use JSON prompt generation and manual import.'
+    );
   };
 
   const handleCopyVisionFallbackPrompt = () => {

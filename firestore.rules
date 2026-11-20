@@ -111,32 +111,20 @@ service cloud.firestore {
     // Shared Lernstudio library: every authenticated teacher account sees and shares published custom sets.
     // Unauthenticated access and unpublished draft reads/writes are denied; Vercel reads via Firebase Admin SDK.
     match /lernstudio_sets/{setId} {
-      allow get, list: if isSignedIn()
-        && isValidId(setId)
-        && (
-          (!('published' in existing()) || existing().published == true)
-          || ('createdByUid' in existing() && existing().createdByUid == request.auth.uid)
-        );
+      allow get, list: if isSignedIn() && isValidId(setId);
       allow create: if isSignedIn()
         && isValidId(setId)
         && isValidLernstudioSet(incoming())
         && incoming().id == setId
-        && (!('createdByUid' in incoming()) || incoming().createdByUid == '' || incoming().createdByUid == request.auth.uid);
+        && (incoming().createdByUid == request.auth.uid || (!('createdByUid' in incoming()) || incoming().createdByUid == ''));
       allow update: if isSignedIn()
         && isValidId(setId)
         && isValidLernstudioSet(incoming())
         && incoming().id == setId
-        && (
-          (!('published' in existing()) || existing().published == true)
-          || ('createdByUid' in existing() && existing().createdByUid == request.auth.uid)
-        );
+        && existing().createdByUid == request.auth.uid;
       allow delete: if isSignedIn()
         && isValidId(setId)
-        && (
-          !('createdByUid' in existing())
-          || existing().createdByUid == ''
-          || existing().createdByUid == request.auth.uid
-        );
+        && existing().createdByUid == request.auth.uid;
     }
 
     // Homework Assignments (Strictly isolated by teacher ownerUid; public get via server Express DTO API)

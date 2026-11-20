@@ -926,7 +926,7 @@ export function setManualZoomLinkForSession(params: {
   }
 
   const nowMs = Date.now();
-  const prevUrl = params.session.zoomJoinUrl || params.session.manualFallbackUrl;
+  const prevUrl = params.session.zoomJoinUrl;
   const prevId = params.session.zoomMeetingId;
 
   let nextHistory = params.history;
@@ -954,7 +954,6 @@ export function setManualZoomLinkForSession(params: {
     zoomMeetingId: parsed.meetingId,
     zoomJoinUrl: parsed.canonicalUrl,
     zoomPasscode: parsed.passcode,
-    manualFallbackUrl: trimmedRaw,
     meetingSource: 'manual',
     syncState: 'manual',
     ...(zoomChangedForCalendar ? { calendarSyncStatus: 'needs_update' as const } : {}),
@@ -1050,7 +1049,7 @@ export async function createOrReplaceZoomMeetingForSession(params: {
 
   const nowMs = Date.now();
   const prevId = params.session.zoomMeetingId;
-  const prevUrl = params.session.zoomJoinUrl || params.session.manualFallbackUrl;
+  const prevUrl = params.session.zoomJoinUrl;
   const hadPrevious = Boolean(prevId || prevUrl);
 
   let nextHistory = params.history;
@@ -1337,7 +1336,7 @@ export function buildZoomMigrationPreview(params: {
   );
 
   const items: ZoomMigrationPreviewItem[] = activeSessionsForOnline.map((s) => {
-    const hasExistingUrlOrId = Boolean(s.zoomJoinUrl || s.manualFallbackUrl || s.zoomMeetingId);
+    const hasExistingUrlOrId = Boolean(s.zoomJoinUrl || s.zoomMeetingId);
     let action: ZoomMigrationPreviewItem['action'] = 'create_new';
 
     if (s.meetingSource === 'zoom_api' && s.zoomMeetingId && s.zoomJoinUrl) {
@@ -1360,7 +1359,7 @@ export function buildZoomMigrationPreview(params: {
       durationMinutes: s.durationMinutes,
       standardizedTitle: s.standardizedTitle,
       action,
-      previousZoomUrl: s.zoomJoinUrl || s.manualFallbackUrl,
+      previousZoomUrl: s.zoomJoinUrl,
       previousZoomMeetingId: s.zoomMeetingId,
       willArchivePrevious: hasExistingUrlOrId && action !== 'already_standardized' && action !== 'update_standardized',
       planWarning40Min: Boolean(uiMeta.isBasicPlan && s.durationMinutes >= 41)

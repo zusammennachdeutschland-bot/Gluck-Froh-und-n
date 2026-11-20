@@ -692,7 +692,7 @@ export const ZoomIntegrationsManager: React.FC = () => {
   };
 
   const handleCopyUrl = async (session: GroupWeeklySession) => {
-    const url = session.zoomJoinUrl || session.manualFallbackUrl;
+    const url = session.zoomJoinUrl;
     if (!url) return;
     try {
       await navigator.clipboard.writeText(url);
@@ -1415,7 +1415,7 @@ export const ZoomIntegrationsManager: React.FC = () => {
           ) : (
             <div className="rounded-2xl bg-surface border border-surface-border divide-y divide-surface-border overflow-hidden">
               {displayedSessions.map((session) => {
-                const joinUrl = session.zoomJoinUrl || session.manualFallbackUrl;
+                const joinUrl = session.zoomJoinUrl;
                 const isBusy = busySessionId === session.id;
                 const hostUrl = hostLaunchMap[session.id];
                 const zoomStatus = getSessionSyncLabel(session);

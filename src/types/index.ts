@@ -1978,7 +1978,6 @@ export interface GroupWeeklySession extends SyncableRecord {
   zoomJoinUrl?: string;
   zoomPasscode?: string;
   zoomHostEmail?: string;
-  manualFallbackUrl?: string;
   meetingSource: ZoomMeetingSource;
   syncState: ZoomSessionSyncState;
   lastError?: string;

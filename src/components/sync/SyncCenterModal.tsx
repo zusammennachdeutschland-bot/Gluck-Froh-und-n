@@ -212,14 +212,31 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full p-2 text-text-muted hover:bg-surface-hover hover:text-text-main border border-surface-border cursor-pointer"
-            aria-label="Close"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            {onClearSyncHistory && (
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await onClearSyncHistory();
+                    if (refreshData) await refreshData();
+                  } catch {}
+                }}
+                className="min-h-[36px] px-3 rounded-xl border border-surface-border bg-surface hover:bg-surface-hover text-xs font-semibold text-text-main flex items-center gap-1.5 cursor-pointer"
+                title={_t('مسح السجل المؤقت', 'Clear Sync Log', 'Synchronisierungsverlauf löschen')}
+              >
+                <span>{_t('مسح', 'Clear', 'Löschen')}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full p-2 text-text-muted hover:bg-surface-hover hover:text-text-main border border-surface-border cursor-pointer"
+              aria-label="Close"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Navigation Strip */}

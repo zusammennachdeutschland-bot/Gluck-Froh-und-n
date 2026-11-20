@@ -55,7 +55,6 @@ import { DownloadedFilesSection } from './DownloadedFilesSection';
 import { GoogleCloudSyncCard } from './GoogleCloudSyncCard';
 import { GrainSettingsCard } from './GrainSettingsCard';
 import { ZoomIntegrationsManager } from './ZoomIntegrationsManager';
-import { AndroidKeystoreSection } from './AndroidKeystoreSection';
 import { getActiveCloudUser, subscribeTeacherAuth } from '../services/firebaseWorkspaceSync';
 import { getDownloadedFilesRegistry } from '../services/downloadedFilesService';
 import { loadZoomUiMeta } from '../services/zoomService';
@@ -933,23 +932,6 @@ export const SettingsView: React.FC = () => {
               </div>
             )}
 
-            {/* ==========================================
-                SUBPAGE: ANDROID KEYSTORE (ADVANCED)
-            ========================================== */}
-            {activeCategory === 'keystore' && (
-              <div className="space-y-4 animate-scale-up">
-                {renderSubPageHeader(
-                  _t('توقيع أندرويد (Release Signing)', 'Android Release Signing', 'Android Release Signierung'),
-                  _t(
-                    'إعداد ملفات التوقيع الرسمية لتطبيقات أندرويد وربطها بـ GitHub Actions',
-                    'Prepare official Android signing keys and connect to GitHub Actions',
-                    'Signierschlüssel für Android vorbereiten'
-                  ),
-                  ShieldCheck
-                )}
-                <AndroidKeystoreSection />
-              </div>
-            )}
 
             {/* ==========================================
                 SUBPAGE: APPEARANCE, COLORS & LANGUAGE

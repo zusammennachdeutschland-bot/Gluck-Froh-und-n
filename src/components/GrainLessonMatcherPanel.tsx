@@ -106,6 +106,27 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
   const [editableLernstudioTitle, setEditableLernstudioTitle] = useState('');
   const [lernstudioSavedIds, setLernstudioSavedIds] = useState<Record<string, boolean>>({});
 
+  const summaryOptions = useMemo(() => {
+    if (!activeDraft) return [];
+    const opts: string[] = [];
+    const mainTitle = selectedLesson.title || activeDraft.mainLearningObjectives[0] || 'درس اللغة الألمانية';
+    opts.push(mainTitle);
+    if (activeDraft.grammar[0]) {
+      opts.push(`شرح وتطبيق قاعدة: ${activeDraft.grammar[0].topic}`);
+    }
+    if (activeDraft.vocabulary.length > 0) {
+      opts.push(`شرح المفردات والتطبيقات اللغوية الجديدة (${activeDraft.vocabulary.length} كلمات)`);
+    }
+    const rawClean = activeDraft.whatWasCoveredAr
+      .replace(/^ملخص مقترح من Grain.*?[:\-]\s*/i, '')
+      .split(/[.!?\n]/)[0]
+      ?.trim();
+    if (rawClean && rawClean.length > 5 && !opts.includes(rawClean)) {
+      opts.push(rawClean);
+    }
+    return opts.slice(0, 4);
+  }, [activeDraft, selectedLesson.title]);
+
   // Hydrate cached recordings & connection status
   useEffect(() => {
     const cached = loadDiscoveredGrainRecordings();
@@ -423,8 +444,9 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
         return;
       }
       setActiveDraft(res.draft);
-      setEditableSummaryAr(res.draft.whatWasCoveredAr);
-      setEditableParentSummaryAr(res.draft.whatWasCoveredAr);
+      const defaultTitle = res.draft.mainLearningObjectives[0] || selectedLesson.title || rec.title || 'درس اللغة الألمانية';
+      setEditableSummaryAr(defaultTitle);
+      setEditableParentSummaryAr(defaultTitle);
       const firstHw = res.draft.homework[0]?.description || '';
       setEditableHomeworkText(firstHw);
       setEditableLernstudioTitle(
@@ -1264,25 +1286,54 @@ export const GrainLessonMatcherPanel: React.FC<GrainLessonMatcherPanelProps> = (
                 </button>
               </div>
 
-              {/* 1. Lesson Summary & Parent Report Draft */}
-              <div className="space-y-1.5">
+              {/* 1. Lesson Summary & Parent Report Draft (Single sentence / title with options) */}
+              <div className="space-y-2">
                 <label className="text-xs font-bold text-text-main flex items-center justify-between">
                   <span>
                     {_t(
-                      '1. ملخص معتمد لتقرير ولي الأمر (قابل للتعديل قبل الاعتماد):',
-                      '1. Approved Parent Report Summary (Editable before approval):',
-                      '1. Zusammenfassung für Elternbericht (vor Bestätigung bearbeitbar):'
+                      '1. عنوان أو جملة واحدة مختصرة لتقرير ولي الأمر (اختر أو اكتب):',
+                      '1. Concise Title or Single Sentence for Parent Report (Select or type):',
+                      '1. Kurzer Titel / Einzelsatz für Elternbericht:'
                     )}
                   </span>
                 </label>
-                <textarea
+
+                {summaryOptions.length > 0 && (
+                  <div className="space-y-1">
+                    <span className="text-[11px] text-text-muted">
+                      {_t('اختر أحد العناوين/الجمل المقترحة:', 'Choose from suggested title/sentence options:')}
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {summaryOptions.map((opt, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            setEditableSummaryAr(opt);
+                            setEditableParentSummaryAr(opt);
+                          }}
+                          className={`text-[11px] px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer font-medium text-start ${
+                            editableSummaryAr === opt
+                              ? 'bg-primary text-primary-fg border-primary shadow-xs'
+                              : 'bg-surface hover:bg-surface-hover text-text-main border-surface-border'
+                          }`}
+                        >
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <input
+                  type="text"
                   value={editableSummaryAr}
                   onChange={(e) => {
                     setEditableSummaryAr(e.target.value);
                     setEditableParentSummaryAr(e.target.value);
                   }}
-                  rows={2}
-                  className="w-full p-2.5 rounded-xl border border-surface-border bg-surface-hover text-xs text-text-main"
+                  placeholder={_t('اكتب جملة واحدة أو عنواناً مختصراً...', 'Type a single sentence or concise title...')}
+                  className="w-full min-h-[38px] px-3 py-2 rounded-xl border border-surface-border bg-surface-hover text-xs text-text-main font-medium"
                 />
                 <div className="flex justify-end">
                   <button

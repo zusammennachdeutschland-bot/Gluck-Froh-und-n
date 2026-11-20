@@ -601,7 +601,7 @@ export function reconcileGroupWeeklySessions(options: {
           groupId: group.id,
           action: groupRenamed ? 'group_renamed' : 'schedule_changed',
           previousZoomMeetingId: existing.zoomMeetingId,
-          previousJoinUrl: existing.zoomJoinUrl || existing.manualFallbackUrl,
+          previousJoinUrl: existing.zoomJoinUrl,
           previousTopic: existing.standardizedTitle,
           newTopic: standardizedTitle,
           reason: groupRenamed
@@ -643,7 +643,6 @@ export function reconcileGroupWeeklySessions(options: {
         zoomMeetingId: legacyZoomParsed.meetingId,
         zoomJoinUrl: hasLegacyUrl ? legacyZoomParsed.canonicalUrl : undefined,
         zoomPasscode: legacyZoomParsed.passcode,
-        manualFallbackUrl: hasLegacyUrl ? legacyZoomParsed.canonicalUrl : undefined,
         meetingSource: hasLegacyUrl ? 'legacy_migrated' : 'zoom_api',
         syncState: 'pending',
         calendarEventUid: generateStableCalendarUid(id),
@@ -779,7 +778,7 @@ export function resolveActiveWeeklySessionForLesson(params: {
       Boolean(s) &&
       !s.deleted &&
       s.groupId === groupId &&
-      Boolean((s.zoomJoinUrl || s.manualFallbackUrl || '').trim())
+      Boolean((s.zoomJoinUrl || '').trim())
   );
   if (candidates.length === 0) return null;
 
@@ -844,7 +843,7 @@ export function resolveActiveZoomLinkForLesson(params: {
   defaultZoomLink?: string | null;
 }): string {
   const activeSession = resolveActiveWeeklySessionForLesson(params);
-  const sessionUrl = (activeSession?.zoomJoinUrl || activeSession?.manualFallbackUrl || '').trim();
+  const sessionUrl = (activeSession?.zoomJoinUrl || '').trim();
   if (sessionUrl) {
     return sessionUrl;
   }

@@ -1199,6 +1199,16 @@ async function runCalendarOAuthFlowTests() {
     assert.equal(getGoogleCalendarConnectionState().lastErrorCode, 'ACCOUNT_SWITCHED');
     __simulateFirebaseAccountChangeForTesting(null);
 
+    console.log('7M. Testing fetch Illegal Invocation prevention with wrapped fetch invocation...');
+    const originalFetchRef = fetch;
+    try {
+      __setCalendarFetchForTesting(async (url, init) => originalFetchRef(url, init));
+      const res = await requestGoogleCalendarAccessToken(false);
+      assert.ok(res);
+    } catch (e: any) {
+      assert.equal(/Illegal invocation/.test(e?.message), false, 'Must not throw Illegal invocation');
+    }
+
     console.log('✅ All Google Calendar OAuth Flow Tests Passed!');
   } finally {
     __setNativeAuthTestAdapter(null);

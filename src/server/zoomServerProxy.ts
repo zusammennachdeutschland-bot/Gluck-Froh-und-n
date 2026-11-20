@@ -384,7 +384,7 @@ async function performZoomFetch(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
   try {
-    const fetcher: ZoomUpstreamFetchFn = customZoomUpstreamFetch || (fetch as any);
+    const fetcher: ZoomUpstreamFetchFn = customZoomUpstreamFetch || ((url, init) => fetch(url, init));
     const resp = await fetcher(url, {
       ...init,
       signal: controller.signal

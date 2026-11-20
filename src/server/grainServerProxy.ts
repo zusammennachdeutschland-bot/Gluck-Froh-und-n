@@ -861,38 +861,13 @@ async function executeUpstreamGrainRequest(options: {
         headers['Content-Type'] = 'application/json';
       }
 
-      if (customUpstreamFetch) {
-        const res = await customUpstreamFetch(options.url, {
-          method: options.method,
-          headers,
-          body: options.bodyString,
-          signal: controller.signal
-        });
-        // Part 3 (FIX-2E): Never follow redirects with Authorization header
-        if (res.status >= 300 && res.status < 400) {
-          return {
-            httpStatus: 502,
-            bodyText: JSON.stringify({
-              error: 'Upstream redirect refused for security (Authorization header is never forwarded across redirects).',
-              code: 'REDIRECT_FORBIDDEN'
-            })
-          };
-        }
-        const text = await res.text();
-        return {
-          httpStatus: res.status,
-          retryAfter: res.headers?.['retry-after'] || res.headers?.['Retry-After'],
-          bodyText: text
-        };
-      }
-
-      const response = await fetch(options.url, {
+      const upstreamFetch = customUpstreamFetch || ((url, init) => fetch(url, init));
+      const response = await upstreamFetch(options.url, {
         method: options.method,
         headers,
         body: options.bodyString,
-        redirect: 'manual',
         signal: controller.signal
-      });
+      } as any);
 
       // Part 3 (FIX-2E): Reject 3xx redirects immediately without following
       if (response.status >= 300 && response.status < 400) {
@@ -906,7 +881,7 @@ async function executeUpstreamGrainRequest(options: {
       }
 
       const bodyText = await response.text();
-      const retryAfter = response.headers.get('retry-after') || undefined;
+      const retryAfter = typeof response.headers?.get === 'function' ? response.headers.get('retry-after') || undefined : undefined;
 
       if ((response.status === 502 || response.status === 503 || response.status === 504) && attempt < maxAttempts) {
         continue;

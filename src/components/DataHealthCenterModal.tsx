@@ -287,7 +287,7 @@ export const DataHealthCenterModal: React.FC<DataHealthCenterModalProps> = ({ on
         groupsWithoutPrice.push(g);
       }
       const hasStandardizedSessionLink = (groupWeeklySessions || []).some(
-        (s) => !s.deleted && s.groupId === g.id && Boolean((s.zoomJoinUrl || s.manualFallbackUrl || '').trim())
+        (s) => !s.deleted && s.groupId === g.id && Boolean((s.zoomJoinUrl || '').trim())
       );
       if (g.type === 'online' && !hasStandardizedSessionLink && (!g.zoomLink || g.zoomLink.trim() === '')) {
         groupsWithoutZoomLink.push(g);

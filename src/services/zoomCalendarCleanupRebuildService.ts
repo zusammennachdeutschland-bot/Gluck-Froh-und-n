@@ -544,8 +544,7 @@ function collectHistoricalZoomReferences(params: {
     const g = groupById.get(s.groupId);
     const ids = [
       s.zoomMeetingId,
-      s.zoomJoinUrl ? extractNumericZoomMeetingId(s.zoomJoinUrl) : undefined,
-      s.manualFallbackUrl ? extractNumericZoomMeetingId(s.manualFallbackUrl) : undefined
+      s.zoomJoinUrl ? extractNumericZoomMeetingId(s.zoomJoinUrl) : undefined
     ].filter((v): v is string => Boolean(v));
     for (const rawId of ids) {
       const clean = rawId.replace(/[^0-9]/g, '');
@@ -555,7 +554,6 @@ function collectHistoricalZoomReferences(params: {
       }
     }
     if (s.zoomJoinUrl) historicalUrls.add(s.zoomJoinUrl);
-    if (s.manualFallbackUrl) historicalUrls.add(s.manualFallbackUrl);
   }
 
   for (const r of params.records || []) {
@@ -829,7 +827,7 @@ function createRecoverySnapshotFromPreview(
       sessionId: item.sessionId,
       sessionCode: item.sessionCode,
       previousZoomMeetingId: full?.zoomMeetingId || item.previousZoomMeetingId,
-      previousJoinUrl: full?.zoomJoinUrl || full?.manualFallbackUrl || item.previousZoomUrl,
+      previousJoinUrl: full?.zoomJoinUrl || item.previousZoomUrl,
       previousZoomPasscode: full?.zoomPasscode,
       previousGoogleCalendarEventId: full?.googleCalendarEventId,
       previousGoogleCalendarIcalUid: full?.googleCalendarIcalUid,
@@ -1539,12 +1537,12 @@ export async function executeZoomCalendarCleanupRebuild(
 
       for (const s of workingSessions) {
         if (!targetSessionIds.has(s.id)) continue;
-        if (s.zoomMeetingId || s.zoomJoinUrl || s.manualFallbackUrl) {
+        if (s.zoomMeetingId || s.zoomJoinUrl) {
           workingHistory = appendZoomHistoryEntry(workingHistory, {
             session: s,
             action: 'cleanup_archived',
             previousZoomMeetingId: s.zoomMeetingId,
-            previousJoinUrl: s.zoomJoinUrl || s.manualFallbackUrl,
+            previousJoinUrl: s.zoomJoinUrl,
             previousTopic: s.standardizedTitle,
             reason: operation.cleanupOnly
               ? `Archived before Clean Only (${operation.operationId})`
@@ -1568,7 +1566,6 @@ export async function executeZoomCalendarCleanupRebuild(
           zoomMeetingId: undefined,
           zoomJoinUrl: undefined,
           zoomPasscode: undefined,
-          manualFallbackUrl: undefined,
           googleCalendarEventId: undefined,
           googleCalendarIcalUid: undefined,
           calendarSyncStatus: 'not_synced',

@@ -677,7 +677,7 @@ export async function verifyGoogleCalendarAuthorization(
   status?: number;
   error?: string;
 }> {
-  const fetchFn = customCalendarFetchForTesting || fetch;
+  const fetchFn = (...args: Parameters<typeof fetch>) => (customCalendarFetchForTesting || fetch)(...args);
   recordCalendarOAuthStage('calendar_oauth_verify_calendar_start');
   try {
     const res = await fetchFn(
@@ -1765,7 +1765,7 @@ export function generateSessionsIcsContent(
     const dtEnd = formatIcsLocalDateTime(dateYmd, s.startTime, duration);
     const byDay = toRRuleByDay(s.weekday);
     const interval = s.recurrence === 'biweekly_a' || s.recurrence === 'biweekly_b' ? 2 : 1;
-    const joinUrl = s.zoomJoinUrl || s.manualFallbackUrl || '';
+    const joinUrl = s.zoomJoinUrl || '';
 
     const descriptionLines = [
       `Group: ${s.groupNameSnapshot}`,
@@ -1861,7 +1861,7 @@ export function buildGoogleCalendarSyncPreview(
       durationMinutes: s.durationMinutes,
       timezone: s.timezone || DEFAULT_ZOOM_TIMEZONE,
       recurrence: s.recurrence,
-      zoomJoinUrl: s.zoomJoinUrl || s.manualFallbackUrl,
+      zoomJoinUrl: s.zoomJoinUrl,
       action
     };
   });
@@ -1882,7 +1882,7 @@ export function buildGoogleCalendarSyncPreview(
           durationMinutes: s.durationMinutes,
           timezone: s.timezone || DEFAULT_ZOOM_TIMEZONE,
           recurrence: s.recurrence,
-          zoomJoinUrl: s.zoomJoinUrl || s.manualFallbackUrl,
+          zoomJoinUrl: s.zoomJoinUrl,
           action: 'delete' as const
         }))
     : [];
@@ -2075,7 +2075,7 @@ export async function syncSessionsToGoogleCalendar(params: {
   retryDelayMs?: number;
   onProgress?: (completed: number, total: number, title: string) => void;
 }): Promise<CalendarSyncResult> {
-  const fetchFn = customCalendarFetchForTesting || fetch;
+  const fetchFn = (...args: Parameters<typeof fetch>) => (customCalendarFetchForTesting || fetch)(...args);
   const calendarId = encodeURIComponent(params.calendarId || 'primary');
   const workingSessions = [...(params.allSessions || [])];
 
@@ -2145,7 +2145,7 @@ export async function syncSessionsToGoogleCalendar(params: {
     const endTimeIsoLocal = addMinutesToIsoWallClock(startTimeIsoLocal, Math.max(15, Number(session.durationMinutes) || 60));
     const byDay = toRRuleByDay(session.weekday);
     const interval = session.recurrence === 'biweekly_a' || session.recurrence === 'biweekly_b' ? 2 : 1;
-    const joinUrl = session.zoomJoinUrl || session.manualFallbackUrl || '';
+    const joinUrl = session.zoomJoinUrl || '';
 
     const description = [
       `Glück Weekly Online Session`,
@@ -2862,7 +2862,7 @@ export async function listPrimaryGoogleCalendarEventsForCleanup(params: {
   maxRetries?: number;
   retryDelayMs?: number;
 }): Promise<CalendarListCleanupEventsResult> {
-  const fetchFn = customCalendarFetchForTesting || fetch;
+  const fetchFn = (...args: Parameters<typeof fetch>) => (customCalendarFetchForTesting || fetch)(...args);
   const calendarId = encodeURIComponent(params.calendarId || 'primary');
   const maxPages = Math.max(1, Math.min(100, params.maxPages ?? 50));
   const maxRetries = Math.max(0, Math.min(4, params.maxRetries ?? 3));
@@ -3196,7 +3196,7 @@ export async function deleteGoogleCalendarEventForCleanup(params: {
   maxRetries?: number;
   retryDelayMs?: number;
 }): Promise<CalendarDeleteEventResult> {
-  const fetchFn = customCalendarFetchForTesting || fetch;
+  const fetchFn = (...args: Parameters<typeof fetch>) => (customCalendarFetchForTesting || fetch)(...args);
   const calendarId = encodeURIComponent(params.calendarId || 'primary');
   const eventId = String(params.eventId || '').trim();
   if (!eventId) {

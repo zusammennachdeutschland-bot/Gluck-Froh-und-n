@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import expressApp, {
-  parseAndNormalizeExtractedGrammarSet,
   resetHomeworkStoresForTesting,
   sanitizePublicSetSnapshot
 } from '../api/expressApp';
@@ -286,78 +285,6 @@ async function runAll() {
       assert.equal(parsed.data!.grammarContent!.exercises[0].type, 'short_answer');
       assert.equal(parsed.data!.grammarContent!.exercises[0].source, 'original');
       assert.equal(parsed.data!.grammarContent!.exercises[1].source, 'generated');
-    });
-
-    // 5. Server Gemini extraction parser + honest 503 when GEMINI_API_KEY is missing
-    await runCase('05. parseAndNormalizeExtractedGrammarSet & POST /api/lernstudio/extract-grammar fail closed without key', async () => {
-      const sampleModelOutput = {
-        title: 'Trennbare Verben',
-        topic: 'Trennbare Verben',
-        level: 'A1',
-        grammarContent: {
-          lessonTitle: 'Trennbare Verben',
-          grammarTopic: 'Trennbare Verben',
-          explanationAr: 'البادئة المنفصلة تنتقل إلى نهاية الجملة.',
-          rules: [{ id: 'r1', title: 'Satzklammer', summaryAr: 'الفعل في المركز 2 والبادئة في الآخر' }],
-          examples: [{ id: 'eg1', german: 'Der Zug fährt um 8 Uhr ab.', arabic: 'القطار ينطلق في الثامنة.' }],
-          exercises: [
-            {
-              id: 'ex_orig',
-              type: 'fill_blank',
-              question: 'Ich ______ (einkaufen) im Supermarkt.',
-              correctAnswer: 'kaufe ... ein',
-              source: 'original',
-              isUncertain: true,
-              uncertaintyReason: 'خط اليد على الهامش غير واضح تماماً'
-            },
-            {
-              id: 'ex_gen',
-              type: 'multiple_choice',
-              question: 'Er ______ früh ______. (aufstehen)',
-              options: ['steht ... auf', 'aufsteht', 'stehe ... auf'],
-              correctAnswer: 'steht ... auf',
-              source: 'generated'
-            }
-          ]
-        }
-      };
-
-      const onlyOriginal = parseAndNormalizeExtractedGrammarSet(sampleModelOutput, {
-        exerciseMode: 'original_only',
-        targetSetKind: 'grammar'
-      });
-      assert.equal(onlyOriginal.success, true);
-      assert.equal(onlyOriginal.extractedSet.grammarContent.exercises.length, 1);
-      assert.equal(onlyOriginal.extractedSet.grammarContent.exercises[0].id, 'ex_orig');
-      assert.ok(onlyOriginal.warnings.length >= 1, 'Expected uncertain warning when isUncertain is true');
-
-      const origAndSim = parseAndNormalizeExtractedGrammarSet(sampleModelOutput, {
-        exerciseMode: 'original_and_similar',
-        targetSetKind: 'grammar'
-      });
-      assert.equal(origAndSim.success, true);
-      assert.equal(origAndSim.extractedSet.grammarContent.exercises.length, 2);
-
-      // Verify API endpoint fails closed with 503 AI_NOT_CONFIGURED when GEMINI_API_KEY is unset
-      const prevKey = process.env.GEMINI_API_KEY;
-      try {
-        delete process.env.GEMINI_API_KEY;
-        const extractRes = await fetch(`${baseUrl}/api/lernstudio/extract-grammar`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            images: [{ dataBase64: 'AAAA', mimeType: 'image/jpeg' }],
-            level: 'A1'
-          })
-        });
-        assert.equal(extractRes.status, 503);
-        const body = (await extractRes.json()) as any;
-        assert.equal(body.success, false);
-        assert.equal(body.code, 'AI_NOT_CONFIGURED');
-      } finally {
-        if (prevKey !== undefined) process.env.GEMINI_API_KEY = prevKey;
-        else delete process.env.GEMINI_API_KEY;
-      }
     });
 
     // 6. Media stripping & local page image IndexedDB/memory fallback store

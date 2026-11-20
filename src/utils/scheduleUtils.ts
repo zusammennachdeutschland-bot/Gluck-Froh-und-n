@@ -380,7 +380,7 @@ export function getProjectedLessonsForRange(
                 s &&
                 !s.deleted &&
                 s.groupId === group.id &&
-                Boolean((s.zoomJoinUrl || s.manualFallbackUrl || '').trim())
+                Boolean((s.zoomJoinUrl || '').trim())
             )
             .sort((a, b) => {
               const exactA = a.weekday === projectedWeekday && a.startTime === sessionTime ? 2 : a.weekday === projectedWeekday ? 1 : 0;
@@ -390,7 +390,7 @@ export function getProjectedLessonsForRange(
               const srcB = b.meetingSource === 'zoom_api' ? 1 : 0;
               return srcB - srcA;
             })[0];
-          const resolvedSessionLink = (matchingSession?.zoomJoinUrl || matchingSession?.manualFallbackUrl || '').trim();
+          const resolvedSessionLink = (matchingSession?.zoomJoinUrl || '').trim();
 
           projected.push({
             id: `l_auto_${group.id}_${dateStr}_${sessionTime.replace(':', '')}`,
