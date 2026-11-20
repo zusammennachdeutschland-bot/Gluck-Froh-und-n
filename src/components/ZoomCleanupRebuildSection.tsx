@@ -20,7 +20,8 @@ import { useApp } from '../context/AppContext';
 import {
   GoogleCalendarConnectionState,
   getInMemoryGoogleCalendarToken,
-  requestGoogleCalendarAccessToken
+  requestGoogleCalendarAccessToken,
+  deleteGoogleCalendarEventForCleanup
 } from '../services/calendarSyncService';
 import {
   CleanupRebuildOperationRecord,
@@ -58,6 +59,35 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [preview, setPreview] = useState<CleanupRebuildPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [deletingEventId, setDeletingEventId] = useState<string | null>(null);
+
+  const handleDeleteAmbiguousEvent = async (eventId: string) => {
+    const token = getInMemoryGoogleCalendarToken();
+    if (!token) {
+      triggerToast(_t('يرجى توصيل تقويم Google أولاً', 'Please connect Google Calendar first'));
+      return;
+    }
+    setDeletingEventId(eventId);
+    try {
+      const res = await deleteGoogleCalendarEventForCleanup({
+        eventId,
+        accessToken: token,
+        calendarId: 'primary',
+        maxRetries: 3,
+        retryDelayMs: 1000
+      });
+      if (res.ok) {
+        triggerToast(_t('تم حذف الحدث بنجاح', 'Calendar event deleted successfully'));
+        await handlePreviewCleanup();
+      } else {
+        triggerToast(res.error || _t('تعذر حذف الحدث', 'Failed to delete event'));
+      }
+    } catch (err: any) {
+      triggerToast(err?.message || _t('تعذر حذف الحدث', 'Failed to delete event'));
+    } finally {
+      setDeletingEventId(null);
+    }
+  };
 
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [confirmMode, setConfirmMode] = useState<'clean_and_rebuild' | 'clean_only'>('clean_and_rebuild');
@@ -474,14 +504,27 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
 
           {/* Manual Resolution / Live Meetings Warning Box */}
           {preview.manualResolutionItems.length > 0 && (
-            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 space-y-1 text-xs">
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 space-y-2 text-xs">
               <div className="font-bold text-amber-800 dark:text-amber-300">
                 {_t('سجلات تتطلب مراجعة يدوية:', 'Items Requiring Attention:')}
               </div>
-              <ul className="space-y-1 list-disc list-inside text-amber-900 dark:text-amber-200 text-[11px]">
+              <ul className="space-y-1.5 list-none text-amber-900 dark:text-amber-200 text-[11px]">
                 {preview.manualResolutionItems.map((item, idx) => (
-                  <li key={`${item.category}_${item.id}_${idx}`}>
-                    <span className="font-semibold">{item.title}:</span> {item.detail}
+                  <li key={`${item.category}_${item.id}_${idx}`} className="flex items-center justify-between gap-2 bg-amber-500/5 p-2 rounded-lg border border-amber-500/15">
+                    <div className="min-w-0 flex-1">
+                      <span className="font-bold">{item.title}:</span> {item.detail}
+                    </div>
+                    {item.category === 'ambiguous_calendar_event' && (
+                      <button
+                        type="button"
+                        disabled={deletingEventId === item.id}
+                        onClick={() => handleDeleteAmbiguousEvent(item.id)}
+                        className="inline-flex items-center gap-1 min-h-[30px] px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 font-bold text-[11px] transition-colors cursor-pointer shrink-0 disabled:opacity-50"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>{_t('حذف', 'Delete')}</span>
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>

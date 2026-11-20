@@ -5,6 +5,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -241,6 +244,14 @@ jobs:
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           overwrite: true
+
+      - name: Publish GitHub Release APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-apk
+          name: Latest Android APK
+          prerelease: true
+          files: android/app/build/outputs/apk/release/app-release.apk
 
       - name: Produce Build Summary
         run: |
