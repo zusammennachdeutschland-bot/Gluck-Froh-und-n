@@ -1,10 +1,11 @@
 import { DevicePresenceState, PairedPeer } from '../../types';
 import { sendHeartbeat } from './syncClient';
+import { isLegacyUnmigratedPeer } from './lanVault';
 
 type PresenceListener = (presences: Map<string, DevicePresenceState>) => void;
 
 const HEARTBEAT_INTERVAL_MS = 12000;
-const PRESENCE_EXPIRATION_MS = 28000;
+const PRESENCE_EXPIRATION_MS = 30000;
 
 class PresenceService {
   private activePresences: Map<string, DevicePresenceState> = new Map();
@@ -28,10 +29,8 @@ class PresenceService {
     if (this.isRunning) return;
     this.isRunning = true;
 
-    // Run initial pulse
     this.pulse(getPeers);
 
-    // Schedule regular heartbeat check
     this.heartbeatTimer = setInterval(() => {
       this.pulse(getPeers);
     }, HEARTBEAT_INTERVAL_MS);
@@ -77,61 +76,64 @@ class PresenceService {
     const peers = getPeers() || [];
     const now = Date.now();
 
-    // 1. Check existing presences for expiration
     let changed = false;
-    for (const [id, state] of this.activePresences.entries()) {
-      if (state.isOnline && (now - state.lastHeartbeat) > PRESENCE_EXPIRATION_MS) {
+    for (const [, state] of this.activePresences.entries()) {
+      if (state.isOnline && now - state.lastHeartbeat > PRESENCE_EXPIRATION_MS) {
         state.isOnline = false;
         state.latencyMs = undefined;
         changed = true;
       }
     }
 
-    // 2. Pulse heartbeats to all paired peers
-    await Promise.all(peers.map(async (peer) => {
-      if (!peer.deviceId && !peer.lastKnownIp) return;
-
-      const targetIdentifier = peer.deviceId || peer.lastKnownIp;
-
-      try {
-        let result = await sendHeartbeat(targetIdentifier, peer.port || 0);
-
-        // Fallback for legacy peers if deviceId failed
-        if (!result && peer.lastKnownIp && peer.lastKnownIp !== peer.deviceId) {
-          result = await sendHeartbeat(peer.lastKnownIp, peer.port || 0);
+    await Promise.all(
+      peers.map(async (peer) => {
+        if (!peer.deviceId || isLegacyUnmigratedPeer(peer)) {
+          const offlineState: DevicePresenceState = {
+            deviceId: peer.deviceId,
+            deviceName: peer.deviceName,
+            isOnline: false,
+            lastHeartbeat: peer.lastHeartbeat || 0,
+            protocolVersion: peer.protocolVersion,
+            supportedFeatures: peer.capabilities
+          };
+          this.activePresences.set(peer.deviceId, offlineState);
+          return;
         }
 
-        const presence = this.activePresences.get(peer.deviceId) || {
-          deviceId: peer.deviceId,
-          deviceName: peer.deviceName,
-          isOnline: false,
-          lastHeartbeat: 0,
-          protocolVersion: peer.protocolVersion,
-          supportedFeatures: peer.capabilities
-        };
+        try {
+          const result = await sendHeartbeat(peer);
 
-        if (result && typeof result.latencyMs === 'number') {
-          presence.isOnline = true;
-          presence.latencyMs = result.latencyMs;
-          presence.lastHeartbeat = Date.now();
-          presence.deviceName = peer.deviceName || presence.deviceName;
-        } else {
-          // If ping failed, mark offline
-          presence.isOnline = false;
-          presence.latencyMs = undefined;
-        }
+          const presence: DevicePresenceState = this.activePresences.get(peer.deviceId) || {
+            deviceId: peer.deviceId,
+            deviceName: peer.deviceName,
+            isOnline: false,
+            lastHeartbeat: 0,
+            protocolVersion: peer.protocolVersion,
+            supportedFeatures: peer.capabilities
+          };
 
-        this.activePresences.set(peer.deviceId, presence);
-        changed = true;
-      } catch {
-        const presence = this.activePresences.get(peer.deviceId);
-        if (presence && presence.isOnline) {
-          presence.isOnline = false;
-          presence.latencyMs = undefined;
+          if (result.ok) {
+            presence.isOnline = true;
+            presence.latencyMs = result.latencyMs;
+            presence.lastHeartbeat = Date.now();
+            presence.deviceName = peer.deviceName || presence.deviceName;
+          } else {
+            presence.isOnline = false;
+            presence.latencyMs = undefined;
+          }
+
+          this.activePresences.set(peer.deviceId, presence);
           changed = true;
+        } catch {
+          const presence = this.activePresences.get(peer.deviceId);
+          if (presence && presence.isOnline) {
+            presence.isOnline = false;
+            presence.latencyMs = undefined;
+            changed = true;
+          }
         }
-      }
-    }));
+      })
+    );
 
     if (changed) {
       this.notify();
@@ -139,15 +141,13 @@ class PresenceService {
   }
 
   public pulseHeartbeats() {
-    // Immediate wake up trigger
     if (this.isRunning) {
       this.notify();
     }
   }
 
   private handleUnload() {
-    // When tab/browser closes, mark all local presence sessions as terminated
-    for (const [_, state] of this.activePresences.entries()) {
+    for (const [, state] of this.activePresences.entries()) {
       state.isOnline = false;
     }
     this.notify();

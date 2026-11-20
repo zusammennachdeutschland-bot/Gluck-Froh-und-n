@@ -141,13 +141,19 @@ export function adaptOutboundPayloadForPeer(
 }
 
 /**
- * Strictly authenticates a paired peer by its non-empty pairingToken (no deviceId fallback).
+ * Finds a registered paired peer that has not been flagged for re-pairing.
+ * Raw auth token verification runs in platform secure storage (Electron main / AndroidKeyStore).
  */
 export function findAuthenticatedPeer(
   pairedPeers: PairedPeer[] | undefined,
-  token: string | undefined
+  deviceIdOrLegacyToken: string | undefined
 ): PairedPeer | undefined {
-  if (!token || typeof token !== 'string' || !token.trim()) return undefined;
-  return (pairedPeers || []).find(p => Boolean(p.pairingToken) && p.pairingToken === token);
+  if (!deviceIdOrLegacyToken || typeof deviceIdOrLegacyToken !== 'string' || !deviceIdOrLegacyToken.trim()) {
+    return undefined;
+  }
+  const clean = deviceIdOrLegacyToken.trim();
+  return (pairedPeers || []).find(
+    (p) => !p.requiresRePairing && (p.deviceId === clean || (Boolean(p.pairingToken) && p.pairingToken === clean))
+  );
 }
 

@@ -143,7 +143,7 @@ export function runSyncStressBenchmark(): BenchmarkMetrics {
   // 5. Measure Outbox Calculation
   const t2 = performance.now();
   const outbox = calculatePendingOutbox(watermarkTable, localData, [
-    { deviceId: 'peer_target', deviceName: 'Peer 1', lastKnownIp: '123456', port: 0, pairingToken: 't1', lastSyncedTimestamp: 0, isOnline: true }
+    { deviceId: 'peer_target', deviceName: 'Peer 1', lastKnownIp: '192.168.1.5', port: 8765, lastSyncedTimestamp: 0, isOnline: true }
   ]);
   const outboxCalculationTimeMs = Math.round((performance.now() - t2) * 100) / 100;
 

@@ -37,5 +37,31 @@ contextBridge.exposeInMainWorld('electronBridge', {
     getMeeting: (meetingId) => ipcRenderer.invoke('zoom:getMeeting', { meetingId: String(meetingId || '') }),
     deleteMeeting: (meetingId) => ipcRenderer.invoke('zoom:deleteMeeting', { meetingId: String(meetingId || '') }),
     listMeetings: (options) => ipcRenderer.invoke('zoom:listMeetings', options || {})
+  },
+  lanSync: {
+    getHostStatus: () => ipcRenderer.invoke('lanSync:getHostStatus'),
+    startHost: (payload) => ipcRenderer.invoke('lanSync:startHost', payload || {}),
+    stopHost: () => ipcRenderer.invoke('lanSync:stopHost'),
+    regeneratePairingCode: (payload) => ipcRenderer.invoke('lanSync:regeneratePairingCode', payload || {}),
+    listPairedPeers: () => ipcRenderer.invoke('lanSync:listPairedPeers'),
+    revokePairedPeer: (peerDeviceId) => ipcRenderer.invoke('lanSync:revokePairedPeer', { peerDeviceId: String(peerDeviceId || '') }),
+    hasStoredCredentials: (peerDeviceId) => ipcRenderer.invoke('lanSync:hasStoredCredentials', { peerDeviceId: String(peerDeviceId || '') }),
+    discoverHosts: (timeoutMs) => ipcRenderer.invoke('lanSync:discoverHosts', { timeoutMs }),
+    testConnection: (payload) => ipcRenderer.invoke('lanSync:testConnection', payload),
+    pairClient: (payload) => ipcRenderer.invoke('lanSync:pairClient', payload),
+    requestPaired: (payload) => ipcRenderer.invoke('lanSync:requestPaired', payload),
+    sendRpcResponse: (payload) => ipcRenderer.invoke('lanSync:rpcResponse', payload),
+    onHostEvent: (handler) => {
+      if (typeof handler !== 'function') return () => {};
+      const listener = (_event, payload) => handler(payload);
+      ipcRenderer.on('lanSync:hostEvent', listener);
+      return () => ipcRenderer.removeListener('lanSync:hostEvent', listener);
+    },
+    onRpcRequest: (handler) => {
+      if (typeof handler !== 'function') return () => {};
+      const listener = (_event, payload) => handler(payload);
+      ipcRenderer.on('lanSync:rpcRequest', listener);
+      return () => ipcRenderer.removeListener('lanSync:rpcRequest', listener);
+    }
   }
 });

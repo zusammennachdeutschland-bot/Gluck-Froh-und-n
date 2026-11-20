@@ -1,11 +1,23 @@
 import React, { useState } from 'react';
-import { 
-  Monitor, Smartphone, Tablet, RefreshCw, MoreVertical, 
-  Trash2, Edit2, Shield, Check, Wifi, Clock, Activity, 
-  ArrowRight, ShieldCheck, AlertCircle, Plus, Sparkles, X
+import {
+  Monitor,
+  Smartphone,
+  Tablet,
+  RefreshCw,
+  MoreVertical,
+  Trash2,
+  Edit2,
+  Shield,
+  Check,
+  ShieldCheck,
+  AlertTriangle,
+  Plus,
+  X,
+  Lock
 } from 'lucide-react';
 import { PairedPeer, DevicePresenceState } from '../../types';
 import { CopyableBlock } from './CopyableBlock';
+import { isLegacyUnmigratedPeer } from '../../services/sync/lanVault';
 import { useApp } from '../../context/AppContext';
 
 interface LinkedDevicesHubProps {
@@ -17,7 +29,7 @@ interface LinkedDevicesHubProps {
   onUnpair: (peerId: string) => void;
   onSyncPeer: (peerId: string) => Promise<void>;
   onForceSyncPeer: (peerId: string) => Promise<void>;
-  onOpenPairing: () => void;
+  onOpenPairing: (prefillPeer?: PairedPeer) => void;
   id?: string;
 }
 
@@ -45,12 +57,12 @@ export const LinkedDevicesHub: React.FC<LinkedDevicesHubProps> = ({
   const getDeviceIcon = (name: string) => {
     const lower = name.toLowerCase();
     if (lower.includes('phone') || lower.includes('mobile') || lower.includes('android') || lower.includes('iphone')) {
-      return <Smartphone className="w-5 h-5" />;
+      return <Smartphone className="w-4 h-4" />;
     }
     if (lower.includes('tablet') || lower.includes('ipad')) {
-      return <Tablet className="w-5 h-5" />;
+      return <Tablet className="w-4 h-4" />;
     }
-    return <Monitor className="w-5 h-5" />;
+    return <Monitor className="w-4 h-4" />;
   };
 
   const handleLocalRename = () => {
@@ -81,206 +93,248 @@ export const LinkedDevicesHub: React.FC<LinkedDevicesHubProps> = ({
   };
 
   return (
-    <div id={id} className="space-y-6">
-      {/* This Device Card */}
-      <div>
-        <span className="text-xs font-black uppercase tracking-wider text-text-muted block mb-2">
-          {_t('هذا الجهاز (الهوية المحلية)', 'This Device (Host Identity)', 'Dieses Gerät (Host-Identität)')}
-        </span>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl border border-primary/20 bg-primary-soft">
-          <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-primary text-white flex items-center justify-center shadow-md shrink-0">
-              <Monitor className="w-6 h-6" />
-            </div>
-            <div>
-              {editingLocal ? (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={localNameInput}
-                    onChange={(e) => setLocalNameInput(e.target.value)}
-                    className="px-3 py-1.5 text-sm rounded-xl border border-surface-border bg-surface text-text-main focus:outline-none focus:ring-2 focus:ring-primary"
-                    onKeyDown={(e) => e.key === 'Enter' && handleLocalRename()}
-                    autoFocus
-                  />
-                  <button type="button" onClick={handleLocalRename} className="p-1.5 text-primary hover:bg-surface rounded-lg cursor-pointer">
-                    <Check className="w-4 h-4" />
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <h4 className="text-sm font-black text-text-main">{localDevice.name}</h4>
-                  <button 
-                    type="button" 
-                    onClick={() => { setEditingLocal(true); setLocalNameInput(localDevice.name); }} 
-                    className="text-text-muted hover:text-primary transition-colors cursor-pointer p-1"
-                    title={_t('إعادة تسمية هذا الجهاز', 'Rename this device', 'Dieses Gerät umbenennen')}
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              )}
-              <span className="text-xs font-mono text-text-muted">
-                {_t('معرف الجهاز:', 'Device ID:', 'Geräte-ID:')} {localDevice.id.slice(0, 12)}...
-              </span>
-            </div>
+    <div id={id} className="space-y-5">
+      {/* This Device Identity Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl border border-primary/20 bg-primary-soft">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-primary text-primary-fg flex items-center justify-center shrink-0">
+            <Monitor className="w-5 h-5" />
           </div>
-
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-primary text-white shadow-xs">
-              <ShieldCheck className="w-4 h-4" />
-              {_t('الجهاز الرئيسي', 'Primary Node', 'Haupt-Knoten')}
+          <div>
+            {editingLocal ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={localNameInput}
+                  onChange={(e) => setLocalNameInput(e.target.value)}
+                  className="px-2.5 py-1 text-sm rounded-lg border border-surface-border bg-surface text-text-main focus:outline-none focus:ring-2 focus:ring-primary"
+                  onKeyDown={(e) => e.key === 'Enter' && handleLocalRename()}
+                  autoFocus
+                />
+                <button type="button" onClick={handleLocalRename} className="p-1 text-primary cursor-pointer">
+                  <Check className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <h4 className="text-sm font-bold text-text-main">{localDevice.name}</h4>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingLocal(true);
+                    setLocalNameInput(localDevice.name);
+                  }}
+                  className="text-text-muted hover:text-primary p-1 cursor-pointer"
+                  title={_t('تعديل الاسم', 'Rename Device', 'Umbenennen')}
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+            <span className="text-[11px] font-mono text-text-muted">
+              ID: {localDevice.id.slice(0, 12)}
             </span>
           </div>
         </div>
+
+        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-primary">
+          <ShieldCheck className="w-4 h-4" />
+          {_t('الجهاز المحلي', 'Local Device', 'Dieses Gerät')}
+        </span>
       </div>
 
-      {/* Linked Devices Section */}
-      <div className="space-y-3">
+      {/* Paired Devices List */}
+      <div className="space-y-2.5">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-black uppercase tracking-wider text-text-muted">
-            {_t('الأجهزة الموثوقة والمرتبطة', 'Trusted & Linked Devices', 'Verknüpfte Geräte')} ({pairedPeers.length})
+          <span className="text-xs font-bold text-text-muted uppercase tracking-wider">
+            {_t('الأجهزة المقترنة عبر Wi-Fi', 'Paired LAN Devices', 'Gekoppelte LAN-Geräte')} ({pairedPeers.length})
           </span>
           <button
             type="button"
-            onClick={onOpenPairing}
-            className="text-xs font-bold text-primary hover:underline flex items-center gap-1.5 cursor-pointer"
+            onClick={() => onOpenPairing()}
+            className="text-xs font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>{_t('ربط جهاز جديد', 'Link New Device', 'Neues Gerät koppeln')}</span>
+            <span>{_t('إضافة جهاز', 'Pair Device', 'Gerät koppeln')}</span>
           </button>
         </div>
 
         {pairedPeers.length === 0 ? (
-          <div className="p-8 text-center rounded-2xl border border-dashed border-surface-border bg-surface">
-            <Smartphone className="w-10 h-10 text-text-muted mx-auto mb-3" />
-            <p className="text-sm font-bold text-text-main">{_t('لا توجد أجهزة متصلة بعد', 'No linked companion devices', 'Keine verknüpften Geräte')}</p>
-            <p className="text-xs text-text-muted mt-1 max-w-sm mx-auto">
-              {_t('قم باقتران هاتفك أو جهازك اللوحي لمزامنة البيانات ثنائياً فوراً.', 'Pair your tablet or mobile phone for instant bidirectional syncing.', 'Koppeln Sie Ihr Smartphone oder Tablet für sofortige Synchronisation.')}
-            </p>
+          <div className="p-6 text-center rounded-2xl border border-dashed border-surface-border bg-surface space-y-3">
+            <Smartphone className="w-8 h-8 text-text-muted mx-auto" />
+            <div>
+              <p className="text-sm font-bold text-text-main">{_t('لا توجد أجهزة مقترنة بعد', 'No paired devices yet', 'Keine gekoppelten Geräte')}</p>
+              <p className="text-xs text-text-muted mt-0.5">
+                {_t('ابحث على شبكة Wi-Fi أو أدخل عنوان IP والمنفذ للاتصال.', 'Search over Wi-Fi or enter host IP & pairing code manually.', 'Im WLAN suchen oder manuell verbinden.')}
+              </p>
+            </div>
             <button
               type="button"
-              onClick={onOpenPairing}
-              className="mt-4 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+              onClick={() => onOpenPairing()}
+              className="px-4 py-2 rounded-xl bg-primary hover:bg-primary-hover text-primary-fg text-xs font-bold cursor-pointer"
             >
-              <Sparkles className="w-4 h-4" />
-              <span>{_t('اقتران جهاز الآن', 'Pair Device Now', 'Jetzt Gerät koppeln')}</span>
-              <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
+              {_t('بحث وربط جهاز', 'Find & Pair Device', 'Gerät suchen & koppeln')}
             </button>
           </div>
         ) : (
-          <div className="space-y-3">
-            {pairedPeers.map(peer => {
+          <div className="space-y-2.5">
+            {pairedPeers.map((peer) => {
               const presence = devicePresences.get(peer.deviceId);
-              const isOnline = presence ? presence.isOnline : false;
-              const latency = presence?.latencyMs;
+              const needsRePair = isLegacyUnmigratedPeer(peer);
+              const isOnline = !needsRePair && (presence ? presence.isOnline : false);
+              const latency = presence?.latencyMs ?? peer.latencyMs;
               const isSyncing = syncingPeerId === peer.deviceId;
 
               return (
                 <div
                   key={peer.deviceId}
-                  className="p-4 rounded-2xl border border-surface-border bg-surface flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all hover:shadow-xs"
+                  className="p-3.5 rounded-2xl border border-surface-border bg-surface flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                 >
-                  <div className="flex items-center gap-3.5">
-                    <div className="relative w-12 h-12 rounded-2xl bg-surface-hover text-text-main flex items-center justify-center border border-surface-border shrink-0">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="relative w-10 h-10 rounded-xl bg-surface-hover text-text-main flex items-center justify-center border border-surface-border shrink-0">
                       {getDeviceIcon(peer.deviceName)}
-                      <span 
-                        className={`absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-surface ${
-                          isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-text-muted/40'
-                        }`} 
+                      <span
+                        className={`absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 border-surface ${
+                          needsRePair ? 'bg-amber-500' : isOnline ? 'bg-emerald-500' : 'bg-text-muted/40'
+                        }`}
                       />
                     </div>
 
-                    <div>
+                    <div className="min-w-0">
                       {editingPeerId === peer.deviceId ? (
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
                           <input
                             type="text"
                             value={peerNameInput}
                             onChange={(e) => setPeerNameInput(e.target.value)}
-                            className="px-3 py-1 text-sm rounded-xl border border-surface-border bg-surface text-text-main focus:outline-none focus:ring-2 focus:ring-primary"
+                            className="px-2.5 py-1 text-xs rounded-lg border border-surface-border bg-background text-text-main"
                             onKeyDown={(e) => e.key === 'Enter' && handlePeerRename(peer.deviceId)}
                             autoFocus
                           />
                           <button type="button" onClick={() => handlePeerRename(peer.deviceId)} className="p-1 text-primary cursor-pointer">
-                            <Check className="w-4 h-4" />
+                            <Check className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       ) : (
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-sm font-black text-text-main">{peer.deviceName}</h4>
+                        <div className="flex items-center gap-1.5">
+                          <h4 className="text-sm font-bold text-text-main truncate">{peer.deviceName}</h4>
                           <button
                             type="button"
-                            onClick={() => { setEditingPeerId(peer.deviceId); setPeerNameInput(peer.deviceName); }}
-                            className="text-text-muted hover:text-primary transition-colors cursor-pointer p-0.5"
-                            title={_t('إعادة تسمية الجهاز', 'Rename device', 'Gerät umbenennen')}
+                            onClick={() => {
+                              setEditingPeerId(peer.deviceId);
+                              setPeerNameInput(peer.deviceName);
+                            }}
+                            className="text-text-muted hover:text-primary p-0.5 cursor-pointer"
+                            title={_t('إعادة تسمية', 'Rename', 'Umbenennen')}
                           >
-                            <Edit2 className="w-3.5 h-3.5" />
+                            <Edit2 className="w-3 h-3" />
                           </button>
                         </div>
                       )}
 
-                      <div className="flex items-center gap-3 text-xs text-text-muted mt-0.5 flex-wrap">
-                        <span className="flex items-center gap-1.5">
-                          <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-text-muted/50'}`} />
-                          {isOnline ? _t('متصل الآن', 'Online Now', 'Online') : `${_t('آخر ظهور', 'Last seen', 'Zuletzt gesehen')} ${new Date(peer.lastSyncedTimestamp || Date.now()).toLocaleDateString()}`}
-                        </span>
-                        {isOnline && typeof latency === 'number' && (
-                          <span className="font-mono text-[10px] bg-surface-hover px-2 py-0.5 rounded-md border border-surface-border">
-                            {latency}ms
+                      <div className="flex items-center gap-2.5 text-[11px] text-text-muted mt-0.5 flex-wrap font-mono tabular-nums">
+                        {needsRePair ? (
+                          <span className="text-amber-600 dark:text-amber-400 font-sans font-bold flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" />
+                            {_t('يتطلب إعادة اقتران على Wi-Fi', 'Re-pair required (Legacy record)', 'Neu kopplung erforderlich')}
                           </span>
+                        ) : (
+                          <>
+                            <span>
+                              {peer.lastKnownIp ? `${peer.lastKnownIp}:${peer.port}` : _t('بانتظار IP', 'Pending IP', 'IP ausstehend')}
+                            </span>
+                            {peer.verificationCode && (
+                              <span className="flex items-center gap-1 text-primary">
+                                <Lock className="w-3 h-3" />
+                                {peer.verificationCode}
+                              </span>
+                            )}
+                            <span className={isOnline ? 'text-emerald-600 dark:text-emerald-400 font-sans font-semibold' : 'font-sans'}>
+                              {isOnline
+                                ? typeof latency === 'number'
+                                  ? `${_t('متصل', 'Connected', 'Verbunden')} · ${latency}ms`
+                                  : _t('متصل', 'Connected', 'Verbunden')
+                                : _t('غير متصل', 'Disconnected', 'Getrennt')}
+                            </span>
+                          </>
                         )}
-                        <span className="font-mono text-[10px] text-text-muted">v{peer.protocolVersion || 2}</span>
                       </div>
+
+                      {peer.lastErrorMessage && (
+                        <div className="text-[11px] text-red-600 dark:text-red-400 mt-1">
+                          {peer.lastErrorCode ? `[${peer.lastErrorCode}] ` : ''}{peer.lastErrorMessage}
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between sm:justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleSyncAction(peer.deviceId, false)}
-                      disabled={isSyncing}
-                      className="px-3.5 py-2 rounded-xl bg-primary text-white hover:bg-primary-hover font-bold text-xs transition-colors flex items-center gap-1.5 disabled:opacity-50 cursor-pointer shadow-xs"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-                      <span>{_t('مزامنة', 'Sync', 'Sync')}</span>
-                    </button>
+                  <div className="flex items-center justify-end gap-2 shrink-0">
+                    {needsRePair ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenPairing(peer)}
+                        className="px-3 py-1.5 rounded-xl bg-amber-500 text-white hover:bg-amber-600 font-bold text-xs cursor-pointer"
+                      >
+                        {_t('إعادة الاقتران', 'Re-Pair', 'Neu koppeln')}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleSyncAction(peer.deviceId, false)}
+                        disabled={isSyncing}
+                        className="px-3 py-1.5 rounded-xl bg-primary text-primary-fg hover:bg-primary-hover font-bold text-xs flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                        <span>{_t('مزامنة', 'Sync', 'Sync')}</span>
+                      </button>
+                    )}
 
                     <div className="relative">
                       <button
                         type="button"
                         onClick={() => setOpenDropdownId(openDropdownId === peer.deviceId ? null : peer.deviceId)}
-                        className="p-2 rounded-xl text-text-muted hover:bg-surface-hover hover:text-text-main border border-surface-border cursor-pointer"
+                        className="p-1.5 rounded-xl text-text-muted hover:bg-surface-hover hover:text-text-main border border-surface-border cursor-pointer"
                       >
                         <MoreVertical className="w-4 h-4" />
                       </button>
 
                       {openDropdownId === peer.deviceId && (
-                        <div className="absolute right-0 rtl:left-0 rtl:right-auto top-full mt-1.5 w-52 rounded-2xl border border-surface-border bg-surface shadow-xl z-20 overflow-hidden text-xs py-1">
+                        <div className="absolute right-0 rtl:left-0 rtl:right-auto top-full mt-1 w-48 rounded-xl border border-surface-border bg-surface shadow-lg z-20 overflow-hidden text-xs py-1">
+                          {!needsRePair && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void handleSyncAction(peer.deviceId, true);
+                                setOpenDropdownId(null);
+                              }}
+                              className="w-full px-3.5 py-2 text-left rtl:text-right text-text-main hover:bg-surface-hover flex items-center gap-2 cursor-pointer font-semibold"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5 text-primary" />
+                              <span>{_t('مزامنة شاملة', 'Force Full Sync', 'Vollständiger Abgleich')}</span>
+                            </button>
+                          )}
                           <button
                             type="button"
-                            onClick={() => { handleSyncAction(peer.deviceId, true); setOpenDropdownId(null); }}
-                            className="w-full px-4 py-2.5 text-left rtl:text-right text-text-main hover:bg-surface-hover flex items-center gap-2.5 cursor-pointer font-bold"
+                            onClick={() => {
+                              setSelectedPeerDetails(peer);
+                              setOpenDropdownId(null);
+                            }}
+                            className="w-full px-3.5 py-2 text-left rtl:text-right text-text-main hover:bg-surface-hover flex items-center gap-2 cursor-pointer"
                           >
-                            <RefreshCw className="w-4 h-4 text-primary" />
-                            <span>{_t('فرض مزامنة شاملة', 'Force Full Sync', 'Vollständige Sync erzwingen')}</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => { setSelectedPeerDetails(peer); setOpenDropdownId(null); }}
-                            className="w-full px-4 py-2.5 text-left rtl:text-right text-text-main hover:bg-surface-hover flex items-center gap-2.5 cursor-pointer"
-                          >
-                            <Activity className="w-4 h-4 text-text-muted" />
-                            <span>{_t('عرض تفاصيل الأمان', 'View Security Details', 'Sicherheitsdetails')}</span>
+                            <Shield className="w-3.5 h-3.5 text-text-muted" />
+                            <span>{_t('تفاصيل الأمان', 'Security Details', 'Sicherheitsdetails')}</span>
                           </button>
                           <div className="h-px bg-surface-border my-1" />
                           <button
                             type="button"
-                            onClick={() => { onUnpair(peer.deviceId); setOpenDropdownId(null); }}
-                            className="w-full px-4 py-2.5 text-left rtl:text-right text-red-600 dark:text-red-400 hover:bg-red-500/10 flex items-center gap-2.5 font-bold cursor-pointer"
+                            onClick={() => {
+                              onUnpair(peer.deviceId);
+                              setOpenDropdownId(null);
+                            }}
+                            className="w-full px-3.5 py-2 text-left rtl:text-right text-red-600 dark:text-red-400 hover:bg-red-500/10 flex items-center gap-2 font-bold cursor-pointer"
                           >
-                            <Trash2 className="w-4 h-4" />
-                            <span>{_t('إلغاء الاقتران والحذف', 'Revoke Trust & Unpair', 'Entkoppeln & Löschen')}</span>
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>{_t('إلغاء الاقتران وحذف المفتاح', 'Revoke & Remove', 'Entkoppeln')}</span>
                           </button>
                         </div>
                       )}
@@ -296,51 +350,59 @@ export const LinkedDevicesHub: React.FC<LinkedDevicesHubProps> = ({
       {/* Security Details Modal */}
       {selectedPeerDetails && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-lg rounded-3xl bg-surface border border-surface-border p-6 space-y-4 shadow-2xl">
+          <div className="w-full max-w-lg rounded-2xl bg-surface border border-surface-border p-5 space-y-4 shadow-xl">
             <div className="flex items-center justify-between border-b border-surface-border pb-3">
-              <h4 className="text-base font-black text-text-main flex items-center gap-2">
-                <Shield className="w-5 h-5 text-primary" />
-                {_t('ملف أمان الجهاز', 'Device Security Profile', 'Gerätesicherheits-Profil')}
+              <h4 className="text-sm font-bold text-text-main flex items-center gap-2">
+                <Shield className="w-4 h-4 text-primary" />
+                {_t('بيانات التشفير والشبكة', 'LAN Security Profile', 'LAN-Sicherheitsprofil')}
               </h4>
               <button
                 type="button"
                 onClick={() => setSelectedPeerDetails(null)}
-                className="p-1 rounded-lg text-text-muted hover:text-text-main hover:bg-surface-hover cursor-pointer"
+                className="p-1 rounded-lg text-text-muted hover:bg-surface-hover cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="text-xs space-y-2.5 text-text-muted">
+            <div className="text-xs space-y-2 text-text-muted">
               <div className="flex justify-between py-1 border-b border-surface-border">
-                <span>{_t('اسم الجهاز', 'Device Name', 'Gerätename')}</span>
+                <span>{_t('الاسم', 'Device Name', 'Name')}</span>
                 <span className="font-bold text-text-main">{selectedPeerDetails.deviceName}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-surface-border">
-                <span>{_t('معرف الجهاز', 'Device ID', 'Geräte-ID')}</span>
-                <span className="font-mono text-text-main">{selectedPeerDetails.deviceId}</span>
+                <span>{_t('العنوان والمنفذ', 'LAN Endpoint', 'LAN-Adresse')}</span>
+                <span className="font-mono text-text-main tabular-nums">
+                  {selectedPeerDetails.lastKnownIp || '—'}:{selectedPeerDetails.port}
+                </span>
               </div>
               <div className="flex justify-between py-1 border-b border-surface-border">
-                <span>{_t('بروتوكول التفاوض', 'Negotiated Protocol', 'Protokoll')}</span>
-                <span className="font-mono text-text-main">v{selectedPeerDetails.protocolVersion || 2}</span>
+                <span>{_t('رمز التحقق للشهادة', 'TLS Pin Code', 'TLS-Prüfcode')}</span>
+                <span className="font-mono text-primary font-bold">
+                  {selectedPeerDetails.verificationCode || '—'}
+                </span>
               </div>
               <div className="flex justify-between py-1 border-b border-surface-border">
-                <span>{_t('القدرات المدعومة', 'Supported Capabilities', 'Fähigkeiten')}</span>
-                <span className="font-mono text-text-main">{selectedPeerDetails.capabilities?.join(', ') || 'base_sync_v1, delta_watermark_v2'}</span>
+                <span>{_t('تخزين المفتاح', 'Token Storage', 'Schlüsselspeicher')}</span>
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                  {selectedPeerDetails.hasStoredAuthToken
+                    ? _t('محفوظ في المخزن المشفر للنظام', 'Protected OS Vault (Not in localStorage)', 'System-Tresor')
+                    : _t('يتطلب إعادة اقتران', 'Re-pair required', 'Nicht gekoppelt')}
+                </span>
               </div>
             </div>
 
             <CopyableBlock
-              title={_t('بيانات التشفير والاقتران الخام', 'Raw Peer Crypto Metadata', 'Peer-Krypto-Metadaten')}
+              title={_t('بيانات الجهاز (بدون مفاتيح سرية)', 'Sanitized Peer Metadata', 'Bereinigte Metadaten')}
               content={JSON.stringify(selectedPeerDetails, null, 2)}
             />
 
             <button
               type="button"
               onClick={() => setSelectedPeerDetails(null)}
-              className="w-full py-2.5 rounded-xl bg-surface-hover hover:bg-surface-border text-xs font-bold text-text-main cursor-pointer"
+              className="w-full py-2 rounded-xl bg-surface-hover hover:bg-surface-border text-xs font-bold text-text-main cursor-pointer"
             >
-              {_t('إغلاق التفاصيل', 'Close Details', 'Schließen')}
+              {_t('إغلاق', 'Close', 'Schließen')}
             </button>
           </div>
         </div>

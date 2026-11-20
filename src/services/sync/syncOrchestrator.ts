@@ -14,15 +14,15 @@ import {
   PurgedRecordTombstone,
   TeacherSettingsRecord
 } from '../../types';
-import { exchangeDeltas } from './syncClient';
-import { resolvePeerIp } from './discoveryService';
+import { exchangeDeltas, fetchPeerPageImageManifest, fetchPeerPageImageChunk } from './syncClient';
+import { resolvePeerEndpoint } from './discoveryService';
 import { buildOutboundDelta, updateWatermarks, resetWatermarksForPeer } from './deltaBuilder';
 import { mergeEntities, mergePurgedTombstones, mergeRecentlyDeleted } from './mergeEngine';
 import { syncHistoryService } from './syncHistoryService';
 import { negotiateProtocol, adaptOutboundPayloadForPeer } from './protocolNegotiator';
 import { syncEventQueue } from './syncEventQueue';
 import { recalculateAllAccountBalances } from '../financeService';
-import { fetchPeerPageImageManifest, fetchPeerPageImageChunk } from './syncClient';
+import { isLegacyUnmigratedPeer, sanitizeSyncStateForStorage } from './lanVault';
 import {
   DEFAULT_PAGE_IMAGE_CHUNK_SIZE,
   GrammarPageImageChunk,
@@ -252,15 +252,39 @@ export async function runSyncCycle(
     const peer = pairedPeers[peerIndex];
     emptyReport.peerName = peer.deviceName || 'Peer Device';
 
-    // 2. Resolve peer's current IP dynamically (unless custom transport is injected)
-    let currentIp: string | null = peer.lastKnownIp || '127.0.0.1';
+    if (isLegacyUnmigratedPeer(peer) && !customExchangeDeltasFn) {
+      peer.isOnline = false;
+      peer.requiresRePairing = true;
+      peer.lastErrorCode = 'UNAUTHORIZED_DEVICE';
+      peer.lastErrorMessage = 'Legacy pairing requires re-pairing over direct local Wi-Fi.';
+      pairedPeers[peerIndex] = peer;
+      await dataSource.updateSyncState(sanitizeSyncStateForStorage({ ...syncState, pairedPeers }));
+      emptyReport.errorMessage = peer.lastErrorMessage;
+      await recordSyncHistory(emptyReport, trigger, 0, 0);
+      return { success: false, report: emptyReport };
+    }
+
+    // 2. Resolve peer's current LAN endpoint dynamically (unless custom transport is injected)
+    let workingPeer: PairedPeer = { ...peer };
     if (!customExchangeDeltasFn) {
-      currentIp = await resolvePeerIp(peer);
-      if (!currentIp) {
-        emptyReport.errorMessage = `Device is currently offline or unreachable.`;
+      const endpoint = await resolvePeerEndpoint(peer);
+      if (!endpoint) {
+        const msg = 'PC Sync Host is offline or unreachable on your local Wi-Fi network.';
+        workingPeer.isOnline = false;
+        workingPeer.lastErrorCode = 'HOST_OFFLINE';
+        workingPeer.lastErrorMessage = msg;
+        pairedPeers[peerIndex] = workingPeer;
+        await dataSource.updateSyncState(sanitizeSyncStateForStorage({ ...syncState, pairedPeers }));
+        emptyReport.errorMessage = msg;
         await recordSyncHistory(emptyReport, trigger, 0, 0);
         return { success: false, report: emptyReport };
       }
+      workingPeer = {
+        ...workingPeer,
+        lastKnownIp: endpoint.ip,
+        port: endpoint.port,
+        knownAddresses: endpoint.addresses
+      };
     }
 
     // 3. Negotiate capabilities and build the outbound delta payload
@@ -273,33 +297,54 @@ export async function runSyncCycle(
       pendingEvents = [];
     }
     const rawOutboundDelta = buildOutboundDelta(
-      peerId, 
-      syncState.peerWatermarkTable, 
-      localData, 
+      peerId,
+      syncState.peerWatermarkTable,
+      localData,
       localDevice,
-      { peerLastSynced: peer.lastSyncedTimestamp }
+      { peerLastSynced: workingPeer.lastSyncedTimestamp }
     );
     if (pendingEvents.length > 0) {
       rawOutboundDelta.syncEvents = pendingEvents;
     }
 
-    const agreedCapabilities = (peer.capabilities && peer.capabilities.length > 0)
-      ? peer.capabilities
+    const agreedCapabilities = (workingPeer.capabilities && workingPeer.capabilities.length > 0)
+      ? workingPeer.capabilities
       : DEFAULT_CAPABILITIES;
-    const negotiatedVersion = peer.protocolVersion || CURRENT_SYNC_PROTOCOL_VERSION;
+    const negotiatedVersion = workingPeer.protocolVersion || CURRENT_SYNC_PROTOCOL_VERSION;
     const outboundDelta = adaptOutboundPayloadForPeer(rawOutboundDelta, negotiatedVersion, agreedCapabilities);
 
     sentCount = Object.values(outboundDelta.records).reduce((acc, curr) => acc + (curr ? curr.length : 0), 0);
     totalTransferred += sentCount;
 
-    // 4. Exchange deltas with the peer
-    const inboundDelta = customExchangeDeltasFn
-      ? await customExchangeDeltasFn(outboundDelta)
-      : await exchangeDeltas(currentIp!, peer.port, peer.pairingToken, outboundDelta);
-    if (!inboundDelta || !inboundDelta.records) {
-      emptyReport.errorMessage = `Peer rejected or failed to answer exchange request.`;
-      await recordSyncHistory(emptyReport, trigger, sentCount, 0);
-      return { success: false, report: emptyReport };
+    // 4. Exchange deltas with the peer over direct LAN HTTPS
+    let inboundDelta: SyncDeltaPayload | null = null;
+    if (customExchangeDeltasFn) {
+      inboundDelta = await customExchangeDeltasFn(outboundDelta);
+      if (!inboundDelta || !inboundDelta.records) {
+        emptyReport.errorMessage = 'Peer rejected or failed to answer exchange request.';
+        await recordSyncHistory(emptyReport, trigger, sentCount, 0);
+        return { success: false, report: emptyReport };
+      }
+    } else {
+      const exchangeRes = await exchangeDeltas(workingPeer, outboundDelta);
+      if (!exchangeRes.ok || !exchangeRes.delta || !exchangeRes.delta.records) {
+        const errMsg = exchangeRes.message || `LAN exchange failed (${exchangeRes.errorCode || 'HOST_OFFLINE'})`;
+        workingPeer.isOnline = exchangeRes.errorCode !== 'HOST_OFFLINE' && exchangeRes.errorCode !== 'CONNECTION_REFUSED' && exchangeRes.errorCode !== 'CONNECTION_TIMEOUT';
+        workingPeer.lastErrorCode = exchangeRes.errorCode;
+        workingPeer.lastErrorMessage = errMsg;
+        if (exchangeRes.errorCode === 'UNAUTHORIZED_DEVICE') {
+          workingPeer.requiresRePairing = true;
+        }
+        pairedPeers[peerIndex] = workingPeer;
+        await dataSource.updateSyncState(sanitizeSyncStateForStorage({ ...syncState, pairedPeers }));
+        emptyReport.errorMessage = errMsg;
+        await recordSyncHistory(emptyReport, trigger, sentCount, 0);
+        return { success: false, report: emptyReport };
+      }
+      inboundDelta = exchangeRes.delta;
+      if (exchangeRes.resolvedIp) workingPeer.lastKnownIp = exchangeRes.resolvedIp;
+      if (exchangeRes.resolvedPort) workingPeer.port = exchangeRes.resolvedPort;
+      if (typeof exchangeRes.latencyMs === 'number') workingPeer.latencyMs = exchangeRes.latencyMs;
     }
 
     // 5. Ingest and sweep authoritative tombstones FIRST (before session events or entity merges)
@@ -394,26 +439,27 @@ export async function runSyncCycle(
       .filter(r => r && r.id && !deferredRecordIds.has(r.id.trim()));
     newWatermarks = updateWatermarks(newWatermarks, inboundDelta.senderDeviceId || peerId, receivedRecords);
 
-    // 8. Update SyncStateMetadata and Peer Presence
-    peer.lastSyncedTimestamp = Date.now();
-    if (!peer.lastKnownIp || peer.lastKnownIp.trim() === '') {
-      peer.lastKnownIp = 'P2P (WebRTC)';
-    }
-    peer.isOnline = true;
-    peer.lastHeartbeat = Date.now();
-    pairedPeers[peerIndex] = peer;
+    // 8. Update SyncStateMetadata and Peer Presence (strip any legacy plaintext tokens)
+    workingPeer.lastSyncedTimestamp = Date.now();
+    workingPeer.isOnline = true;
+    workingPeer.lastHeartbeat = Date.now();
+    workingPeer.lastErrorCode = undefined;
+    workingPeer.lastErrorMessage = undefined;
+    pairedPeers[peerIndex] = workingPeer;
 
-    await dataSource.updateSyncState({
-      ...syncState,
-      peerWatermarkTable: newWatermarks,
-      pairedPeers
-    });
+    await dataSource.updateSyncState(
+      sanitizeSyncStateForStorage({
+        ...syncState,
+        peerWatermarkTable: newWatermarks,
+        pairedPeers
+      })
+    );
 
     const finalReport: SyncCycleReport = {
       id: cycleId,
       timestamp: Date.now(),
       peerId,
-      peerName: peer.deviceName,
+      peerName: workingPeer.deviceName,
       direction: 'bidirectional',
       status: 'success',
       entities: entityDiffs,
@@ -427,7 +473,7 @@ export async function runSyncCycle(
 
     // Non-blocking background transfer of any missing grammar textbook page images
     if (!customExchangeDeltasFn) {
-      void syncMissingPageImagesWithPeer({ peer, dataSource }).catch(() => {});
+      void syncMissingPageImagesWithPeer({ peer: workingPeer, dataSource }).catch(() => {});
     }
 
     return { success: true, report: finalReport };
@@ -704,7 +750,7 @@ export async function getLocalPageImageChunk(params: {
  * Never throws: failures are reported cleanly without disturbing P2P delta sync.
  */
 export async function syncMissingPageImagesWithPeer(params: {
-  peer: Pick<PairedPeer, 'deviceId' | 'pairingToken'>;
+  peer: Pick<PairedPeer, 'deviceId'> & Partial<PairedPeer>;
   dataSource: SyncDataSource;
   transport?: PageImageSyncTransport;
   chunkSizeChars?: number;
@@ -743,11 +789,22 @@ export async function syncMissingPageImagesWithPeer(params: {
       return { transferredIds, skippedExistingIds, failedIds };
     }
 
+    const fullPeer: PairedPeer = {
+      deviceId: params.peer.deviceId,
+      deviceName: params.peer.deviceName || 'Peer Device',
+      lastKnownIp: params.peer.lastKnownIp || '',
+      port: params.peer.port || 8765,
+      lastSyncedTimestamp: params.peer.lastSyncedTimestamp || 0,
+      isOnline: params.peer.isOnline ?? true,
+      tlsFingerprintSha256: params.peer.tlsFingerprintSha256,
+      knownAddresses: params.peer.knownAddresses
+    };
+
     const transport: PageImageSyncTransport = params.transport || {
       fetchManifest: ({ requestedImageIds, existingImageIds }) =>
-        fetchPeerPageImageManifest(params.peer.deviceId, params.peer.pairingToken, requestedImageIds, existingImageIds),
+        fetchPeerPageImageManifest(fullPeer, requestedImageIds, existingImageIds),
       fetchChunk: ({ imageId, chunkIndex, chunkSizeChars: sz }) =>
-        fetchPeerPageImageChunk(params.peer.deviceId, params.peer.pairingToken, imageId, chunkIndex, sz)
+        fetchPeerPageImageChunk(fullPeer, imageId, chunkIndex, sz)
     };
 
     const manifestResp = await transport.fetchManifest({

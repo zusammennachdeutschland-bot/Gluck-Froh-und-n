@@ -18,12 +18,13 @@ export type LessonStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelle
 export const CURRENT_SYNC_PROTOCOL_VERSION = 2;
 export const MIN_SUPPORTED_SYNC_PROTOCOL_VERSION = 1;
 export const APP_BUILD_VERSION = '3.0.0';
+export const DEFAULT_LAN_SYNC_PORT = 8765;
 
 export type SyncCapability = 
   | 'core_entities'      // Students, Groups, Lessons, Payments (v1)
   | 'settings_sync'      // Teacher Profile, Working Days/Hours, Templates, Currency (v2)
   | 'todos_sync'         // Quick todos & notification sync (v2)
-  | 'heartbeat_presence' // WebRTC keep-alive & live latency (v2)
+  | 'heartbeat_presence' // Direct LAN keep-alive & live latency (v2)
   | 'diff_reports'       // Structured post-sync audit reports (v2)
   | 'binary_compression';// Optional compression for large records (v3)
 
@@ -34,6 +35,112 @@ export const DEFAULT_CAPABILITIES: SyncCapability[] = [
   'heartbeat_presence',
   'diff_reports'
 ];
+
+export type LanSyncErrorCode =
+  | 'HOST_OFFLINE'
+  | 'CONNECTION_TIMEOUT'
+  | 'CONNECTION_REFUSED'
+  | 'PAIRING_CODE_INVALID'
+  | 'PAIRING_CODE_EXPIRED'
+  | 'PAIRING_LOCKED_OUT'
+  | 'UNAUTHORIZED_DEVICE'
+  | 'PROTOCOL_VERSION_MISMATCH'
+  | 'INVALID_PAYLOAD'
+  | 'STORAGE_SAVE_FAILED'
+  | 'NETWORK_CHANGED'
+  | 'CERTIFICATE_MISMATCH'
+  | 'PORT_IN_USE'
+  | 'PORT_PERMISSION_DENIED'
+  | 'HOST_BIND_FAILED'
+  | 'HOST_UNSUPPORTED_PLATFORM'
+  | 'NO_WIFI_CONNECTION';
+
+export type LanSyncUiState =
+  | 'searching'
+  | 'host_found'
+  | 'waiting_for_code'
+  | 'pairing'
+  | 'connected'
+  | 'disconnected'
+  | 'synchronizing'
+  | 'sync_completed'
+  | 'sync_failed';
+
+export interface DiscoveredLanHost {
+  deviceId: string;
+  deviceName: string;
+  primaryIp: string;
+  addresses: string[];
+  port: number;
+  protocolVersion: number;
+  tlsEnabled: boolean;
+  certFingerprintSha256?: string | null;
+  verificationCode?: string | null;
+  pairingActive?: boolean;
+  latencyMs?: number;
+  discoverySource?: 'nsd' | 'udp' | 'manual' | 'health_probe';
+}
+
+export interface LanHostStatus {
+  isSupported: boolean;
+  listening: boolean;
+  status: 'waiting_for_devices' | 'no_wifi_interface' | 'stopped' | 'error' | 'unsupported';
+  deviceId: string;
+  deviceName: string;
+  addresses: string[];
+  primaryIp: string | null;
+  port: number;
+  tlsEnabled: boolean;
+  certFingerprintSha256: string | null;
+  verificationCode: string | null;
+  pairingCode: string | null;
+  pairingExpiresAt: number;
+  pairingLockedOut: boolean;
+  lockoutRemainingMs: number;
+  pairedPeersCount: number;
+  bindError?: string | null;
+  errorCode?: LanSyncErrorCode | null;
+  protocolVersion?: number;
+}
+
+export interface LanConnectionTestResult {
+  ok: boolean;
+  host: string;
+  port: number;
+  httpStatus: number;
+  latencyMs?: number;
+  deviceId?: string;
+  deviceName?: string;
+  addresses?: string[];
+  protocolVersion?: number;
+  tlsEnabled?: boolean;
+  certFingerprintSha256?: string | null;
+  verificationCode?: string | null;
+  pairingActive?: boolean;
+  errorCode?: LanSyncErrorCode;
+  message?: string;
+}
+
+export interface LanNetworkStatus {
+  wifiConnected: boolean;
+  lanConnected: boolean;
+  hasInternet: boolean;
+  localIpv4Addresses: string[];
+  platform: 'electron' | 'android' | 'web';
+}
+
+export interface LanDiagnosticAttempt {
+  id: string;
+  timestamp: number;
+  operation: 'health_check' | 'pair' | 'heartbeat' | 'exchange' | 'status' | 'discover' | 'page_images';
+  targetIp: string;
+  port: number;
+  ok: boolean;
+  httpStatus?: number;
+  latencyMs?: number;
+  errorCode?: LanSyncErrorCode;
+  message?: string;
+}
 
 export interface ProtocolHeader {
   protocolVersion: number;       // e.g., 2
@@ -60,14 +167,23 @@ export interface PairedPeer {
   deviceId: string;
   deviceName: string;
   lastKnownIp: string;
+  knownAddresses?: string[];
   port: number;
-  pairingToken: string;
+  /** Deprecated legacy field retained only for migration cleanup; never persisted to localStorage. */
+  pairingToken?: string;
+  hasStoredAuthToken?: boolean;
+  tlsFingerprintSha256?: string;
+  verificationCode?: string;
+  requiresRePairing?: boolean;
+  legacyMigratedFrom?: string;
   lastSyncedTimestamp: number;
   isOnline: boolean;
   protocolVersion?: number;
   capabilities?: SyncCapability[];
   lastHeartbeat?: number;
   latencyMs?: number;
+  lastErrorCode?: LanSyncErrorCode;
+  lastErrorMessage?: string;
 }
 
 export interface SyncStateMetadata {
@@ -76,6 +192,7 @@ export interface SyncStateMetadata {
   localRevisionCounter: number;
   peerWatermarkTable: PeerWatermarkTable;
   protocolVersion?: number;
+  hostPort?: number;
   pairedPeers?: PairedPeer[];
   status?: 'online' | 'syncing' | 'offline' | 'error';
   lastSyncedTimestamp?: number;

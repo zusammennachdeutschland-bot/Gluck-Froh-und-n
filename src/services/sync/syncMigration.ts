@@ -1,5 +1,13 @@
 import { storage } from '../storageService';
-import { SyncStateMetadata, TeacherSettingsRecord, TeacherProfile, CURRENT_SYNC_PROTOCOL_VERSION } from '../../types';
+import {
+  SyncStateMetadata,
+  TeacherSettingsRecord,
+  TeacherProfile,
+  CURRENT_SYNC_PROTOCOL_VERSION,
+  DEFAULT_LAN_SYNC_PORT,
+  PairedPeer
+} from '../../types';
+import { isLegacyUnmigratedPeer, sanitizeSyncStateForStorage } from './lanVault';
 
 const MIGRATION_KEYS = [
   'dl_groups',
@@ -112,6 +120,54 @@ export async function migrateTeacherSettings(localDeviceId: string): Promise<Tea
 }
 
 /**
+ * Safely migrates legacy PeerJS/WebRTC or PIN-as-IP paired peer records to the direct LAN schema.
+ * Preserves deviceId, deviceName, lastSyncedTimestamp, and peerWatermarkTable, strips any plaintext
+ * pairingToken from localStorage, and marks unmigrated peers as requiring re-pairing.
+ */
+export function migrateLegacyPeerRecords(state: SyncStateMetadata): {
+  migratedState: SyncStateMetadata;
+  didChange: boolean;
+} {
+  if (!state || !Array.isArray(state.pairedPeers)) {
+    return { migratedState: state, didChange: false };
+  }
+
+  let didChange = false;
+  const upgradedPeers: PairedPeer[] = state.pairedPeers.map((rawPeer) => {
+    const legacy = isLegacyUnmigratedPeer(rawPeer);
+    const hadPlaintextToken = Boolean((rawPeer as any).pairingToken);
+    if (!legacy && !hadPlaintextToken) {
+      return rawPeer;
+    }
+
+    didChange = true;
+    const { pairingToken: _removedToken, ...rest } = rawPeer as PairedPeer & { pairingToken?: string };
+    return {
+      ...rest,
+      lastKnownIp: legacy ? '' : rawPeer.lastKnownIp,
+      port: legacy || !rawPeer.port || Number(rawPeer.port) <= 0 ? DEFAULT_LAN_SYNC_PORT : Number(rawPeer.port),
+      hasStoredAuthToken: legacy ? false : Boolean(rest.hasStoredAuthToken),
+      requiresRePairing: legacy ? true : Boolean(rest.requiresRePairing),
+      legacyMigratedFrom: rest.legacyMigratedFrom || (legacy ? String(rawPeer.lastKnownIp || 'legacy') : undefined),
+      isOnline: false
+    };
+  });
+
+  if (!didChange) {
+    return { migratedState: state, didChange: false };
+  }
+
+  return {
+    migratedState: sanitizeSyncStateForStorage({
+      ...state,
+      hostPort: state.hostPort || DEFAULT_LAN_SYNC_PORT,
+      pairedPeers: upgradedPeers
+    }),
+    didChange: true
+  };
+}
+
+/**
  * Executes Safe Multi-Version Sync Migration.
  * Migrates all existing local storage records and teacher settings to the SyncableRecord schema.
  */
@@ -123,13 +179,17 @@ export async function runSyncMigration(): Promise<void> {
     if (existingState && existingState.localDeviceId) {
       // Incremental Migration: Ensure dl_settings exists
       await migrateTeacherSettings(existingState.localDeviceId);
-      
-      // Update protocol version if needed
-      if (!existingState.protocolVersion || existingState.protocolVersion < CURRENT_SYNC_PROTOCOL_VERSION) {
-        await storage.setItem('dl_sync_state', {
-          ...existingState,
-          protocolVersion: CURRENT_SYNC_PROTOCOL_VERSION
-        });
+
+      const { migratedState, didChange } = migrateLegacyPeerRecords(existingState);
+      const needsProtocolBump = !migratedState.protocolVersion || migratedState.protocolVersion < CURRENT_SYNC_PROTOCOL_VERSION;
+      const needsPortDefault = !migratedState.hostPort;
+
+      if (didChange || needsProtocolBump || needsPortDefault) {
+        await storage.setItem('dl_sync_state', sanitizeSyncStateForStorage({
+          ...migratedState,
+          protocolVersion: Math.max(CURRENT_SYNC_PROTOCOL_VERSION, migratedState.protocolVersion || 0),
+          hostPort: migratedState.hostPort || DEFAULT_LAN_SYNC_PORT
+        }));
       }
       return;
     }

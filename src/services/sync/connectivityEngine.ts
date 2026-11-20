@@ -1,4 +1,5 @@
 import { SyncConnectionState } from '../../types';
+import { getLanNetworkStatus } from './lanTransport';
 
 type StateListener = (state: SyncConnectionState, details?: { reason?: string; lastChecked?: number }) => void;
 
@@ -7,7 +8,8 @@ class ConnectivityEngine {
   private listeners: Set<StateListener> = new Set();
   private checkInterval: any = null;
   private isChecking = false;
-  private brokerConnected = false;
+  private hostListening = false;
+  private lanConnected = false;
   private isSyncing = false;
   private hasPeersReady = false;
   private lastErrorMessage: string | null = null;
@@ -28,7 +30,6 @@ class ConnectivityEngine {
   public init() {
     this.checkConnectivity();
     if (!this.checkInterval && typeof window !== 'undefined') {
-      // Periodic health check every 15 seconds
       this.checkInterval = setInterval(() => {
         this.checkConnectivity();
       }, 15000);
@@ -59,9 +60,9 @@ class ConnectivityEngine {
     this.lastCheckedTimestamp = Date.now();
     for (const listener of this.listeners) {
       try {
-        listener(this.currentState, { 
+        listener(this.currentState, {
           reason: this.lastErrorMessage || undefined,
-          lastChecked: this.lastCheckedTimestamp 
+          lastChecked: this.lastCheckedTimestamp
         });
       } catch (err) {
         console.warn('[ConnectivityEngine] Listener error:', err);
@@ -77,15 +78,19 @@ class ConnectivityEngine {
     }
 
     if (this.currentState !== newState) {
-      console.log(`[ConnectivityEngine] Transition: ${this.currentState} -> ${newState}`);
       this.currentState = newState;
       this.notify();
     }
   }
 
-  public setBrokerStatus(connected: boolean) {
-    this.brokerConnected = connected;
+  public setHostListening(listening: boolean) {
+    this.hostListening = listening;
     this.evaluateState();
+  }
+
+  /** Compatibility alias kept for callers checking host/listener status. */
+  public setBrokerStatus(connected: boolean) {
+    this.setHostListening(connected);
   }
 
   public setSyncing(syncing: boolean) {
@@ -104,35 +109,24 @@ class ConnectivityEngine {
 
   private handleNetworkChange(isOnline: boolean) {
     if (!isOnline) {
-      this.brokerConnected = false;
-      this.setState('OFFLINE');
+      this.lanConnected = false;
+      this.evaluateState();
     } else {
       this.checkConnectivity();
     }
   }
 
+  /**
+   * Validates local Wi-Fi / LAN interface readiness without requiring internet access.
+   */
   public async checkConnectivity(): Promise<SyncConnectionState> {
     if (this.isChecking) return this.currentState;
     this.isChecking = true;
 
     try {
-      // 1. Check local interface state
-      if (typeof navigator !== 'undefined' && !navigator.onLine) {
-        this.setState('OFFLINE');
-        this.isChecking = false;
-        return 'OFFLINE';
-      }
-
-      // 2. Probe actual internet reachability
-      const hasInternet = await this.probeInternetReachability();
-      if (!hasInternet) {
-        this.setState('NETWORK_CONNECTED');
-        this.isChecking = false;
-        return 'NETWORK_CONNECTED';
-      }
-
-      // 3. Internet is available, evaluate broker and sync readiness
-      this.evaluateState(true);
+      const netStatus = await getLanNetworkStatus();
+      this.lanConnected = Boolean(netStatus.lanConnected || netStatus.wifiConnected || netStatus.localIpv4Addresses.length > 0);
+      this.evaluateState();
       return this.currentState;
     } catch (err: any) {
       this.setState('NETWORK_CONNECTED', err?.message);
@@ -142,55 +136,30 @@ class ConnectivityEngine {
     }
   }
 
-  private evaluateState(internetConfirmed: boolean = true) {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      this.setState('OFFLINE');
-      return;
-    }
-
+  private evaluateState() {
     if (this.isSyncing) {
       this.setState('SYNCING');
       return;
     }
 
-    if (!internetConfirmed && this.currentState === 'OFFLINE') {
-      this.setState('NETWORK_CONNECTED');
-      return;
+    if (!this.lanConnected && !this.hostListening && !this.hasPeersReady) {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        this.setState('OFFLINE');
+        return;
+      }
     }
 
-    if (!this.brokerConnected) {
-      this.setState('INTERNET_AVAILABLE');
-      return;
-    }
-
-    if (this.hasPeersReady) {
+    if (this.hasPeersReady || this.hostListening) {
       this.setState('SYNC_READY');
       return;
     }
 
-    this.setState('BROKER_CONNECTED');
-  }
-
-  private async probeInternetReachability(): Promise<boolean> {
-    if (typeof window === 'undefined') return true;
-
-    try {
-      // Quick fast fetch check with 3-second timeout
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3000);
-
-      // Probe current origin or reliable fast static asset
-      const response = await fetch(`/favicon.ico?_probe=${Date.now()}`, {
-        method: 'HEAD',
-        cache: 'no-store',
-        signal: controller.signal
-      }).catch(() => null);
-
-      clearTimeout(timeout);
-      return response !== null;
-    } catch {
-      return false;
+    if (this.lanConnected) {
+      this.setState('NETWORK_CONNECTED');
+      return;
     }
+
+    this.setState('OFFLINE');
   }
 
   public destroy() {

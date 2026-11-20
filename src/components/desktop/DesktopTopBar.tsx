@@ -40,6 +40,7 @@ export const DesktopTopBar: React.FC<DesktopTopBarProps> = () => {
     getSyncHistory,
     clearSyncHistory,
     updateSyncState,
+    unpairPeer,
     startHosting,
     refreshCalendarAndDashboard
   } = useApp();
@@ -72,41 +73,27 @@ export const DesktopTopBar: React.FC<DesktopTopBarProps> = () => {
     ].slice(0, 50));
   };
 
-  const handlePair = async (ip: string, pin: string) => {
+  const handlePair = async (
+    hostIp: string,
+    port: number,
+    pairingCode: string,
+    expectedFingerprint?: string
+  ) => {
     if (!syncState) return;
-    try {
-      const localDevice = { deviceId: syncState.localDeviceId, deviceName: syncState.localDeviceName };
-      const token = await pairWithPeer(ip, 0, pin, localDevice);
-      if (token) {
-        const actualToken = typeof token === 'string' ? token : (token as any).pairingToken || (token as any).token || 'token';
-        const actualPeerId = typeof token === 'string' ? `peer_${Date.now()}` : (token as any).peerId || `peer_${Date.now()}`;
-        const actualPeerName = typeof token === 'string' ? `Device (${ip})` : (token as any).deviceName || `Companion Device`;
-        const negotiatedVersion = (token as any).negotiatedVersion || 1;
-        const agreedCapabilities = (token as any).agreedCapabilities || ['core_entities'];
-        
-        const newPeer = { 
-          deviceId: actualPeerId, 
-          deviceName: actualPeerName, 
-          lastKnownIp: 'P2P (WebRTC)',
-          port: 0,
-          pairingToken: actualToken,
-          protocolVersion: negotiatedVersion,
-          capabilities: agreedCapabilities,
-          lastSyncedTimestamp: Date.now(),
-          isOnline: true,
-          lastHeartbeat: Date.now()
-        };
-        const updatedPeers = [...(syncState.pairedPeers || []).filter(p => p.deviceId !== actualPeerId), newPeer];
-        await updateSyncState({ ...syncState, pairedPeers: updatedPeers });
-        addLog(`Paired with ${actualPeerName} (${actualPeerId.substring(0, 10)})`);
-      } else {
-        addLog(`Could not connect to device ${ip} (Device is offline or invalid PIN)`);
-        throw new Error(`Device (${ip}) is offline or PIN was not found`);
-      }
-    } catch (err: any) {
-      addLog(`Failed to pair with ${ip}: ${err.message || 'Offline'}`);
-      throw err;
+    const localDevice = { deviceId: syncState.localDeviceId, deviceName: syncState.localDeviceName };
+    const res = await pairWithPeer(hostIp, port, pairingCode, localDevice, expectedFingerprint);
+    if (!res.ok || !res.peer) {
+      const msg = res.message || res.errorCode || `Could not pair with ${hostIp}:${port}`;
+      addLog(`Pairing failed (${hostIp}:${port}): ${msg}`);
+      throw new Error(msg);
     }
+    const pairedPeer = res.peer;
+    const updatedPeers = [
+      ...(syncState.pairedPeers || []).filter((p) => p.deviceId !== pairedPeer.deviceId),
+      pairedPeer
+    ];
+    await updateSyncState({ ...syncState, pairedPeers: updatedPeers });
+    addLog(`Paired with ${pairedPeer.deviceName} (${pairedPeer.lastKnownIp}:${pairedPeer.port})`);
   };
 
   const handleForceSync = async (peerId?: string) => {
@@ -134,10 +121,8 @@ export const DesktopTopBar: React.FC<DesktopTopBarProps> = () => {
   };
 
   const handleUnpair = async (peerId: string) => {
-    if (!syncState) return;
-    const updatedPeers = (syncState.pairedPeers || []).filter(p => p.deviceId !== peerId);
-    await updateSyncState({ ...syncState, pairedPeers: updatedPeers });
-    addLog(`Unpaired device ${peerId.substring(0, 6)}`);
+    await unpairPeer(peerId);
+    addLog(`Revoked & unpaired device ${peerId.substring(0, 8)}`);
   };
 
   const handleRenameLocalDevice = async (newName: string) => {
@@ -267,7 +252,7 @@ export const DesktopTopBar: React.FC<DesktopTopBarProps> = () => {
           {/* Divider */}
           <div className="h-6 w-px bg-surface-border/80 mx-1" />
 
-          {/* P2P Sync Center Button */}
+          {/* LAN Sync Center Button */}
           {isSyncReady && syncState && (
             <motion.button
               whileHover={{ scale: 1.03 }}
@@ -283,7 +268,7 @@ export const DesktopTopBar: React.FC<DesktopTopBarProps> = () => {
               title={
                 onlineCount > 0
                   ? `${onlineCount} Gerät(e) online & synchronisiert`
-                  : 'P2P Synchronisations-Zentrum öffnen'
+                  : 'WLAN Synchronisations-Zentrum öffnen'
               }
             >
               {isSyncing ? (

@@ -11,7 +11,8 @@ import {
   CertificateRecord, HodGermanStudent, Complaint, StudentActionPlan, VisitRecord, SchoolNote,
   FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment, FinanceNotification,
   TodoItem, PaymentPlanType, AICertificateBackground,
-  GroupWeeklySession, ZoomMeetingRecord, ZoomMeetingHistory, GrainRecordingMatch
+  GroupWeeklySession, ZoomMeetingRecord, ZoomMeetingHistory, GrainRecordingMatch,
+  LanHostStatus
 } from '../types';
 import { recalculateAllAccountBalances, computeAccountBalance, shouldSettlePendingCycleRecord, splitPaymentAcrossLessons } from '../services/financeService';
 import { 
@@ -43,6 +44,7 @@ import {
 import { runSyncCycle, forceFullSync, SyncDataSource } from '../services/sync/syncOrchestrator';
 import { calculatePendingOutbox } from '../services/sync/deltaBuilder';
 import { startLocalServer } from '../services/sync/localServer';
+import { sanitizeSyncStateForStorage, revokeStoredLanCredentials } from '../services/sync/lanVault';
 import { connectivityEngine } from '../services/sync/connectivityEngine';
 import { presenceService } from '../services/sync/presenceService';
 import { autoSyncEngine } from '../services/sync/autoSyncEngine';
@@ -471,7 +473,8 @@ interface AppContextType {
   getSyncHistory: () => Promise<SyncHistoryEntry[]>;
   clearSyncHistory: () => Promise<void>;
   updateSyncState: (newState: SyncStateMetadata) => Promise<void>;
-  startHosting: () => Promise<{ip: string, pin: string, port: number}>;
+  unpairPeer: (peerId: string) => Promise<void>;
+  startHosting: (portOverride?: number) => Promise<LanHostStatus & { ip: string; pin: string }>;
   externalDataVersion: number;
   bumpExternalDataVersion: () => void;
 
@@ -8914,12 +8917,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       await storage.flushPendingWrites();
     },
     updateSyncState: async (newState: SyncStateMetadata) => {
-      setSyncState(newState);
-      syncStateRef.current = newState;
-      syncRevisionRef.current = newState.localRevisionCounter;
-      await storage.setItem('dl_sync_state', newState);
+      const sanitized = sanitizeSyncStateForStorage(newState);
+      setSyncState(sanitized);
+      syncStateRef.current = sanitized;
+      syncRevisionRef.current = sanitized.localRevisionCounter;
+      await storage.setItem('dl_sync_state', sanitized);
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('dl_sync_state_changed', { detail: newState }));
+        window.dispatchEvent(new CustomEvent('dl_sync_state_changed', { detail: sanitized }));
       }
     }
   };
@@ -8978,9 +8982,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     await syncHistoryService.clearHistory();
   };
 
-  const startHosting = async () => {
+  const startHosting = async (portOverride?: number) => {
     if (!syncState) throw new Error('Sync not initialized');
-    return await startLocalServer(syncState.localDeviceName, syncState.localDeviceId, syncState, syncDataSource);
+    return await startLocalServer(syncState.localDeviceName, syncState.localDeviceId, syncState, syncDataSource, portOverride);
+  };
+
+  const unpairPeer = async (peerId: string): Promise<void> => {
+    await revokeStoredLanCredentials(peerId);
+    const current = syncStateRef.current;
+    if (!current) return;
+    const updatedPeers = (current.pairedPeers || []).filter((p) => p.deviceId !== peerId);
+    await syncDataSource.updateSyncState({ ...current, pairedPeers: updatedPeers });
   };
 
   // Memoize active records to prevent infinite re-render cascades
@@ -9254,6 +9266,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         getSyncHistory,
         clearSyncHistory,
         updateSyncState: syncDataSource.updateSyncState,
+        unpairPeer,
         startHosting,
         externalDataVersion,
         bumpExternalDataVersion,
