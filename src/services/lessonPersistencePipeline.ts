@@ -94,8 +94,9 @@ export const runLessonPersistencePipeline = async (args: {
   const { persistedBefore, inMemorySnapshot, fallbackLessons = [], updater, students,
     filterActiveLessons, setFullHistory, setActiveLessons, writeStorage, trace } = args;
   const base = mergeFullLessonHistory(inMemorySnapshot, persistedBefore, fallbackLessons);
+  const baseIds = new Set(base.map(row => row.id));
   trace?.('updateFullLessonsStorage: merged authoritative base', base, {
-    removedIds: persistedBefore.filter(row => !base.some(item => item.id === row.id)).map(row => row.id)
+    removedIds: persistedBefore.filter(row => row?.id && !baseIds.has(row.id)).map(row => row.id)
   });
   const rawUpdated = updater(base);
   trace?.('updateFullLessonsStorage: updater output before completion guard', rawUpdated);
