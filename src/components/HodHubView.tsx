@@ -227,7 +227,7 @@ export const HodHubView: React.FC = () => {
       
       const timetableData = {
         dayKey: new Date().getDay().toString(),
-        periodsCount: 8,
+        periodsCount: effectivePeriodSettings.periodsCount,
         teachers: activeTeachersList.map((t: any) => ({
           id: t.id || t.name,
           name: t.name,
