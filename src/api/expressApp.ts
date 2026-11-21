@@ -36,7 +36,7 @@ const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-const allowedAppOrigins = new Set<string>(['capacitor://localhost', 'ionic://localhost']);
+const allowedAppOrigins = new Set<string>(['https://localhost', 'capacitor://localhost', 'ionic://localhost']);
 
 const addConfiguredOrigin = (value?: string) => {
   const raw = String(value || '').trim();
