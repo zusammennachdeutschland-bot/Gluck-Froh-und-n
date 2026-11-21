@@ -333,15 +333,21 @@ export function getProjectedLessonsForRange(
 
   const projected: Lesson[] = [];
 
+  // Iterate calendar days at local noon. Midnight is not a stable local time:
+  // when DST starts at 00:00 (for example Africa/Cairo on 2026-04-24),
+  // setDate() can normalize midnight to 01:00 and instant comparisons against
+  // an end date at 00:00 would incorrectly exclude the inclusive end day.
   const startD = parseLocalDate(startDateStr);
   const endD = parseLocalDate(endDateStr);
+  startD.setHours(12, 0, 0, 0);
+  endD.setHours(12, 0, 0, 0);
 
   activeGroups.forEach(group => {
     const slots = getGroupScheduleSlots(group);
     if (slots.length === 0) return;
 
     const cursor = new Date(startD);
-    while (cursor <= endD) {
+    while (cursor.getTime() <= endD.getTime()) {
       const dayNum = cursor.getDay();
       const dateStr = formatLocalDate(cursor);
 
