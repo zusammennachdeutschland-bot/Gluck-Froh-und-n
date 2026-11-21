@@ -2,10 +2,10 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson } from '../types';
 import { normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
-import { isLessonOnDate, isLessonCompatibleWithGroupSchedule } from '../utils/dailyLessonUtils';
+import { getLessonsForDate } from '../utils/dailyLessonUtils';
 import { useLocalDateKey } from '../hooks/useLocalDateKey';
 import { isPendingStatus, pickAuthoritativeLesson, normalizeTime } from '../utils/lessonUtils';
-import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
+
 import { Bell, CheckCircle2, Clock, Trash2, Award, History, BarChart2, Settings, Menu, Sparkles, BookOpen, Layers, X, Users, Gamepad2, Video, SlidersHorizontal } from 'lucide-react';
 import { NotificationsModal } from './NotificationsModal';
 import { motion, AnimatePresence } from 'motion/react';
@@ -23,6 +23,8 @@ export const Header: React.FC = () => {
     profile, 
     notifications, 
     lessons, 
+    getFullLessonsSnapshot,
+    groupWeeklySessions,
     groups,
     students,
     dismissedDashboardLessonIds = [],
@@ -267,27 +269,10 @@ export const Header: React.FC = () => {
   const todayStr = useLocalDateKey();
 
   // Today's lessons
-  const todaysLessons = useMemo(() => {
-    const active = lessons
-      .filter(l => !l.deleted && isLessonOnDate(l, todayStr) && !dismissedDashboardLessonIds.includes(l.id))
-      .filter(l => isLessonCompatibleWithGroupSchedule(l, groups.find(g => g.id === l.groupId && !g.deleted)))
-
-    const slotMap = new Map<string, Lesson>();
-    active.forEach(l => {
-      const normTime = normalizeTime(l.time) || l.time;
-      const key = l.groupId && l.groupId !== 'quick_group'
-        ? `${l.groupId}_${normalizeDateToISO(l.date)}_${normTime}`
-        : l.id;
-      const existing = slotMap.get(key);
-      if (!existing) {
-        slotMap.set(key, l);
-      } else {
-        slotMap.set(key, pickAuthoritativeLesson(existing, l).survivor);
-      }
-    });
-
-    return Array.from(slotMap.values());
-  }, [lessons, groups, dismissedDashboardLessonIds, todayStr]);
+  const todaysLessons = useMemo(() => (
+    getLessonsForDate(todayStr, getFullLessonsSnapshot(), groups, groupWeeklySessions)
+      .filter(l => !dismissedDashboardLessonIds.includes(l.id))
+  ), [todayStr, getFullLessonsSnapshot, groups, groupWeeklySessions, dismissedDashboardLessonIds]);
 
   // Total lessons count
   const lessonsCount = todaysLessons.length;
