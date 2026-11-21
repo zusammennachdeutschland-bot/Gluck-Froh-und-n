@@ -2560,6 +2560,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         const prunedIds = getPrunedLessonIds();
         const merged = mergeLessonSyncSnapshot(full, currentLessons, prunedIds);
 
+        // A stale React projection cannot change an existing full-store record.
+        // Skip the write entirely when it contributes no new IDs and no pruning.
+        if (merged.length === full.length) return;
+
         fullLessonsRef.current = merged;
         await storage.setItem('dl_lessons', merged);
       }).catch(err => console.error('Lesson sync error:', err));
