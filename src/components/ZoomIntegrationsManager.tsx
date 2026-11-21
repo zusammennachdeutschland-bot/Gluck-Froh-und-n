@@ -61,6 +61,7 @@ import {
   verifyOrSilentlyReauthorizeGoogleCalendar
 } from '../services/calendarSyncService';
 import { ZoomCleanupRebuildSection } from './ZoomCleanupRebuildSection';
+import { logZoomReminderPipeline } from '../utils/zoomReminderDiagnostics';
 
 const COMMON_TIMEZONES = [
   'Africa/Cairo',
@@ -400,6 +401,24 @@ export const ZoomIntegrationsManager: React.FC = () => {
         }
       });
 
+      logZoomReminderPipeline('Zoom Manager bulk-sync completed before applyZoomWorkspaceSnapshot', {
+        completed: result.completed,
+        succeededCount: result.succeededCount,
+        failedCount: result.failedCount,
+        skippedCount: result.skippedCount,
+        processedSessionIds: result.processedSessionIds,
+        errors: result.errors,
+        sessions: result.sessions.map(session => ({
+          id: session.id,
+          groupId: session.groupId,
+          deleted: Boolean(session.deleted),
+          meetingSource: session.meetingSource,
+          syncState: session.syncState,
+          hasZoomJoinUrl: Boolean((session.zoomJoinUrl || '').trim()),
+          weekday: session.weekday,
+          startTime: session.startTime
+        }))
+      });
       applyZoomWorkspaceSnapshot({
         sessions: result.sessions,
         records: result.records,
