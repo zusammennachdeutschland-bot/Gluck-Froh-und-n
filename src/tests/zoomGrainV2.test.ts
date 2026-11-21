@@ -468,6 +468,14 @@ async function runZoomGrainV2Tests() {
     });
     assert.equal(canonicalIdentity.resolverGroupId, groupV1.id);
     assert.equal(canonicalIdentity.identityReasonCode, 'LESSON_GROUP_ID_MATCHED');
+    const stalePropResolvedUrl = resolveActiveZoomLinkForLesson({
+      group: canonicalIdentity.group,
+      groupId: canonicalIdentity.resolverGroupId,
+      lesson: bulkSyncedLesson,
+      groupWeeklySessions: resumedRes.sessions
+    });
+    assert.equal(stalePropResolvedUrl, bulkSyncedZoomUrl,
+      'A stale duplicate group prop must not override the lesson canonical group ID');
 
     // If an import left an orphaned lesson.groupId, use the supplied group only
     // when it is independently present in the current canonical groups collection.
