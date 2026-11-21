@@ -1,5 +1,5 @@
 import { Group, GroupScheduleSlot, GroupWeeklySession, Lesson, ScheduleRecurrence } from '../types';
-import { parseLocalDate, formatLocalDate } from './timeUtils';
+import { parseLocalDate, formatLocalDate, normalizeDateToISO } from './timeUtils';
 
 export const DAY_NAME_TO_NUM: Record<string, number> = {
   'so': 0, 'sonntag': 0, 'sun': 0, 'sunday': 0, 'الأحد': 0, 'الاحد': 0, '0': 0,
@@ -260,6 +260,8 @@ export function getProjectedLessonsForRange(
   groupWeeklySessions?: GroupWeeklySession[],
   numberingBasisLessons?: Lesson[]
 ): Lesson[] {
+  startDateStr = normalizeDateToISO(startDateStr);
+  endDateStr = normalizeDateToISO(endDateStr);
   const activeGroups = (groups || []).filter(g => !g.deleted && g.status !== 'archived');
   const activeGroupIds = new Set(activeGroups.map(g => g.id));
   const groupsById = new Map<string, Group>(activeGroups.map(g => [g.id, g]));
@@ -295,7 +297,7 @@ export function getProjectedLessonsForRange(
   (explicitLessons || []).forEach(l => {
     if (l.groupId && l.date && l.time) {
       const normTime = l.time.trim();
-      const key = `${l.groupId}_${l.date}_${normTime}`;
+      const key = `${l.groupId}_${normalizeDateToISO(l.date)}_${normTime}`;
       if (l.deleted) {
         deletedKeys.add(key);
       } else {
@@ -325,7 +327,7 @@ export function getProjectedLessonsForRange(
   const explicitGroupDateMap = new Map<string, Lesson[]>();
   explicit.forEach(l => {
     if (l.groupId && l.date) {
-      const gDateKey = `${l.groupId}_${l.date}`;
+      const gDateKey = `${l.groupId}_${normalizeDateToISO(l.date)}`;
       if (!explicitGroupDateMap.has(gDateKey)) explicitGroupDateMap.set(gDateKey, []);
       explicitGroupDateMap.get(gDateKey)!.push(l);
     }
@@ -371,7 +373,7 @@ export function getProjectedLessonsForRange(
 
       for (const slot of matchingSlots) {
         const sessionTime = slot.time || group.scheduleTime || '17:00';
-        const key = `${group.id}_${dateStr}_${sessionTime}`;
+        const key = `${group.id}_${dateStr}_${sessionTime.trim()}`;
 
         if (!explicitKeys.has(key) && !deletedKeys.has(key)) {
           const isPerLesson = group.paymentCycle === 'per_lesson' || group.paymentModel === 'per_session';
@@ -414,7 +416,7 @@ export function getProjectedLessonsForRange(
             paymentStatus: 'pending',
             amountDue: perSessionPrice,
             amountPaid: 0,
-            meetingLink: group.type === 'online' ? (resolvedSessionLink || group.zoomLink || defaultZoomLink) : undefined,
+            meetingLink: group.type === 'online' ? (resolvedSessionLink || undefined) : undefined,
             locationAddress: group.type === 'offline' ? (group.address || 'Cairo Center') : undefined,
             scheduleRecurrence: group.scheduleRecurrence || 'weekly',
             biweeklyWeek: getAlternatingWeek(cursor)
@@ -471,8 +473,8 @@ export function getProjectedLessonsForRange(
       return t.trim();
     };
     const cmpChrono = (a: Partial<Lesson>, b: Partial<Lesson>) => {
-      const kA = `${(a.date || '').trim()}T${normalizeTimeLocal(a.time)}`;
-      const kB = `${(b.date || '').trim()}T${normalizeTimeLocal(b.time)}`;
+      const kA = `${normalizeDateToISO(a.date || '')}T${normalizeTimeLocal(a.time)}`;
+      const kB = `${normalizeDateToISO(b.date || '')}T${normalizeTimeLocal(b.time)}`;
       if (kA !== kB) return kA.localeCompare(kB);
       return String(a.id || '').localeCompare(String(b.id || ''));
     };

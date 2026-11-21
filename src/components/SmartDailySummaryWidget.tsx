@@ -3,9 +3,9 @@ import { useApp } from '../context/AppContext';
 import { calculateDuePaymentCycles } from '../utils/paymentUtils';
 import { normalizeDateToISO } from '../utils/timeUtils';
 import { normalizeTime } from '../utils/lessonUtils';
-import { isLessonOnDate, isLessonCompatibleWithGroupSchedule } from '../utils/dailyLessonUtils';
+import { getLessonsForDate } from '../utils/dailyLessonUtils';
 import { useLocalDateKey } from '../hooks/useLocalDateKey';
-import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
+
 import { useSyncedHomeworkData } from '../hooks/useSyncedHomeworkData';
 import { buildSmartDailySummaryHomeworkInsights } from '../utils/lessonHomeworkLinkUtils';
 
@@ -24,30 +24,15 @@ import {
 } from 'lucide-react';
 
 export const SmartDailySummaryWidget: React.FC = () => {
-  const { lessons, students, groups, payments, profile, language, t, _t } = useApp();
+  const { lessons, getFullLessonsSnapshot, groups, groupWeeklySessions, students, payments, profile, language, t, _t } = useApp();
   const { assignments: syncedAssignments, submissions: syncedSubmissions, currentOwnerUid } = useSyncedHomeworkData();
   const [isAlertsExpanded, setIsAlertsExpanded] = useState(false);
 
   const todayStr = useLocalDateKey();
 
   const summary = useMemo(() => {
-    const active = lessons
-      .filter(l => !l.deleted && isLessonOnDate(l, todayStr) && l.status !== 'cancelled')
-      .filter(l => isLessonCompatibleWithGroupSchedule(l, groups.find(g => g.id === l.groupId && !g.deleted)))
-
-    const seen = new Set<string>();
-    const todaysLessons: typeof lessons = [];
-    active.forEach(l => {
-      const key = l.groupId && l.groupId !== 'quick_group'
-        ? `${l.groupId}_${normalizeDateToISO(l.date)}_${normalizeTime(l.time)}`
-        : l.id;
-      if (!seen.has(key)) {
-        seen.add(key);
-        todaysLessons.push(l);
-      }
-    });
-
-    todaysLessons.sort((a, b) => a.time.localeCompare(b.time));
+    const todaysLessons = getLessonsForDate(todayStr, getFullLessonsSnapshot(), groups, groupWeeklySessions)
+      .filter(l => l.status !== 'cancelled');
 
     const todaysLessonsCount = todaysLessons.length;
 
@@ -168,7 +153,7 @@ export const SmartDailySummaryWidget: React.FC = () => {
       currency,
       hwInsights
     };
-  }, [lessons, students, groups, payments, profile, todayStr, language, t, syncedAssignments, syncedSubmissions, currentOwnerUid]);
+  }, [lessons, getFullLessonsSnapshot, groups, groupWeeklySessions, students, payments, profile, todayStr, language, t, syncedAssignments, syncedSubmissions, currentOwnerUid]);
 
   const { hwInsights } = summary;
   const hasAlerts = hwInsights.alerts.length > 0;

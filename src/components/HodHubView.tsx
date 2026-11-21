@@ -150,7 +150,7 @@ export const HodHubView: React.FC = () => {
 
   // Live Data SWR & Polling State
   const [isLiveSyncing, setIsLiveSyncing] = useState(false);
-  const [lastSyncedAt, setLastSyncedAt] = useState<string>(new Date().toLocaleTimeString());
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [liveKpis, setLiveKpis] = useState<any>(null);
   const [liveTimetable, setLiveTimetable] = useState<any>(null);
   const [liveStudentData, setLiveStudentData] = useState<any>(null);
@@ -162,23 +162,15 @@ export const HodHubView: React.FC = () => {
       // the 'live database' is the browser's local storage (IndexedDB wrapper).
       const { storage } = await import('../services/storageService');
       
-      const [storedStudents, storedComplaints, storedPlans, storedVisits] = await Promise.all([
+      const [storedStudents, storedComplaints, storedPlans] = await Promise.all([
         storage.getItem<any[]>('hod_german_students'),
         storage.getItem<any[]>('hod_complaints'),
-        storage.getItem<any[]>('hod_student_action_plans'),
-        storage.getItem<any[]>('hod_visit_records')
+        storage.getItem<any[]>('hod_student_action_plans')
       ]);
 
-      // Merge all visit sources for true total count
-      const allVisitMap = new Map<string, any>();
-      (storedVisits || []).forEach((v: any) => v?.id && allVisitMap.set(v.id, v));
-      (schoolSettings.visitRecords || []).forEach((v: any) => v?.id && allVisitMap.set(v.id, v));
-      (hodVisits || []).forEach((v: any) => v?.id && allVisitMap.set(v.id, v));
-      (visitRecords || []).forEach((v: any) => v?.id && allVisitMap.set(v.id, v));
-
-      // Calculate true KPIs
+      // Visit totals come only from the canonical HOD visit collection.
       const kpiData = {
-        visitsCount: allVisitMap.size,
+        visitsCount: (hodVisits || []).filter(v => !v.deleted).length,
         activePlansCount: storedPlans ? storedPlans.length : activePlans.length,
         pendingComplaintsCount: storedComplaints ? storedComplaints.filter(c => c.status !== 'resolved').length : parentComplaints.filter(c => c.status !== 'resolved').length
       };
@@ -227,7 +219,7 @@ export const HodHubView: React.FC = () => {
       
       const timetableData = {
         dayKey: new Date().getDay().toString(),
-        periodsCount: 8,
+        periodsCount: effectivePeriodSettings.periodsCount,
         teachers: activeTeachersList.map((t: any) => ({
           id: t.id || t.name,
           name: t.name,
@@ -239,7 +231,7 @@ export const HodHubView: React.FC = () => {
       setLiveKpis(kpiData);
       setLiveTimetable(timetableData);
       setLiveStudentData(studentData);
-      setLastSyncedAt(new Date().toLocaleTimeString());
+      setLastSyncedAt(new Date().toLocaleString());
 
     } catch (err) {
       console.error('Live sync error:', err);
@@ -1368,24 +1360,14 @@ export const HodHubView: React.FC = () => {
   };
 
   // State for Visits & Booklet Observations
-  const initialMergedVisits = useMemo(() => {
-    const map = new Map<string, any>();
-    (schoolSettings.visitRecords || []).forEach((v: any) => v?.id && map.set(v.id, v));
-    (hodVisits || []).forEach((v: any) => v?.id && map.set(v.id, v));
-    return Array.from(map.values());
-  }, [schoolSettings.visitRecords, hodVisits]);
+  // hodVisits is the sole canonical visit collection; profile.schoolSettings.visitRecords
+  // is read only by the one-time migration in AppContext.
+  const initialMergedVisits = useMemo(() => (hodVisits || []).filter(v => !v.deleted), [hodVisits]);
 
   const [visitRecords, setVisitRecords] = useState<any[]>(initialMergedVisits);
 
   useEffect(() => {
-    if (initialMergedVisits.length > 0) {
-      setVisitRecords(prev => {
-        const map = new Map<string, any>();
-        prev.forEach((v: any) => v?.id && map.set(v.id, v));
-        initialMergedVisits.forEach((v: any) => v?.id && map.set(v.id, v));
-        return Array.from(map.values());
-      });
-    }
+    setVisitRecords(initialMergedVisits);
   }, [initialMergedVisits]);
   const [bookletObservations, setBookletObservations] = useState<any[]>(schoolSettings.bookletObservations || []);
   const [isVisitModalOpen, setIsVisitModalOpen] = useState(false);
@@ -2052,18 +2034,19 @@ export const HodHubView: React.FC = () => {
 
   // Save changes to profile
   const persistHodData = (updates: any) => {
+    const { visitRecords: nextVisitRecords, ...profileUpdates } = updates || {};
+    const { visitRecords: _legacyVisitRecords, ...settingsWithoutLegacyVisits } = schoolSettings as any;
     const updatedSettings = {
-      ...schoolSettings,
-      visitRecords,
+      ...settingsWithoutLegacyVisits,
       bookletObservations,
       weeklyPlanStatuses: weeklyPlans,
       stageReports,
       stageFollowUps,
-      ...updates
+      ...profileUpdates
     };
     updateProfile({ schoolSettings: updatedSettings });
-    if (updates.visitRecords && setHodVisits) {
-      setHodVisits(updates.visitRecords);
+    if (Array.isArray(nextVisitRecords) && setHodVisits) {
+      setHodVisits(nextVisitRecords);
     }
   };
 
@@ -2451,6 +2434,10 @@ export const HodHubView: React.FC = () => {
       {activeTab === 'overview' && (
         <div className="space-y-2 animate-fade-in relative pb-20">
           {/* 1. Core KPIs & Quick Stats Bar */}
+          <div className="flex items-center justify-between gap-2 text-[10px] text-text-muted">
+            <span>{_t('لقطة محلية من هذا الجهاز', 'Local device snapshot', 'Lokaler Gerätestand')}</span>
+            <span>{lastSyncedAt ? _t(`آخر قراءة: ${lastSyncedAt}`, `Read: ${lastSyncedAt}`, `Gelesen: ${lastSyncedAt}`) : _t('لم تتم القراءة بعد', 'Not read yet', 'Noch nicht gelesen')}</span>
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div 
               onClick={() => setActiveTab('staff')}

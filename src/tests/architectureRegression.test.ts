@@ -1,0 +1,118 @@
+import assert from 'node:assert/strict';
+import { normalizeDateToISO } from '../utils/timeUtils';
+import { getLessonsForDate, isLessonCompatibleWithGroupSchedule } from '../utils/dailyLessonUtils';
+import { mergeHodVisitMigration } from '../utils/hodVisitMigration';
+import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
+import { Group, GroupWeeklySession, Lesson, VisitRecord } from '../types';
+
+function runArchitectureRegressionTests() {
+  console.log('=== Architecture regression tests ===');
+
+  // Date normalization: Arabic numerals, day-first strings, ISO timestamps and invalid dates.
+  assert.equal(normalizeDateToISO('٢٣/١١/٢٠٢٦'), '2026-11-23');
+  assert.equal(normalizeDateToISO('23/11/2026'), '2026-11-23');
+  assert.equal(normalizeDateToISO('2026-11-23T19:30:00.000Z'), '2026-11-23');
+  assert.equal(normalizeDateToISO('2026-1-3'), '2026-01-03');
+  assert.equal(normalizeDateToISO('31/02/2026'), '');
+  assert.equal(normalizeDateToISO('2026-13-01'), '');
+  assert.equal(normalizeDateToISO(''), '');
+
+  const group = {
+    id: 'grp_architecture_test',
+    name: 'Architecture Test',
+    type: 'online',
+    grade: 'Grade 8',
+    monthlyPackagePrice: 1200,
+    sessionCount: 4,
+    lessonDurationMinutes: 60,
+    schedules: [{ day: 'Monday', time: '17:00' }],
+    scheduleRecurrence: 'weekly'
+  } as unknown as Group;
+
+  const storedCompleted = {
+    id: 'lesson-real-2026-11-23',
+    groupId: group.id,
+    groupName: group.name,
+    date: '23/11/2026',
+    time: '17:00',
+    durationMinutes: 60,
+    type: 'online',
+    status: 'completed',
+    paymentStatus: 'pending',
+    amountDue: 300,
+    amountPaid: 0,
+    sessionNumber: 1,
+    totalSessionsInPackage: 4
+  } as Lesson;
+  const reconciled = getLessonsForDate('2026-11-23', [storedCompleted], [group]);
+  assert.equal(reconciled.length, 1, 'Stored lesson must reconcile with its projected schedule slot');
+  assert.equal(reconciled[0].id, storedCompleted.id, 'Completed stored lesson must win over synthetic projection');
+
+  const staleGenerated = {
+    ...storedCompleted,
+    id: 'l_auto_grp_architecture_test_2026-11-23_1700',
+    date: '2026-11-23',
+    status: 'scheduled'
+  } as Lesson;
+  const changedSchedule = {
+    ...group,
+    schedules: [{ day: 'Monday', time: '18:00' }]
+  } as Group;
+  assert.equal(
+    isLessonCompatibleWithGroupSchedule(staleGenerated, changedSchedule),
+    false,
+    'Unmodified generated record for a removed slot must not override the group schedule'
+  );
+  assert.equal(
+    isLessonCompatibleWithGroupSchedule({ ...staleGenerated, id: 'manual-lesson' }, changedSchedule),
+    true,
+    'Manual/actual lesson records must retain their provenance'
+  );
+
+  const legacyVisit = { id: 'visit-1', date: '2026-11-20', deleted: false } as VisitRecord;
+  const deletedLegacy = { id: 'visit-2', date: '2026-11-19', deleted: true } as VisitRecord;
+  const tombstone = { id: 'visit-1', date: '2026-11-20', deleted: true, updatedAt: 20 } as VisitRecord;
+  const migrated = mergeHodVisitMigration([tombstone], [legacyVisit, deletedLegacy], false);
+  assert.equal(migrated.length, 1);
+  assert.equal(migrated[0].deleted, true, 'Canonical tombstone must prevent legacy resurrection');
+  assert.deepEqual(
+    mergeHodVisitMigration([], [legacyVisit], true),
+    [],
+    'Completed migration must never re-import legacy profile visits'
+  );
+
+  const canonicalUrl = 'https://zoom.us/j/77777777777';
+  const activeSession = {
+    id: 'gws-current',
+    groupId: group.id,
+    weekday: 1,
+    startTime: '17:00',
+    zoomMeetingId: '77777777777',
+    zoomJoinUrl: canonicalUrl,
+    meetingSource: 'zoom_api',
+    syncState: 'synced',
+    updatedAt: 200,
+    deleted: false
+  } as GroupWeeklySession;
+  const supersededSession = {
+    ...activeSession,
+    id: 'gws-old',
+    zoomMeetingId: '66666666666',
+    zoomJoinUrl: 'https://zoom.us/j/66666666666',
+    syncState: 'superseded',
+    updatedAt: 100
+  } as GroupWeeklySession;
+  assert.equal(
+    resolveActiveZoomLinkForLesson({
+      groupId: group.id,
+      lesson: { groupId: group.id, date: '2026-11-24', time: '18:00' },
+      groupWeeklySessions: [supersededSession, activeSession]
+    }),
+    canonicalUrl,
+    'Lesson without an exact slot link must resolve to the current group canonical URL'
+  );
+
+  console.log('=== Architecture regression tests passed ===');
+}
+
+runArchitectureRegressionTests();

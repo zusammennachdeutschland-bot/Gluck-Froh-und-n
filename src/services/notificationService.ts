@@ -5,13 +5,14 @@ import {
   NotificationSettings, Lesson, Group, Student, PaymentRecord, 
   ScheduledNotificationItem, NotificationPriority, NotificationSound 
 } from '../types';
-import { formatLocalDate } from '../utils/timeUtils';
+import { formatLocalDate, normalizeDateToISO } from '../utils/timeUtils';
 import { getSchoolSettings, calculatePeriodsTimings } from '../utils/schoolUtils';
 import { safeLocalStorageSetItem } from './storageService';
 
 // Helper to construct Date object for Africa/Cairo wall clock times
 export function getCairoDateWithTime(dateStr: string, timeStr: string): Date {
-  const localDateStr = `${dateStr}T${timeStr.padStart(5, '0')}:00`;
+  const normalizedDateStr = normalizeDateToISO(dateStr);
+  const localDateStr = `${normalizedDateStr}T${timeStr.padStart(5, '0')}:00`;
   const targetDate = new Date(localDateStr);
   try {
     const formatter = new Intl.DateTimeFormat('en-US', {
@@ -35,7 +36,7 @@ export function getCairoDateWithTime(dateStr: string, timeStr: string): Date {
       cairoParts.minute,
       cairoParts.second || 0
     );
-    const [y, m, d] = dateStr.split('-').map(Number);
+    const [y, m, d] = normalizedDateStr.split('-').map(Number);
     const [hrs, mins] = timeStr.split(':').map(Number);
     const desiredDate = new Date(y, m - 1, d, hrs, mins, 0);
     const diffMs = desiredDate.getTime() - cairoDate.getTime();
@@ -949,7 +950,7 @@ const rebuildAllNotificationSchedulesInternal = async (
     }
 
     const todayStr = formatLocalDate();
-    const todayLessons = lessons.filter(l => l.date === todayStr);
+    const todayLessons = lessons.filter(l => normalizeDateToISO(l.date) === normalizeDateToISO(todayStr));
 
     let summaryText = isAr ? 'ملخص اليوم: ' : isDe ? 'Tagesübersicht: ' : 'Daily Summary: ';
     const parts: string[] = [];

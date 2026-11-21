@@ -2,7 +2,7 @@ import { isPendingStatus } from "../utils/lessonUtils";
 import { useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { sendSystemNotification, getNotificationPermission, requestNotificationPermission } from '../services/notificationService';
-import { formatLocalDate } from '../utils/timeUtils';
+import { formatLocalDate, normalizeDateToISO } from '../utils/timeUtils';
 
 export const useLessonReminders = () => {
   const { 
@@ -28,7 +28,7 @@ export const useLessonReminders = () => {
           // 1. All upcoming lessons starting soon (e.g. within minutesBefore)
           const upcomingLessons = lessons?.filter(l => {
             if (!l || !l.time || typeof l.time !== 'string') return false;
-            if (l.date !== todayStr || l.status !== 'scheduled') return false;
+            if (normalizeDateToISO(l.date) !== todayStr || l.status !== 'scheduled') return false;
             const parts = l.time.split(':').map(n => parseInt(n, 10));
             if (parts.length < 2 || isNaN(parts[0]) || isNaN(parts[1])) return false;
             const lMins = parts[0] * 60 + parts[1];
@@ -75,7 +75,7 @@ export const useLessonReminders = () => {
           }
 
           // 2. Pending past lessons reminder (once a day)
-          const pastPending = lessons?.filter(l => l && l.date && l.date < todayStr && isPendingStatus(l.status)) || [];
+          const pastPending = lessons?.filter(l => l && l.date && normalizeDateToISO(l.date) < todayStr && isPendingStatus(l.status)) || [];
           if (pastPending.length > 0) {
             const notifKey = `rem_past_pending_${todayStr}`;
             if (!sessionStorage.getItem(notifKey)) {

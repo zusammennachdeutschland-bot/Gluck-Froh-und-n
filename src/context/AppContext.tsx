@@ -33,6 +33,7 @@ import { runSyncMigration } from '../services/sync/syncMigration';
 import { trackLocalMutation, trackLocalDeletion, getActiveRecords, detectLocalOriginPlatform } from '../services/sync/mutationTracker';
 import { hydrateVerbGroupSet } from '../shared/verbGroupSync';
 import { normalizeLernstudioSet, stripHeavyGrammarMediaForSync } from '../shared/grammarEngine';
+import { mergeHodVisitMigration } from '../utils/hodVisitMigration';
 import {
   mergeEntities,
   mergeRecentlyDeleted,
@@ -1548,7 +1549,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             if (paid.id === p.id || paid.deleted || paid.status !== 'paid') return false;
             if (paid.studentId !== p.studentId) return false;
             if (realIds.length > 0 && paid.lessonIds?.some((id: string) => realIds.includes(id))) return true;
-            if (p.dueDate && paid.dueDate && p.dueDate === paid.dueDate && p.amountDue === paid.amountDue) return true;
+            if (p.dueDate && paid.dueDate && normalizeDateToISO(p.dueDate) === normalizeDateToISO(paid.dueDate) && p.amountDue === paid.amountDue) return true;
             return false;
           });
 
@@ -1670,7 +1671,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [hodVisits, setHodVisits] = useState<VisitRecord[]>(() => {
     const saved = initialData['hod_visit_records'];
-    const raw: VisitRecord[] = Array.isArray(saved) ? saved : [];
+    const migrationKey = 'hod_visit_records_migrated_v1';
+    const migrationAlreadyDone = Boolean(initialData[migrationKey]);
+    const legacyProfileVisits = ((initialData['dl_profile'] as any)?.schoolSettings?.visitRecords || []) as VisitRecord[];
+    const canonicalVisits: VisitRecord[] = Array.isArray(saved) ? saved : [];
+    const raw = mergeHodVisitMigration(canonicalVisits, legacyProfileVisits, migrationAlreadyDone);
+    if (!migrationAlreadyDone) {
+      storage.setItem(migrationKey, true);
+      storage.setItem('hod_visit_records', raw);
+    }
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       const id = item.id || `hod_vst_${Date.now()}_${idx}`;
@@ -1707,41 +1716,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   useEffect(() => {
     if (!isInitializedRef.current) return;
     storage.setItem('hod_visit_records', hodVisits);
-
-    // Keep profile.schoolSettings.visitRecords synchronized with hodVisits while respecting purge tombstones
-    const purgedVisitIds = new Set<string>(
-      (recentlyDeletedRef.current?.purgedRecords || [])
-        .filter((p) => p && p.id)
-        .map((p) => p.id.trim())
-    );
-    setProfile(prev => {
-      const existingSettings = (prev?.schoolSettings as any) || {};
-      const existingVisits = (existingSettings.visitRecords || []).filter(
-        (v: any) => v?.id && !purgedVisitIds.has(String(v.id).trim())
-      );
-      const map = new Map<string, VisitRecord>();
-      existingVisits.forEach((v: any) => v?.id && map.set(v.id, v));
-      (hodVisits || []).forEach(v => {
-        if (v?.id && !purgedVisitIds.has(String(v.id).trim()) && !v.deleted) {
-          map.set(v.id, v);
-        }
-      });
-      const merged = Array.from(map.values());
-
-      if ((existingSettings.visitRecords || []).length === merged.length && merged.every((v: any, i: number) => v.id === (existingSettings.visitRecords || [])[i]?.id)) {
-        return prev;
-      }
-
-      const updated = {
-        ...prev,
-        schoolSettings: {
-          ...existingSettings,
-          visitRecords: merged
-        } as any
-      };
-      storage.setItem('dl_profile', updated);
-      return updated;
-    });
   }, [hodVisits]);
 
   // School & Lesson Notes State with SyncableRecord schema
@@ -2753,7 +2727,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
     if (triggerType !== 'manual') {
       // Check if already shown today
-      if (inspirationSettings.lastShownDate === todayStr) {
+      if (normalizeDateToISO(inspirationSettings.lastShownDate || '') === normalizeDateToISO(todayStr)) {
         // If already shown today and displayMethod includes in_app card, load the active card if not dismissed
         if (!isInspirationDismissedToday && inspirationSettings.lastShownMessageId && (inspirationSettings.displayMethod === 'in_app' || inspirationSettings.displayMethod === 'both')) {
           const shownMsg = inspirationMessages.find(m => m.id === inspirationSettings.lastShownMessageId);
@@ -2766,7 +2740,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
       // Check specific frequency rules
       if (inspirationSettings.frequency === 'before_first_lesson' && triggerType !== 'before_lesson') {
-        const todaysLessons = lessons.filter(l => l.date === todayStr && l.status !== 'cancelled');
+        const todaysLessons = lessons.filter(l => normalizeDateToISO(l.date) === normalizeDateToISO(todayStr) && l.status !== 'cancelled');
         if (todaysLessons.length === 0) {
           return; // No lessons today yet
         }
@@ -2837,7 +2811,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const nowMins = now.getHours() * 60 + now.getMinutes();
 
       lessons.forEach((lesson) => {
-        if (lesson.deleted || lesson.date !== todayStr || lesson.status !== 'scheduled') return;
+        if (lesson.deleted || normalizeDateToISO(lesson.date) !== normalizeDateToISO(todayStr) || lesson.status !== 'scheduled') return;
 
         const timeParts = lesson.time.split(':').map(n => parseInt(n, 10));
         if (timeParts.length < 2 || isNaN(timeParts[0]) || isNaN(timeParts[1])) return;
@@ -2894,136 +2868,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     return () => clearInterval(interval);
   }, [lessons, profile.enableLessonAlerts, profile.enableBrowserPush, notifiedLessonAlerts, notificationSettings.masterEnabled, notificationSettings.lessonReminder.enabled, language]);
 
-  // Auto-sync recurring group schedules directly into calendar (#27 Set optimization)
-  useEffect(() => {
-    if (!groups || groups.length === 0) return;
-
-    const sourceLessons = (fullLessonsRef.current && fullLessonsRef.current.length > 0)
-      ? fullLessonsRef.current
-      : lessons;
-    const newAutoLessons: Lesson[] = [];
-    const today = new Date();
-    const existingSlotSet = buildLessonSlotSet(sourceLessons);
-    const groupLessonCounts = new Map<string, number>();
-    for (const l of sourceLessons) {
-      if (!l.deleted && l.status !== 'cancelled' && l.groupId) {
-        groupLessonCounts.set(l.groupId, (groupLessonCounts.get(l.groupId) || 0) + 1);
-      }
-    }
-
-    groups.forEach(group => {
-      if (group.deleted || group.status === 'archived') return;
-      const slots = getGroupScheduleSlots(group);
-      if (slots.length === 0) return;
-
-      const isPerLesson = isGroupPerLesson(group);
-      const perSessionPrice = isPerLesson && group.pricePerSession
-        ? group.pricePerSession
-        : Math.round((group.monthlyPackagePrice || 1200) / (group.sessionCount || 4));
-      let groupAddedCount = 0;
-      const baseGroupCount = groupLessonCounts.get(group.id) || 0;
-
-      // Maintain a rolling window of exactly 14 days of auto-generated future lessons
-      const ROLLING_FUTURE_WINDOW_DAYS = 14;
-      const prunedIds = getPrunedLessonIds();
-
-      for (let dayOffset = 0; dayOffset <= ROLLING_FUTURE_WINDOW_DAYS; dayOffset++) {
-        const d = new Date();
-        d.setDate(today.getDate() + dayOffset);
-        if (!isDateMatchingGroupRecurrence(group.scheduleRecurrence, d)) continue;
-        const dayNum = d.getDay();
-
-        const matchingSlot = slots.find(s => getDayNumber(s.day) === dayNum);
-        if (matchingSlot) {
-          const dateStr = formatLocalDate(d);
-          const sessionTime = matchingSlot.time || '17:00';
-          const slotKey = makeLessonSlotKey(group.id, dateStr, sessionTime);
-          const autoLessonId = `l_auto_${group.id}_${dateStr}_${sessionTime.replace(':', '')}`;
-
-          // If this slot was explicitly pruned or already exists with a non-deleted record, do not auto-generate
-          if (prunedIds.has(autoLessonId)) continue;
-          if (sourceLessons.some(l => l && l.id === autoLessonId)) continue;
-
-          // If group already has a completed, cancelled, or in-progress session on this date, do not auto-generate another scheduled session
-          const existingForGroupOnDate = sourceLessons.filter(l => l.groupId === group.id && l.date === dateStr && !l.deleted);
-          const hasHandledOnDate = existingForGroupOnDate.some(
-            l => l.status === 'completed' || l.status === 'cancelled' || l.status === 'in_progress' || (l.report && l.report.attendanceStatus)
-          );
-          const daySlotsCount = slots.filter(s => getDayNumber(s.day) === dayNum).length || 1;
-          if (hasHandledOnDate && existingForGroupOnDate.length >= daySlotsCount) {
-            continue;
-          }
-
-          if (!existingSlotSet.has(slotKey)) {
-            existingSlotSet.add(slotKey);
-            const sessionNumber = isPerLesson
-              ? 1
-              : ((((group.startingSessionNumber || 1) - 1 + baseGroupCount + groupAddedCount) % (group.sessionCount || 4)) + 1);
-            groupAddedCount += 1;
-
-            newAutoLessons.push(wrapMutation({
-              id: autoLessonId,
-              groupId: group.id,
-              groupName: group.name,
-              title: `${group.name} Lektion`,
-              date: dateStr,
-              time: sessionTime,
-              durationMinutes: group.lessonDurationMinutes || 60,
-              type: group.type,
-              grade: group.grade,
-              sessionNumber,
-              totalSessionsInPackage: isPerLesson ? 1 : (group.sessionCount || 4),
-              status: 'scheduled',
-              paymentStatus: 'pending',
-              amountDue: perSessionPrice,
-              amountPaid: 0,
-              meetingLink: group.type === 'online'
-                ? resolveActiveZoomLinkForLesson({
-                    group,
-                    lesson: { groupId: group.id, date: dateStr, time: sessionTime },
-                    groupWeeklySessions: groupWeeklySessionsRef.current,
-                  })
-                : undefined,
-              locationAddress: group.type === 'offline' ? (group.address || 'Cairo Center') : undefined,
-              scheduleRecurrence: group.scheduleRecurrence || 'weekly',
-              biweeklyWeek: getAlternatingWeek(d),
-              isAutoGenerated: true
-            } as Lesson));
-          }
-        }
-      }
-    });
-
-    if (newAutoLessons.length > 0) {
-      updateFullLessonsStorage(prev => {
-        const prevSlotSet = buildLessonSlotSet(prev);
-        const prevIdSet = new Set(prev.map(l => l?.id).filter(Boolean));
-        const deduplicated = newAutoLessons.filter(
-          nl => !prevIdSet.has(nl.id) && !prevSlotSet.has(makeLessonSlotKey(nl.groupId || '', nl.date, nl.time))
-        );
-        if (deduplicated.length === 0) return prev;
-        let combined = [...prev, ...deduplicated];
-        const affectedGroupIds = new Set(deduplicated.map(l => l.groupId).filter(Boolean) as string[]);
-        affectedGroupIds.forEach(gid => {
-          const grp = groups.find(g => g.id === gid);
-          if (grp) {
-            combined = resequenceScheduledLessonsAfterChange(combined, { groupId: grp.id, groupName: grp.name }, {
-              group: grp,
-              students
-            });
-          }
-        });
-        return combined;
-      });
-    }
-  }, [groups]);
+  // Future recurring group occurrences are projected from group schedules; storage holds actual or edited lessons only.
 
   const updateProfile = (updates: Partial<TeacherProfile>) => {
-    if (updates.schoolSettings?.visitRecords && Array.isArray(updates.schoolSettings.visitRecords)) {
-      setHodVisits(updates.schoolSettings.visitRecords);
-    }
     setProfile(prev => {
-      const updated = { ...prev, ...updates };
+      const merged = { ...prev, ...updates };
+      // HOD visits live only in hod_visit_records; never persist/re-import the legacy profile copy.
+      const { visitRecords: _legacyVisitRecords, ...schoolSettings } = (merged.schoolSettings || {}) as any;
+      const updated = { ...merged, schoolSettings } as TeacherProfile;
       storage.setItem('dl_profile', updated);
       return updated;
     });
@@ -3095,7 +2947,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             lesson.groupId !== 'quick_group' && 
             !lesson.deleted &&
             lesson.status === 'scheduled' && 
-            lesson.date >= todayStr && 
+            normalizeDateToISO(lesson.date) >= todayStr && 
             (!lesson.report || (!lesson.report.attendanceStatus && !lesson.report.teacherNotes && !lesson.report.homeworkTitle && lesson.report.quizScore === undefined)) &&
             (!lesson.studentPayments || Object.keys(lesson.studentPayments).length === 0) &&
             (!lesson.amountPaid || lesson.amountPaid === 0)
@@ -3116,7 +2968,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
                 const daySlotsCount = activeSlots.filter(s => getDayNumber(s.day) === lDayNum).length || 1;
                 const completedCountOnDate = filteredAndDeduplicated.filter(
                   l => l.groupId === lesson.groupId &&
-                       l.date === lesson.date &&
+                       normalizeDateToISO(l.date) === normalizeDateToISO(lesson.date) &&
                        !l.deleted &&
                        (l.status === 'completed' || (l.report && l.report.attendanceStatus))
                 ).length;
@@ -3451,7 +3303,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const isHistoricalOrLocked = (l: Lesson) => {
       if (l.groupId !== id) return true;
       if (l.deleted) return true;
-      if (l.date < todayStr) return true;
+      if (normalizeDateToISO(l.date) < normalizeDateToISO(todayStr)) return true;
       if (l.status !== 'scheduled') return true;
       if (l.report && (l.report.attendanceStatus || l.report.teacherNotes || l.report.homeworkTitle || l.report.quizScore !== undefined)) return true;
       if (l.studentPayments && Object.keys(l.studentPayments).length > 0) return true;
@@ -3463,7 +3315,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const fullSourceLessons = (fullLessonsRef.current && fullLessonsRef.current.length > 0) ? fullLessonsRef.current : lessons;
     const newGeneratedLessons: Lesson[] = [];
     if (scheduleChanged && newSlots.length > 0) {
-      const pastGroupLessonsCount = fullSourceLessons.filter(l => l.groupId === id && !l.deleted && l.status !== 'cancelled' && (l.date < todayStr || isHistoricalOrLocked(l))).length;
+      const pastGroupLessonsCount = fullSourceLessons.filter(l => l.groupId === id && !l.deleted && l.status !== 'cancelled' && (normalizeDateToISO(l.date) < normalizeDateToISO(todayStr) || isHistoricalOrLocked(l))).length;
       const startingNum = updatedGroup.startingSessionNumber || 1;
       const sessionCount = updatedGroup.sessionCount || 4;
 
@@ -3495,7 +3347,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           const slotKey = makeLessonSlotKey(id, dateStr, sessionTime);
 
           // If group already has a completed session on this date, do not generate duplicate/extra slots
-          const existingForGroupOnDate = lessons.filter(l => l.groupId === id && l.date === dateStr && !l.deleted);
+          const existingForGroupOnDate = lessons.filter(l => l.groupId === id && normalizeDateToISO(l.date) === normalizeDateToISO(dateStr) && !l.deleted);
           const hasCompletedOnDate = existingForGroupOnDate.some(
             l => l.status === 'completed' || (l.report && l.report.attendanceStatus)
           );
@@ -3738,7 +3590,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     // Cancel / delete future scheduled lessons belonging to the deleted group from both storage and RAM
     const todayStr = formatLocalDate();
     await updateFullLessonsStorage(all => all.map(l => {
-      if (l.groupId === id && (l.date >= todayStr || l.status === 'scheduled' || l.status === 'in_progress' || l.status === 'pending_action') && l.status !== 'completed') {
+      if (l.groupId === id && (normalizeDateToISO(l.date) >= normalizeDateToISO(todayStr) || l.status === 'scheduled' || l.status === 'in_progress' || l.status === 'pending_action') && l.status !== 'completed') {
         return wrapDeletion(l);
       }
       return l;
@@ -4309,7 +4161,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     return active.filter(n => {
       if (params.lessonId && n.lessonId === params.lessonId) return true;
       if (params.date && params.periodNumber !== undefined && params.className) {
-        if (n.date === params.date && n.periodNumber === params.periodNumber && n.className?.trim().toLowerCase() === params.className.trim().toLowerCase()) {
+        if (normalizeDateToISO(n.date || '') === normalizeDateToISO(params.date || '') && n.periodNumber === params.periodNumber && n.className?.trim().toLowerCase() === params.className.trim().toLowerCase()) {
           return true;
         }
       }
@@ -4915,22 +4767,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return filtered;
     });
 
-    setProfile(prev => {
-      const existingVisits = (prev?.schoolSettings as any)?.visitRecords;
-      if (!Array.isArray(existingVisits) || existingVisits.length === 0) return prev;
-      const filteredVisits = existingVisits.filter((v: any) => v && v.id && !allPurgedIds.has(String(v.id).trim()));
-      if (filteredVisits.length === existingVisits.length) return prev;
-      const updated = {
-        ...prev,
-        schoolSettings: {
-          ...(prev.schoolSettings as any),
-          visitRecords: filteredVisits
-        }
-      };
-      storage.setItem('dl_profile', updated);
-      return updated;
-    });
-
     setGoldHoldings(prev => {
       const filtered = (prev || []).filter(g => g && g.id && !allPurgedIds.has(String(g.id).trim()));
       if (filtered.length !== (prev || []).length) {
@@ -5271,7 +5107,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const requiresResequence =
         updates.status === 'cancelled' ||
         (previousStatus === 'cancelled' && Boolean(updates.status)) ||
-        (updates.date !== undefined && updates.date !== previousDate) ||
+        (updates.date !== undefined && normalizeDateToISO(updates.date || '') !== normalizeDateToISO(previousDate || '')) ||
         (updates.time !== undefined && updates.time !== previousTime) ||
         updates.groupId !== undefined ||
         updates.studentId !== undefined;
@@ -5451,7 +5287,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const deleteFutureGroupLessons = (groupId: string, fromDate: string, currentLessonId?: string) => {
     const updater = (allLessons: Lesson[]) => allLessons.map(l => {
       if (l.groupId === groupId && !l.deleted) {
-        const isTarget = (currentLessonId && l.id === currentLessonId) || l.date >= fromDate;
+        const isTarget = (currentLessonId && l.id === currentLessonId) || normalizeDateToISO(l.date) >= normalizeDateToISO(fromDate);
         const isModifiable = l.status === 'scheduled' && (!l.report || (!l.report.attendanceStatus && !l.report.teacherNotes));
         if (isTarget && isModifiable) {
           return wrapDeletion(l);
@@ -5460,7 +5296,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return l;
     });
     updateFullLessonsStorage(updater);
-    if (selectedLesson && selectedLesson.groupId === groupId && (selectedLesson.id === currentLessonId || selectedLesson.date >= fromDate)) {
+    if (selectedLesson && selectedLesson.groupId === groupId && (selectedLesson.id === currentLessonId || normalizeDateToISO(selectedLesson.date) >= normalizeDateToISO(fromDate))) {
       closeLessonControl();
     }
     autoSyncEngine.notifyMutation('lessons', groupId);
@@ -6052,144 +5888,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     autoSyncEngine.notifyMutation('lessons', lessonId);
   };
 
+  /**
+   * Group schedules are the source of truth for future recurring occurrences.
+   * Do not materialize a rolling year of synthetic lessons into storage: the
+   * shared schedule projection supplies those rows to Calendar and Dashboard.
+   * Keep only future generated rows that have become real/edited lesson records.
+   */
   const generateGroupScheduleLessons = (groupId: string, days: string[], defaultTime: string, numWeeks: number = 52, customDayTimes?: Record<string, string>, groupOverride?: Group) => {
     const targetGroup = groupOverride || groups.find(g => g.id === groupId && !g.deleted);
     if (!targetGroup) return;
 
-    const effectiveGroup: Group = {
-      ...targetGroup,
-      scheduleDays: days && days.length > 0 ? days : targetGroup.scheduleDays,
-      scheduleTime: defaultTime || targetGroup.scheduleTime,
-      scheduleDayTimes: customDayTimes || targetGroup.scheduleDayTimes,
-    };
-
-    const slots = getGroupScheduleSlots(effectiveGroup);
-    if (slots.length === 0) return;
-
-    const newLessons: Lesson[] = [];
-    const today = new Date();
-
-    const activeLessons = lessons.filter(l => !l.deleted && l.status !== 'cancelled');
-    const existingSlotSet = buildLessonSlotSet(activeLessons);
-    const activeGroupLessonsCount = activeLessons.filter(l => l.groupId === groupId).length;
-    const isPerLesson = isGroupPerLesson(targetGroup);
-    const perSessionPrice = isPerLesson && targetGroup.pricePerSession
-      ? targetGroup.pricePerSession
-      : Math.round((targetGroup.monthlyPackagePrice || 1200) / (targetGroup.sessionCount || 4));
-
-    const checkOverlap = (l1: { date: string; time: string; durationMinutes: number }, l2: { date: string; time: string; durationMinutes: number }) => {
-      if (l1.date !== l2.date) return false;
-      const getMinutes = (timeStr: string) => {
-        const [h, m] = (timeStr || "00:00").split(':').map(Number);
-        return (h || 0) * 60 + (m || 0);
-      };
-      const start1 = getMinutes(l1.time);
-      const end1 = start1 + (l1.durationMinutes || 60);
-      const start2 = getMinutes(l2.time);
-      const end2 = start2 + (l2.durationMinutes || 60);
-      return start1 < end2 && start2 < end1;
-    };
-
-    for (let dayOffset = 0; dayOffset < numWeeks * 7; dayOffset++) {
-      const d = new Date();
-      d.setDate(today.getDate() + dayOffset);
-      const dayNum = d.getDay();
-
-      const matchingSlot = slots.find(s => getDayNumber(s.day) === dayNum);
-
-      if (matchingSlot) {
-        // Alternating week check (Week A vs Week B)
-        if (!isDateMatchingGroupRecurrence(targetGroup.scheduleRecurrence, d)) {
-          continue;
-        }
-
-        const dateStr = formatLocalDate(d);
-        const sessionTime = matchingSlot.time || defaultTime || '17:00';
-        const slotKey = makeLessonSlotKey(groupId, dateStr, sessionTime);
-
-        if (!existingSlotSet.has(slotKey)) {
-          const dummyLesson = { 
-            id: 'dummy', 
-            date: dateStr, 
-            time: sessionTime, 
-            durationMinutes: targetGroup.lessonDurationMinutes || 60,
-            groupId: targetGroup.id,
-            scheduleRecurrence: targetGroup.scheduleRecurrence || 'weekly'
-          };
-          
-          // Conflict check against other distinct groups
-          const hasConflict = activeLessons.some(l => 
-            l.groupId !== groupId && 
-            checkOverlap(dummyLesson, l)
-          ) || newLessons.some(l => checkOverlap(dummyLesson, l));
-          
-          if (!hasConflict) {
-            existingSlotSet.add(slotKey);
-            newLessons.push(wrapMutation({
-              id: `l_auto_${targetGroup.id}_${dateStr}_${sessionTime.replace(':', '')}`,
-              isAutoGenerated: true,
-              groupId: targetGroup.id,
-              groupName: targetGroup.name,
-              title: `${targetGroup.name} Lektion`,
-              date: dateStr,
-              time: sessionTime,
-              durationMinutes: targetGroup.lessonDurationMinutes || 60,
-              type: targetGroup.type,
-              grade: targetGroup.grade,
-              sessionNumber: isPerLesson ? 1 : ((((targetGroup.startingSessionNumber || 1) - 1 + activeGroupLessonsCount + newLessons.length) % (targetGroup.sessionCount || 4)) + 1),
-              totalSessionsInPackage: isPerLesson ? 1 : (targetGroup.sessionCount || 4),
-              status: 'scheduled',
-              paymentStatus: 'pending',
-              amountDue: perSessionPrice,
-              amountPaid: 0,
-              meetingLink: targetGroup.type === 'online'
-                ? resolveActiveZoomLinkForLesson({
-                    group: targetGroup,
-                    lesson: { groupId: targetGroup.id, date: dateStr, time: sessionTime },
-                    groupWeeklySessions: groupWeeklySessionsRef.current,
-                  })
-                : undefined,
-              locationAddress: targetGroup.type === 'offline' ? (targetGroup.address || 'Cairo Center') : undefined,
-              scheduleRecurrence: targetGroup.scheduleRecurrence || 'weekly',
-              biweeklyWeek: getAlternatingWeek(d)
-            } as Lesson));
-          }
-        }
-      }
-    }
-
     const todayIso = formatLocalDate();
-    updateFullLessonsStorage(prev => {
-      // Soft-delete stale future scheduled lessons of this group that don't match the new alternating week recurrence
-      let cleanedPrev = prev;
-      if (targetGroup.scheduleRecurrence && targetGroup.scheduleRecurrence !== 'weekly') {
-        cleanedPrev = prev.map(l => {
-          if (l.groupId !== groupId) return l;
-          if (l.deleted || l.status !== 'scheduled' || l.date < todayIso) return l;
-          if (l.report?.attendanceStatus || l.report?.teacherNotes || (l.amountPaid && l.amountPaid > 0)) return l;
-          if (!isDateMatchingGroupRecurrence(targetGroup.scheduleRecurrence, l.date)) {
-            return wrapDeletion(l);
-          }
-          return l;
-        });
-      }
+    updateFullLessonsStorage(prev => prev.filter(lesson => {
+      if (
+        lesson.groupId !== groupId ||
+        !lesson.isAutoGenerated ||
+        lesson.deleted ||
+        lesson.status !== 'scheduled' ||
+        normalizeDateToISO(lesson.date) < todayIso
+      ) return true;
 
-      if (newLessons.length === 0) {
-        return cleanedPrev;
-      }
-
-      const existingIds = new Set(cleanedPrev.map(l => l.id));
-      const prevSlotSet = buildLessonSlotSet(cleanedPrev);
-      const deduplicated = newLessons.filter(
-        nl => !existingIds.has(nl.id) && !prevSlotSet.has(makeLessonSlotKey(nl.groupId || '', nl.date, nl.time))
+      const report = lesson.report;
+      const hasRealWork = Boolean(
+        report?.attendanceStatus ||
+        report?.teacherNotes ||
+        report?.homeworkTitle ||
+        report?.quizScore !== undefined ||
+        (lesson.studentPayments && Object.keys(lesson.studentPayments).length > 0) ||
+        (lesson.amountPaid && lesson.amountPaid > 0) ||
+        lesson.notes?.trim() ||
+        lesson.quickNotes?.trim() ||
+        lesson.topic?.trim() ||
+        lesson.whatWasTaught?.trim() ||
+        lesson.homeworkTitle?.trim() ||
+        lesson.homeworkDescription?.trim() ||
+        (lesson as any).isRescheduled ||
+        (lesson as any).rescheduledFromDate ||
+        (lesson as any).manualOverride
       );
-      const combined = deduplicated.length > 0 ? [...cleanedPrev, ...deduplicated] : cleanedPrev;
-      return resequenceScheduledLessonsAfterChange(combined, { groupId: targetGroup.id }, {
-        group: targetGroup,
-        students,
-        wrapMutation
-      });
-    });
+      return hasRealWork;
+    }));
   };
 
   // Payments
@@ -6372,7 +6110,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const matchingIndices: number[] = [];
       allLessons.forEach((l, idx) => {
         const matchesId = targetIds.has(l.id);
-        const matchesDate = (l.studentId === data.studentId || (l.groupId && l.groupId === data.groupId)) && targetDates.has(l.date);
+        const matchesDate = (l.studentId === data.studentId || (l.groupId && l.groupId === data.groupId)) && Array.from(targetDates).some(date => normalizeDateToISO(date) === normalizeDateToISO(l.date));
         if (matchesId || matchesDate) {
           matchingIndices.push(idx);
         }
@@ -6870,7 +6608,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         }
         const matchesId = p.lessonId === lessonId || (p.lessonIds && p.lessonIds.includes(lessonId));
         const matchesDate = effectiveStudentId && p.studentId === effectiveStudentId &&
-          (p.lessonDates && p.lessonDates.some(d => d.includes(targetLesson.date)));
+          (p.lessonDates && p.lessonDates.some(d => normalizeDateToISO(d) === normalizeDateToISO(targetLesson.date)));
         if (matchesId || matchesDate) {
           matchedAny = true;
           if (!paymentRecordId) paymentRecordId = p.id;

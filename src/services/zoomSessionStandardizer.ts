@@ -772,7 +772,20 @@ export function resolveActiveWeeklySessionForLesson(params: {
   );
 
   exactMatches.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  return exactMatches[0] || null;
+  if (exactMatches[0]) return exactMatches[0];
+
+  // If the lesson has no slot-specific active URL, use the group's current canonical
+  // API-managed link. Group-wide replacement keeps all active sessions in agreement.
+  const canonicalGroupSessions = params.groupWeeklySessions.filter((session) =>
+    Boolean(session) &&
+    !session.deleted &&
+    session.groupId === groupId &&
+    session.meetingSource === 'zoom_api' &&
+    session.syncState === 'synced' &&
+    Boolean((session.zoomJoinUrl || '').trim())
+  );
+  canonicalGroupSessions.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  return canonicalGroupSessions[0] || null;
 }
 
 /**
@@ -788,22 +801,5 @@ export function resolveActiveZoomLinkForLesson(params: {
   targetDay?: string | number | null;
   targetTime?: string | null;
 }): string {
-  const activeSessionUrl = (resolveActiveWeeklySessionForLesson(params)?.zoomJoinUrl || '').trim();
-  if (activeSessionUrl) return activeSessionUrl;
-
-  // Backward compatibility: groups created before standardized weekly sessions
-  // may only have group.zoomLink. Never use that legacy value once this group
-  // has any standardized-session record (including deleted/unsynced records),
-  // because it may point to a replaced or archived meeting.
-  const groupId = params.group?.id || params.groupId || params.lesson?.groupId;
-  const hasStandardizedSessionHistory = Boolean(
-    groupId &&
-    Array.isArray(params.groupWeeklySessions) &&
-    params.groupWeeklySessions.some((session) => session?.groupId === groupId)
-  );
-  if (!hasStandardizedSessionHistory) {
-    return (params.group?.zoomLink || '').trim();
-  }
-
-  return '';
+  return (resolveActiveWeeklySessionForLesson(params)?.zoomJoinUrl || '').trim();
 }
