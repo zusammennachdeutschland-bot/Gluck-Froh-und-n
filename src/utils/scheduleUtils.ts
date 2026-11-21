@@ -295,7 +295,7 @@ export function getProjectedLessonsForRange(
         const weekday = parseLocalDate(normalizeDateToISO(l.date)).getDay();
         const normalizeSlotTime = (value?: string) => {
           const parts = String(value || '').trim().split(':');
-          return parts.length === 2 && /^\\d{1,2}$/.test(parts[0]) && /^\\d{1,2}$/.test(parts[1])
+          return parts.length === 2 && /^\d{1,2}$/.test(parts[0]) && /^\d{1,2}$/.test(parts[1])
             ? `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`
             : String(value || '').trim();
         };
