@@ -20,12 +20,12 @@ const makeLesson = (id: string, studentName: string, time: string, status: 'sche
   updatedAt: status === 'completed' ? 2 : 1
 } as Lesson);
 
-const assertCompleted = (lessons: Lesson[], boundary: string) => {
+const assertStatuses = (lessons: Lesson[], expected: Record<string, string>, boundary: string) => {
   const byId = new Map(lessons.map(lesson => [lesson.id, lesson]));
-  for (const id of ['judy-0800', 'kinda-0900', 'taleen-1000']) {
-    assert.equal(byId.get(id)?.status, 'completed', `${boundary}: ${id} must be completed`);
+  assert.deepEqual(Array.from(byId.keys()).sort(), Object.keys(expected).sort(), `${boundary}: all IDs must exist exactly once`);
+  for (const [id, status] of Object.entries(expected)) {
+    assert.equal(byId.get(id)?.status, status, `${boundary}: ${id} must remain ${status}`);
   }
-  assert.equal(byId.size, 3, `${boundary}: all three IDs must exist exactly once`);
 };
 
 const runSameDayHandlerRegression = () => {
@@ -37,7 +37,9 @@ const runSameDayHandlerRegression = () => {
 
   // This is the same mutation helper called by AppContext.saveLessonReport from
   // the Home checkmark handler. Invoke it twice, as the teacher does on Home.
-  const invokeActualCompletionMutation = (lessonId: string) => {
+  const expectedAfterKinda = { 'judy-0800': 'completed', 'kinda-0900': 'completed', 'taleen-1000': 'scheduled' };
+  const expectedAfterTaleen = { 'judy-0800': 'completed', 'kinda-0900': 'completed', 'taleen-1000': 'completed' };
+  const invokeActualCompletionMutation = (lessonId: string, expected: Record<string, string>) => {
     const result = applyLessonCompletionMutation(full, lessonId, lesson => ({
       ...lesson,
       status: 'completed',
@@ -47,21 +49,21 @@ const runSameDayHandlerRegression = () => {
     } as Lesson));
     full = result.lessons;
     assert.equal(result.found, true, `handler must find ${lessonId}`);
-    assertCompleted(full, `after ${lessonId} completion mutation`);
+    assertStatuses(full, expected, `after ${lessonId} completion mutation`);
 
     const pivot = full.find(lesson => lesson.id === lessonId)!;
     full = resequenceScheduledLessonsAfterChange(full, pivot);
-    assertCompleted(full, `after ${lessonId} resequence`);
+    assertStatuses(full, expected, `after ${lessonId} resequence`);
 
     const deduped = deduplicateLessonList(full);
     assert.deepEqual(Array.from(deduped.removedIds), [], 'the three separate lessons must not be deduplicated');
     full = deduped.deduplicated as Lesson[];
-    assertCompleted(full, `after ${lessonId} deduplication`);
+    assertStatuses(full, expected, `after ${lessonId} deduplication`);
   };
 
-  invokeActualCompletionMutation('kinda-0900');
-  invokeActualCompletionMutation('taleen-1000');
-  assertCompleted(full, 'after both Home checkmark handler invocations');
+  invokeActualCompletionMutation('kinda-0900', expectedAfterKinda);
+  invokeActualCompletionMutation('taleen-1000', expectedAfterTaleen);
+  assertStatuses(full, expectedAfterTaleen, 'after both Home checkmark handler invocations');
 };
 
 const runScaleTests = () => {
