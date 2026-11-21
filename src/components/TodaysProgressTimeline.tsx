@@ -1,10 +1,10 @@
-import { isPendingStatus, calculateSequentialSessionNumber, pickAuthoritativeLesson, normalizeTime } from "../utils/lessonUtils";
+import { isPendingStatus, calculateSequentialSessionNumber, pickAuthoritativeLesson, normalizeTime, isGroupPerLesson } from "../utils/lessonUtils";
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson, Group, Student, LessonReport } from '../types';
 import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
 import { getLessonsForDate } from '../utils/dailyLessonUtils';
-import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
+import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence, isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
 import { storage } from '../services/storageService';
 import { 
   CheckCircle2, Clock, PlayCircle, ChevronRight, ChevronDown, ChevronUp, AlertCircle, XCircle, X, Video, MapPin, Users, Check, MessageCircle, Phone
