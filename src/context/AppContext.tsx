@@ -96,6 +96,8 @@ import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesServ
 import { loadGrainGroupLearningRecords, saveGrainGroupLearningRecords, sanitizeGrainGroupLearningRecord } from '../services/grainService';
 import { loadZoomUiMeta, sanitizeZoomRecordForStorage } from '../services/zoomService';
 import { DEFAULT_ZOOM_TIMEZONE, reconcileGroupWeeklySessions, resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
+import { enqueueLessonSyncTask } from '../services/lessonSyncQueue';
+import { mergeLessonSyncSnapshot } from '../utils/lessonSync';
 
 export const DEFAULT_BOTTOM_NAV_ORDER = [
   'home',
@@ -503,8 +505,7 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-// Module-level serialized storage sync queues to eliminate concurrent read-modify-write race conditions
-let lessonSyncQueue: Promise<void> = Promise.resolve();
+// Module-level serialized storage queue for payments.
 let paymentSyncQueue: Promise<void> = Promise.resolve();
 
 export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any }> = ({ children, initialData }) => {
@@ -1319,42 +1320,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   // Safe atomic full-storage manipulation methods to prevent synchronization race conditions or phantom resurrection
   const updateFullLessonsStorage = useCallback(async (updater: (allLessons: Lesson[]) => Lesson[]): Promise<Lesson[]> => {
-    return new Promise<Lesson[]>((resolve, reject) => {
-      lessonSyncQueue = lessonSyncQueue.then(async () => {
-        try {
-          const full = (fullLessonsRef.current && fullLessonsRef.current.length > 0)
-            ? fullLessonsRef.current
-            : ((await storage.getItem<Lesson[]>('dl_lessons')) || lessons);
-          const rawUpdated = updater(full || []);
-          
-          // Deduplicate by lesson.id strictly (keeping the latest occurrence)
-          const seen = new Set<string>();
-          const dedupedById: Lesson[] = [];
-          for (let i = rawUpdated.length - 1; i >= 0; i--) {
-            const item = rawUpdated[i];
-            if (item && item.id && !seen.has(item.id)) {
-              seen.add(item.id);
-              dedupedById.unshift(item);
-            }
-          }
-          
-          // Comprehensive lesson deduplication
-          const { deduplicated: deduped } = deduplicateLessonList(dedupedById, students);
+    return enqueueLessonSyncTask(async () => {
+      const full = (fullLessonsRef.current && fullLessonsRef.current.length > 0)
+        ? fullLessonsRef.current
+        : ((await storage.getItem<Lesson[]>('dl_lessons')) || lessons);
+      const rawUpdated = updater(full || []);
 
-          fullLessonsRef.current = deduped;
-          setLessons(filterActiveLessons(deduped));
-          await storage.setItem('dl_lessons', deduped);
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('gluck-local-data-mutated'));
-          }
-          resolve(deduped);
-        } catch (e) {
-          reject(e);
+      // Deduplicate by lesson.id strictly (keeping the latest occurrence).
+      const seen = new Set<string>();
+      const dedupedById: Lesson[] = [];
+      for (let i = rawUpdated.length - 1; i >= 0; i--) {
+        const item = rawUpdated[i];
+        if (item && item.id && !seen.has(item.id)) {
+          seen.add(item.id);
+          dedupedById.unshift(item);
         }
-      }).catch(err => {
-        console.error('updateFullLessonsStorage error:', err);
-        reject(err);
-      });
+      }
+
+      const { deduplicated: deduped } = deduplicateLessonList(dedupedById, students);
+      fullLessonsRef.current = deduped;
+      setLessons(filterActiveLessons(deduped));
+      await storage.setItem('dl_lessons', deduped);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('gluck-local-data-mutated'));
+      }
+      return deduped;
     });
   }, [lessons, students]);
 
@@ -2561,62 +2551,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     if (!isInitializedRef.current) return;
     function syncLessons() {
       if (!lessons) return;
+      // Capture only for adding genuinely missing active records. The full store
+      // is authoritative for every ID it already contains.
       const currentLessons = lessons;
-      lessonSyncQueue = lessonSyncQueue.then(async () => {
-        const full = (await storage.getItem<Lesson[]>('dl_lessons')) || fullLessonsRef.current || [];
-        const activeMap = new Map<string, Lesson>(currentLessons.map(l => [l.id, l]));
-        const fullIds = new Set(full.map(l => l.id));
-
+      enqueueLessonSyncTask(async () => {
+        const stored = await storage.getItem<Lesson[]>('dl_lessons');
+        const full = Array.isArray(stored) ? stored : (fullLessonsRef.current || []);
         const prunedIds = getPrunedLessonIds();
-        const merged: Lesson[] = [];
-        (full as Lesson[]).forEach((l: Lesson) => {
-          if (l && l.id && prunedIds.has(l.id)) return; // Skip pruned records
-          if (activeMap.has(l.id)) {
-            const activeVersion = activeMap.get(l.id)!;
-            const storedUpdatedAt = typeof l.updatedAt === 'number' ? l.updatedAt : 0;
-            const activeUpdatedAt = typeof activeVersion.updatedAt === 'number' ? activeVersion.updatedAt : 0;
+        const merged = mergeLessonSyncSnapshot(full, currentLessons, prunedIds);
 
-            // React's active lessons state can lag behind a just-completed queued write.
-            // Never let that stale scheduled snapshot overwrite a terminal stored state.
-            const storedIsTerminal = l.status === 'completed' || l.status === 'cancelled' || Boolean(l.deleted);
-            const activeIsTerminal = activeVersion.status === 'completed' || activeVersion.status === 'cancelled' || Boolean(activeVersion.deleted);
-            if (storedIsTerminal && !activeIsTerminal) {
-              merged.push(l);
-            } else if (activeIsTerminal && !storedIsTerminal) {
-              merged.push(activeVersion);
-            } else if (activeUpdatedAt > storedUpdatedAt) {
-              merged.push(activeVersion);
-            } else {
-              // On equal/unknown timestamps prefer the serialized full record. The active
-              // list is a filtered UI projection and must not roll back a newer full record.
-              merged.push(l);
-            }
-          } else {
-            // Historical or tombstoned lesson, preserve in storage
-            merged.push(l);
-          }
-        });
-
-        currentLessons.forEach(l => {
-          if (l && l.id && prunedIds.has(l.id)) return; // Skip pruned records
-          if (!fullIds.has(l.id)) {
-            merged.push(l);
-          }
-        });
-
-        // Strict deduplication by lesson ID (keeping latest occurrence)
-        const seen = new Set<string>();
-        const deduped: Lesson[] = [];
-        for (let i = merged.length - 1; i >= 0; i--) {
-          const item = merged[i];
-          if (item && item.id && !seen.has(item.id)) {
-            seen.add(item.id);
-            deduped.unshift(item);
-          }
-        }
-
-        fullLessonsRef.current = deduped;
-        await storage.setItem('dl_lessons', deduped);
+        fullLessonsRef.current = merged;
+        await storage.setItem('dl_lessons', merged);
       }).catch(err => console.error('Lesson sync error:', err));
     }
     syncLessons();
