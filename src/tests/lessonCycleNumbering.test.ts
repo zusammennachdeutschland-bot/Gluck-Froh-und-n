@@ -9,6 +9,7 @@ import {
   compareLessonsChronologically,
   shouldShowLessonPaymentCollection,
   shouldRetainLessonInActiveWindow,
+  deduplicateLessonList,
 } from '../utils/lessonUtils';
 import { getProjectedLessonsForRange } from '../utils/scheduleUtils';
 import { Group, Lesson, Student } from '../types';
@@ -616,6 +617,47 @@ runTest('TEST T: getProjectedLessonsForRange computes sequential session numbers
   }
 });
 
+
+// TEST U: Same-day group slots with the same cycle number are separate lessons
+runTest('TEST U: Completing a second same-day slot must never deduplicate the first completed slot', () => {
+  const groupId = 'grp_two_slots_same_day';
+  const group = makeGroup({
+    id: groupId,
+    scheduleDays: ['Monday'],
+    scheduleTime: '10:00',
+    sessionCount: 4,
+  });
+  const firstSlot = makeLesson({
+    id: 'same_day_slot_1000',
+    groupId,
+    date: '2026-11-23',
+    time: '10:00',
+    sessionNumber: 1,
+    status: 'completed',
+    report: { attendanceStatus: 'present' } as any,
+  });
+  const secondSlot = makeLesson({
+    id: 'same_day_slot_1100',
+    groupId,
+    date: '2026-11-23',
+    time: '11:00',
+    sessionNumber: 1,
+    status: 'completed',
+    report: { attendanceStatus: 'present' } as any,
+  });
+
+  const result = deduplicateLessonList([firstSlot, secondSlot], []);
+  assert.equal(result.deduplicated.length, 2, 'Different times must remain two separate lesson records');
+  assert.equal(result.deduplicated.find(l => l.id === firstSlot.id)?.status, 'completed');
+  assert.equal(result.deduplicated.find(l => l.id === secondSlot.id)?.status, 'completed');
+
+  const exactDuplicate = { ...secondSlot, id: 'same_day_slot_1100_duplicate' };
+  const withTrueDuplicate = deduplicateLessonList([firstSlot, secondSlot, exactDuplicate], []);
+  assert.equal(withTrueDuplicate.deduplicated.length, 2, 'An exact same-time duplicate must still be removed');
+  assert.equal(withTrueDuplicate.deduplicated.find(l => l.id === firstSlot.id)?.status, 'completed');
+  assert.equal(withTrueDuplicate.deduplicated.find(l => l.id === secondSlot.id)?.status, 'completed');
+});
+
 console.log('===============================================================');
-console.log(`✅ All ${passedCount}/20 Unified Lesson Cycle Numbering Tests Passed!`);
+console.log(`✅ All ${passedCount}/21 Unified Lesson Cycle Numbering Tests Passed!`);
 console.log('===============================================================');
