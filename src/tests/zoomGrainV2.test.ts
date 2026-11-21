@@ -286,6 +286,102 @@ async function runZoomGrainV2Tests() {
     assert.equal(serializedStatus.includes('acc_secret_987654'), false);
     assert.equal(statusState.hasCredentials, true);
 
+    // Direct regression: creating a Zoom meeting from one slot replaces the
+    // canonical URL for every active weekly slot in the same group.
+    const groupWideOldMon: GroupWeeklySession = {
+      ...monSession,
+      zoomMeetingId: '81111111111',
+      zoomJoinUrl: 'https://zoom.us/j/81111111111?pwd=OLD_MON',
+      meetingSource: 'zoom_api',
+      syncState: 'synced'
+    };
+    const groupWideOldWed: GroupWeeklySession = {
+      ...wedSession,
+      zoomMeetingId: '82222222222',
+      zoomJoinUrl: 'https://zoom.us/j/82222222222?pwd=OLD_WED',
+      meetingSource: 'zoom_api',
+      syncState: 'synced'
+    };
+    const groupWideOldRecords = [
+      {
+        id: 'zoom_record_old_mon',
+        sessionId: groupWideOldMon.id,
+        groupId: groupV1.id,
+        zoomMeetingId: '81111111111',
+        joinUrl: groupWideOldMon.zoomJoinUrl!,
+        topic: groupWideOldMon.standardizedTitle,
+        startTime: groupWideOldMon.startTime,
+        durationMinutes: groupWideOldMon.durationMinutes,
+        timezone: groupWideOldMon.timezone,
+        meetingType: 8,
+        recurrenceWeeklyDay: 2,
+        recurrenceRepeatInterval: 1,
+        status: 'active',
+        syncedAt: new Date().toISOString()
+      },
+      {
+        id: 'zoom_record_old_wed',
+        sessionId: groupWideOldWed.id,
+        groupId: groupV1.id,
+        zoomMeetingId: '82222222222',
+        joinUrl: groupWideOldWed.zoomJoinUrl!,
+        topic: groupWideOldWed.standardizedTitle,
+        startTime: groupWideOldWed.startTime,
+        durationMinutes: groupWideOldWed.durationMinutes,
+        timezone: groupWideOldWed.timezone,
+        meetingType: 8,
+        recurrenceWeeklyDay: 4,
+        recurrenceRepeatInterval: 1,
+        status: 'active',
+        syncedAt: new Date().toISOString()
+      }
+    ] as any;
+    const groupWideCreate = await createOrReplaceZoomMeetingForSession({
+      session: groupWideOldMon,
+      sessions: [groupWideOldMon, groupWideOldWed],
+      records: groupWideOldRecords,
+      history: []
+    });
+    assert.equal(groupWideCreate.ok, true, 'Creating a meeting for one slot should succeed');
+    const canonicalGroupUrl = groupWideCreate.createdRecord?.joinUrl;
+    assert.ok(canonicalGroupUrl, 'The create operation must return the new canonical URL');
+    assert.equal(groupWideCreate.sessions.length, 2);
+    assert.ok(
+      groupWideCreate.sessions.every((s) => s.zoomJoinUrl === canonicalGroupUrl),
+      'Every active weekly slot in the group must receive the new canonical URL'
+    );
+    assert.ok(
+      groupWideCreate.records.filter((r) => r.groupId === groupV1.id && r.status === 'active')
+        .every((r) => r.joinUrl === canonicalGroupUrl),
+      'No old active Zoom record may remain selectable after group-wide replacement'
+    );
+    assert.ok(
+      groupWideCreate.records.filter((r) => r.groupId === groupV1.id && r.status === 'superseded').length >= 2,
+      'Every previously active group record must be marked superseded'
+    );
+    const oldLinkLesson = {
+      id: 'lesson_group_old_link',
+      groupId: groupV1.id,
+      date: '2026-11-16',
+      time: '19:00',
+      type: 'online' as const,
+      meetingLink: 'https://zoom.us/j/81111111111?pwd=OLD_MON'
+    };
+    assert.equal(
+      resolveActiveZoomLinkForLesson({
+        group: groupV1,
+        lesson: oldLinkLesson,
+        groupWeeklySessions: groupWideCreate.sessions
+      }),
+      canonicalGroupUrl,
+      'A lesson carrying an old slot URL must resolve only to the new canonical group URL'
+    );
+    assert.equal(
+      groupWideCreate.records.some((r) => r.status === 'active' && r.joinUrl === groupWideOldWed.zoomJoinUrl),
+      false,
+      'A superseded Wednesday URL must never remain active/selectable'
+    );
+
     // -------------------------------------------------------------------------
     // 4. DRY-RUN PREVIEW & RESUMABLE BULK MIGRATION
     // -------------------------------------------------------------------------
