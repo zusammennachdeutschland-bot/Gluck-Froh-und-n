@@ -1549,7 +1549,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             if (paid.id === p.id || paid.deleted || paid.status !== 'paid') return false;
             if (paid.studentId !== p.studentId) return false;
             if (realIds.length > 0 && paid.lessonIds?.some((id: string) => realIds.includes(id))) return true;
-            if (p.dueDate && paid.dueDate && p.dueDate === paid.dueDate && p.amountDue === paid.amountDue) return true;
+            if (p.dueDate && paid.dueDate && normalizeDateToISO(p.dueDate) === normalizeDateToISO(paid.dueDate) && p.amountDue === paid.amountDue) return true;
             return false;
           });
 
@@ -2727,7 +2727,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
     if (triggerType !== 'manual') {
       // Check if already shown today
-      if (inspirationSettings.lastShownDate === todayStr) {
+      if (normalizeDateToISO(inspirationSettings.lastShownDate || '') === normalizeDateToISO(todayStr)) {
         // If already shown today and displayMethod includes in_app card, load the active card if not dismissed
         if (!isInspirationDismissedToday && inspirationSettings.lastShownMessageId && (inspirationSettings.displayMethod === 'in_app' || inspirationSettings.displayMethod === 'both')) {
           const shownMsg = inspirationMessages.find(m => m.id === inspirationSettings.lastShownMessageId);
@@ -4161,7 +4161,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     return active.filter(n => {
       if (params.lessonId && n.lessonId === params.lessonId) return true;
       if (params.date && params.periodNumber !== undefined && params.className) {
-        if (n.date === params.date && n.periodNumber === params.periodNumber && n.className?.trim().toLowerCase() === params.className.trim().toLowerCase()) {
+        if (normalizeDateToISO(n.date || '') === normalizeDateToISO(params.date || '') && n.periodNumber === params.periodNumber && n.className?.trim().toLowerCase() === params.className.trim().toLowerCase()) {
           return true;
         }
       }
@@ -5107,7 +5107,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const requiresResequence =
         updates.status === 'cancelled' ||
         (previousStatus === 'cancelled' && Boolean(updates.status)) ||
-        (updates.date !== undefined && updates.date !== previousDate) ||
+        (updates.date !== undefined && normalizeDateToISO(updates.date || '') !== normalizeDateToISO(previousDate || '')) ||
         (updates.time !== undefined && updates.time !== previousTime) ||
         updates.groupId !== undefined ||
         updates.studentId !== undefined;
@@ -6608,7 +6608,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         }
         const matchesId = p.lessonId === lessonId || (p.lessonIds && p.lessonIds.includes(lessonId));
         const matchesDate = effectiveStudentId && p.studentId === effectiveStudentId &&
-          (p.lessonDates && p.lessonDates.some(d => d.includes(targetLesson.date)));
+          (p.lessonDates && p.lessonDates.some(d => normalizeDateToISO(d) === normalizeDateToISO(targetLesson.date)));
         if (matchesId || matchesDate) {
           matchedAny = true;
           if (!paymentRecordId) paymentRecordId = p.id;
