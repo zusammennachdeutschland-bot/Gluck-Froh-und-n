@@ -524,6 +524,12 @@ export const ZoomIntegrationsManager: React.FC = () => {
           authRes.error || _t('فشل ربط Google Calendar', 'Google Calendar authorization failed')
         );
       }
+    } catch (err: any) {
+      const message =
+        (typeof err?.message === 'string' && err.message.trim()) ||
+        _t('حدث خطأ أثناء ربط Google Calendar', 'An unexpected error occurred while connecting Google Calendar');
+      console.error('[Glück Calendar] Connection flow failed:', err);
+      triggerToast(message);
     } finally {
       setIsConnectingCalendar(false);
     }
@@ -1588,6 +1594,7 @@ export const ZoomIntegrationsManager: React.FC = () => {
           zoomConnected={meta.connected}
           timezone={timezoneInput || DEFAULT_ZOOM_TIMEZONE}
           calendarConn={calendarConn}
+          isCalendarConnecting={isConnectingCalendar}
           onConnectCalendar={handleConnectGoogleCalendar}
         />
       )}

@@ -173,6 +173,8 @@ let inMemoryTokenExpiresAtMs = 0;
 let inMemoryTokenAccountEmail: string | null = null;
 let lastInvalidatedAccessToken: string | null = null;
 let inFlightCalendarAuthPromise: Promise<GoogleCalendarTokenResult> | null = null;
+// Keep silent startup verification separate: a user tap must never inherit a silent-only attempt.
+let inFlightSilentCalendarAuthPromise: Promise<GoogleCalendarTokenResult> | null = null;
 
 // Single-shot guards for startup redirect processing and deep-link callbacks
 let webRedirectProcessingPromise: Promise<WebCalendarRedirectStartupResult> | null = null;
@@ -380,6 +382,7 @@ export function __resetCalendarOAuthStateForTesting(): void {
   clearInMemoryGoogleCalendarToken();
   lastInvalidatedAccessToken = null;
   inFlightCalendarAuthPromise = null;
+  inFlightSilentCalendarAuthPromise = null;
   webRedirectProcessingPromise = null;
   testActiveFirebaseEmail = undefined;
   handledCalendarDeepLinkKeys.clear();
@@ -409,6 +412,7 @@ export function __simulateColdRestartForTesting(): GoogleCalendarConnectionState
   inMemoryTokenAccountEmail = null;
   lastInvalidatedAccessToken = null;
   inFlightCalendarAuthPromise = null;
+  inFlightSilentCalendarAuthPromise = null;
   webRedirectProcessingPromise = null;
   currentConnectionMeta = readPersistedConnectionMeta();
   return getGoogleCalendarConnectionState();
@@ -1373,11 +1377,17 @@ export async function verifyOrSilentlyReauthorizeGoogleCalendar(
     if (inFlightCalendarAuthPromise) {
       return inFlightCalendarAuthPromise;
     }
-    inFlightCalendarAuthPromise = executeAndroidNativeCalendarOAuth(false, { silentOnly: true });
+    if (inFlightSilentCalendarAuthPromise) {
+      return inFlightSilentCalendarAuthPromise;
+    }
+    const silentAttempt = executeAndroidNativeCalendarOAuth(false, { silentOnly: true });
+    inFlightSilentCalendarAuthPromise = silentAttempt;
     try {
-      return await inFlightCalendarAuthPromise;
+      return await silentAttempt;
     } finally {
-      inFlightCalendarAuthPromise = null;
+      if (inFlightSilentCalendarAuthPromise === silentAttempt) {
+        inFlightSilentCalendarAuthPromise = null;
+      }
     }
   }
 
@@ -1430,6 +1440,32 @@ export async function requestGoogleCalendarAccessToken(
         writeVerified: currentConnectionMeta.writeVerified,
         platform: getCurrentPlatformTag()
       };
+    }
+  }
+
+  // A startup silent-only check may still be running when the user taps Connect.
+  // Wait for it to settle, then continue with an interactive authorization attempt.
+  if (inFlightSilentCalendarAuthPromise) {
+    const silentAttempt = inFlightSilentCalendarAuthPromise;
+    try {
+      await silentAttempt;
+    } catch {
+      // A failed silent check must not block an explicit user-initiated reconnect.
+    }
+    if (!forcePrompt) {
+      const tokenAfterSilentCheck = getInMemoryGoogleCalendarToken();
+      if (tokenAfterSilentCheck) {
+        return {
+          ok: true,
+          accessToken: tokenAfterSilentCheck,
+          accountEmail: inMemoryTokenAccountEmail || currentConnectionMeta.accountEmail,
+          calendarSummary: currentConnectionMeta.calendarSummary,
+          scopeVerified: currentConnectionMeta.scopeVerified,
+          readVerified: currentConnectionMeta.readVerified,
+          writeVerified: currentConnectionMeta.writeVerified,
+          platform: getCurrentPlatformTag()
+        };
+      }
     }
   }
 
