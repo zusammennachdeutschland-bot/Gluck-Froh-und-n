@@ -502,33 +502,71 @@ export const resequenceScheduledLessonsAfterChange = (
   const result = [...allLessons];
   const scopeIndices: number[] = [];
 
-  result.forEach((l, idx) => {
-    if (!l || l.deleted || l.status === 'cancelled') return;
-    if (doesLessonMatchScope(l, changedLesson, { group: grp, student: st, students: options?.students })) {
+  for (let idx = 0; idx < result.length; idx++) {
+    const lesson = result[idx];
+    if (!lesson || lesson.deleted || lesson.status === 'cancelled') continue;
+    if (doesLessonMatchScope(lesson, changedLesson, { group: grp, student: st, students: options?.students })) {
       scopeIndices.push(idx);
     }
-  });
+  }
 
+  // Sort the scope once; do not filter and sort the same collection for every row.
   scopeIndices.sort((idxA, idxB) => compareLessonsChronologically(result[idxA], result[idxB]));
+  const ordered = scopeIndices.map(idx => result[idx]);
+  const orderedIndexById = new Map<string, number>();
+  ordered.forEach((lesson, index) => { if (lesson.id) orderedIndexById.set(lesson.id, index); });
 
-  for (const idx of scopeIndices) {
-    const l = result[idx];
-    const resolution = resolveLessonCycleNumber(l, result, {
-      group: grp,
-      student: st,
-      students: options?.students,
-      forceRecalculate: true,
-    });
+  const hasValidAnchor = Boolean(
+    grp?.cycleAnchorSessionNumber && grp.cycleAnchorSessionNumber >= 1 &&
+    (grp.cycleAnchorLessonId || grp.cycleAnchorDate)
+  );
+  let anchorIndex = -1;
+  if (hasValidAnchor && grp) {
+    if (grp.cycleAnchorLessonId) anchorIndex = orderedIndexById.get(grp.cycleAnchorLessonId) ?? -1;
+    if (anchorIndex === -1 && grp.cycleAnchorDate) {
+      const anchorProbe: Partial<Lesson> = {
+        id: grp.cycleAnchorLessonId || '',
+        date: grp.cycleAnchorDate,
+        time: normalizeTime(grp.cycleAnchorTime) || grp.cycleAnchorTime || '00:00'
+      };
+      let low = 0;
+      let high = ordered.length;
+      while (low < high) {
+        const mid = (low + high) >>> 1;
+        if (compareLessonsChronologically(ordered[mid], anchorProbe) < 0) low = mid + 1;
+        else high = mid;
+      }
+      anchorIndex = low;
+    }
+  }
 
-    if (
-      l.sessionNumber !== resolution.sessionNumber ||
-      l.totalSessionsInPackage !== resolution.totalCycleSessions
-    ) {
-      result[idx] = wrap({
-        ...l,
-        sessionNumber: resolution.sessionNumber,
-        totalSessionsInPackage: resolution.totalCycleSessions,
-      });
+  for (let sequenceIndex = 0; sequenceIndex < scopeIndices.length; sequenceIndex++) {
+    const idx = scopeIndices[sequenceIndex];
+    const lesson = result[idx];
+    const isPerLesson = Boolean(
+      isGroupPerLesson(grp) ||
+      (!grp && st && (st.paymentPlan === 'per_lesson' || st.bundleSize === 1)) ||
+      (!grp && !st && lesson.totalSessionsInPackage === 1)
+    );
+    const totalCycleSessions = isPerLesson ? 1
+      : (grp?.sessionCount && grp.sessionCount > 1) ? grp.sessionCount
+      : (st?.bundleSize && st.bundleSize > 1) ? st.bundleSize
+      : (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1) ? lesson.totalSessionsInPackage : 4;
+
+    let sessionNumber = 1;
+    if (!isPerLesson) {
+      const startingSessionNumber = Math.min(totalCycleSessions, Math.max(1, grp?.startingSessionNumber || 1));
+      if (hasValidAnchor && grp && anchorIndex !== -1) {
+        const anchorSessionNumber = Math.min(totalCycleSessions, Math.max(1, Math.floor(grp.cycleAnchorSessionNumber || 1)));
+        const delta = sequenceIndex - anchorIndex;
+        sessionNumber = ((((anchorSessionNumber - 1 + delta) % totalCycleSessions) + totalCycleSessions) % totalCycleSessions) + 1;
+      } else {
+        sessionNumber = ((startingSessionNumber - 1 + sequenceIndex) % totalCycleSessions) + 1;
+      }
+    }
+
+    if (lesson.sessionNumber !== sessionNumber || lesson.totalSessionsInPackage !== totalCycleSessions) {
+      result[idx] = wrap({ ...lesson, sessionNumber, totalSessionsInPackage: totalCycleSessions });
     }
   }
 
@@ -752,6 +790,32 @@ export const pickAuthoritativeLesson = (l1: any, l2: any): { survivor: any; dupl
   return { survivor, duplicate };
 };
 
+const buildLessonDedupIndexKeys = (lesson: any, studentsById: Map<string, any>): string[] => {
+  const keys = new Set<string>();
+  if (lesson.groupId && lesson.groupId !== 'quick_group') keys.add(`group:${lesson.groupId}`);
+  if (lesson.studentId) {
+    keys.add(`student:${lesson.studentId}`);
+    const student = studentsById.get(lesson.studentId);
+    if (student?.groupId && student.groupId !== 'quick_group') keys.add(`group:${student.groupId}`);
+  }
+  const name = normalizeName(lesson.studentName || lesson.quickStudentName);
+  if (name) {
+    // Substring name matches share at least one 1-3 character n-gram.
+    for (let size = 1; size <= Math.min(3, name.length); size++) {
+      for (let i = 0; i <= name.length - size; i++) keys.add(`name:${name.slice(i, i + size)}`);
+    }
+  }
+  const title = normalizeName(lesson.title);
+  if (title && title.length > 5) keys.add(`title:${title}`);
+  return Array.from(keys);
+};
+
+interface LessonDuplicateIndexBucket {
+  all: Set<number>;
+  noTime: Set<number>;
+  byMinute: Map<number, Set<number>>;
+}
+
 export const deduplicateLessonList = (
   lessons: any[],
   students?: any[]
@@ -762,34 +826,97 @@ export const deduplicateLessonList = (
 
   const removedIds = new Set<string>();
   const idMap = new Map<string, string>();
-  const activeList = lessons.filter(l => l && l.id && !l.deleted);
-  const deletedList = lessons.filter(l => l && l.id && l.deleted);
-
+  const studentsById = new Map((students || []).filter((student: any) => student?.id).map((student: any) => [student.id, student]));
   const survivors: any[] = [];
+  const indexes = new Map<string, LessonDuplicateIndexBucket>();
+
+  const getBucket = (key: string): LessonDuplicateIndexBucket => {
+    let bucket = indexes.get(key);
+    if (!bucket) {
+      bucket = { all: new Set(), noTime: new Set(), byMinute: new Map() };
+      indexes.set(key, bucket);
+    }
+    return bucket;
+  };
+
+  const addToIndex = (lesson: any, index: number) => {
+    const date = normalizeDateToISO(lesson.date);
+    if (!date) return;
+    const keys = buildLessonDedupIndexKeys(lesson, studentsById).map(key => `${date}|${key}`);
+    const time = normalizeTime(lesson.time);
+    const startMinute = time ? Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5)) : NaN;
+    const duration = Math.max(0, Number(lesson.durationMinutes) || 60);
+    for (const key of keys) {
+      const bucket = getBucket(key);
+      bucket.all.add(index);
+      if (!Number.isFinite(startMinute)) {
+        bucket.noTime.add(index);
+        continue;
+      }
+      for (let minute = startMinute; minute < startMinute + Math.max(1, duration); minute++) {
+        let minuteSet = bucket.byMinute.get(minute);
+        if (!minuteSet) bucket.byMinute.set(minute, minuteSet = new Set());
+        minuteSet.add(index);
+      }
+    }
+  };
+
+  const activeList: any[] = [];
+  const deletedList: any[] = [];
+  for (const lesson of lessons) {
+    if (!lesson?.id) continue;
+    if (lesson.deleted) deletedList.push(lesson);
+    else activeList.push(lesson);
+  }
 
   for (const candidate of activeList) {
-    if (removedIds.has(candidate.id)) continue;
+    const date = normalizeDateToISO(candidate.date);
+    const candidateKeys = date
+      ? buildLessonDedupIndexKeys(candidate, studentsById).map(key => `${date}|${key}`)
+      : [];
+    const time = normalizeTime(candidate.time);
+    const startMinute = time ? Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5)) : NaN;
+    const duration = Math.max(0, Number(candidate.durationMinutes) || 60);
+    const possible = new Set<number>();
 
-    // Check if candidate is duplicate with any already accepted survivor
-    const existingIndex = survivors.findIndex(s => areDuplicateLessons(s, candidate, students));
+    for (const key of candidateKeys) {
+      const bucket = indexes.get(key);
+      if (!bucket) continue;
+      if (!Number.isFinite(startMinute)) {
+        for (const index of bucket.all) possible.add(index);
+      } else {
+        for (const index of bucket.noTime) possible.add(index);
+        for (let minute = startMinute; minute < startMinute + Math.max(1, duration); minute++) {
+          const matches = bucket.byMinute.get(minute);
+          if (matches) for (const index of matches) possible.add(index);
+        }
+      }
+    }
+
+    let existingIndex = -1;
+    for (const index of possible) {
+      if (areDuplicateLessons(survivors[index], candidate, students)) {
+        existingIndex = index;
+        break;
+      }
+    }
 
     if (existingIndex >= 0) {
-      const existingSurvivor = survivors[existingIndex];
-      const { survivor, duplicate } = pickAuthoritativeLesson(existingSurvivor, candidate);
-
+      const { survivor, duplicate } = pickAuthoritativeLesson(survivors[existingIndex], candidate);
       survivors[existingIndex] = survivor;
       removedIds.add(duplicate.id);
       idMap.set(duplicate.id, survivor.id);
+      // Old index entries remain harmless aliases; the current winner is indexed too.
+      addToIndex(survivor, existingIndex);
     } else {
+      const index = survivors.length;
       survivors.push(candidate);
+      addToIndex(candidate, index);
     }
   }
 
-  const hasChanges = removedIds.size > 0;
-  // Keep deleted list if needed or return only survivors
-  const deduplicated = [...survivors, ...deletedList.filter(d => !removedIds.has(d.id))];
-
-  return { deduplicated, removedIds, idMap, hasChanges };
+  const deduplicated = [...survivors, ...deletedList.filter(item => !removedIds.has(item.id))];
+  return { deduplicated, removedIds, idMap, hasChanges: removedIds.size > 0 };
 };
 
 export const deduplicatePaymentsList = (
