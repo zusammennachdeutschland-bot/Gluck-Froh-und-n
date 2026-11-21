@@ -13,7 +13,7 @@ import {
 import { deduplicateLessonList, resequenceScheduledLessonsAfterChange } from '../utils/lessonUtils';
 
 const makeLesson = (id: string, studentName: string, time: string, status: 'scheduled' | 'completed', groupId?: string): Lesson => ({
-  id, studentName, groupId, date: formatLocalDate(), time, durationMinutes: 60, status,
+  id, studentName, groupId, date: formatLocalDate(), time, durationMinutes: 60, amountDue: 200, status,
   sessionNumber: 1, totalSessionsInPackage: 1, updatedAt: status === 'completed' ? 2 : 1
 } as Lesson);
 
