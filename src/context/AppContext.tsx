@@ -2982,7 +2982,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
                     group,
                     lesson: { groupId: group.id, date: dateStr, time: sessionTime },
                     groupWeeklySessions: groupWeeklySessionsRef.current,
-                    defaultZoomLink: profile.defaultZoomLink
                   })
                 : undefined,
               locationAddress: group.type === 'offline' ? (group.address || 'Cairo Center') : undefined,
@@ -3531,7 +3530,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
                     group: updatedGroup,
                     lesson: { groupId: updatedGroup.id, date: dateStr, time: sessionTime },
                     groupWeeklySessions: groupWeeklySessionsRef.current,
-                    defaultZoomLink: profile.defaultZoomLink
                   })
                 : undefined,
               locationAddress: updatedGroup.type === 'offline' ? (updatedGroup.address || 'Cairo Center') : undefined,
@@ -3569,7 +3567,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
                 group: updatedGroup,
                 lesson: l,
                 groupWeeklySessions: groupWeeklySessionsRef.current,
-                defaultZoomLink: profile.defaultZoomLink
               }) || l.meetingLink)
             : undefined,
           locationAddress: updatedGroup.type === 'offline' ? (updatedGroup.address || l.locationAddress) : undefined,
@@ -5181,7 +5178,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
                 group: targetGroup,
                 lesson: { groupId: targetGroup?.id || lessonData.groupId, date: dateStr, time: lessonData.time, meetingLink: lessonData.meetingLink },
                 groupWeeklySessions: groupWeeklySessionsRef.current,
-                defaultZoomLink: profile.defaultZoomLink
               })
             : undefined,
           locationAddress: lessonData.type === 'offline' ? (lessonData.locationAddress || targetGroup?.address || '') : undefined,
@@ -6151,7 +6147,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
                     group: targetGroup,
                     lesson: { groupId: targetGroup.id, date: dateStr, time: sessionTime },
                     groupWeeklySessions: groupWeeklySessionsRef.current,
-                    defaultZoomLink: profile.defaultZoomLink
                   })
                 : undefined,
               locationAddress: targetGroup.type === 'offline' ? (targetGroup.address || 'Cairo Center') : undefined,
