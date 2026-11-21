@@ -823,10 +823,10 @@ const buildLessonDedupIndexKeys = (lesson: any, studentsById: Map<string, any>):
   }
   const name = normalizeName(lesson.studentName || lesson.quickStudentName);
   if (name) {
-    // Substring name matches share at least one 1-3 character n-gram.
-    for (let size = 1; size <= Math.min(3, name.length); size++) {
-      for (let i = 0; i <= name.length - size; i++) keys.add(`name:${name.slice(i, i + size)}`);
-    }
+    keys.add(`name-exact:${name}`);
+    // Name matching is substring-aware in areDuplicateLessons. Index whole words
+    // so common prefixes do not turn unrelated students into an O(n²) candidate set.
+    for (const token of name.split(/\s+/).filter(Boolean)) keys.add(`name-word:${token}`);
   }
   const title = normalizeName(lesson.title);
   if (title && title.length > 5) keys.add(`title:${title}`);
@@ -849,7 +849,8 @@ export const deduplicateLessonList = (
 
   const removedIds = new Set<string>();
   const idMap = new Map<string, string>();
-  const studentsById = new Map((students || []).filter((student: any) => student?.id).map((student: any) => [student.id, student]));
+  const studentsById = new Map<string, any>();
+  for (const student of students || []) if ((student as any)?.id) studentsById.set((student as any).id, student);
   const survivors: any[] = [];
   const indexes = new Map<string, LessonDuplicateIndexBucket>();
 
