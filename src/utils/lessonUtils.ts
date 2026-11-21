@@ -820,7 +820,7 @@ export const pickAuthoritativeLesson = (l1: any, l2: any): { survivor: any; dupl
   return { survivor, duplicate };
 };
 
-const buildLessonDedupIndexKeys = (lesson: any, studentsById: Map<string, any>): string[] => {
+const buildLessonDedupIndexKeys = (lesson: any, studentsById: Map<string, any>, nameTokenFrequency: Map<string, number>): string[] => {
   const keys = new Set<string>();
   if (lesson.groupId && lesson.groupId !== 'quick_group') keys.add(`group:${lesson.groupId}`);
   if (lesson.studentId) {
@@ -833,7 +833,10 @@ const buildLessonDedupIndexKeys = (lesson: any, studentsById: Map<string, any>):
     keys.add(`name-exact:${name}`);
     // Name matching is substring-aware in areDuplicateLessons. Index whole words
     // so common prefixes do not turn unrelated students into an O(n²) candidate set.
-    for (const token of name.split(/\s+/).filter(Boolean)) keys.add(`name-word:${token}`);
+    for (const token of name.split(/\s+/).filter(Boolean)) {
+      // Very common words produce broad buckets with no useful selectivity.
+      if ((nameTokenFrequency.get(token) || 0) <= 64) keys.add(`name-word:${token}`);
+    }
   }
   const title = normalizeName(lesson.title);
   if (title && title.length > 5) keys.add(`title:${title}`);
@@ -873,7 +876,7 @@ export const deduplicateLessonList = (
   const addToIndex = (lesson: any, index: number) => {
     const date = normalizeDateToISO(lesson.date);
     if (!date) return;
-    const keys = buildLessonDedupIndexKeys(lesson, studentsById).map(key => `${date}|${key}`);
+    const keys = buildLessonDedupIndexKeys(lesson, studentsById, nameTokenFrequency).map(key => `${date}|${key}`);
     const time = normalizeTime(lesson.time);
     const startMinute = time ? Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5)) : NaN;
     const duration = Math.max(0, Number(lesson.durationMinutes) || 60);
@@ -899,11 +902,18 @@ export const deduplicateLessonList = (
     if (lesson.deleted) deletedList.push(lesson);
     else activeList.push(lesson);
   }
+  const nameTokenFrequency = new Map<string, number>();
+  for (const lesson of activeList) {
+    const name = normalizeName(lesson.studentName || lesson.quickStudentName);
+    for (const token of new Set(name.split(/\s+/).filter(Boolean))) {
+      nameTokenFrequency.set(token, (nameTokenFrequency.get(token) || 0) + 1);
+    }
+  }
 
   for (const candidate of activeList) {
     const date = normalizeDateToISO(candidate.date);
     const candidateKeys = date
-      ? buildLessonDedupIndexKeys(candidate, studentsById).map(key => `${date}|${key}`)
+      ? buildLessonDedupIndexKeys(candidate, studentsById, nameTokenFrequency).map(key => `${date}|${key}`)
       : [];
     const time = normalizeTime(candidate.time);
     const startMinute = time ? Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5)) : NaN;
