@@ -778,6 +778,7 @@ function MainApp() {
 import { migrateFromLocalStorageToIndexedDB } from './services/migrationService';
 import { storage } from './services/storageService';
 import { sanitizeInitialData, clearAllLocalDataAndReset } from './services/dataSanitizer';
+import { mergeHodVisitMigration } from './utils/hodVisitMigration';
 import { HomeworkPlayerPage } from './pages/HomeworkPlayerPage';
 
 function isHomeworkLocation(): boolean {
@@ -858,6 +859,23 @@ export default function App() {
       keys.forEach((key, idx) => {
         rawDict[key] = values[idx];
       });
+
+      // Import legacy profile visits once, before AppProvider initializes its state.
+      // Await durable writes so a restart cannot replay the legacy source after a deletion.
+      const hodVisitMigrationKey = 'hod_visit_records_migrated_v1';
+      if (!rawDict[hodVisitMigrationKey]) {
+        const migratedVisits = mergeHodVisitMigration(
+          Array.isArray(rawDict['hod_visit_records']) ? rawDict['hod_visit_records'] : [],
+          Array.isArray(rawDict['dl_profile']?.schoolSettings?.visitRecords)
+            ? rawDict['dl_profile'].schoolSettings.visitRecords
+            : [],
+          false
+        );
+        rawDict['hod_visit_records'] = migratedVisits;
+        await storage.setItem('hod_visit_records', migratedVisits);
+        await storage.setItem(hodVisitMigrationKey, true);
+        rawDict[hodVisitMigrationKey] = true;
+      }
 
       // Self-healing: Sanitize all collections, arrays, and objects
       const safeData = sanitizeInitialData(rawDict);
