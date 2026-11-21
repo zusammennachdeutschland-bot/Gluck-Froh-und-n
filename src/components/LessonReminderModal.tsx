@@ -11,6 +11,7 @@ import {
 import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { getTimeBasedGreeting } from '../utils/greetingUtils';
 import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
+import { diagnoseZoomReminderResolution, logZoomReminderPipeline } from '../utils/zoomReminderDiagnostics';
 
 interface LessonReminderModalProps {
   lesson?: Lesson | null;
@@ -47,8 +48,13 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     return en;
   };
 
-  // Find associated group
-  const targetGroup = group || (lesson?.groupId ? groups.find(g => g.id === lesson.groupId) : null);
+  // Resolve the group from the effective lesson's stable groupId first.
+  // A stale/imported group prop must never redirect a reminder to another group's Zoom session.
+  const canonicalLessonGroup = lesson?.groupId
+    ? groups.find(g => g.id === lesson.groupId) || null
+    : null;
+  const targetGroup = canonicalLessonGroup ||
+    (group && (!lesson?.groupId || group.id === lesson.groupId) ? group : null);
   // Find nearest upcoming lesson chronologically if lesson is not directly passed
   const upcomingLesson = lesson || (targetGroup
     ? (lessons || [])
@@ -86,24 +92,50 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   // Only use the synced Zoom API link for the exact scheduled weekly session.
   // Legacy group, lesson and profile URLs are intentionally never used.
   const effectiveTargetLesson = lesson || upcomingLesson;
+  const effectiveGroupId = effectiveTargetLesson?.groupId || targetGroup?.id;
+  const zoomReminderDiagnostics = React.useMemo(() => diagnoseZoomReminderResolution({
+    targetGroup,
+    lesson,
+    effectiveLesson: effectiveTargetLesson,
+    groupWeeklySessions,
+    targetDay: upcomingSchedule?.day,
+    targetTime: effectiveTargetLesson?.time || upcomingSchedule?.time
+  }), [targetGroup, lesson, effectiveTargetLesson, groupWeeklySessions, upcomingSchedule?.day, upcomingSchedule?.time]);
   const resolvedZoomLink = React.useMemo(() => {
     if (!isOnline) return '';
     return resolveActiveZoomLinkForLesson({
-      group: targetGroup,
+      group: targetGroup?.id === effectiveGroupId ? targetGroup : null,
+      groupId: effectiveGroupId,
       lesson: effectiveTargetLesson,
       groupWeeklySessions,
       targetDay: upcomingSchedule?.day,
-      targetTime: lesson?.time || upcomingSchedule?.time
+      targetTime: effectiveTargetLesson?.time || upcomingSchedule?.time
     });
   }, [
     isOnline,
     targetGroup,
+    effectiveGroupId,
     effectiveTargetLesson,
     groupWeeklySessions,
     upcomingSchedule?.day,
-    upcomingSchedule?.time,
-    lesson?.time
+    upcomingSchedule?.time
   ]);
+
+  React.useEffect(() => {
+    logZoomReminderPipeline('LessonReminderModal resolver input/output', {
+      targetGroupId: targetGroup?.id || null,
+      lessonGroupId: lesson?.groupId || null,
+      effectiveTargetLessonGroupId: effectiveTargetLesson?.groupId || null,
+      targetLessonDate: effectiveTargetLesson?.date || null,
+      targetLessonTime: effectiveTargetLesson?.time || null,
+      normalizedTargetWeekday: zoomReminderDiagnostics.normalizedWeekday,
+      normalizedTargetTime: zoomReminderDiagnostics.normalizedTime,
+      reasonCode: zoomReminderDiagnostics.reasonCode,
+      resolved: Boolean(resolvedZoomLink),
+      resolvedSessionId: zoomReminderDiagnostics.resolvedSessionId,
+      groupWeeklySessionsForTargetId: zoomReminderDiagnostics.matchingGroupRows
+    });
+  }, [targetGroup?.id, lesson?.groupId, effectiveTargetLesson?.groupId, effectiveTargetLesson?.date, effectiveTargetLesson?.time, zoomReminderDiagnostics, resolvedZoomLink]);
 
   // Resolve first student and target student
   const firstStudent = groupStudents.length > 0 
