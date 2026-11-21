@@ -788,5 +788,22 @@ export function resolveActiveZoomLinkForLesson(params: {
   targetDay?: string | number | null;
   targetTime?: string | null;
 }): string {
-  return (resolveActiveWeeklySessionForLesson(params)?.zoomJoinUrl || '').trim();
+  const activeSessionUrl = (resolveActiveWeeklySessionForLesson(params)?.zoomJoinUrl || '').trim();
+  if (activeSessionUrl) return activeSessionUrl;
+
+  // Backward compatibility: groups created before standardized weekly sessions
+  // may only have group.zoomLink. Never use that legacy value once this group
+  // has any standardized-session record (including deleted/unsynced records),
+  // because it may point to a replaced or archived meeting.
+  const groupId = params.group?.id || params.groupId || params.lesson?.groupId;
+  const hasStandardizedSessionHistory = Boolean(
+    groupId &&
+    Array.isArray(params.groupWeeklySessions) &&
+    params.groupWeeklySessions.some((session) => session?.groupId === groupId)
+  );
+  if (!hasStandardizedSessionHistory) {
+    return (params.group?.zoomLink || '').trim();
+  }
+
+  return '';
 }
