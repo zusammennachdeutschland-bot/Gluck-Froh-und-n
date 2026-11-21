@@ -231,6 +231,50 @@ const traceLessonStorageBoundary = <T>(operation: 'read' | 'write', key: string,
   return value;
 };
 
+export const reconcileLessonStorageCopies = <T extends { id: string; status?: string; updatedAt?: any; _fieldUpdatedAt?: Record<string, any>; report?: any }>(
+  primaryRows: T[],
+  mirrorRows: T[]
+): T[] => {
+  const byId = new Map<string, T>();
+  const timestamp = (value: any): number => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Date.parse(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+  };
+  const statusRank: Record<string, number> = {
+    scheduled: 0, pending_action: 1, in_progress: 2, cancelled: 3, completed: 4
+  };
+  for (const row of [...(Array.isArray(primaryRows) ? primaryRows : []), ...(Array.isArray(mirrorRows) ? mirrorRows : [])]) {
+    if (!row?.id) continue;
+    const current = byId.get(row.id);
+    if (!current) {
+      byId.set(row.id, row);
+      continue;
+    }
+    const currentUpdated = timestamp(current.updatedAt);
+    const incomingUpdated = timestamp(row.updatedAt);
+    const incomingWins = incomingUpdated > currentUpdated;
+    const base = incomingWins ? row : current;
+    const currentStatusUpdated = timestamp(current._fieldUpdatedAt?.status) || currentUpdated;
+    const incomingStatusUpdated = timestamp(row._fieldUpdatedAt?.status) || incomingUpdated;
+    let statusSource = incomingStatusUpdated > currentStatusUpdated ? row : current;
+    if (incomingStatusUpdated === currentStatusUpdated &&
+        (statusRank[row.status || ''] ?? -1) > (statusRank[current.status || ''] ?? -1)) {
+      statusSource = row;
+    }
+    const merged = { ...base } as T;
+    if (statusSource.status !== undefined) merged.status = statusSource.status;
+    if (merged.status === 'completed' && (!merged.report || Object.keys(merged.report || {}).length === 0)) {
+      merged.report = current.report || row.report;
+    }
+    byId.set(row.id, merged);
+  }
+  return Array.from(byId.values());
+};
+
 const writeDebounceTimers: Record<string, any> = {};
 
 export const storage = {
@@ -249,6 +293,32 @@ export const storage = {
       } else if (isLocalforageSupported) {
         const val = await localforage.getItem<T>(key);
         if (val !== null && val !== undefined) {
+          if (key === 'dl_lessons' && Array.isArray(val) && hasLocalStorageRuntime()) {
+            // IndexedDB may contain an older successful snapshot when a later write
+            // fell back to localStorage. Reconcile both durable copies on every boot.
+            try {
+              const mirrorRaw = localStorage.getItem(key);
+              if (mirrorRaw !== null) {
+                const mirror = JSON.parse(mirrorRaw);
+                if (Array.isArray(mirror)) {
+                  const reconciled = reconcileLessonStorageCopies(val as any[], mirror as any[]) as T;
+                  memoryStore[key] = reconciled;
+                  const serialized = JSON.stringify(reconciled);
+                  try {
+                    await localforage.setItem(key, reconciled);
+                    verifiedPrimaryDbMirrorKeys.add(key);
+                  } catch (repairError) {
+                    verifiedPrimaryDbMirrorKeys.delete(key);
+                    console.warn('Could not repair IndexedDB lesson snapshot from localStorage mirror:', repairError);
+                  }
+                  safeLocalStorageSetItem(key, serialized, verifiedPrimaryDbMirrorKeys.has(key));
+                  return traceLessonStorageBoundary('read', key, reconciled);
+                }
+              }
+            } catch (reconcileError) {
+              console.warn('Could not reconcile durable lesson snapshots:', reconcileError);
+            }
+          }
           memoryStore[key] = val;
           return traceLessonStorageBoundary('read', key, val);
         }
