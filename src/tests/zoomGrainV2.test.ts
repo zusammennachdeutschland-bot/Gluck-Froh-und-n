@@ -387,6 +387,9 @@ async function runZoomGrainV2Tests() {
     // -------------------------------------------------------------------------
     console.log('4. Testing dry-run migration preview, manual link archiving & checkpoint resume...');
 
+    // The direct group-wide replacement regression above already created one meeting.
+    // Measure this migration independently instead of asserting against the shared test counter.
+    const createdZoomTopicsBeforeMigration = createdZoomTopics.length;
     const preview = buildZoomMigrationPreview({
       groups: [groupV1],
       existingSessions: []
@@ -429,7 +432,11 @@ async function runZoomGrainV2Tests() {
     });
     assert.equal(resumedRes.completed, true);
     assert.equal(resumedRes.succeededCount, 0, 'Resume must not create another meeting after the group already has one canonical URL');
-    assert.equal(createdZoomTopics.length, 1, 'One group-wide canonical Zoom meeting must cover every weekly slot');
+    assert.equal(
+      createdZoomTopics.length - createdZoomTopicsBeforeMigration,
+      1,
+      'Resumable migration must create only one group-wide canonical Zoom meeting for every weekly slot'
+    );
 
     const migratedMon = resumedRes.sessions.find((s) => s.weekday === 1)!;
     assert.equal(migratedMon.meetingSource, 'zoom_api');
