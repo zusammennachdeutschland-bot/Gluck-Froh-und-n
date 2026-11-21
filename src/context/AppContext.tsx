@@ -1670,14 +1670,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [hodVisits, setHodVisits] = useState<VisitRecord[]>(() => {
     const saved = initialData['hod_visit_records'];
-    const legacyProfileVisits = ((initialData['dl_profile'] as any)?.schoolSettings?.visitRecords || []) as VisitRecord[];
+    const migrationKey = 'hod_visit_records_migrated_v1';
+    const migrationAlreadyDone = Boolean(initialData[migrationKey]);
+    const legacyProfileVisits = migrationAlreadyDone
+      ? []
+      : (((initialData['dl_profile'] as any)?.schoolSettings?.visitRecords || []) as VisitRecord[]);
     const canonicalVisits: VisitRecord[] = Array.isArray(saved) ? saved : [];
     const legacyVisits: VisitRecord[] = Array.isArray(legacyProfileVisits) ? legacyProfileVisits : [];
     const migratedById = new Map<string, VisitRecord>();
-    legacyVisits.forEach(item => item?.id && migratedById.set(item.id, item));
-    // Canonical records (including deletion tombstones) always win on ID collisions.
+    // Import legacy records only once; canonical records and their deletion tombstones always win.
+    legacyVisits.forEach(item => item?.id && !item.deleted && migratedById.set(item.id, item));
     canonicalVisits.forEach(item => item?.id && migratedById.set(item.id, item));
     const raw: VisitRecord[] = Array.from(migratedById.values());
+    if (!migrationAlreadyDone) {
+      storage.setItem(migrationKey, true);
+      storage.setItem('hod_visit_records', raw);
+    }
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       const id = item.id || `hod_vst_${Date.now()}_${idx}`;
@@ -2866,134 +2874,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     return () => clearInterval(interval);
   }, [lessons, profile.enableLessonAlerts, profile.enableBrowserPush, notifiedLessonAlerts, notificationSettings.masterEnabled, notificationSettings.lessonReminder.enabled, language]);
 
-  // Auto-sync recurring group schedules directly into calendar (#27 Set optimization)
-  useEffect(() => {
-    if (!groups || groups.length === 0) return;
-
-    const sourceLessons = (fullLessonsRef.current && fullLessonsRef.current.length > 0)
-      ? fullLessonsRef.current
-      : lessons;
-    const newAutoLessons: Lesson[] = [];
-    const today = new Date();
-    const existingSlotSet = buildLessonSlotSet(sourceLessons);
-    const groupLessonCounts = new Map<string, number>();
-    for (const l of sourceLessons) {
-      if (!l.deleted && l.status !== 'cancelled' && l.groupId) {
-        groupLessonCounts.set(l.groupId, (groupLessonCounts.get(l.groupId) || 0) + 1);
-      }
-    }
-
-    groups.forEach(group => {
-      if (group.deleted || group.status === 'archived') return;
-      const slots = getGroupScheduleSlots(group);
-      if (slots.length === 0) return;
-
-      const isPerLesson = isGroupPerLesson(group);
-      const perSessionPrice = isPerLesson && group.pricePerSession
-        ? group.pricePerSession
-        : Math.round((group.monthlyPackagePrice || 1200) / (group.sessionCount || 4));
-      let groupAddedCount = 0;
-      const baseGroupCount = groupLessonCounts.get(group.id) || 0;
-
-      // Maintain a rolling window of exactly 14 days of auto-generated future lessons
-      const ROLLING_FUTURE_WINDOW_DAYS = 14;
-      const prunedIds = getPrunedLessonIds();
-
-      for (let dayOffset = 0; dayOffset <= ROLLING_FUTURE_WINDOW_DAYS; dayOffset++) {
-        const d = new Date();
-        d.setDate(today.getDate() + dayOffset);
-        if (!isDateMatchingGroupRecurrence(group.scheduleRecurrence, d)) continue;
-        const dayNum = d.getDay();
-
-        const matchingSlot = slots.find(s => getDayNumber(s.day) === dayNum);
-        if (matchingSlot) {
-          const dateStr = formatLocalDate(d);
-          const sessionTime = matchingSlot.time || '17:00';
-          const slotKey = makeLessonSlotKey(group.id, dateStr, sessionTime);
-          const autoLessonId = `l_auto_${group.id}_${dateStr}_${sessionTime.replace(':', '')}`;
-
-          // If this slot was explicitly pruned or already exists with a non-deleted record, do not auto-generate
-          if (prunedIds.has(autoLessonId)) continue;
-          if (sourceLessons.some(l => l && l.id === autoLessonId)) continue;
-
-          // If group already has a completed, cancelled, or in-progress session on this date, do not auto-generate another scheduled session
-          const existingForGroupOnDate = sourceLessons.filter(l => l.groupId === group.id && l.date === dateStr && !l.deleted);
-          const hasHandledOnDate = existingForGroupOnDate.some(
-            l => l.status === 'completed' || l.status === 'cancelled' || l.status === 'in_progress' || (l.report && l.report.attendanceStatus)
-          );
-          const daySlotsCount = slots.filter(s => getDayNumber(s.day) === dayNum).length || 1;
-          if (hasHandledOnDate && existingForGroupOnDate.length >= daySlotsCount) {
-            continue;
-          }
-
-          if (!existingSlotSet.has(slotKey)) {
-            existingSlotSet.add(slotKey);
-            const sessionNumber = isPerLesson
-              ? 1
-              : ((((group.startingSessionNumber || 1) - 1 + baseGroupCount + groupAddedCount) % (group.sessionCount || 4)) + 1);
-            groupAddedCount += 1;
-
-            newAutoLessons.push(wrapMutation({
-              id: autoLessonId,
-              groupId: group.id,
-              groupName: group.name,
-              title: `${group.name} Lektion`,
-              date: dateStr,
-              time: sessionTime,
-              durationMinutes: group.lessonDurationMinutes || 60,
-              type: group.type,
-              grade: group.grade,
-              sessionNumber,
-              totalSessionsInPackage: isPerLesson ? 1 : (group.sessionCount || 4),
-              status: 'scheduled',
-              paymentStatus: 'pending',
-              amountDue: perSessionPrice,
-              amountPaid: 0,
-              meetingLink: group.type === 'online'
-                ? resolveActiveZoomLinkForLesson({
-                    group,
-                    lesson: { groupId: group.id, date: dateStr, time: sessionTime },
-                    groupWeeklySessions: groupWeeklySessionsRef.current,
-                  })
-                : undefined,
-              locationAddress: group.type === 'offline' ? (group.address || 'Cairo Center') : undefined,
-              scheduleRecurrence: group.scheduleRecurrence || 'weekly',
-              biweeklyWeek: getAlternatingWeek(d),
-              isAutoGenerated: true
-            } as Lesson));
-          }
-        }
-      }
-    });
-
-    if (newAutoLessons.length > 0) {
-      updateFullLessonsStorage(prev => {
-        const prevSlotSet = buildLessonSlotSet(prev);
-        const prevIdSet = new Set(prev.map(l => l?.id).filter(Boolean));
-        const deduplicated = newAutoLessons.filter(
-          nl => !prevIdSet.has(nl.id) && !prevSlotSet.has(makeLessonSlotKey(nl.groupId || '', nl.date, nl.time))
-        );
-        if (deduplicated.length === 0) return prev;
-        let combined = [...prev, ...deduplicated];
-        const affectedGroupIds = new Set(deduplicated.map(l => l.groupId).filter(Boolean) as string[]);
-        affectedGroupIds.forEach(gid => {
-          const grp = groups.find(g => g.id === gid);
-          if (grp) {
-            combined = resequenceScheduledLessonsAfterChange(combined, { groupId: grp.id, groupName: grp.name }, {
-              group: grp,
-              students
-            });
-          }
-        });
-        return combined;
-      });
-    }
-  }, [groups]);
+  // Future recurring group occurrences are projected from group schedules; storage holds actual or edited lessons only.
 
   const updateProfile = (updates: Partial<TeacherProfile>) => {
-    if (updates.schoolSettings?.visitRecords && Array.isArray(updates.schoolSettings.visitRecords)) {
-      setHodVisits(updates.schoolSettings.visitRecords);
-    }
     setProfile(prev => {
       const updated = { ...prev, ...updates };
       storage.setItem('dl_profile', updated);
