@@ -209,8 +209,8 @@ interface AppContextType {
   deleteLesson: (id: string) => void;
   deleteFutureGroupLessons: (groupId: string, fromDate: string, currentLessonId?: string) => void;
   deleteAllGroupLessons: (groupId: string, onlyScheduled?: boolean) => void;
-  saveLessonReport: (lessonId: string, report: LessonReport, packageCount?: number, sessionNumber?: number) => void;
-  cancelLesson: (lessonId: string, notes?: string) => void;
+  saveLessonReport: (lessonId: string, report: LessonReport, packageCount?: number, sessionNumber?: number, fallbackLesson?: Lesson) => void;
+  cancelLesson: (lessonId: string, notes?: string, fallbackLesson?: Lesson) => void;
   generateGroupScheduleLessons: (groupId: string, days: string[], time: string, numWeeks?: number, customDayTimes?: Record<string, string>, groupOverride?: Group) => void;
   previewInvalidBiweeklyAutoLessons: () => Promise<Lesson[]>;
   cleanupInvalidBiweeklyAutoLessons: (lessonIds?: string[]) => Promise<number>;
@@ -5322,11 +5322,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     autoSyncEngine.notifyMutation('lessons', groupId);
   };
 
-  const saveLessonReport = (lessonId: string, report: LessonReport, packageCount?: number, sessionNumber?: number) => {
+  const saveLessonReport = (lessonId: string, report: LessonReport, packageCount?: number, sessionNumber?: number, fallbackLesson?: Lesson) => {
     const targetLesson =
       (fullLessonsRef.current || []).find(l => l.id === lessonId) ||
       lessons.find(l => l.id === lessonId) ||
-      (selectedLesson && selectedLesson.id === lessonId ? selectedLesson : undefined);
+      (selectedLesson && selectedLesson.id === lessonId ? selectedLesson : undefined) ||
+      (fallbackLesson?.id === lessonId ? fallbackLesson : undefined);
     if (!targetLesson) return;
 
     const targetGroup = groups.find(g => g.id === targetLesson.groupId || (g.name && targetLesson.groupId && g.name.trim().toLowerCase() === targetLesson.groupId.trim().toLowerCase()));
@@ -5781,12 +5782,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     /* confetti removed */
   };
 
-  const cancelLesson = (lessonId: string, notes?: string) => {
+  const cancelLesson = (lessonId: string, notes?: string, fallbackLesson?: Lesson) => {
     syncEventQueue.enqueue('session_cancelled', { lessonId, notes, timestamp: Date.now() });
 
     const updater = (allLessons: Lesson[]): Lesson[] => {
       let found = false;
-      const target = allLessons.find(l => l.id === lessonId) || (selectedLesson?.id === lessonId ? selectedLesson : null);
+      const target = allLessons.find(l => l.id === lessonId) || (selectedLesson?.id === lessonId ? selectedLesson : null) || (fallbackLesson?.id === lessonId ? fallbackLesson : null);
       const targetGroupId = target?.groupId;
       const targetStudentId = target?.studentId;
       const targetStudentName = target?.studentName;
