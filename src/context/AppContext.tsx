@@ -1670,7 +1670,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [hodVisits, setHodVisits] = useState<VisitRecord[]>(() => {
     const saved = initialData['hod_visit_records'];
-    const raw: VisitRecord[] = Array.isArray(saved) ? saved : [];
+    const legacyProfileVisits = ((initialData['dl_profile'] as any)?.schoolSettings?.visitRecords || []) as VisitRecord[];
+    const raw: VisitRecord[] = Array.isArray(saved) && saved.length > 0 ? saved : (Array.isArray(legacyProfileVisits) ? legacyProfileVisits : []);
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       const id = item.id || `hod_vst_${Date.now()}_${idx}`;
@@ -1707,41 +1708,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   useEffect(() => {
     if (!isInitializedRef.current) return;
     storage.setItem('hod_visit_records', hodVisits);
-
-    // Keep profile.schoolSettings.visitRecords synchronized with hodVisits while respecting purge tombstones
-    const purgedVisitIds = new Set<string>(
-      (recentlyDeletedRef.current?.purgedRecords || [])
-        .filter((p) => p && p.id)
-        .map((p) => p.id.trim())
-    );
-    setProfile(prev => {
-      const existingSettings = (prev?.schoolSettings as any) || {};
-      const existingVisits = (existingSettings.visitRecords || []).filter(
-        (v: any) => v?.id && !purgedVisitIds.has(String(v.id).trim())
-      );
-      const map = new Map<string, VisitRecord>();
-      existingVisits.forEach((v: any) => v?.id && map.set(v.id, v));
-      (hodVisits || []).forEach(v => {
-        if (v?.id && !purgedVisitIds.has(String(v.id).trim()) && !v.deleted) {
-          map.set(v.id, v);
-        }
-      });
-      const merged = Array.from(map.values());
-
-      if ((existingSettings.visitRecords || []).length === merged.length && merged.every((v: any, i: number) => v.id === (existingSettings.visitRecords || [])[i]?.id)) {
-        return prev;
-      }
-
-      const updated = {
-        ...prev,
-        schoolSettings: {
-          ...existingSettings,
-          visitRecords: merged
-        } as any
-      };
-      storage.setItem('dl_profile', updated);
-      return updated;
-    });
   }, [hodVisits]);
 
   // School & Lesson Notes State with SyncableRecord schema
