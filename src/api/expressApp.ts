@@ -36,19 +36,36 @@ const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+const allowedAppOrigins = new Set<string>(['capacitor://localhost', 'ionic://localhost']);
+
+const addConfiguredOrigin = (value?: string) => {
+  const raw = String(value || '').trim();
+  if (!raw) return;
+  try {
+    const url = new URL(raw.includes('://') ? raw : `https://${raw}`);
+    allowedAppOrigins.add(url.origin);
+  } catch {
+    // Ignore malformed deployment URL configuration.
+  }
+};
+
+addConfiguredOrigin(process.env.APP_URL);
+addConfiguredOrigin(process.env.VERCEL_URL);
+addConfiguredOrigin(process.env.VERCEL_PROJECT_PRODUCTION_URL);
+
 app.use((req, res, next) => {
   const origin = typeof req.headers?.origin === 'string' ? req.headers.origin.trim() : '';
-  const isAllowedOrigin =
-    !origin ||
-    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin) ||
-    /^capacitor:\/\/localhost$/i.test(origin) ||
-    /^ionic:\/\/localhost$/i.test(origin) ||
-    /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin);
-  if (isAllowedOrigin) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    if (origin) {
-      res.setHeader('Vary', 'Origin');
-    }
+  const isLocalDevelopmentOrigin =
+    process.env.NODE_ENV !== 'production' &&
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+  const isAllowedOrigin = !origin || allowedAppOrigins.has(origin) || isLocalDevelopmentOrigin;
+
+  if (origin && !isAllowedOrigin) {
+    return res.status(403).json({ error: 'Origin is not allowed' });
+  }
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Owner-Uid, X-Grain-Session-Token, X-Grain-Local-Client, X-Zoom-Session-Token, X-Zoom-Local-Client');
@@ -238,6 +255,19 @@ app.post('/api/hod/dashboard/action', (req, res) => {
 
 // 4. TTS Proxy Endpoint
 app.get('/api/tts', async (req, res) => {
+  const authHeader = String(req.headers.authorization || '');
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+  if (!bearerToken) {
+    return res.status(401).json({ error: 'Unauthorized: Firebase Bearer token is required for TTS' });
+  }
+
+  const verification = await verifyFirebaseIdToken(bearerToken);
+  if (!verification.isValid || !verification.payload) {
+    return res.status(401).json({
+      error: `Unauthorized: ${verification.error || 'Invalid Firebase ID token'}`
+    });
+  }
+
   try {
     const text = ((req.query.text as string) || '').trim();
     const lang = ((req.query.lang as string) || 'de').trim();
