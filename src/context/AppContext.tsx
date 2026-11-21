@@ -1671,7 +1671,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const [hodVisits, setHodVisits] = useState<VisitRecord[]>(() => {
     const saved = initialData['hod_visit_records'];
     const legacyProfileVisits = ((initialData['dl_profile'] as any)?.schoolSettings?.visitRecords || []) as VisitRecord[];
-    const raw: VisitRecord[] = Array.isArray(saved) && saved.length > 0 ? saved : (Array.isArray(legacyProfileVisits) ? legacyProfileVisits : []);
+    const canonicalVisits: VisitRecord[] = Array.isArray(saved) ? saved : [];
+    const legacyVisits: VisitRecord[] = Array.isArray(legacyProfileVisits) ? legacyProfileVisits : [];
+    const migratedById = new Map<string, VisitRecord>();
+    legacyVisits.forEach(item => item?.id && migratedById.set(item.id, item));
+    // Canonical records (including deletion tombstones) always win on ID collisions.
+    canonicalVisits.forEach(item => item?.id && migratedById.set(item.id, item));
+    const raw: VisitRecord[] = Array.from(migratedById.values());
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       const id = item.id || `hod_vst_${Date.now()}_${idx}`;
