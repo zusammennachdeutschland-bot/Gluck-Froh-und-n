@@ -271,6 +271,91 @@ export const ZoomIntegrationsManager: React.FC = () => {
     return { total, zoomSynced, calSynced, needsAttention, deletedOrphanCalEvents };
   }, [activeSessions, livePreviewSummary.reconciledSessions]);
 
+  const handleCopyMeetingsForAi = async () => {
+    const exportData = {
+      purpose: 'Create recurring calendar events from the following existing Zoom meeting schedule.',
+      instructions: [
+        'Create one calendar event for each meeting below.',
+        'Preserve the exact meeting title, weekday, local start time, duration, timezone, recurrence interval, Zoom join URL, meeting ID, passcode, and host email.',
+        'All times are local wall-clock times in each event timezone.',
+        'recurrence=weekly means every week; recurrence=biweekly_a or biweekly_b means every two weeks. Keep the A/B cycle distinction and do not convert it to weekly.',
+        'The app does not store a recurrence start date for these weekly templates. Determine the next matching date from the current date in the event timezone, and ask me if a historical or specific start date is required.',
+        'Do not invent missing details. If a field is null, leave it unset.',
+        'Do not change or shorten Zoom URLs or remove passcodes.'
+      ],
+      exportedAt: new Date().toISOString(),
+      timezoneReference: timezoneInput || DEFAULT_ZOOM_TIMEZONE,
+      meetingCount: activeSessions.length,
+      meetings: activeSessions.map((session) => ({
+        title: session.standardizedTitle,
+        groupName: session.groupNameSnapshot || null,
+        sessionCode: session.sessionCode,
+        sessionId: session.id,
+        groupId: session.groupId,
+        weekday: session.weekdayName,
+        weekdayIndexSundayZero: session.weekday,
+        localStartTime: session.startTime,
+        durationMinutes: session.durationMinutes,
+        timezone: session.timezone || timezoneInput || DEFAULT_ZOOM_TIMEZONE,
+        recurrence: session.recurrence,
+        recurrenceInterval: session.recurrence === 'weekly' ? 1 : 2,
+        recurrenceCycle: session.recurrence === 'biweekly_a' ? 'A' : session.recurrence === 'biweekly_b' ? 'B' : null,
+        zoomMeetingId: session.zoomMeetingId || null,
+        zoomJoinUrl: session.zoomJoinUrl || null,
+        zoomPasscode: session.zoomPasscode || null,
+        zoomHostEmail: session.zoomHostEmail || null,
+        meetingSource: session.meetingSource,
+        sessionStatus: session.syncState,
+        calendarSyncStatus: session.calendarSyncStatus || 'not_synced'
+      }))
+    };
+
+    const textToCopy = [
+      'Please use this complete meeting data to create the recurring events in my calendar:',
+      '',
+      JSON.stringify(exportData, null, 2)
+    ].join('\\n');
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(textToCopy);
+      } else {
+        throw new Error('Clipboard API unavailable');
+      }
+      triggerToast(_t(
+        `تم نسخ بيانات ${activeSessions.length} اجتماع بالكامل. الصقها في أي AI.`,
+        `Copied complete data for ${activeSessions.length} meetings. Paste it into any AI.`,
+        `Daten für ${activeSessions.length} Meetings kopiert.`
+      ));
+    } catch {
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = textToCopy;
+        textarea.setAttribute('readonly', 'true');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        textarea.style.pointerEvents = 'none';
+        document.body.appendChild(textarea);
+        textarea.select();
+        textarea.setSelectionRange(0, textarea.value.length);
+        const copied = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        if (!copied) throw new Error('Legacy clipboard copy failed');
+        triggerToast(_t(
+          'تم نسخ بيانات الاجتماعات بالكامل.',
+          'Complete meeting data copied.',
+          'Vollständige Meeting-Daten kopiert.'
+        ));
+      } catch {
+        triggerToast(_t(
+          'تعذر النسخ تلقائيًا. استخدم زر تصدير .ics كبديل.',
+          'Automatic copy failed. Use Export .ics as a fallback.',
+          'Automatisches Kopieren fehlgeschlagen. Exportiere stattdessen .ics.'
+        ));
+      }
+    }
+  };
+
   const handleSaveCredentials = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!accountIdInput.trim() || !clientIdInput.trim() || !clientSecretInput.trim()) return;
@@ -1367,6 +1452,15 @@ export const ZoomIntegrationsManager: React.FC = () => {
                     </button>
                   )}
 
+                  <button
+                    type="button"
+                    disabled={activeSessions.length === 0}
+                    onClick={handleCopyMeetingsForAi}
+                    className="min-h-[44px] px-3.5 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-text-main text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                  >
+                    <Copy className="w-3.5 h-3.5 shrink-0" />
+                    <span>{_t('نسخ بيانات الاجتماعات للـ AI', 'Copy meetings for AI')}</span>
+                  </button>
                   <button
                     type="button"
                     disabled={activeSessions.length === 0}
