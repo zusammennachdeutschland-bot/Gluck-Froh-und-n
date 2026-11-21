@@ -75,6 +75,9 @@ public class GoogleCredentialAuthPlugin extends Plugin {
 
     private final AtomicBoolean signInInProgress = new AtomicBoolean(false);
     private final AtomicBoolean calendarAuthInProgress = new AtomicBoolean(false);
+    private final Handler calendarAuthHandler = new Handler(Looper.getMainLooper());
+    @Nullable
+    private volatile Runnable pendingCalendarConsentTimeout = null;
     @Nullable
     private volatile CancellationSignal activeCancellationSignal = null;
     @Nullable
@@ -600,7 +603,30 @@ public class GoogleCredentialAuthPlugin extends Plugin {
                                 IntentSenderRequest intentSenderRequest =
                                     new IntentSenderRequest.Builder(pendingIntent.getIntentSender()).build();
                                 calendarAuthLauncher.launch(intentSenderRequest);
+
+                                // authorize() has completed, but the consent Activity is a separate
+                                // asynchronous phase. It needs its own watchdog or JS can remain stuck.
+                                final Runnable consentTimeout = () -> {
+                                    if (pendingCalendarAuthCall != call) return;
+                                    pendingCalendarAuthCall = null;
+                                    pendingCalendarConsentTimeout = null;
+                                    calendarAuthInProgress.set(false);
+                                    Log.e(TAG, "[CalendarOAuth] stage=native_consent_timeout elapsedMs=" +
+                                        Math.max(0L, System.currentTimeMillis() - calendarAuthStartMs));
+                                    rejectCalendarAuthError(
+                                        activity,
+                                        call,
+                                        "Google Calendar consent screen did not return a result. Check Google Play Services and try again.",
+                                        "CALENDAR_CONSENT_TIMEOUT",
+                                        null
+                                    );
+                                };
+                                pendingCalendarConsentTimeout = consentTimeout;
+                                calendarAuthHandler.postDelayed(consentTimeout, 120000L);
                             } catch (Throwable launchErr) {
+                                Runnable consentTimeout = pendingCalendarConsentTimeout;
+                                if (consentTimeout != null) calendarAuthHandler.removeCallbacks(consentTimeout);
+                                pendingCalendarConsentTimeout = null;
                                 pendingCalendarAuthCall = null;
                                 calendarAuthInProgress.set(false);
                                 Log.e(
@@ -701,6 +727,10 @@ public class GoogleCredentialAuthPlugin extends Plugin {
     }
 
     private void handleCalendarAuthorizationActivityResult(@NonNull ActivityResult activityResult) {
+        final Runnable consentTimeout = pendingCalendarConsentTimeout;
+        if (consentTimeout != null) calendarAuthHandler.removeCallbacks(consentTimeout);
+        pendingCalendarConsentTimeout = null;
+
         final PluginCall call = pendingCalendarAuthCall;
         pendingCalendarAuthCall = null;
         calendarAuthInProgress.set(false);
