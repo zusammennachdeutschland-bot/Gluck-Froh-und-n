@@ -1368,12 +1368,9 @@ export const HodHubView: React.FC = () => {
   };
 
   // State for Visits & Booklet Observations
-  const initialMergedVisits = useMemo(() => {
-    const map = new Map<string, any>();
-    (schoolSettings.visitRecords || []).forEach((v: any) => v?.id && map.set(v.id, v));
-    (hodVisits || []).forEach((v: any) => v?.id && map.set(v.id, v));
-    return Array.from(map.values());
-  }, [schoolSettings.visitRecords, hodVisits]);
+  // hodVisits is the sole canonical visit collection; profile.schoolSettings.visitRecords
+  // is read only by the one-time migration in AppContext.
+  const initialMergedVisits = useMemo(() => (hodVisits || []).filter(v => !v.deleted), [hodVisits]);
 
   const [visitRecords, setVisitRecords] = useState<any[]>(initialMergedVisits);
 
@@ -2052,9 +2049,9 @@ export const HodHubView: React.FC = () => {
 
   // Save changes to profile
   const persistHodData = (updates: any) => {
+    const { visitRecords: _legacyVisitRecords, ...settingsWithoutLegacyVisits } = schoolSettings as any;
     const updatedSettings = {
-      ...schoolSettings,
-      visitRecords,
+      ...settingsWithoutLegacyVisits,
       bookletObservations,
       weeklyPlanStatuses: weeklyPlans,
       stageReports,
