@@ -43,7 +43,7 @@ const runScenario = async (entryPoint: 'home' | 'modal') => {
   await storage.setItem('dl_lessons', full);
   await waitForLessonSyncQueue();
 
-  const persistReport = (lessonId: string, report: LessonReport, fallbackLesson?: Lesson) => {
+  const persistReport = (lessonId: string, report: LessonReport, _packageCount?: number, _sessionNumber?: number, fallbackLesson?: Lesson) => {
     const promise = enqueueLessonSyncTask(async () => {
       const persisted = (await storage.getItem<Lesson[]>('dl_lessons')) || [];
       const target = full.find(row => row.id === lessonId) || fallbackLesson;
