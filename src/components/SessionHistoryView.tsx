@@ -2,7 +2,7 @@ import { isPendingStatus } from "../utils/lessonUtils";
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson, Student } from '../types';
-import { formatLocalDate } from '../utils/timeUtils';
+import { formatLocalDate, normalizeDateToISO } from '../utils/timeUtils';
 import { 
   History, Search, Filter, Calendar, Clock, CheckCircle2, XCircle, 
   AlertTriangle, Users, User, ArrowUpRight, FileText, Settings, Play, 
@@ -83,12 +83,14 @@ export const SessionHistoryView: React.FC = () => {
 
         // Period filter
         if (periodFilter === 'today') {
-          if (lesson.date !== todayStr) return false;
+          if (normalizeDateToISO(lesson.date) !== todayStr) return false;
         } else if (periodFilter === 'this_week') {
-          const lessonWeekStart = getWeekStart(new Date(lesson.date));
+          const normalizedLessonDate = normalizeDateToISO(lesson.date);
+          if (!normalizedLessonDate) return false;
+          const lessonWeekStart = getWeekStart(new Date(`${normalizedLessonDate}T00:00:00`));
           if (lessonWeekStart !== currentWeekStart) return false;
         } else if (periodFilter === 'this_month') {
-          if (!lesson.date.startsWith(currentMonthPrefix)) return false;
+          if (!normalizeDateToISO(lesson.date).startsWith(currentMonthPrefix)) return false;
         }
 
         // Search term
@@ -108,8 +110,8 @@ export const SessionHistoryView: React.FC = () => {
       })
       .sort((a, b) => {
         // Compare date & time descending
-        const dateA = `${a.date}T${a.time}`;
-        const dateB = `${b.date}T${b.time}`;
+        const dateA = `${normalizeDateToISO(a.date)}T${a.time}`;
+        const dateB = `${normalizeDateToISO(b.date)}T${b.time}`;
         return dateB.localeCompare(dateA);
       });
   }, [lessons, statusFilter, entityFilter, periodFilter, searchTerm, todayStr, currentWeekStart, currentMonthPrefix]);
