@@ -935,7 +935,6 @@ export const TodaysProgressTimeline: React.FC = () => {
                           group: targetGroup,
                           lesson,
                           groupWeeklySessions,
-                          defaultZoomLink: profile.defaultZoomLink
                         });
 
                         if (!isOfflineLesson && meetingUrl) {
