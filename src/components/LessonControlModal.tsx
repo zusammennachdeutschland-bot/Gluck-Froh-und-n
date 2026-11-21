@@ -1273,7 +1273,6 @@ export const LessonControlModal: React.FC = () => {
                       group: targetGroup,
                       lesson: selectedLesson,
                       groupWeeklySessions,
-                      defaultZoomLink: profile.defaultZoomLink
                     })}
                     target="_blank"
                     rel="noreferrer"
