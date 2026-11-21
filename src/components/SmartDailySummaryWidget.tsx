@@ -153,7 +153,7 @@ export const SmartDailySummaryWidget: React.FC = () => {
       currency,
       hwInsights
     };
-  }, [lessons, students, groups, payments, profile, todayStr, language, t, syncedAssignments, syncedSubmissions, currentOwnerUid]);
+  }, [lessons, getFullLessonsSnapshot, groups, groupWeeklySessions, students, payments, profile, todayStr, language, t, syncedAssignments, syncedSubmissions, currentOwnerUid]);
 
   const { hwInsights } = summary;
   const hasAlerts = hwInsights.alerts.length > 0;
