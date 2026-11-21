@@ -53,7 +53,7 @@ import { buildOutboundDelta } from '../services/sync/deltaBuilder';
 import { partitionBackupPayload } from '../services/firebaseWorkspaceSync';
 import { validateAndSanitizeBackupPayload } from '../utils/backupEngine';
 import { Group, GroupWeeklySession, Lesson, Student, ZoomMeetingHistory } from '../types';
-import { diagnoseZoomReminderResolution } from '../utils/zoomReminderDiagnostics';
+import { diagnoseZoomReminderResolution, resolveReminderGroupIdentity } from '../utils/zoomReminderDiagnostics';
 
 async function runZoomGrainV2Tests() {
   console.log('=== Starting Glück × Zoom × Grain V2.0 Verification Suite ===');
@@ -460,15 +460,37 @@ async function runZoomGrainV2Tests() {
     });
     assert.ok(bulkSyncedZoomUrl, 'Exact schedule slot must resolve a valid synced Zoom API link');
     assert.equal(bulkSyncedZoomUrl, migratedMon.zoomJoinUrl);
+    const staleImportedGroupProp = { ...groupV1, id: 'grp_imported_duplicate' };
+    const canonicalIdentity = resolveReminderGroupIdentity({
+      lessonGroupId: groupV1.id,
+      suppliedGroup: staleImportedGroupProp,
+      groups: [groupV1, staleImportedGroupProp]
+    });
+    assert.equal(canonicalIdentity.resolverGroupId, groupV1.id);
+    assert.equal(canonicalIdentity.identityReasonCode, 'LESSON_GROUP_ID_MATCHED');
+
+    // If an import left an orphaned lesson.groupId, use the supplied group only
+    // when it is independently present in the current canonical groups collection.
+    const orphanIdentity = resolveReminderGroupIdentity({
+      lessonGroupId: 'old_import_group_id',
+      suppliedGroup: groupV1,
+      groups: [groupV1]
+    });
+    assert.equal(orphanIdentity.resolverGroupId, groupV1.id);
+    assert.equal(orphanIdentity.identityReasonCode, 'STALE_LESSON_GROUP_ID_USED_KNOWN_PROP_GROUP');
+
     const exactDiagnostics = diagnoseZoomReminderResolution({
       targetGroup: groupV1,
       lesson: bulkSyncedLesson,
       effectiveLesson: bulkSyncedLesson,
       groupWeeklySessions: resumedRes.sessions,
       targetDay: 'MON',
-      targetTime: '19:00'
+      targetTime: '19:00',
+      resolverGroupId: canonicalIdentity.resolverGroupId,
+      identityReasonCode: canonicalIdentity.identityReasonCode
     });
     assert.equal(exactDiagnostics.reasonCode, 'RESOLVED_EXACT_SLOT');
+    assert.equal(exactDiagnostics.identityReasonCode, 'LESSON_GROUP_ID_MATCHED');
     assert.equal(exactDiagnostics.resolvedSessionId, migratedMon.id);
     assert.ok(exactDiagnostics.matchingGroupRows.length >= 2);
 
@@ -492,7 +514,9 @@ async function runZoomGrainV2Tests() {
       effectiveLesson: fallbackLesson,
       groupWeeklySessions: resumedRes.sessions,
       targetDay: 'FRI',
-      targetTime: '17:00'
+      targetTime: '17:00',
+      resolverGroupId: groupV1.id,
+      identityReasonCode: 'LESSON_GROUP_ID_MATCHED'
     });
     assert.equal(fallbackDiagnostics.reasonCode, 'RESOLVED_GROUP_WIDE_FALLBACK');
     assert.equal(fallbackDiagnostics.resolvedSessionId, migratedMon.id);
