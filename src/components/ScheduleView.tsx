@@ -277,7 +277,7 @@ export const ScheduleView: React.FC = () => {
 
     for (let day = 1; day <= daysInMonth; day++) {
       const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      const lessonsOnDay = activeLessons.filter((l) => l.date === dateStr);
+      const lessonsOnDay = activeLessons.filter((l) => normalizeDateToISO(l.date) === normalizeDateToISO(dateStr));
 
       gridDays.push({
         dayNumber: day,
