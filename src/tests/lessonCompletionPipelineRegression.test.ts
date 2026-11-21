@@ -92,7 +92,7 @@ const runScenario = async (entryPoint: 'home' | 'modal') => {
   } else {
     for (const id of ['kinda-0900', 'taleen-1000']) {
       const target = full.find(row => row.id === id)!;
-      persistReport(id, { attendanceStatus: 'present' } as LessonReport, target);
+      persistReport(id, { attendanceStatus: 'present' } as LessonReport, undefined, undefined, target);
       await pending.shift();
       await waitForLessonSyncQueue();
       // LessonControlModal.handleSaveReport also calls updateLesson after saveLessonReport.
