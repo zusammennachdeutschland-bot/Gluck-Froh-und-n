@@ -445,7 +445,6 @@ export const ScheduleView: React.FC = () => {
             group: targetGroup,
             lesson: l,
             groupWeeklySessions,
-            defaultZoomLink: profile.defaultZoomLink
           })
         : '';
       const location = isOnlineLesson
