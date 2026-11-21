@@ -576,32 +576,44 @@ runTest('TEST T: getProjectedLessonsForRange computes sequential session numbers
   const anchorFields = buildGroupCycleAnchorFields(existing[1], 1, existing, { group: baseGroup });
   const anchoredGroup: Group = { ...baseGroup, ...anchorFields };
 
-  // Project 5 future Mondays from 2026-04-20 to 2026-05-18
-  const projectedAll = getProjectedLessonsForRange(
-    '2026-04-20',
-    '2026-05-18',
-    [anchoredGroup],
-    existing.slice(1), // truncated active window without p_old
-    undefined,
-    [],
-    existing // authoritative full numbering basis
-  );
+  // Run the exact same inclusive date range in both timezones. Egypt's
+  // 2026 DST transition occurs at midnight on Apr 24, which used to skip
+  // the final calendar day because the cursor became 01:00 while endD was 00:00.
+  const expected = [
+    { date: '2026-04-20', sessionNumber: 3, total: 4 },
+    { date: '2026-04-27', sessionNumber: 4, total: 4 },
+    { date: '2026-05-04', sessionNumber: 1, total: 4 },
+    { date: '2026-05-11', sessionNumber: 2, total: 4 },
+    { date: '2026-05-18', sessionNumber: 3, total: 4 },
+  ];
+  const originalTimezone = process.env.TZ;
+  try {
+    for (const timezone of ['Africa/Cairo', 'UTC']) {
+      process.env.TZ = timezone;
+      const projectedAll = getProjectedLessonsForRange(
+        '2026-04-20',
+        '2026-05-18',
+        [anchoredGroup],
+        existing.slice(1), // truncated active window without p_old
+        undefined,
+        [],
+        existing // authoritative full numbering basis
+      );
+      const projectedOnly = projectedAll
+        .filter(l => l.id.startsWith('l_auto_'))
+        .sort((a, b) => a.date.localeCompare(b.date));
 
-  const projectedOnly = projectedAll
-    .filter(l => l.id.startsWith('l_auto_'))
-    .sort((a, b) => a.date.localeCompare(b.date));
-
-  assert.equal(projectedOnly.length, 5, 'Should project 5 Mondays');
-  assert.deepEqual(
-    projectedOnly.map(l => ({ date: l.date, sessionNumber: l.sessionNumber, total: l.totalSessionsInPackage })),
-    [
-      { date: '2026-04-20', sessionNumber: 3, total: 4 },
-      { date: '2026-04-27', sessionNumber: 4, total: 4 },
-      { date: '2026-05-04', sessionNumber: 1, total: 4 },
-      { date: '2026-05-11', sessionNumber: 2, total: 4 },
-      { date: '2026-05-18', sessionNumber: 3, total: 4 },
-    ]
-  );
+      assert.equal(projectedOnly.length, 5, `Should project 5 Mondays in ${timezone}`);
+      assert.deepEqual(
+        projectedOnly.map(l => ({ date: l.date, sessionNumber: l.sessionNumber, total: l.totalSessionsInPackage })),
+        expected,
+        `Projected Mondays and cycle numbers should match in ${timezone}`
+      );
+    }
+  } finally {
+    if (originalTimezone === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTimezone;
+  }
 });
 
 console.log('===============================================================');
