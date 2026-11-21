@@ -734,26 +734,7 @@ function parseIsoDateWeekday(dateStr?: string | null): number {
   return d.getDay();
 }
 
-function timeToMinutes(hhmm?: string | null): number {
-  const norm = normalize24HourTime(hhmm, '');
-  if (!norm) return -1;
-  const [h, m] = norm.split(':').map((x) => parseInt(x, 10));
-  if (isNaN(h) || isNaN(m)) return -1;
-  return h * 60 + m;
-}
 
-function rankWeeklySessionForZoomLink(session: GroupWeeklySession): number {
-  let score = 0;
-  if (session.meetingSource === 'zoom_api') score += 40;
-  else if (session.meetingSource === 'manual') score += 25;
-  else score += 10;
-
-  if (session.syncState === 'synced') score += 20;
-  else if (session.syncState === 'needs_update') score += 10;
-
-  if (session.zoomJoinUrl?.trim()) score += 5;
-  return score;
-}
 
 /**
  * Resolves only a current, successfully synced Zoom API session for the exact
