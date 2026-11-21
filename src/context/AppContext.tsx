@@ -33,6 +33,7 @@ import { runSyncMigration } from '../services/sync/syncMigration';
 import { trackLocalMutation, trackLocalDeletion, getActiveRecords, detectLocalOriginPlatform } from '../services/sync/mutationTracker';
 import { hydrateVerbGroupSet } from '../shared/verbGroupSync';
 import { normalizeLernstudioSet, stripHeavyGrammarMediaForSync } from '../shared/grammarEngine';
+import { mergeHodVisitMigration } from '../utils/hodVisitMigration';
 import {
   mergeEntities,
   mergeRecentlyDeleted,
@@ -1672,16 +1673,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const saved = initialData['hod_visit_records'];
     const migrationKey = 'hod_visit_records_migrated_v1';
     const migrationAlreadyDone = Boolean(initialData[migrationKey]);
-    const legacyProfileVisits = migrationAlreadyDone
-      ? []
-      : (((initialData['dl_profile'] as any)?.schoolSettings?.visitRecords || []) as VisitRecord[]);
+    const legacyProfileVisits = ((initialData['dl_profile'] as any)?.schoolSettings?.visitRecords || []) as VisitRecord[];
     const canonicalVisits: VisitRecord[] = Array.isArray(saved) ? saved : [];
-    const legacyVisits: VisitRecord[] = Array.isArray(legacyProfileVisits) ? legacyProfileVisits : [];
-    const migratedById = new Map<string, VisitRecord>();
-    // Import legacy records only once; canonical records and their deletion tombstones always win.
-    legacyVisits.forEach(item => item?.id && !item.deleted && migratedById.set(item.id, item));
-    canonicalVisits.forEach(item => item?.id && migratedById.set(item.id, item));
-    const raw: VisitRecord[] = Array.from(migratedById.values());
+    const raw = mergeHodVisitMigration(canonicalVisits, legacyProfileVisits, migrationAlreadyDone);
     if (!migrationAlreadyDone) {
       storage.setItem(migrationKey, true);
       storage.setItem('hod_visit_records', raw);
