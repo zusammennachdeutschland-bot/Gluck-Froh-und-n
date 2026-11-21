@@ -97,7 +97,7 @@ export const getBookedSlotsForDate = (dateStr: string, lessons: Lesson[], groups
   const slots: TimeSlot[] = [];
   
   // We rely on actual Lesson instances since the system generates them
-  lessons.filter(l => l.date === dateStr && l.status !== 'cancelled').forEach(l => {
+  lessons.filter(l => normalizeDateToISO(l.date) === normalizeDateToISO(dateStr) && l.status !== 'cancelled').forEach(l => {
     const startMin = parseTime(l.time);
     const endMin = startMin + l.durationMinutes;
     slots.push({ start: l.time, end: formatTime(endMin), startMin, endMin });
