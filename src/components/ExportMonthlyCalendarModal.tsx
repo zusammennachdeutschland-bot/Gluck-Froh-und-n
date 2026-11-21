@@ -143,7 +143,6 @@ export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProp
             group: targetGroup,
             lesson: l,
             groupWeeklySessions,
-            defaultZoomLink: profile.defaultZoomLink
           })
         : '';
       const address = l.locationAddress || targetGroup?.address || '';
