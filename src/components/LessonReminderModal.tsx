@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { Lesson, Group, GroupWeeklySession, ZoomMeetingRecord, ZoomMeetingHistory } from '../types';
+import { Lesson, Group } from '../types';
 import { buildWhatsAppUrl, formatWhatsAppPhone, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { getUpcomingGroupSchedule, isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
 import { getGroupCycleInfo, calculateSequentialSessionNumber, resolveLessonCycleNumber, compareLessonsChronologically, computeStartingSessionNumberForTargetLesson } from '../utils/lessonUtils';
@@ -10,8 +10,7 @@ import {
 } from 'lucide-react';
 import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { getTimeBasedGreeting } from '../utils/greetingUtils';
-import { resolveActiveZoomLinkForLesson, resolveActiveWeeklySessionForLesson } from '../services/zoomSessionStandardizer';
-import { setManualZoomLinkForSession } from '../services/zoomService';
+import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
 
 interface LessonReminderModalProps {
   lesson?: Lesson | null;
@@ -39,7 +38,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   recipientPhone,
   onClose,
 }) => {
-  const { groups, students, lessons, getFullLessonsSnapshot, setLessonSessionNumberAnchor, groupWeeklySessions, zoomMeetingRecords, zoomMeetingHistory, applyZoomWorkspaceSnapshot, profile, updateGroup, updateLesson, updateProfile, language, t, _t, reportLanguage, setReportLanguage, reportT } = useApp();
+  const { groups, students, lessons, getFullLessonsSnapshot, setLessonSessionNumberAnchor, groupWeeklySessions, updateGroup, updateLesson, language, t, _t, reportLanguage, setReportLanguage, reportT } = useApp();
 
   const currentMsgLang = reportLanguage || 'ar';
   const msgT = (ar: string, en: string, de?: string) => {
@@ -84,8 +83,8 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   // Determine if lesson/group is online or offline
   const isOnline = lesson?.type === 'online' || targetGroup?.type === 'online';
 
-  // Resolve active standardized Zoom link for this exact group + weekly session slot first,
-  // falling back to legacy group.zoomLink / lesson.meetingLink / profile.defaultZoomLink.
+  // Only use the synced Zoom API link for the exact scheduled weekly session.
+  // Legacy group, lesson and profile URLs are intentionally never used.
   const effectiveTargetLesson = lesson || upcomingLesson;
   const resolvedZoomLink = React.useMemo(() => {
     if (!isOnline) return '';
@@ -94,8 +93,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
       lesson: effectiveTargetLesson,
       groupWeeklySessions,
       targetDay: upcomingSchedule?.day,
-      targetTime: lesson?.time || upcomingSchedule?.time,
-      defaultZoomLink: profile.defaultZoomLink
+      targetTime: lesson?.time || upcomingSchedule?.time
     });
   }, [
     isOnline,
@@ -104,8 +102,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     groupWeeklySessions,
     upcomingSchedule?.day,
     upcomingSchedule?.time,
-    lesson?.time,
-    profile.defaultZoomLink
+    lesson?.time
   ]);
 
   // Resolve first student and target student
@@ -215,10 +212,6 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   );
 
   const [selectedArrivalTime, setSelectedArrivalTime] = useState('15');
-  const [zoomLink, setZoomLink] = useState(resolvedZoomLink);
-  const [hasManualZoomEdit, setHasManualZoomEdit] = useState(false);
-  const [isSavingZoom, setIsSavingZoom] = useState(false);
-  const [zoomSaveSuccess, setZoomSaveSuccess] = useState(false);
   const [copied, setCopied] = useState(false);
   const [customMessage, setCustomMessage] = useState<string | null>(null);
 
@@ -270,12 +263,6 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   }, [groupWhatsAppLink]);
 
   useEffect(() => {
-    if (!hasManualZoomEdit) {
-      setZoomLink(resolvedZoomLink);
-    }
-  }, [resolvedZoomLink, hasManualZoomEdit]);
-
-  useEffect(() => {
     if (detectedPreviousHomework && !previousHomework) {
       setPreviousHomework(detectedPreviousHomework);
       setIncludeHomework(true);
@@ -319,7 +306,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
         const intro = reminderStyle === 'immediate'
           ? `${enGreeting}\n\nWe are starting our lesson now.`
           : `${enGreeting}\n\nReminder and confirmation for our lesson scheduled at ${time12}.`;
-        const zoomPart = zoomLink.trim() ? `\n\n🔗 Lesson Link:\n${zoomLink.trim()}` : '';
+        const zoomPart = resolvedZoomLink.trim() ? `\n\n🔗 Lesson Link:\n${resolvedZoomLink.trim()}` : '';
         return `${intro}${cycleLine}${homeworkLine}${zoomPart}`;
       } else {
         let intro = '';
@@ -349,7 +336,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
         const intro = reminderStyle === 'immediate'
           ? `${deGreeting}\n\nwir beginnen jetzt mit unserer Unterrichtsstunde.`
           : `${deGreeting}\n\nErinnerung und Terminbestätigung für unsere Unterrichtsstunde um ${rawTime} Uhr.`;
-        const zoomPart = zoomLink.trim() ? `\n\n🔗 Link zur Stunde:\n${zoomLink.trim()}` : '';
+        const zoomPart = resolvedZoomLink.trim() ? `\n\n🔗 Link zur Stunde:\n${resolvedZoomLink.trim()}` : '';
         return `${intro}${cycleLine}${homeworkLine}${zoomPart}`;
       } else {
         let intro = '';
@@ -379,7 +366,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
       const intro = reminderStyle === 'immediate'
         ? `${arGreeting}\n\nهنبدأ الحصة الآن إن شاء الله.`
         : `${arGreeting}\n\nتذكير وتأكيد بموعد حصتنا إن شاء الله الساعة ${time12}.`;
-      const zoomPart = zoomLink.trim() ? `\n\n🔗 لينك الحصة:\n${zoomLink.trim()}` : '';
+      const zoomPart = resolvedZoomLink.trim() ? `\n\n🔗 لينك الحصة:\n${resolvedZoomLink.trim()}` : '';
       return `${intro}${cycleLine}${homeworkLine}${zoomPart}`;
     } else {
       let intro = '';
@@ -398,7 +385,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     currentMsgLang,
     isOnline, 
     rawTime, 
-    zoomLink, 
+    resolvedZoomLink, 
     selectedArrivalTime, 
     isMultiStudentGroup, 
     targetGroup, 
@@ -427,74 +414,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     }, 400);
   };
 
-  // Save Zoom link back to canonical session
-  const handleSaveZoomLink = () => {
-    if (!zoomLink.trim()) return;
-    setIsSavingZoom(true);
-    if (targetGroup) {
-      let activeSession = resolveActiveWeeklySessionForLesson({
-        group: targetGroup,
-        lesson: effectiveTargetLesson,
-        groupWeeklySessions,
-        targetDay: upcomingSchedule?.day,
-        targetTime: lesson?.time || upcomingSchedule?.time
-      });
-
-      let nextSessions = [...groupWeeklySessions];
-      if (!activeSession) {
-        const newSessionId = `gws_${targetGroup.id}_${upcomingSchedule?.day ?? 1}_${(lesson?.time || upcomingSchedule?.time || '17:00').replace(':', '')}_${Math.random().toString(36).slice(2, 6)}`;
-        const newSession: GroupWeeklySession = {
-          id: newSessionId,
-          groupId: targetGroup.id,
-          groupNameSnapshot: targetGroup.name,
-          weekday: Number(upcomingSchedule?.day ?? 1),
-          weekdayName: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][Number(upcomingSchedule?.day ?? 1)] || 'Monday',
-          startTime: lesson?.time || upcomingSchedule?.time || '17:00',
-          durationMinutes: targetGroup.lessonDurationMinutes || 60,
-          timezone: 'Africa/Cairo',
-          recurrence: 'weekly',
-          sessionCode: `${targetGroup.name.slice(0, 5).toUpperCase()}-SESSION`,
-          standardizedTitle: `${targetGroup.name} Session`,
-          meetingSource: 'manual',
-          syncState: 'manual',
-          calendarEventUid: `gluck-session-${newSessionId}@glueck.app`,
-          calendarSyncStatus: 'not_synced',
-          updatedAt: Date.now(),
-          originDeviceId: 'local',
-          originRevision: 1,
-          deleted: false
-        };
-        nextSessions.push(newSession);
-        activeSession = newSession;
-      }
-
-      const res = setManualZoomLinkForSession({
-        session: activeSession,
-        manualUrl: zoomLink.trim(),
-        sessions: nextSessions,
-        records: zoomMeetingRecords,
-        history: zoomMeetingHistory
-      });
-
-      if (res.ok) {
-        applyZoomWorkspaceSnapshot({
-          sessions: res.sessions,
-          records: res.records,
-          history: res.history
-        });
-      } else {
-        updateProfile({ defaultZoomLink: zoomLink.trim() });
-      }
-    } else {
-      updateProfile({ defaultZoomLink: zoomLink.trim() });
-    }
-
-    setTimeout(() => {
-      setIsSavingZoom(false);
-      setZoomSaveSuccess(true);
-      setTimeout(() => setZoomSaveSuccess(false), 2000);
-    }, 400);
-  };
+  // Zoom links are read-only here; Zoom API sync is the sole source of truth.
 
   const handleCopyText = () => {
     navigator.clipboard.writeText(activeMessage);
@@ -508,7 +428,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   };
 
   const handleSendWhatsApp = () => {
-    if (isOnline && !zoomLink.trim()) {
+    if (isOnline && !resolvedZoomLink.trim()) {
       alert(_t('برجاء إضافة رابط الزووم أولاً قبل إرسال التذكير.', 'Please add the Zoom link before sending the reminder.', 'Bitte fügen Sie zuerst den Zoom-Link hinzu.'));
       return;
     }
@@ -571,7 +491,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
       alert(_t(`بيانات التواصل (رقم هاتف أو يوزر نيم واتساب) لولي أمر الطالب (${studentToTarget.name}) غير مسجلة في بيانات الطالب.`, `Contact information for parent of (${studentToTarget.name}) is missing.`, `Kontaktdaten für die Eltern von (${studentToTarget.name}) fehlen.`));
       return;
     }
-    if (isOnline && !zoomLink.trim()) {
+    if (isOnline && !resolvedZoomLink.trim()) {
       alert(_t('برجاء إضافة رابط الزووم أولاً قبل إرسال التذكير.', 'Please add the Zoom link before sending the reminder.', 'Bitte fügen Sie zuerst den Zoom-Link hinzu.'));
       return;
     }
@@ -922,34 +842,15 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
           )}
 
           {/* Conditional: Online missing Zoom link */}
-          {isOnline && !zoomLink.trim() && (
+          {isOnline && !resolvedZoomLink.trim() && (
             <div className="bg-amber-500/10 border border-amber-500/25 p-2 rounded-xl flex items-center justify-between gap-2 text-xs">
               <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-300 font-bold min-w-0 truncate">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">{_t('رابط الزووم غير مسجل', 'Zoom Link Not Set', 'Zoom-Link fehlt')}</span>
               </div>
-              <div className="flex gap-1.5 shrink-0">
-                <input
-                  type="url"
-                  value={zoomLink}
-                  onChange={(e) => {
-                    setHasManualZoomEdit(true);
-                    setZoomLink(e.target.value);
-                    setCustomMessage(null);
-                  }}
-                  placeholder="https://zoom.us/j/..."
-                  className="bg-background border border-amber-300 dark:border-amber-700 rounded-lg px-2 py-1 text-xs font-mono w-40 sm:w-48"
-                  dir="ltr"
-                />
-                <button
-                  type="button"
-                  onClick={handleSaveZoomLink}
-                  disabled={isSavingZoom || !zoomLink.trim()}
-                  className="bg-primary text-white text-[11px] font-bold px-2 py-1 rounded-lg cursor-pointer disabled:opacity-50"
-                >
-                  {_t('حفظ', 'Save', 'Speichern')}
-                </button>
-              </div>
+              <span className="text-[10px] text-amber-700 dark:text-amber-300 font-medium shrink-0">
+                {_t('زامن جلسة Zoom من إدارة Zoom أولاً', 'Sync the Zoom session from Zoom Manager first', 'Synchronisieren Sie die Zoom-Sitzung zuerst im Zoom-Manager')}
+              </span>>
             </div>
           )}
         </div>
