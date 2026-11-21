@@ -11,6 +11,8 @@ import android.content.pm.Signature;
 import android.content.pm.SigningInfo;
 import android.os.Build;
 import android.os.CancellationSignal;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultLauncher;
@@ -505,10 +507,33 @@ public class GoogleCredentialAuthPlugin extends Plugin {
             silentOnly
         );
 
+        final Handler authorizationTimeoutHandler = new Handler(Looper.getMainLooper());
+        final AtomicBoolean authorizationTaskCompleted = new AtomicBoolean(false);
+        final Runnable authorizationTimeout = () -> {
+            if (!authorizationTaskCompleted.compareAndSet(false, true)) return;
+            pendingCalendarAuthCall = null;
+            calendarAuthInProgress.set(false);
+            Log.w(TAG, "[CalendarOAuth] stage=native_authorize_timeout elapsedMs=" +
+                Math.max(0L, System.currentTimeMillis() - calendarAuthStartMs));
+            rejectCalendarAuthError(
+                activity,
+                call,
+                "Google Calendar authorization did not respond. Check Google Play Services and try again.",
+                "CALENDAR_AUTH_TIMEOUT",
+                null
+            );
+        };
+        // AuthorizationClient.authorize() and clearToken() must always settle; otherwise
+        // the JS caller remains in Connecting... and calendarAuthInProgress blocks retries.
+        authorizationTimeoutHandler.postDelayed(authorizationTimeout, 30000L);
+
         final AuthorizationClient authorizationClient = Identity.getAuthorizationClient(activity);
 
         final Runnable launchAuthorization = () -> activity.runOnUiThread(() -> {
+            if (authorizationTaskCompleted.get()) return;
             if (activity.isFinishing() || activity.isDestroyed()) {
+                authorizationTimeoutHandler.removeCallbacks(authorizationTimeout);
+                authorizationTaskCompleted.set(true);
                 calendarAuthInProgress.set(false);
                 rejectCallSafely(
                     call,
@@ -530,6 +555,8 @@ public class GoogleCredentialAuthPlugin extends Plugin {
                 authorizationClient
                     .authorize(authorizationRequest)
                     .addOnSuccessListener(activity, authorizationResult -> {
+                        if (!authorizationTaskCompleted.compareAndSet(false, true)) return;
+                        authorizationTimeoutHandler.removeCallbacks(authorizationTimeout);
                         if (authorizationResult.hasResolution()) {
                             if (silentOnly) {
                                 calendarAuthInProgress.set(false);
@@ -602,6 +629,8 @@ public class GoogleCredentialAuthPlugin extends Plugin {
                         }
                     })
                     .addOnFailureListener(activity, err -> {
+                        if (!authorizationTaskCompleted.compareAndSet(false, true)) return;
+                        authorizationTimeoutHandler.removeCallbacks(authorizationTimeout);
                         calendarAuthInProgress.set(false);
                         String code = classifyCalendarAuthErrorCode(err);
                         Log.w(
@@ -620,6 +649,8 @@ public class GoogleCredentialAuthPlugin extends Plugin {
                         );
                     });
             } catch (Throwable ex) {
+                authorizationTimeoutHandler.removeCallbacks(authorizationTimeout);
+                authorizationTaskCompleted.set(true);
                 calendarAuthInProgress.set(false);
                 Log.e(
                     TAG,
