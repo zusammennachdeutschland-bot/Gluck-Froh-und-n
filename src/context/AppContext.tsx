@@ -5035,6 +5035,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const updateLesson = (id: string, updates: Partial<Lesson>) => {
     const updater = (allLessons: Lesson[]) => {
+      traceLessonPipeline('LessonControlModal.updateLesson: updater input', allLessons, { note: `targetId=${id}; patchStatus=${updates.status || 'unchanged'}` });
       let found = false;
       let targetItem: Lesson | undefined;
       let previousStatus: LessonStatus | undefined;
@@ -5104,9 +5105,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         });
       }
 
+      traceLessonPipeline('LessonControlModal.updateLesson: updater output', updated, { previousLessons: allLessons, note: `targetId=${id}` });
       return updated;
     };
-    updateFullLessonsStorage(updater);
+    void updateFullLessonsStorage(updater);
     if (selectedLesson && selectedLesson.id === id) {
       setSelectedLesson(prev => prev ? { ...prev, ...updates } : null);
     }
