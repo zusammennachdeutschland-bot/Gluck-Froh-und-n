@@ -1058,12 +1058,12 @@ async function runZoomGrainV2Tests() {
     });
     assert.equal(resolvedGroupOnly, 'https://us05web.zoom.us/j/88833334444?pwd=NEW_THU');
 
-    // Legacy group without standardized sessions still falls back gracefully
+    // Legacy group without a canonical standardized session must not resurrect a stale legacy URL
     const resolvedLegacy = resolveActiveZoomLinkForLesson({
       group: { id: 'grp_legacy', type: 'online', zoomLink: 'https://zoom.us/j/55566677788' },
       groupWeeklySessions: standardizedSessions,
     });
-    assert.equal(resolvedLegacy, 'https://zoom.us/j/55566677788');
+    assert.equal(resolvedLegacy, '', 'Legacy group.zoomLink must not be used as a fallback');
 
     // Projected lessons automatically embed the exact per-slot standardized Zoom links
     const projectedRange = getProjectedLessonsForRange(
