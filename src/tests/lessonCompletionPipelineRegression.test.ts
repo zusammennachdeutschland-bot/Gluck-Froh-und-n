@@ -112,7 +112,10 @@ const runScenario = async (entryPoint: 'home' | 'modal') => {
       await patchPromise;
       await waitForLessonSyncQueue();
       assertStatuses(full, expected, `LessonControlModal.updateLesson path for ${id}`);
-      assertStatuses((await storage.getItem<Lesson[]>('dl_lessons')) || [], expected, `Modal ${id}: storage after follow-up update`);
+      const afterModalWrite = (await storage.getItem<Lesson[]>('dl_lessons')) || [];
+      assertStatuses(afterModalWrite, expected, `Modal ${id}: storage after follow-up update`);
+      const afterModalRestart = (await storage.getItem<Lesson[]>('dl_lessons')) || [];
+      assertStatuses(afterModalRestart, expected, `Modal ${id}: after restart following updateLesson write`);
     }
   }
   const final = (await storage.getItem<Lesson[]>('dl_lessons')) || [];
