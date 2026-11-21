@@ -1131,10 +1131,46 @@ export async function createOrReplaceZoomMeetingForSession(params: {
     nowMs
   });
 
-  const nextSessions = params.sessions.map((s) => (s.id === updatedSession.id ? updatedSession : s));
+  // A Zoom meeting created from the group UI becomes the single canonical link for the whole group.
+  // Replace every active slot link together so lessons without an exact slot record still resolve
+  // to the current group URL, and no superseded URL can be selected later.
+  const nextSessions = params.sessions.map((s) => {
+    if (s.groupId !== updatedSession.groupId || s.deleted) return s;
+    if (s.id === updatedSession.id) return updatedSession;
+    const calendarNeedsUpdate = Boolean(s.googleCalendarEventId || s.calendarSyncStatus === 'synced');
+    return {
+      ...s,
+      zoomMeetingId: newMeetingId,
+      zoomJoinUrl: newJoinUrl,
+      zoomPasscode: newPasscode,
+      zoomHostEmail: updatedSession.zoomHostEmail,
+      meetingSource: 'zoom_api' as const,
+      syncState: 'synced' as const,
+      lastSyncedAt: new Date(nowMs).toISOString(),
+      ...(calendarNeedsUpdate ? { calendarSyncStatus: 'needs_update' as const } : {}),
+      lastError: undefined,
+      updatedAt: nowMs,
+      version: (s.version || 1) + 1,
+      originRevision: (s.originRevision || 1) + 1
+    };
+  });
+  const groupHistory = params.sessions
+    .filter((s) => s.groupId === updatedSession.groupId && s.id !== updatedSession.id && !s.deleted && (s.zoomMeetingId || s.zoomJoinUrl))
+    .reduce((history, previousSession) => appendZoomHistoryEntry(history, {
+      session: previousSession,
+      action: 'regenerated',
+      previousZoomMeetingId: previousSession.zoomMeetingId,
+      previousJoinUrl: previousSession.zoomJoinUrl,
+      previousTopic: previousSession.standardizedTitle,
+      newZoomMeetingId: newMeetingId,
+      newJoinUrl,
+      newTopic: updatedSession.standardizedTitle,
+      reason: 'Group-wide canonical Zoom link replacement',
+      nowMs
+    }), nextHistory);
   const nextRecords = [
     ...params.records.map((r) =>
-      r.sessionId === updatedSession.id && r.status === 'active'
+      r.groupId === updatedSession.groupId && r.status === 'active'
         ? { ...r, status: 'superseded' as const, supersededByMeetingId: createdRecord.zoomMeetingId, updatedAt: nowMs }
         : r
     ),
@@ -1147,7 +1183,7 @@ export async function createOrReplaceZoomMeetingForSession(params: {
     createdRecord,
     sessions: nextSessions,
     records: nextRecords,
-    history: nextHistory,
+    history: groupHistory,
     archivedPrevious: hadPrevious,
     planWarning40Min
   };
