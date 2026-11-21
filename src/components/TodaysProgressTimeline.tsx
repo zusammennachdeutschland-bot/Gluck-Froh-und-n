@@ -344,7 +344,7 @@ export const TodaysProgressTimeline: React.FC = () => {
           return false;
         }
         if (l.groupId && l.groupId !== 'quick_group' && l.date && l.time) {
-          const slotKey = `${l.groupId}_${l.date}_${normalizeTime(l.time) || l.time}`;
+          const slotKey = `${l.groupId}_${normalizeDateToISO(l.date)}_${normalizeTime(l.time) || l.time}`;
           if (resolvedSlotKeys.has(slotKey)) return false;
         }
         return true;
@@ -362,7 +362,7 @@ export const TodaysProgressTimeline: React.FC = () => {
     const slotMap = new Map<string, Lesson>();
     active.forEach(l => {
       const key = l.groupId && l.groupId !== 'quick_group'
-        ? `${l.groupId}_${l.date}_${normalizeTime(l.time) || l.time}`
+        ? `${l.groupId}_${normalizeDateToISO(l.date)}_${normalizeTime(l.time) || l.time}`
         : l.id;
       const existing = slotMap.get(key);
       if (!existing) {
