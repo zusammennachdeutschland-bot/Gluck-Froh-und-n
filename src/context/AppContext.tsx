@@ -1026,19 +1026,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     });
 
     const seenIds = new Set<string>();
-    return filtered.filter(lesson => {
-      if (!lesson || !lesson.id || seenIds.has(lesson.id)) {
-        return false;
-      }
+    const active = filtered.filter(lesson => {
+      if (!lesson || !lesson.id || seenIds.has(lesson.id)) return false;
       if (lesson.groupId && lesson.groupId !== 'quick_group') {
         const key = `${lesson.groupId}_${lesson.date}_${lesson.time}`;
-        if (bestLessons.get(key)?.id !== lesson.id) {
-          return false;
-        }
+        if (bestLessons.get(key)?.id !== lesson.id) return false;
       }
       seenIds.add(lesson.id);
       return true;
     });
+    const activeIds = new Set(active.map(lesson => lesson.id));
+    traceLessonPipeline('filterActiveLessons: after group-slot deduplication', active, {
+      removedIds: filtered.filter(lesson => lesson?.id && !activeIds.has(lesson.id)).map(lesson => lesson.id),
+      note: `Before slot deduplication: ${filtered.length}; after: ${active.length}`
+    });
+    return active;
   };
 
   // One-time startup deduplication across all existing lessons & payments (students is already initialized above)
@@ -2408,6 +2410,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
     const baseLessonsLen = (fullLessonsRef.current && fullLessonsRef.current.length > 0) ? fullLessonsRef.current.length : lessons.length;
     if (snap.lessons.length !== baseLessonsLen) {
+      traceLessonPipeline('external sync snapshot: before replacing full lesson history', fullLessonsRef.current, {
+        note: `incoming rows=${snap.lessons.length}; current rows=${baseLessonsLen}`
+      });
+      traceLessonPipeline('external sync snapshot: incoming lesson history', snap.lessons);
       fullLessonsRef.current = snap.lessons;
       storage.setItem('dl_lessons', snap.lessons);
       setLessons(filterActiveLessons(snap.lessons));
@@ -2587,6 +2593,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         const stored = await storage.getItem<Lesson[]>('dl_lessons');
         const full = Array.isArray(stored) ? stored : (fullLessonsRef.current || []);
         const prunedIds = getPrunedLessonIds();
+        traceLessonPipeline('syncLessons: persisted full history before merge', full);
+        traceLessonPipeline('syncLessons: current React projection', currentLessons);
         const merged = mergeLessonSyncSnapshot(full, currentLessons, prunedIds);
 
         // A stale React projection cannot change an existing full-store record.
@@ -2594,7 +2602,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         if (merged.length === full.length) return;
 
         fullLessonsRef.current = merged;
+        traceLessonPipeline('syncLessons: merged full history before write', merged, {
+          removedIds: prunedIds,
+          note: `merged rows=${merged.length}; previous rows=${full.length}`
+        });
         await storage.setItem('dl_lessons', merged);
+        traceLessonPipeline('syncLessons: persisted full history after write', (await storage.getItem<Lesson[]>('dl_lessons')) || []);
       }).catch(err => console.error('Lesson sync error:', err));
     }
     syncLessons();
