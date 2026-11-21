@@ -1,5 +1,5 @@
-import { Group, Lesson } from '../types';
-import { getDayNumber, getGroupScheduleSlots, isDateMatchingGroupRecurrence } from './scheduleUtils';
+import { Group, GroupWeeklySession, Lesson } from '../types';
+import { getDayNumber, getGroupScheduleSlots, getProjectedLessonsForRange, isDateMatchingGroupRecurrence } from './scheduleUtils';
 import { normalizeDateToISO, parseLocalDate } from './timeUtils';
 import { normalizeTime } from './lessonUtils';
 
@@ -71,4 +71,37 @@ export const isLessonCompatibleWithGroupSchedule = (
     getDayNumber(slot.day) === weekday &&
     normalizeTime(slot.time) === lessonTime
   );
+};
+
+
+/** Canonical daily lesson query shared by dashboard widgets. */
+export const getLessonsForDate = (
+  dateInput: string,
+  lessons: Lesson[],
+  groups: Group[],
+  groupWeeklySessions: GroupWeeklySession[] = []
+): Lesson[] => {
+  const dateKey = normalizeDateToISO(dateInput);
+  if (!dateKey) return [];
+  const source = Array.isArray(lessons) ? lessons : [];
+  const projected = getProjectedLessonsForRange(dateKey, dateKey, groups || [], source, undefined, groupWeeklySessions, source);
+  const priority = (lesson: Lesson): number => {
+    if (lesson.status === 'completed' || lesson.status === 'cancelled') return 5;
+    if (lesson.status === 'in_progress') return 4;
+    if (lesson.status === 'scheduled') return 2;
+    return 1;
+  };
+  const bySlot = new Map<string, Lesson>();
+  projected.forEach(lesson => {
+    if (lesson.deleted || !isLessonOnDate(lesson, dateKey)) return;
+    const key = lesson.groupId && lesson.groupId !== 'quick_group'
+      ? `${lesson.groupId}_${dateKey}_${normalizeTime(lesson.time)}`
+      : lesson.id;
+    const current = bySlot.get(key);
+    if (!current || priority(lesson) > priority(current) ||
+      (priority(lesson) === priority(current) && Number((lesson as any).updatedAt || 0) > Number((current as any).updatedAt || 0))) {
+      bySlot.set(key, lesson);
+    }
+  });
+  return Array.from(bySlot.values()).sort((a, b) => normalizeTime(a.time).localeCompare(normalizeTime(b.time)));
 };
