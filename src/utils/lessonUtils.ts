@@ -102,7 +102,8 @@ export const compareLessonsChronologically = (
 const doesLessonMatchScope = (
   candidate: Partial<Lesson>,
   targetLesson: Partial<Lesson>,
-  options?: LessonCycleOptions
+  options?: LessonCycleOptions,
+  studentGroupById?: Map<string, string>
 ): boolean => {
   const targetGroupId = (targetLesson.groupId || options?.group?.id || '').trim();
   const targetGroupName = (options?.group?.name || targetLesson.groupName || '').trim().toLowerCase();
@@ -130,8 +131,9 @@ const doesLessonMatchScope = (
       return true;
     }
     if (options?.students && candidate.groupId) {
-      const st = options.students.find(s => s.id === targetStudentId);
-      if (st?.groupId && st.groupId === candidate.groupId) {
+      const studentGroupId = studentGroupById?.get(targetStudentId) ??
+        options.students.find(s => s.id === targetStudentId)?.groupId;
+      if (studentGroupId && studentGroupId === candidate.groupId) {
         return true;
       }
     }
@@ -524,11 +526,16 @@ export const resequenceScheduledLessonsAfterChange = (
 
   const result = [...allLessons];
   const scopeIndices: number[] = [];
+  const studentGroupById = new Map<string, string>();
+  for (const student of options?.students || []) {
+    if (student?.id && student.groupId) studentGroupById.set(student.id, student.groupId);
+  }
+  const scopeOptions = { group: grp, student: st, students: options?.students };
 
   for (let idx = 0; idx < result.length; idx++) {
     const lesson = result[idx];
     if (!lesson || lesson.deleted || lesson.status === 'cancelled') continue;
-    if (doesLessonMatchScope(lesson, changedLesson, { group: grp, student: st, students: options?.students })) {
+    if (doesLessonMatchScope(lesson, changedLesson, scopeOptions, studentGroupById)) {
       scopeIndices.push(idx);
     }
   }
