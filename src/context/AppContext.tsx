@@ -96,6 +96,7 @@ import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesServ
 import { loadGrainGroupLearningRecords, saveGrainGroupLearningRecords, sanitizeGrainGroupLearningRecord } from '../services/grainService';
 import { loadZoomUiMeta, sanitizeZoomRecordForStorage } from '../services/zoomService';
 import { DEFAULT_ZOOM_TIMEZONE, reconcileGroupWeeklySessions, resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
+import { logZoomReminderPipeline } from '../utils/zoomReminderDiagnostics';
 import { enqueueLessonSyncTask } from '../services/lessonSyncQueue';
 import { mergeLessonSyncSnapshot, preserveCompletedLessonStatuses } from '../utils/lessonSync';
 import { traceLessonPipeline } from '../utils/lessonPipelineDiagnostics';
@@ -1876,8 +1877,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const groupWeeklySessionsRef = useRef<GroupWeeklySession[]>(groupWeeklySessions);
   useEffect(() => {
     groupWeeklySessionsRef.current = groupWeeklySessions;
+    logZoomReminderPipeline('AppContext groupWeeklySessions state/hydration', {
+      count: groupWeeklySessions.length,
+      rows: groupWeeklySessions.map(session => ({
+        id: session.id, groupId: session.groupId, deleted: Boolean(session.deleted),
+        meetingSource: session.meetingSource, syncState: session.syncState,
+        hasZoomJoinUrl: Boolean((session.zoomJoinUrl || '').trim()),
+        weekday: session.weekday, startTime: session.startTime
+      }))
+    });
     if (!isInitializedRef.current) return;
-    storage.setItem('glueck_group_weekly_sessions_v1', groupWeeklySessions.map((x) => sanitizeZoomRecordForStorage(x)));
+    const cleaned = groupWeeklySessions.map((x) => sanitizeZoomRecordForStorage(x));
+    void storage.setItem('glueck_group_weekly_sessions_v1', cleaned).then(async () => {
+      const persisted = await storage.getItem<GroupWeeklySession[]>('glueck_group_weekly_sessions_v1');
+      logZoomReminderPipeline('AppContext groupWeeklySessions persisted read-after-write', {
+        count: Array.isArray(persisted) ? persisted.length : 0,
+        rows: (Array.isArray(persisted) ? persisted : []).map(session => ({
+          id: session.id, groupId: session.groupId, deleted: Boolean(session.deleted),
+          meetingSource: session.meetingSource, syncState: session.syncState,
+          hasZoomJoinUrl: Boolean((session.zoomJoinUrl || '').trim()),
+          weekday: session.weekday, startTime: session.startTime
+        }))
+      });
+    }).catch(error => logZoomReminderPipeline('AppContext groupWeeklySessions persistence failed', {
+      message: error instanceof Error ? error.message : String(error)
+    }));
   }, [groupWeeklySessions]);
 
   const [zoomMeetingRecords, setZoomMeetingRecords] = useState<ZoomMeetingRecord[]>(() => {
@@ -1918,10 +1942,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     matches?: GrainRecordingMatch[];
   }) => {
     if (snapshot.sessions) {
+      logZoomReminderPipeline('AppContext applyZoomWorkspaceSnapshot incoming sessions', {
+        count: snapshot.sessions.length,
+        rows: snapshot.sessions.map(session => ({
+          id: session.id, groupId: session.groupId, deleted: Boolean(session.deleted),
+          meetingSource: session.meetingSource, syncState: session.syncState,
+          hasZoomJoinUrl: Boolean((session.zoomJoinUrl || '').trim()),
+          weekday: session.weekday, startTime: session.startTime
+        }))
+      });
       const cleaned = snapshot.sessions.map((x) => sanitizeZoomRecordForStorage(x));
+      logZoomReminderPipeline('AppContext applyZoomWorkspaceSnapshot sanitized sessions', {
+        count: cleaned.length,
+        rows: cleaned.map(session => ({
+          id: session.id, groupId: session.groupId, deleted: Boolean(session.deleted),
+          meetingSource: session.meetingSource, syncState: session.syncState,
+          hasZoomJoinUrl: Boolean((session.zoomJoinUrl || '').trim()),
+          weekday: session.weekday, startTime: session.startTime
+        }))
+      });
       groupWeeklySessionsRef.current = cleaned;
       setGroupWeeklySessions(cleaned);
-      storage.setItem('glueck_group_weekly_sessions_v1', cleaned);
+      void storage.setItem('glueck_group_weekly_sessions_v1', cleaned).then(async () => {
+        const persisted = await storage.getItem<GroupWeeklySession[]>('glueck_group_weekly_sessions_v1');
+        logZoomReminderPipeline('AppContext applyZoomWorkspaceSnapshot persisted sessions', {
+          count: Array.isArray(persisted) ? persisted.length : 0,
+          rows: (Array.isArray(persisted) ? persisted : []).map(session => ({
+            id: session.id, groupId: session.groupId, deleted: Boolean(session.deleted),
+            meetingSource: session.meetingSource, syncState: session.syncState,
+            hasZoomJoinUrl: Boolean((session.zoomJoinUrl || '').trim()),
+            weekday: session.weekday, startTime: session.startTime
+          }))
+        });
+      }).catch(error => logZoomReminderPipeline('AppContext applyZoomWorkspaceSnapshot persistence failed', {
+        message: error instanceof Error ? error.message : String(error)
+      }));
       autoSyncEngine.notifyMutation('groupWeeklySessions', 'bulk_zoom_update');
 
       // Automatically refresh meetingLink on upcoming/in-progress online lessons so every
