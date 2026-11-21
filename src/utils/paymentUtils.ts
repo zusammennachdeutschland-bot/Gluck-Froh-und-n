@@ -152,7 +152,7 @@ export const calculateDuePaymentCycles = (
           if (match) {
             const dateNormalized = normalizeDateToISO(match[1]);
             const matchedLessons = activeLessons.filter(l => 
-              l.date === dateNormalized && 
+              normalizeDateToISO(l.date) === dateNormalized && 
               ((p.studentId && (l.studentId === p.studentId || l.studentName === p.studentName)) || (p.groupId && l.groupId === p.groupId))
             );
             matchedLessons.forEach(ml => {
