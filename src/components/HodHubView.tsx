@@ -2049,6 +2049,7 @@ export const HodHubView: React.FC = () => {
 
   // Save changes to profile
   const persistHodData = (updates: any) => {
+    const { visitRecords: nextVisitRecords, ...profileUpdates } = updates || {};
     const { visitRecords: _legacyVisitRecords, ...settingsWithoutLegacyVisits } = schoolSettings as any;
     const updatedSettings = {
       ...settingsWithoutLegacyVisits,
@@ -2056,11 +2057,11 @@ export const HodHubView: React.FC = () => {
       weeklyPlanStatuses: weeklyPlans,
       stageReports,
       stageFollowUps,
-      ...updates
+      ...profileUpdates
     };
     updateProfile({ schoolSettings: updatedSettings });
-    if (updates.visitRecords && setHodVisits) {
-      setHodVisits(updates.visitRecords);
+    if (Array.isArray(nextVisitRecords) && setHodVisits) {
+      setHodVisits(nextVisitRecords);
     }
   };
 
