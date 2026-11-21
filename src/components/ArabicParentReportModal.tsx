@@ -749,7 +749,7 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
     const bulkLang: 'ar' | 'en' | 'de' = reportLanguage === 'en' ? 'en' : reportLanguage === 'de' ? 'de' : 'ar';
     const nextHomework = formatCurrentHomeworkWithOnline(homeworkInfo.text, bulkLang);
     
-    const isLessonToday = Boolean(lesson.date && lesson.date === getLocalDateStr());
+    const isLessonToday = Boolean(lesson.date && normalizeDateToISO(lesson.date) === getLocalDateStr());
     const dayName = getLessonArabicDay(lesson.date, lesson.dayOfWeek);
     const dateFormatted = formatArabicDate(lesson.date);
     const timeFormatted = formatArabicTime(lesson.time);
@@ -1065,7 +1065,7 @@ ${topicBlock}${hwBlock}${prevHwBlock}${recordingSection}
       studentNote = (activeStudentId ? (localReport?.studentNotes?.[activeStudentId] || lesson.report?.studentNotes?.[activeStudentId]) : '') || '';
     }
 
-    const isLessonToday = Boolean(lesson.date && lesson.date === getLocalDateStr());
+    const isLessonToday = Boolean(lesson.date && normalizeDateToISO(lesson.date) === getLocalDateStr());
     const dayName = getLessonArabicDay(lesson.date, lesson.dayOfWeek);
     const dateFormatted = formatArabicDate(lesson.date);
     const timeFormatted = formatArabicTime(lesson.time);
