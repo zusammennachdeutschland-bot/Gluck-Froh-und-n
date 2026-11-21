@@ -143,14 +143,14 @@ export const runLessonPersistencePipeline = async (args: {
     filterActiveLessons, setFullHistory, setActiveLessons, writeStorage, trace } = args;
   const base = mergeFullLessonHistory(inMemorySnapshot, persistedBefore, fallbackLessons);
   const baseIds = new Set(base.map(row => row.id));
-  trace?.('updateFullLessonsStorage: merged authoritative base', base, {
+  trace?.('updateFullLessonsStorage: merged authoritative base', base, { previousLessons: inMemorySnapshot,
     removedIds: persistedBefore.filter(row => row?.id && !baseIds.has(row.id)).map(row => row.id)
   });
   const rawUpdated = updater(base);
-  trace?.('updateFullLessonsStorage: updater output before completion guard', rawUpdated);
+  trace?.('updateFullLessonsStorage: updater output before completion guard', rawUpdated, { previousLessons: base });
 
   const guarded = preserveCompletedLessonStatuses([persistedBefore, inMemorySnapshot, base], rawUpdated);
-  trace?.('updateFullLessonsStorage: completion regression guard', guarded.lessons, {
+  trace?.('updateFullLessonsStorage: completion regression guard', guarded.lessons, { previousLessons: rawUpdated,
     note: guarded.protectedIds.size
       ? `Protected completed IDs: ${Array.from(guarded.protectedIds).join(', ')}`
       : 'No completed status regressions detected'
@@ -170,21 +170,21 @@ export const runLessonPersistencePipeline = async (args: {
     }
   }
   const dedupedById = reversed.reverse();
-  trace?.('updateFullLessonsStorage: ID deduplication', dedupedById, { removedIds: duplicateIds });
+  trace?.('updateFullLessonsStorage: ID deduplication', dedupedById, { removedIds: duplicateIds, previousLessons: guarded.lessons });
 
   const semantic = deduplicateLessonList(dedupedById, students);
   const deduped = semantic.deduplicated as Lesson[];
-  trace?.('updateFullLessonsStorage: semantic deduplication', deduped, { removedIds: semantic.removedIds });
+  trace?.('updateFullLessonsStorage: semantic deduplication', deduped, { removedIds: semantic.removedIds, previousLessons: dedupedById });
   setFullHistory(deduped);
 
   const active = filterActiveLessons(deduped);
   const activeIds = new Set(active.map(row => row.id));
-  trace?.('updateFullLessonsStorage: active state before setLessons', active, {
+  trace?.('updateFullLessonsStorage: active state before setLessons', active, { previousLessons: deduped,
     removedIds: deduped.filter(row => row?.id && !activeIds.has(row.id)).map(row => row.id)
   });
   setActiveLessons(active);
   trace?.('updateFullLessonsStorage: writing dl_lessons', deduped);
   await writeStorage(deduped);
-  trace?.('updateFullLessonsStorage: dl_lessons write complete', deduped);
+  trace?.('updateFullLessonsStorage: dl_lessons write complete', deduped, { previousLessons: deduped });
   return deduped;
 };
