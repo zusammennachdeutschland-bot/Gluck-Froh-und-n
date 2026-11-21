@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import type { Lesson } from '../types';
 import { storage, __setSimulatePrimaryDbForTests } from '../services/storageService';
 import { enqueueLessonSyncTask, waitForLessonSyncQueue } from '../services/lessonSyncQueue';
-import { mergeLessonSyncSnapshot } from '../utils/lessonSync';
+import { mergeLessonSyncSnapshot, preserveCompletedLessonStatuses } from '../utils/lessonSync';
 import { applyLessonCompletionMutation, deduplicateLessonList, resequenceScheduledLessonsAfterChange } from '../utils/lessonUtils';
 
 const makeLesson = (
@@ -75,6 +75,12 @@ const run = async () => {
         const pivot = fullState.find(lesson => lesson.id === lessonId)!;
         fullState = resequenceScheduledLessonsAfterChange(fullState, pivot);
         assertStatuses(fullState, expected, `${lessonId}: full state after resequence`);
+
+        // Reproduce the real failure mode: a delayed callback can carry the old
+        // scheduled Home projection. The persistence guard must retain completed IDs.
+        const guarded = preserveCompletedLessonStatuses([fullState], staleHomeSnapshot);
+        assertStatuses(guarded.lessons, expected, `${lessonId}: full state after stale-snapshot completion guard`);
+        fullState = guarded.lessons;
 
         const deduplication = deduplicateLessonList(fullState);
         assert.deepEqual(Array.from(deduplication.removedIds), [], 'Judy, Kinda and Taleen are distinct lesson slots');
