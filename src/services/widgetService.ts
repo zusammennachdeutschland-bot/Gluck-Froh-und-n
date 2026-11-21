@@ -31,7 +31,7 @@ const getTodayRevenue = (payments: PaymentRecord[]): number => {
   const paidOnly = payments.filter(p => p.status === 'paid');
   const dailyPayments = paidOnly.filter(p => {
     const d = p.paidDate || p.dueDate;
-    return d && d.startsWith(todayStr);
+    return d && normalizeDateToISO(d) === normalizeDateToISO(todayStr);
   });
   return dailyPayments.reduce((sum, p) => sum + (p.amountPaid || p.amountDue || 0), 0);
 };
