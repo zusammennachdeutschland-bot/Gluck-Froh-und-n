@@ -647,9 +647,11 @@ export const areDuplicateLessons = (l1: any, l2: any, students?: any[]): boolean
   const t2 = normalizeTime(l2.time);
   const sameTime = !t1 || !t2 || t1 === t2;
   const overlaps = checkOverlap(l1, l2);
-  const sameSession = l1.sessionNumber && l2.sessionNumber && l1.sessionNumber === l2.sessionNumber;
-
-  return sameTime || overlaps || sameSession;
+  // Session numbers are cycle labels, not unique lesson identities. Different time slots
+  // on the same date may legitimately share a session number (especially projected
+  // recurring slots, which are resequenced only after a real lesson is saved).
+  // Only the same slot or an overlapping slot is a duplicate occurrence.
+  return sameTime || overlaps;
 };
 
 export const pickAuthoritativeLesson = (l1: any, l2: any): { survivor: any; duplicate: any } => {
