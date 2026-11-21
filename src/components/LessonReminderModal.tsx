@@ -138,6 +138,18 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
       reasonCode: zoomReminderDiagnostics.reasonCode,
       resolved: Boolean(resolvedZoomLink),
       resolvedSessionId: zoomReminderDiagnostics.resolvedSessionId,
+      groupIdentityRows: groups.filter(candidate =>
+        candidate && (
+          candidate.id === lesson?.groupId ||
+          candidate.id === targetGroup?.id ||
+          (targetGroup?.name && String(candidate.name || '').trim().toLowerCase() === String(targetGroup.name).trim().toLowerCase())
+        )
+      ).map(candidate => ({
+        id: candidate.id,
+        name: candidate.name,
+        deleted: Boolean(candidate.deleted),
+        type: candidate.type
+      })),
       groupWeeklySessionsForTargetId: zoomReminderDiagnostics.matchingGroupRows
     });
   }, [targetGroup?.id, lesson?.groupId, effectiveTargetLesson?.groupId, effectiveTargetLesson?.date, effectiveTargetLesson?.time, zoomReminderDiagnostics, resolvedZoomLink, effectiveGroupId, reminderGroupIdentity.identityReasonCode]);
