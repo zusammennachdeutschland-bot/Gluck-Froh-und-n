@@ -286,7 +286,22 @@ export const storage = {
     try {
       if (simulatePrimaryDbForTests) {
         if (simulatedPrimaryDbStore.has(key)) {
-          const val = simulatedPrimaryDbStore.get(key);
+          let val = simulatedPrimaryDbStore.get(key);
+          if (key === 'dl_lessons' && Array.isArray(val) && hasLocalStorageRuntime()) {
+            try {
+              const mirrorRaw = localStorage.getItem(key);
+              if (mirrorRaw !== null) {
+                const mirror = JSON.parse(mirrorRaw);
+                if (Array.isArray(mirror)) {
+                  val = reconcileLessonStorageCopies(val, mirror);
+                  simulatedPrimaryDbStore.set(key, val);
+                  safeLocalStorageSetItem(key, JSON.stringify(val), true);
+                }
+              }
+            } catch (reconcileError) {
+              console.warn('Could not reconcile simulated durable lesson snapshots:', reconcileError);
+            }
+          }
           memoryStore[key] = val;
           return traceLessonStorageBoundary('read', key, val);
         }
