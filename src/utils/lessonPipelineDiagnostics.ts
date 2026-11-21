@@ -3,7 +3,7 @@ import type { Lesson } from '../types';
 export interface LessonPipelineTraceDetails {
   removedIds?: Iterable<string>;
   mergedIds?: Map<string, string> | Record<string, string>;
-  note?: string;
+  note?: string;\n  previousLessons?: Lesson[];
 }
 
 /**
@@ -28,7 +28,7 @@ export const traceLessonPipeline = (
     }));
     console.groupCollapsed(`[Glück lesson pipeline] ${stage} · ${rows.length} records`);
     console.table(rows);
-    if (details.removedIds) console.info('Removed IDs:', Array.from(details.removedIds));
+    if (details.removedIds) console.info('Removed IDs:', Array.from(details.removedIds));\n    if (details.previousLessons) {\n      const previousById = new Map(details.previousLessons.filter(row => row?.id).map(row => [row.id, row]));\n      const currentById = new Map((lessons || []).filter(row => row?.id).map(row => [row.id, row]));\n      const removed = [...previousById.keys()].filter(id => !currentById.has(id));\n      const statusChanged = [...currentById.entries()].flatMap(([id, row]) => {\n        const previous = previousById.get(id);\n        return previous && previous.status !== row.status ? [{ id, from: previous.status, to: row.status }] : [];\n      });\n      console.info('Boundary diff:', { removedIds: removed, statusChanged });\n    }
     if (details.mergedIds) {
       const mappings = details.mergedIds instanceof Map
         ? Array.from(details.mergedIds.entries())
