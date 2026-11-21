@@ -2572,7 +2572,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         (full as Lesson[]).forEach((l: Lesson) => {
           if (l && l.id && prunedIds.has(l.id)) return; // Skip pruned records
           if (activeMap.has(l.id)) {
-            merged.push(activeMap.get(l.id)!);
+            const activeVersion = activeMap.get(l.id)!;
+            const storedUpdatedAt = typeof l.updatedAt === 'number' ? l.updatedAt : 0;
+            const activeUpdatedAt = typeof activeVersion.updatedAt === 'number' ? activeVersion.updatedAt : 0;
+
+            // React's active lessons state can lag behind a just-completed queued write.
+            // Never let that stale scheduled snapshot overwrite a terminal stored state.
+            const storedIsTerminal = l.status === 'completed' || l.status === 'cancelled' || Boolean(l.deleted);
+            const activeIsTerminal = activeVersion.status === 'completed' || activeVersion.status === 'cancelled' || Boolean(activeVersion.deleted);
+            if (storedIsTerminal && !activeIsTerminal) {
+              merged.push(l);
+            } else if (activeIsTerminal && !storedIsTerminal) {
+              merged.push(activeVersion);
+            } else if (activeUpdatedAt > storedUpdatedAt) {
+              merged.push(activeVersion);
+            } else {
+              // On equal/unknown timestamps prefer the serialized full record. The active
+              // list is a filtered UI projection and must not roll back a newer full record.
+              merged.push(l);
+            }
           } else {
             // Historical or tombstoned lesson, preserve in storage
             merged.push(l);
