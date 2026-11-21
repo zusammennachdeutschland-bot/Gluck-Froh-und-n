@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext';
 import { Lesson, Group, Student, LessonReport, AttendanceStatus, PaymentStatus } from '../types';
 import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
 import { isLessonOnDate, isLessonCompatibleWithGroupSchedule } from '../utils/dailyLessonUtils';
-import { getGroupScheduleSlots, getDayNumber, isStudentMatchingLessonWeek, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
+import { getGroupScheduleSlots, getDayNumber, isStudentMatchingLessonWeek, isDateMatchingGroupRecurrence, getProjectedLessonsForRange } from '../utils/scheduleUtils';
 import { storage } from '../services/storageService';
 import { 
   CheckCircle2, Clock, PlayCircle, ChevronRight, ChevronDown, ChevronUp, AlertCircle, XCircle, X, Video, MapPin, Users, Check, MessageCircle, Phone
@@ -354,9 +354,22 @@ export const TodaysProgressTimeline: React.FC = () => {
 
   // 2. TODAY'S LESSONS: Lessons scheduled for today, excluding deleted items & stale slots from changed group schedules
   const todaysLessons = useMemo(() => {
-    const active = lessons
+    // Use the same authoritative schedule projection source as Calendar so a
+    // recurring session is not lost from the Dashboard when its active RAM
+    // lesson record is absent from the current lesson window.
+    const authoritativeLessons = getFullLessonsSnapshot();
+    const projectedForToday = getProjectedLessonsForRange(
+      todayStr,
+      todayStr,
+      groups,
+      authoritativeLessons,
+      undefined,
+      groupWeeklySessions,
+      authoritativeLessons
+    );
+    const active = projectedForToday
       .filter(l => !l.deleted && isLessonOnDate(l, todayStr) && !dismissedDashboardLessonIds.includes(l.id))
-      .filter(l => isLessonCompatibleWithGroupSchedule(l, groups.find(g => g.id === l.groupId && !g.deleted)))
+      .filter(l => l.id.startsWith('l_auto_') || isLessonCompatibleWithGroupSchedule(l, groups.find(g => g.id === l.groupId && !g.deleted)));
 
     // Deduplicate: If multiple entries exist for the same group slot on this date, always keep the authoritative one (completed/cancelled/in_progress > scheduled)
     const slotMap = new Map<string, Lesson>();
@@ -373,7 +386,7 @@ export const TodaysProgressTimeline: React.FC = () => {
     });
 
     return Array.from(slotMap.values()).sort((a, b) => a.time.localeCompare(b.time));
-  }, [lessons, groups, todayStr, dismissedDashboardLessonIds]);
+  }, [lessons, groups, todayStr, dismissedDashboardLessonIds, getFullLessonsSnapshot, groupWeeklySessions]);
 
   const getLessonState = (lesson: Lesson): 'completed' | 'cancelled' | 'active' | 'upcoming' => {
     if (lesson.status === 'completed') return 'completed';
