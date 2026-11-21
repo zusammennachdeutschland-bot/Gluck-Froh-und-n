@@ -272,7 +272,7 @@ export const syncContactRemindersToWidget = async (
   try {
     const todayStr = formatLocalDate();
     const todayLessons = lessons
-      .filter(l => l.date === todayStr)
+      .filter(l => normalizeDateToISO(l.date) === normalizeDateToISO(todayStr))
       .sort((a, b) => a.time.localeCompare(b.time));
 
     const contactItems: Array<{
