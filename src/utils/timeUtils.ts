@@ -39,21 +39,31 @@ export const getDayOfWeekIndex = (dateStr: string): number => {
 export const normalizeDateToISO = (dateStr: string): string => {
   if (!dateStr || typeof dateStr !== 'string') return '';
   const normalized = normalizeDigits(dateStr.trim());
-  const dmMatch = normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  if (dmMatch) {
-    const day = dmMatch[1].padStart(2, '0');
-    const month = dmMatch[2].padStart(2, '0');
-    const year = dmMatch[3];
-    return `${year}-${month}-${day}`;
+  if (!normalized) return '';
+
+  const dmMatch = normalized.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})(?:$|[T\\s])/);
+  const isoMatch = normalized.match(/^(\\d{4})-(\\d{1,2})-(\\d{1,2})(?:$|[T\\s])/);
+  const match = dmMatch
+    ? { year: Number(dmMatch[3]), month: Number(dmMatch[2]), day: Number(dmMatch[1]) }
+    : isoMatch
+      ? { year: Number(isoMatch[1]), month: Number(isoMatch[2]), day: Number(isoMatch[3]) }
+      : null;
+
+  if (match) {
+    const { year, month, day } = match;
+    const daysInMonth = month >= 1 && month <= 12
+      ? new Date(year, month, 0).getDate()
+      : 0;
+    if (!Number.isInteger(year) || year < 1 || month < 1 || month > 12 || day < 1 || day > daysInMonth) {
+      return '';
+    }
+    return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
-  const isoMatch = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (isoMatch) {
-    const year = isoMatch[1];
-    const month = isoMatch[2].padStart(2, '0');
-    const day = isoMatch[3].padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  }
-  return normalized.substring(0, 10);
+
+  // Preserve compatibility with other parseable date formats without slicing arbitrary text.
+  const parsed = new Date(normalized);
+  if (!Number.isNaN(parsed.getTime())) return formatLocalDate(parsed);
+  return '';
 };
 
 /**
