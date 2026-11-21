@@ -117,7 +117,7 @@ export const createLessonReportCompletionUpdater = (args: {
       amountPaid: report.amountPaid !== undefined ? report.amountPaid : (lesson.amountPaid ?? targetLesson.amountPaid),
       recordingLink: report.recordingLink !== undefined ? report.recordingLink : lesson.recordingLink,
       recordingLink2: report.recordingLink2 !== undefined ? report.recordingLink2 : lesson.recordingLink2,
-      studentPayments: report.studentPayments ? Object.fromEntries(
+      studentPayments: report.studentPayments && Object.keys(report.studentPayments).length > 0 ? Object.fromEntries(
         Object.entries(report.studentPayments).map(([studentId, payment]: [string, any]) => {
           const student = students.find(item => item.id === studentId);
           return [studentId, {
@@ -131,6 +131,8 @@ export const createLessonReportCompletionUpdater = (args: {
       ) : lesson.studentPayments,
       report
     } as Lesson);
+    return stampFieldTimestamps(lesson, mutated);
+    };
     const completion = applyLessonCompletionMutation(allLessons, lessonId, createCompletedRecord, targetLesson);
     const pivot = completion.lessons.find(lesson => lesson.id === lessonId);
     return resequenceScheduledLessonsAfterChange(completion.lessons, pivot, {
