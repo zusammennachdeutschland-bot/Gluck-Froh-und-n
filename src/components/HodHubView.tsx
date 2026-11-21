@@ -1367,14 +1367,7 @@ export const HodHubView: React.FC = () => {
   const [visitRecords, setVisitRecords] = useState<any[]>(initialMergedVisits);
 
   useEffect(() => {
-    if (initialMergedVisits.length > 0) {
-      setVisitRecords(prev => {
-        const map = new Map<string, any>();
-        prev.forEach((v: any) => v?.id && map.set(v.id, v));
-        initialMergedVisits.forEach((v: any) => v?.id && map.set(v.id, v));
-        return Array.from(map.values());
-      });
-    }
+    setVisitRecords(initialMergedVisits);
   }, [initialMergedVisits]);
   const [bookletObservations, setBookletObservations] = useState<any[]>(schoolSettings.bookletObservations || []);
   const [isVisitModalOpen, setIsVisitModalOpen] = useState(false);
