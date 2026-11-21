@@ -244,14 +244,14 @@ export const calculateDuePaymentCycles = (
     rawCompletedLessons.forEach(l => {
       const isDupe = stCompletedLessons.some(existing => 
         areDuplicateLessons(existing, l) ||
-        (existing.date === l.date && (existing.time === l.time || (existing.sessionNumber && existing.sessionNumber === l.sessionNumber)))
+        (normalizeDateToISO(existing.date) === normalizeDateToISO(l.date) && (existing.time === l.time || (existing.sessionNumber && existing.sessionNumber === l.sessionNumber)))
       );
       if (!isDupe) {
         stCompletedLessons.push(l);
       }
     });
 
-    stCompletedLessons.sort((a, b) => a.date.localeCompare(b.date));
+    stCompletedLessons.sort((a, b) => normalizeDateToISO(a.date).localeCompare(normalizeDateToISO(b.date)));
 
     // Handle advance prepaid lessons
     const advancePayments = activePayments.filter(p => 
@@ -677,7 +677,7 @@ export const getStudentAdvanceLessonCredits = (
     if (!matchesStudent) return false;
     const att = l.report?.studentAttendance?.[studentId] || l.report?.attendanceStatus || 'present';
     if (att === 'absent') return false;
-    if (earliestAdvancePayment && l.date && l.date < earliestAdvancePayment.substring(0, 10)) {
+    if (earliestAdvancePayment && l.date && normalizeDateToISO(l.date) < normalizeDateToISO(earliestAdvancePayment)) {
       return false;
     }
     return true;
