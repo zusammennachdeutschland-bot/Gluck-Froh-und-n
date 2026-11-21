@@ -935,12 +935,18 @@ export const deduplicateLessonList = (
     }
 
     let existingIndex = -1;
-    // Match the original survivors.findIndex ordering when several indexed slots
-    // are candidates, preserving deterministic winner selection.
-    for (const index of Array.from(possible).sort((a, b) => a - b)) {
-      if (areDuplicateLessons(survivors[index], candidate, students)) {
-        existingIndex = index;
-        break;
+    // Select the earliest candidate without allocating/sorting a temporary array
+    // for every lesson. This preserves survivors.findIndex semantics in O(k).
+    let earliestCandidate = Number.POSITIVE_INFINITY;
+    for (const index of possible) if (index < earliestCandidate) earliestCandidate = index;
+    if (Number.isFinite(earliestCandidate) && areDuplicateLessons(survivors[earliestCandidate], candidate, students)) {
+      existingIndex = earliestCandidate;
+    } else if (Number.isFinite(earliestCandidate)) {
+      // A bucket may contain unrelated same-token names; check remaining candidates
+      // in insertion order while tracking the minimum matching index.
+      for (const index of possible) {
+        if (index <= earliestCandidate || index >= existingIndex && existingIndex >= 0) continue;
+        if (areDuplicateLessons(survivors[index], candidate, students)) existingIndex = index;
       }
     }
 
