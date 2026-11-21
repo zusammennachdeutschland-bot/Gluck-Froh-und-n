@@ -33,9 +33,12 @@ export const filterActiveLessonRows = (
       const candidateScore = score(lesson);
       const currentScore = score(current);
       let winner = candidateScore > currentScore ? lesson : current;
-      const loser = winner === lesson ? current : lesson;
+      let loser = winner === lesson ? current : lesson;
       if (candidateScore === currentScore &&
-        lesson.updatedAt && (!current.updatedAt || lesson.updatedAt > current.updatedAt)) winner = lesson;
+        lesson.updatedAt && (!current.updatedAt || lesson.updatedAt > current.updatedAt)) {
+        winner = lesson;
+        loser = current;
+      }
       const paid = winner.paymentStatus === 'paid' || loser.paymentStatus === 'paid' ||
         winner.report?.paymentStatus === 'paid' || loser.report?.paymentStatus === 'paid';
       if (paid) {
