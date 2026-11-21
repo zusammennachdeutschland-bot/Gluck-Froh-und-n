@@ -2,9 +2,9 @@ import React, { useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { normalizeDateToISO } from '../utils/timeUtils';
 import { normalizeTime } from '../utils/lessonUtils';
-import { isLessonOnDate, isLessonCompatibleWithGroupSchedule } from '../utils/dailyLessonUtils';
+import { getLessonsForDate } from '../utils/dailyLessonUtils';
 import { useLocalDateKey } from '../hooks/useLocalDateKey';
-import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence, getProjectedLessonsForRange } from '../utils/scheduleUtils';
+
 import { Calendar, Video, MapPin, Home, User, Clock, ChevronRight, Link2, Copy, Check, ExternalLink, AlertCircle } from 'lucide-react';
 import { useSyncedHomeworkData } from '../hooks/useSyncedHomeworkData';
 import {
@@ -19,37 +19,10 @@ export const TomorrowsLessonsWidget: React.FC = () => {
 
   const tomorrowStr = useLocalDateKey(1);
 
-  const tomorrowsLessons = useMemo(() => {
-    // Match Calendar's projection source so missing active-window records do
-    // not make a valid recurring group session disappear from the Dashboard.
-    const authoritativeLessons = getFullLessonsSnapshot();
-    const projectedForTomorrow = getProjectedLessonsForRange(
-      tomorrowStr,
-      tomorrowStr,
-      groups,
-      authoritativeLessons,
-      undefined,
-      groupWeeklySessions,
-      authoritativeLessons
-    );
-    const active = projectedForTomorrow
-      .filter(l => !l.deleted && isLessonOnDate(l, tomorrowStr) && l.status !== 'cancelled')
-      .filter(l => l.id.startsWith('l_auto_') || isLessonCompatibleWithGroupSchedule(l, groups.find(g => g.id === l.groupId && !g.deleted)));
-
-    const seen = new Set<string>();
-    const deduplicated: typeof lessons = [];
-    active.forEach(l => {
-      const key = l.groupId && l.groupId !== 'quick_group'
-        ? `${l.groupId}_${normalizeDateToISO(l.date)}_${normalizeTime(l.time)}`
-        : l.id;
-      if (!seen.has(key)) {
-        seen.add(key);
-        deduplicated.push(l);
-      }
-    });
-
-    return deduplicated.sort((a, b) => a.time.localeCompare(b.time));
-  }, [lessons, groups, tomorrowStr, getFullLessonsSnapshot, groupWeeklySessions]);
+  const tomorrowsLessons = useMemo(() => (
+    getLessonsForDate(tomorrowStr, getFullLessonsSnapshot(), groups, groupWeeklySessions)
+      .filter(l => l.status !== 'cancelled')
+  ), [tomorrowStr, getFullLessonsSnapshot, groups, groupWeeklySessions]);
 
   const getTypeBadge = (type?: string, location?: string) => {
     let label = '';
