@@ -14,6 +14,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { GroupProfileModal } from './GroupProfileModal';
 import { SelectParentCallModal } from './SelectParentCallModal';
 import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
+import { traceLessonPipeline } from '../utils/lessonPipelineDiagnostics';
 
 const getLessonEndTime = (timeStr: string, durationMinutes: number = 60): string => {
   if (!timeStr) return '';
@@ -88,6 +89,11 @@ export const TodaysProgressTimeline: React.FC = () => {
   const handleQuickCompleteLesson = (e: React.MouseEvent, targetLesson: Lesson) => {
     e.stopPropagation();
 
+    const fullSnapshotAtCheckmark = getFullLessonsSnapshot();
+    traceLessonPipeline('Home checkmark: handler entered', fullSnapshotAtCheckmark, {
+      note: `clicked id=${targetLesson.id}; group=${targetLesson.groupName || targetLesson.groupId || ''}; student=${targetLesson.studentName || targetLesson.studentId || ''}; date=${targetLesson.date}; time=${targetLesson.time}; status=${targetLesson.status}`
+    });
+
     const targetGroup = targetLesson.groupId
       ? (groups.find(g => g.id === targetLesson.groupId) || groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupId.trim().toLowerCase()))
       : (targetLesson.groupName ? groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupName!.trim().toLowerCase()) : undefined);
@@ -146,7 +152,7 @@ export const TodaysProgressTimeline: React.FC = () => {
           ? targetGroup.sessionCount
           : (targetLesson.totalSessionsInPackage && targetLesson.totalSessionsInPackage > 1 ? targetLesson.totalSessionsInPackage : 4));
 
-    const cycleRes = resolveLessonCycleNumber(targetLesson, getFullLessonsSnapshot(), {
+    const cycleRes = resolveLessonCycleNumber(targetLesson, fullSnapshotAtCheckmark, {
       group: targetGroup,
       student: targetStudent,
       students
@@ -179,7 +185,13 @@ export const TodaysProgressTimeline: React.FC = () => {
       savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
+    traceLessonPipeline('Home checkmark: immediately before saveLessonReport', getFullLessonsSnapshot(), {
+      note: `completing id=${targetLesson.id}; report status=completed; session=${finalSessionNumber}/${cycleTotalSessions}`
+    });
     saveLessonReport(targetLesson.id, reportData, cycleTotalSessions, finalSessionNumber, targetLesson);
+    traceLessonPipeline('Home checkmark: saveLessonReport returned (queued persistence may still be running)', getFullLessonsSnapshot(), {
+      note: `completed id=${targetLesson.id}`
+    });
     storage.removeItem(`dl_draft_report_${targetLesson.id}`);
   };
 
