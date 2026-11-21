@@ -5,9 +5,9 @@ export type ZoomReminderIdentityReason = 'LESSON_GROUP_ID_MATCHED' | 'STALE_LESS
 
 export function resolveReminderGroupIdentity(params: {
   lessonGroupId?: string | null;
-  suppliedGroup?: Partial<Group> | null;
+  suppliedGroup?: Group | null;
   groups: Group[];
-}): { group: Group | Partial<Group> | null; resolverGroupId?: string; identityReasonCode: ZoomReminderIdentityReason } {
+}): { group: Group | null; resolverGroupId?: string; identityReasonCode: ZoomReminderIdentityReason } {
   const lessonGroupId = String(params.lessonGroupId || '').trim();
   const suppliedGroupId = String(params.suppliedGroup?.id || '').trim();
   if (lessonGroupId) {
@@ -24,7 +24,7 @@ export function resolveReminderGroupIdentity(params: {
         : 'GROUP_PROP_MATCHED'
     };
     if (!lessonGroupId || suppliedGroupId === lessonGroupId) {
-      return { group: params.suppliedGroup as Group, resolverGroupId: suppliedGroupId, identityReasonCode: 'GROUP_PROP_MATCHED' };
+      return { group: params.suppliedGroup, resolverGroupId: suppliedGroupId, identityReasonCode: 'GROUP_PROP_MATCHED' };
     }
   }
   return { group: null, resolverGroupId: lessonGroupId || undefined, identityReasonCode: 'NO_TRUSTED_GROUP_OBJECT' };
