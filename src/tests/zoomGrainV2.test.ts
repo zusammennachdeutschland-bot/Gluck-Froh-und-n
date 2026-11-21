@@ -53,6 +53,7 @@ import { buildOutboundDelta } from '../services/sync/deltaBuilder';
 import { partitionBackupPayload } from '../services/firebaseWorkspaceSync';
 import { validateAndSanitizeBackupPayload } from '../utils/backupEngine';
 import { Group, GroupWeeklySession, Lesson, Student, ZoomMeetingHistory } from '../types';
+import { diagnoseZoomReminderResolution } from '../utils/zoomReminderDiagnostics';
 
 async function runZoomGrainV2Tests() {
   console.log('=== Starting Glück × Zoom × Grain V2.0 Verification Suite ===');
@@ -441,6 +442,60 @@ async function runZoomGrainV2Tests() {
     const migratedMon = resumedRes.sessions.find((s) => s.weekday === 1)!;
     assert.equal(migratedMon.meetingSource, 'zoom_api');
     assert.equal(migratedMon.syncState, 'synced');
+
+    // The exact successful bulk-sync result must resolve in LessonReminderModal's
+    // strict API-only resolver path (without legacy/manual URL candidates).
+    const bulkSyncedLesson: Lesson = {
+      id: 'lesson_reminder_exact_slot',
+      groupId: groupV1.id,
+      date: '2026-11-16', // Monday
+      time: '19:00',
+      type: 'online',
+      status: 'scheduled'
+    } as Lesson;
+    const bulkSyncedZoomUrl = resolveActiveZoomLinkForLesson({
+      group: groupV1,
+      lesson: bulkSyncedLesson,
+      groupWeeklySessions: resumedRes.sessions
+    });
+    assert.ok(bulkSyncedZoomUrl, 'Exact schedule slot must resolve a valid synced Zoom API link');
+    assert.equal(bulkSyncedZoomUrl, migratedMon.zoomJoinUrl);
+    const exactDiagnostics = diagnoseZoomReminderResolution({
+      targetGroup: groupV1,
+      lesson: bulkSyncedLesson,
+      effectiveLesson: bulkSyncedLesson,
+      groupWeeklySessions: resumedRes.sessions,
+      targetDay: 'MON',
+      targetTime: '19:00'
+    });
+    assert.equal(exactDiagnostics.reasonCode, 'RESOLVED_EXACT_SLOT');
+    assert.equal(exactDiagnostics.resolvedSessionId, migratedMon.id);
+    assert.ok(exactDiagnostics.matchingGroupRows.length >= 2);
+
+    // A valid date/time outside the group's exact slot must use the existing
+    // group-wide canonical API-session fallback, not a second fallback implementation.
+    const fallbackLesson: Lesson = {
+      ...bulkSyncedLesson,
+      id: 'lesson_reminder_group_fallback',
+      date: '2026-11-20', // Friday, no matching configured slot
+      time: '17:00'
+    };
+    const fallbackZoomUrl = resolveActiveZoomLinkForLesson({
+      group: groupV1,
+      lesson: fallbackLesson,
+      groupWeeklySessions: resumedRes.sessions
+    });
+    assert.equal(fallbackZoomUrl, bulkSyncedZoomUrl);
+    const fallbackDiagnostics = diagnoseZoomReminderResolution({
+      targetGroup: groupV1,
+      lesson: fallbackLesson,
+      effectiveLesson: fallbackLesson,
+      groupWeeklySessions: resumedRes.sessions,
+      targetDay: 'FRI',
+      targetTime: '17:00'
+    });
+    assert.equal(fallbackDiagnostics.reasonCode, 'RESOLVED_GROUP_WIDE_FALLBACK');
+    assert.equal(fallbackDiagnostics.resolvedSessionId, migratedMon.id);
     const activeGroupSessions = resumedRes.sessions.filter((s) => s.groupId === groupV1.id && !s.deleted);
     assert.equal(new Set(activeGroupSessions.map((s) => s.zoomJoinUrl)).size, 1,
       'Creating a Zoom meeting from the group UI must replace every active slot URL with one canonical group URL');
