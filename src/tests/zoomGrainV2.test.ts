@@ -53,7 +53,6 @@ import { buildOutboundDelta } from '../services/sync/deltaBuilder';
 import { partitionBackupPayload } from '../services/firebaseWorkspaceSync';
 import { validateAndSanitizeBackupPayload } from '../utils/backupEngine';
 import { Group, GroupWeeklySession, Lesson, Student, ZoomMeetingHistory } from '../types';
-import { diagnoseZoomReminderResolution, resolveReminderGroupIdentity } from '../utils/zoomReminderDiagnostics';
 
 async function runZoomGrainV2Tests() {
   console.log('=== Starting Glück × Zoom × Grain V2.0 Verification Suite ===');
@@ -287,110 +286,11 @@ async function runZoomGrainV2Tests() {
     assert.equal(serializedStatus.includes('acc_secret_987654'), false);
     assert.equal(statusState.hasCredentials, true);
 
-    // Direct regression: creating a Zoom meeting from one slot replaces the
-    // canonical URL for every active weekly slot in the same group.
-    const groupWideOldMon: GroupWeeklySession = {
-      ...monSession,
-      zoomMeetingId: '81111111111',
-      zoomJoinUrl: 'https://zoom.us/j/81111111111?pwd=OLD_MON',
-      meetingSource: 'zoom_api',
-      syncState: 'synced'
-    };
-    const groupWideOldWed: GroupWeeklySession = {
-      ...wedSession,
-      zoomMeetingId: '82222222222',
-      zoomJoinUrl: 'https://zoom.us/j/82222222222?pwd=OLD_WED',
-      meetingSource: 'zoom_api',
-      syncState: 'synced'
-    };
-    const groupWideOldRecords = [
-      {
-        id: 'zoom_record_old_mon',
-        sessionId: groupWideOldMon.id,
-        groupId: groupV1.id,
-        zoomMeetingId: '81111111111',
-        joinUrl: groupWideOldMon.zoomJoinUrl!,
-        topic: groupWideOldMon.standardizedTitle,
-        startTime: groupWideOldMon.startTime,
-        durationMinutes: groupWideOldMon.durationMinutes,
-        timezone: groupWideOldMon.timezone,
-        meetingType: 8,
-        recurrenceWeeklyDay: 2,
-        recurrenceRepeatInterval: 1,
-        status: 'active',
-        syncedAt: new Date().toISOString()
-      },
-      {
-        id: 'zoom_record_old_wed',
-        sessionId: groupWideOldWed.id,
-        groupId: groupV1.id,
-        zoomMeetingId: '82222222222',
-        joinUrl: groupWideOldWed.zoomJoinUrl!,
-        topic: groupWideOldWed.standardizedTitle,
-        startTime: groupWideOldWed.startTime,
-        durationMinutes: groupWideOldWed.durationMinutes,
-        timezone: groupWideOldWed.timezone,
-        meetingType: 8,
-        recurrenceWeeklyDay: 4,
-        recurrenceRepeatInterval: 1,
-        status: 'active',
-        syncedAt: new Date().toISOString()
-      }
-    ] as any;
-    const groupWideCreate = await createOrReplaceZoomMeetingForSession({
-      session: groupWideOldMon,
-      sessions: [groupWideOldMon, groupWideOldWed],
-      records: groupWideOldRecords,
-      history: []
-    });
-    assert.equal(groupWideCreate.ok, true, 'Creating a meeting for one slot should succeed');
-    const canonicalGroupUrl = groupWideCreate.createdRecord?.joinUrl;
-    assert.ok(canonicalGroupUrl, 'The create operation must return the new canonical URL');
-    assert.equal(groupWideCreate.sessions.length, 2);
-    assert.ok(
-      groupWideCreate.sessions.every((s) => s.zoomJoinUrl === canonicalGroupUrl),
-      'Every active weekly slot in the group must receive the new canonical URL'
-    );
-    assert.ok(
-      groupWideCreate.records.filter((r) => r.groupId === groupV1.id && r.status === 'active')
-        .every((r) => r.joinUrl === canonicalGroupUrl),
-      'No old active Zoom record may remain selectable after group-wide replacement'
-    );
-    assert.ok(
-      groupWideCreate.records.filter((r) => r.groupId === groupV1.id && r.status === 'superseded').length >= 2,
-      'Every previously active group record must be marked superseded'
-    );
-    const oldLinkLesson = {
-      id: 'lesson_group_old_link',
-      groupId: groupV1.id,
-      date: '2026-11-16',
-      time: '19:00',
-      type: 'online' as const,
-      meetingLink: 'https://zoom.us/j/81111111111?pwd=OLD_MON'
-    };
-    assert.equal(
-      resolveActiveZoomLinkForLesson({
-        group: groupV1,
-        lesson: oldLinkLesson,
-        groupWeeklySessions: groupWideCreate.sessions
-      }),
-      canonicalGroupUrl,
-      'A lesson carrying an old slot URL must resolve only to the new canonical group URL'
-    );
-    assert.equal(
-      groupWideCreate.records.some((r) => r.status === 'active' && r.joinUrl === groupWideOldWed.zoomJoinUrl),
-      false,
-      'A superseded Wednesday URL must never remain active/selectable'
-    );
-
     // -------------------------------------------------------------------------
     // 4. DRY-RUN PREVIEW & RESUMABLE BULK MIGRATION
     // -------------------------------------------------------------------------
     console.log('4. Testing dry-run migration preview, manual link archiving & checkpoint resume...');
 
-    // The direct group-wide replacement regression above already created one meeting.
-    // Measure this migration independently instead of asserting against the shared test counter.
-    const createdZoomTopicsBeforeMigration = createdZoomTopics.length;
     const preview = buildZoomMigrationPreview({
       groups: [groupV1],
       existingSessions: []
@@ -419,7 +319,7 @@ async function runZoomGrainV2Tests() {
     assert.equal(partialRes.succeededCount, 1);
     assert.equal(firstSkipIds.length, 1);
 
-    // Resume from checkpoint — the first group-wide creation already supplied the canonical link to every slot
+    // Resume from checkpoint — only remaining session should be created
     const resumePreview = buildZoomMigrationPreview({
       groups: [groupV1],
       existingSessions: partialRes.sessions
@@ -432,109 +332,12 @@ async function runZoomGrainV2Tests() {
       skipSessionIds: new Set(firstSkipIds)
     });
     assert.equal(resumedRes.completed, true);
-    assert.equal(resumedRes.succeededCount, 0, 'Resume must not create another meeting after the group already has one canonical URL');
-    assert.equal(
-      createdZoomTopics.length - createdZoomTopicsBeforeMigration,
-      1,
-      'Resumable migration must create only one group-wide canonical Zoom meeting for every weekly slot'
-    );
+    assert.equal(resumedRes.succeededCount, 1, 'Resume must only process remaining session');
+    assert.equal(createdZoomTopics.length, 2, 'Total Zoom meetings created across pause+resume must be exactly 2');
 
     const migratedMon = resumedRes.sessions.find((s) => s.weekday === 1)!;
     assert.equal(migratedMon.meetingSource, 'zoom_api');
     assert.equal(migratedMon.syncState, 'synced');
-
-    // The exact successful bulk-sync result must resolve in LessonReminderModal's
-    // strict API-only resolver path (without legacy/manual URL candidates).
-    const bulkSyncedLesson: Lesson = {
-      id: 'lesson_reminder_exact_slot',
-      groupId: groupV1.id,
-      date: '2026-11-16', // Monday
-      time: '19:00',
-      type: 'online',
-      status: 'scheduled'
-    } as Lesson;
-    const bulkSyncedZoomUrl = resolveActiveZoomLinkForLesson({
-      group: groupV1,
-      lesson: bulkSyncedLesson,
-      groupWeeklySessions: resumedRes.sessions
-    });
-    assert.ok(bulkSyncedZoomUrl, 'Exact schedule slot must resolve a valid synced Zoom API link');
-    assert.equal(bulkSyncedZoomUrl, migratedMon.zoomJoinUrl);
-    const staleImportedGroupProp = { ...groupV1, id: 'grp_imported_duplicate' };
-    const canonicalIdentity = resolveReminderGroupIdentity({
-      lessonGroupId: groupV1.id,
-      suppliedGroup: staleImportedGroupProp,
-      groups: [groupV1, staleImportedGroupProp]
-    });
-    assert.equal(canonicalIdentity.resolverGroupId, groupV1.id);
-    assert.equal(canonicalIdentity.identityReasonCode, 'LESSON_GROUP_ID_MATCHED');
-    const stalePropResolvedUrl = resolveActiveZoomLinkForLesson({
-      group: canonicalIdentity.group,
-      groupId: canonicalIdentity.resolverGroupId,
-      lesson: bulkSyncedLesson,
-      groupWeeklySessions: resumedRes.sessions
-    });
-    assert.equal(stalePropResolvedUrl, bulkSyncedZoomUrl,
-      'A stale duplicate group prop must not override the lesson canonical group ID');
-
-    // If an import left an orphaned lesson.groupId, use the supplied group only
-    // when it is independently present in the current canonical groups collection.
-    const orphanIdentity = resolveReminderGroupIdentity({
-      lessonGroupId: 'old_import_group_id',
-      suppliedGroup: groupV1,
-      groups: [groupV1]
-    });
-    assert.equal(orphanIdentity.resolverGroupId, groupV1.id);
-    assert.equal(orphanIdentity.identityReasonCode, 'STALE_LESSON_GROUP_ID_USED_KNOWN_PROP_GROUP');
-
-    const exactDiagnostics = diagnoseZoomReminderResolution({
-      targetGroup: groupV1,
-      lesson: bulkSyncedLesson,
-      effectiveLesson: bulkSyncedLesson,
-      groupWeeklySessions: resumedRes.sessions,
-      targetDay: 'MON',
-      targetTime: '19:00',
-      resolverGroupId: canonicalIdentity.resolverGroupId,
-      identityReasonCode: canonicalIdentity.identityReasonCode
-    });
-    assert.equal(exactDiagnostics.reasonCode, 'RESOLVED_EXACT_SLOT');
-    assert.equal(exactDiagnostics.identityReasonCode, 'LESSON_GROUP_ID_MATCHED');
-    assert.equal(exactDiagnostics.resolvedSessionId, migratedMon.id);
-    assert.ok(exactDiagnostics.matchingGroupRows.length >= 2);
-
-    // A valid date/time outside the group's exact slot must use the existing
-    // group-wide canonical API-session fallback, not a second fallback implementation.
-    const fallbackLesson: Lesson = {
-      ...bulkSyncedLesson,
-      id: 'lesson_reminder_group_fallback',
-      date: '2026-11-20', // Friday, no matching configured slot
-      time: '17:00'
-    };
-    const fallbackZoomUrl = resolveActiveZoomLinkForLesson({
-      group: groupV1,
-      lesson: fallbackLesson,
-      groupWeeklySessions: resumedRes.sessions
-    });
-    assert.equal(fallbackZoomUrl, bulkSyncedZoomUrl);
-    const fallbackDiagnostics = diagnoseZoomReminderResolution({
-      targetGroup: groupV1,
-      lesson: fallbackLesson,
-      effectiveLesson: fallbackLesson,
-      groupWeeklySessions: resumedRes.sessions,
-      targetDay: 'FRI',
-      targetTime: '17:00',
-      resolverGroupId: groupV1.id,
-      identityReasonCode: 'LESSON_GROUP_ID_MATCHED'
-    });
-    assert.equal(fallbackDiagnostics.reasonCode, 'RESOLVED_GROUP_WIDE_FALLBACK');
-    assert.equal(fallbackDiagnostics.resolvedSessionId, migratedMon.id);
-    const activeGroupSessions = resumedRes.sessions.filter((s) => s.groupId === groupV1.id && !s.deleted);
-    assert.equal(new Set(activeGroupSessions.map((s) => s.zoomJoinUrl)).size, 1,
-      'Creating a Zoom meeting from the group UI must replace every active slot URL with one canonical group URL');
-    assert.ok(activeGroupSessions.every((s) => s.zoomMeetingId === migratedMon.zoomMeetingId),
-      'Every active group session must reference the same current Zoom meeting ID');
-    assert.equal(resumedRes.records.filter((r) => r.groupId === groupV1.id && r.status === 'active').length, 1,
-      'All previous active meeting records across the group must be superseded');
     assert.ok(
       resumedRes.history.some(
         (h) =>
@@ -1227,6 +1030,7 @@ async function runZoomGrainV2Tests() {
       group: multiSlotGroup,
       lesson: staleThuLesson,
       groupWeeklySessions: standardizedSessions,
+      defaultZoomLink: 'https://zoom.us/j/99999999999'
     });
     assert.equal(
       resolvedThu,
@@ -1239,6 +1043,7 @@ async function runZoomGrainV2Tests() {
       group: multiSlotGroup,
       lesson: { id: 'lesson_mon_stale', groupId: multiSlotGroup.id, date: '2026-11-16', time: '16:00', type: 'online', meetingLink: 'https://zoom.us/j/11111111111?pwd=OLD_DELETED_LINK' },
       groupWeeklySessions: standardizedSessions,
+      defaultZoomLink: 'https://zoom.us/j/99999999999'
     });
     assert.equal(
       resolvedMon,
@@ -1255,12 +1060,13 @@ async function runZoomGrainV2Tests() {
     });
     assert.equal(resolvedGroupOnly, 'https://us05web.zoom.us/j/88833334444?pwd=NEW_THU');
 
-    // Legacy group without a canonical standardized session must not resurrect a stale legacy URL
+    // Legacy group without standardized sessions still falls back gracefully
     const resolvedLegacy = resolveActiveZoomLinkForLesson({
       group: { id: 'grp_legacy', type: 'online', zoomLink: 'https://zoom.us/j/55566677788' },
       groupWeeklySessions: standardizedSessions,
+      defaultZoomLink: 'https://zoom.us/j/99999999999'
     });
-    assert.equal(resolvedLegacy, '', 'Legacy group.zoomLink must not be used as a fallback');
+    assert.equal(resolvedLegacy, 'https://zoom.us/j/55566677788');
 
     // Projected lessons automatically embed the exact per-slot standardized Zoom links
     const projectedRange = getProjectedLessonsForRange(

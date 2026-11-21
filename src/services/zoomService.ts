@@ -1131,56 +1131,13 @@ export async function createOrReplaceZoomMeetingForSession(params: {
     nowMs
   });
 
-  // Clean & Rebuild creates one dedicated recurring meeting per active weekly session slot,
-  // whereas normal group-level creation/replacement keeps a single canonical link across the group.
-  const replaceWholeGroup = params.actionType !== 'cleanup_rebuilt';
-  const hasTargetSession = params.sessions.some((s) => s.id === updatedSession.id);
-  const baseSessions = hasTargetSession ? params.sessions : [...params.sessions, updatedSession];
-  const nextSessions = baseSessions.map((s) => {
-    if (s.id === updatedSession.id) return updatedSession;
-    if (!replaceWholeGroup || s.groupId !== updatedSession.groupId || s.deleted) return s;
-    const calendarNeedsUpdate = Boolean(s.googleCalendarEventId || s.calendarSyncStatus === 'synced');
-    return {
-      ...s,
-      zoomMeetingId: newMeetingId,
-      zoomJoinUrl: newJoinUrl,
-      zoomPasscode: newPasscode,
-      zoomHostEmail: updatedSession.zoomHostEmail,
-      meetingSource: 'zoom_api' as const,
-      syncState: 'synced' as const,
-      lastSyncedAt: new Date(nowMs).toISOString(),
-      ...(calendarNeedsUpdate ? { calendarSyncStatus: 'needs_update' as const } : {}),
-      lastError: undefined,
-      updatedAt: nowMs,
-      version: (s.version || 1) + 1,
-      originRevision: (s.originRevision || 1) + 1
-    };
-  });
-  const groupHistory = replaceWholeGroup
-    ? params.sessions
-        .filter((s) => s.groupId === updatedSession.groupId && s.id !== updatedSession.id && !s.deleted && (s.zoomMeetingId || s.zoomJoinUrl))
-        .reduce((history, previousSession) => appendZoomHistoryEntry(history, {
-          session: previousSession,
-          action: 'regenerated',
-          previousZoomMeetingId: previousSession.zoomMeetingId,
-          previousJoinUrl: previousSession.zoomJoinUrl,
-          previousTopic: previousSession.standardizedTitle,
-          newZoomMeetingId: newMeetingId,
-          newJoinUrl,
-          newTopic: updatedSession.standardizedTitle,
-          reason: 'Group-wide canonical Zoom link replacement',
-          nowMs
-        }), nextHistory)
-    : nextHistory;
+  const nextSessions = params.sessions.map((s) => (s.id === updatedSession.id ? updatedSession : s));
   const nextRecords = [
-    ...params.records.map((r) => {
-      const matchesTarget = replaceWholeGroup
-        ? r.groupId === updatedSession.groupId
-        : r.sessionId === updatedSession.id;
-      return matchesTarget && r.status === 'active'
+    ...params.records.map((r) =>
+      r.sessionId === updatedSession.id && r.status === 'active'
         ? { ...r, status: 'superseded' as const, supersededByMeetingId: createdRecord.zoomMeetingId, updatedAt: nowMs }
-        : r;
-    }),
+        : r
+    ),
     createdRecord
   ];
 
@@ -1190,7 +1147,7 @@ export async function createOrReplaceZoomMeetingForSession(params: {
     createdRecord,
     sessions: nextSessions,
     records: nextRecords,
-    history: groupHistory,
+    history: nextHistory,
     archivedPrevious: hadPrevious,
     planWarning40Min
   };
@@ -1296,7 +1253,6 @@ export async function updateZoomMeetingForSession(params: {
     ...params.session,
     timezone: tz,
     ...(patchedJoinUrl ? { zoomJoinUrl: patchedJoinUrl } : {}),
-    meetingSource: 'zoom_api',
     syncState: 'synced',
     lastSyncedAt: new Date(nowMs).toISOString(),
     ...((timezoneChanged || joinUrlChanged) &&
@@ -1310,15 +1266,11 @@ export async function updateZoomMeetingForSession(params: {
     originRevision: (params.session.originRevision || 1) + 1
   };
 
-  const hasTargetSession = params.sessions.some((s) => s.id === updatedSession.id);
-  const nextSessions = hasTargetSession
-    ? params.sessions.map((s) => (s.id === updatedSession.id ? updatedSession : s))
-    : [...params.sessions, updatedSession];
+  const nextSessions = params.sessions.map((s) => (s.id === updatedSession.id ? updatedSession : s));
   const nextRecords = params.records.map((r) =>
     r.sessionId === updatedSession.id && r.status === 'active'
       ? {
           ...r,
-          joinUrl: updatedSession.zoomJoinUrl || r.joinUrl,
           topic: updatedSession.standardizedTitle,
           startTime: updatedSession.startTime,
           durationMinutes: updatedSession.durationMinutes,

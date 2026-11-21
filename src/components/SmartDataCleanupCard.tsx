@@ -91,15 +91,8 @@ export const SmartDataCleanupCard: React.FC<Props> = ({ className = '', onCleanu
       ];
       exportPrunedLessonsBackupJson(allPrunable);
 
-      // 2. Execute cleanup (strictly Archive -> Tombstone -> Delete with rollback)
-      const res = await executeLessonCleanup(lessons, analysis, async (cleanedLessons) => {
-        const { storage } = await import('../services/storageService');
-        await storage.setItem('dl_lessons', cleanedLessons);
-        const ok = await storage.verifyDurableReadBackValue('dl_lessons', cleanedLessons);
-        if (!ok) {
-          throw new Error('Failed to verify persisted cleaned lessons.');
-        }
-      });
+      // 2. Execute cleanup
+      const res = await executeLessonCleanup(lessons, analysis);
       setLessons(res.cleanedLessons);
 
       setCleanupMessage(

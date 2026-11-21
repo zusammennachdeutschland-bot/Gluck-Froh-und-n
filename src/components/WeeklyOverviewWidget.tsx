@@ -1,41 +1,40 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { useApp } from '../context/AppContext';
-import { normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
-import { useLocalDateKey } from '../hooks/useLocalDateKey';
-import {
-  computeDashboardPeriodStats,
-  getDashboardLessonsForRange,
-  getWeekDateRangeFridayToThursday,
-} from '../utils/dashboardStatsUtils';
+import { formatLocalDate } from '../utils/timeUtils';
 import { CheckCircle2, XCircle, Clock, Wallet, CalendarDays, Target } from 'lucide-react';
 
 export const WeeklyOverviewWidget: React.FC = () => {
-  const { lessons, getFullLessonsSnapshot, groups, groupWeeklySessions, payments, profile, language, t, _t } = useApp();
-  const todayStr = useLocalDateKey();
+  const { lessons, groups, students, payments, profile, language, t, _t } = useApp();
 
-  // Week calculation: Friday to Thursday using unified lesson range source (today/future projected without retroactive past fabrication)
-  const stats = useMemo(() => {
-    const refDate = parseLocalDate(todayStr);
-    const { startDateStr: friStr, endDateStr: thuStr, startDate: friday, endDate: thursday } =
-      getWeekDateRangeFridayToThursday(refDate);
+  // Week calculation: Friday to Thursday
+  const getWeekStats = () => {
+    const now = new Date();
+    const day = now.getDay(); // 0 = Sun, 1 = Mon, ..., 5 = Fri, 6 = Sat
+    const daysSinceFriday = (day + 2) % 7;
 
-    const weekLessons = getDashboardLessonsForRange({
-      startDateStr: friStr,
-      endDateStr: thuStr,
-      todayStr,
-      lessons: getFullLessonsSnapshot(),
-      groups,
-      groupWeeklySessions,
-    });
+    const friday = new Date(now);
+    friday.setDate(now.getDate() - daysSinceFriday);
+    friday.setHours(0, 0, 0, 0);
 
-    const { completed, cancelled, remaining } = computeDashboardPeriodStats(weekLessons);
+    const thursday = new Date(friday);
+    thursday.setDate(friday.getDate() + 6);
+    thursday.setHours(23, 59, 59, 999);
+
+    const friStr = formatLocalDate(friday);
+    const thuStr = formatLocalDate(thursday);
+
+    const weekLessons = lessons.filter(l => l.date >= friStr && l.date <= thuStr && !l.deleted);
+
+    const completed = weekLessons.filter(l => l.status === 'completed').length;
+    const cancelled = weekLessons.filter(l => l.status === 'cancelled').length;
+    const remaining = weekLessons.filter(l => l.status === 'scheduled' || l.status === 'in_progress').length;
 
     // Use actual payment records for accurate revenue tracking (matching Payments View)
     const paidOnly = payments.filter(p => p.status === 'paid' && !p.deleted);
     const weeklyPayments = paidOnly.filter(p => {
       const d = p.paidDate || p.dueDate;
       if (!d) return false;
-      const dateOnly = normalizeDateToISO(d);
+      const dateOnly = d.substring(0, 10);
       return dateOnly >= friStr && dateOnly <= thuStr;
     });
     const revenue = weeklyPayments.reduce((sum, p) => sum + (p.amountPaid || p.amountDue || 0), 0);
@@ -44,7 +43,7 @@ export const WeeklyOverviewWidget: React.FC = () => {
     const weeklyPending = pendingOnly.filter(p => {
       const d = p.dueDate;
       if (!d) return false;
-      const dateOnly = normalizeDateToISO(d);
+      const dateOnly = d.substring(0, 10);
       return dateOnly >= friStr && dateOnly <= thuStr;
     });
     const pendingRevenue = weeklyPending.reduce((sum, p) => sum + p.amountDue, 0);
@@ -58,8 +57,9 @@ export const WeeklyOverviewWidget: React.FC = () => {
       totalExpected: revenue + pendingRevenue,
       dateRange: `${friday.toLocaleDateString(language === 'ar' ? 'ar-EG' : language === 'de' ? 'de-DE' : 'en-US', { day: 'numeric', month: 'short' })} - ${thursday.toLocaleDateString(language === 'ar' ? 'ar-EG' : language === 'de' ? 'de-DE' : 'en-US', { day: 'numeric', month: 'short' })}`
     };
-  }, [todayStr, lessons, getFullLessonsSnapshot, groups, groupWeeklySessions, payments, language]);
+  };
 
+  const stats = getWeekStats();
   const targetGoal = profile.weeklyIncomeGoal || 0;
   const goalPercent = targetGoal > 0 ? Math.min(100, Math.round((stats.revenue / targetGoal) * 100)) : 0;
 

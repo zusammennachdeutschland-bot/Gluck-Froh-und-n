@@ -277,12 +277,8 @@ export const LernstudioView: React.FC<Props> = ({
           ownedSetIds: (setsRef.current || []).map((s) => s.id),
           ownedStudentIds: (studentsRef.current || []).map((st) => st.id)
         };
-        const migRes = migrateLegacyHomeworkForAccount(migOpts);
-        if (migRes.status === 'failed') {
-          console.warn('[LernstudioView] Legacy homework migration failed:', migRes.error);
-        } else {
-          backfilledUidsRef.current.add(nextUid);
-        }
+        migrateLegacyHomeworkForAccount(migOpts);
+        backfilledUidsRef.current.add(nextUid);
       }
       setActiveAuthUid(nextUid);
       setHomeworkStats(getHomeworkSummaryStats(studentsRef.current));

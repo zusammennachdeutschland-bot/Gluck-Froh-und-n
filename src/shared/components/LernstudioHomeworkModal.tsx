@@ -43,7 +43,6 @@ import {
   setHomeworkAssignmentActiveStatus,
   updateHomeworkAssignmentMetadata,
   getPreservedSubmissionsForDeletedAssignments,
-  isHomeworkAutoClosedByDeadline,
   getHomeworkLastRefreshTimestamp,
   ArchivedAssignmentMeta,
   publishCustomLernstudioSetOnce,
@@ -428,12 +427,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
           ownedSetIds: sets.map((s) => s.id),
           ownedStudentIds: (studentsRef.current || []).map((st) => st.id)
         };
-        const migRes = migrateLegacyHomeworkForAccount(migOpts);
-        if (migRes.status === 'failed') {
-          setCreateError(
-            migRes.error || 'تعذر إكمال ترحيل الواجبات القديمة بسبب خطأ في التخزين. لم يتم حذف البيانات الأصلية.'
-          );
-        }
+        migrateLegacyHomeworkForAccount(migOpts);
       }
       setPendingSyncCount(getPendingHomeworkSyncCount(u?.uid || null));
     });
@@ -1034,7 +1028,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         cloudCreatePending: !isCloudSynced
       };
 
-      saveLocalAssignment(finalAssignment, false, { throwOnError: true });
+      saveLocalAssignment(finalAssignment, false);
       window.dispatchEvent(new CustomEvent('glueck-homework-sync-updated'));
       setAssignmentsList((prev) => [
         {
@@ -1059,15 +1053,10 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         onAssignmentConfirmed(finalAssignment);
       }
 
-      if (autoCloseOnCreate && isCloudSynced) {
+      if (autoCloseOnCreate) {
         loadAllAssignments(false).catch(() => {});
         onClose();
         return;
-      }
-      if (!isCloudSynced) {
-        setCreateError(
-          'تم الحفظ محلياً (بانتظار المزامنة السحابية) — لم يتم تأكيد الرفع إلى السحابة بسبب عدم الاتصال أو خطأ بالشبكة.'
-        );
       }
 
       await loadAllAssignments(false).catch(() => {});
@@ -1210,8 +1199,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
   const handleToggleAssignmentActive = async (hw: HomeworkAssignment) => {
     if (!hw?.id || togglingActiveId) return;
-    const isCurrentlyClosed =
-      hw.isActive === false || hw.status === 'closed' || isHomeworkAutoClosedByDeadline(hw);
+    const isCurrentlyClosed = hw.isActive === false || hw.status === 'closed';
     const nextActive = isCurrentlyClosed;
     setTogglingActiveId(hw.id);
     try {
@@ -2355,12 +2343,12 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                   <h4 className="text-base sm:text-lg font-black text-text-main">
                     {createdCloudSynced
                       ? 'تم تجهيز الواجب والرابط القصير بنجاح'
-                      : 'تم الحفظ محلياً (بانتظار المزامنة السحابية)'}
+                      : 'بانتظار تأكيد المزامنة السحابية لتفعيل الرابط'}
                   </h4>
                   <p className="text-xs text-text-muted">
                     {createdCloudSynced
                       ? 'انسخ الرابط القصير وأرسله للطلاب — ستظهر إجابات ومحاولات كل طالب لحظياً داخل التطبيق'
-                      : 'تحذير المزامنة السحابية: تم الحفظ على جهازك فقط ولن يفتح الرابط عند الطلاب حتى تكتمل المزامنة مع السحابة.'}
+                      : 'لا يتم عرض الرابط كجاهز للمشاركة حتى يكتمل حفظه سحابياً في Firestore لضمان فتحه لدى جميع الطلاب'}
                   </p>
                   <div className="pt-1">
                     {createdCloudSynced ? (
@@ -2369,7 +2357,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[11px] font-bold">
-                        <CloudOff className="w-3 h-3" /> محفوظ محلياً (بانتظار المزامنة السحابية) — اضغط تأكيد المزامنة بالأسفل
+                        <CloudOff className="w-3 h-3" /> محفوظ محلياً — اضغط تأكيد المزامنة بالأسفل لتفعيل الرابط القصير
                       </span>
                     )}
                   </div>
@@ -2591,16 +2579,12 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                         disabled={togglingActiveId === selectedDetails.assignment.id}
                         onClick={() => handleToggleAssignmentActive(selectedDetails.assignment)}
                         className={`px-2.5 py-1.5 rounded-lg border text-xs font-bold flex items-center gap-1 cursor-pointer ${
-                          selectedDetails.assignment.isActive === false ||
-                          selectedDetails.assignment.status === 'closed' ||
-                          isHomeworkAutoClosedByDeadline(selectedDetails.assignment)
+                          selectedDetails.assignment.isActive === false || selectedDetails.assignment.status === 'closed'
                             ? 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
                             : 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 text-amber-600 dark:text-amber-400'
                         }`}
                       >
-                        {selectedDetails.assignment.isActive === false ||
-                        selectedDetails.assignment.status === 'closed' ||
-                        isHomeworkAutoClosedByDeadline(selectedDetails.assignment) ? (
+                        {selectedDetails.assignment.isActive === false || selectedDetails.assignment.status === 'closed' ? (
                           <>
                             <Unlock className="w-3.5 h-3.5" />
                             <span>إعادة فتح الواجب</span>
@@ -3326,7 +3310,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                                   <h4 className="text-sm font-bold text-text-main group-hover:text-primary transition-colors truncate">
                                     {hw.title}
                                   </h4>
-                                  {hw.isActive === false || hw.status === 'closed' || isHomeworkAutoClosedByDeadline(hw) ? (
+                                  {hw.isActive === false || hw.status === 'closed' ? (
                                     <span className="text-[10px] font-black text-amber-600 dark:text-amber-400">
                                       · 🔒 مغلق
                                     </span>
@@ -3336,7 +3320,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                                       <Cloud className="w-3.5 h-3.5" />
                                     </span>
                                   ) : (
-                                    <span title="محفوظ محلياً (بانتظار المزامنة السحابية)" className="text-amber-500 shrink-0">
+                                    <span title="محفوظ محلياً بانتظار المزامنة" className="text-amber-500 shrink-0">
                                       <CloudOff className="w-3.5 h-3.5" />
                                     </span>
                                   )}
@@ -3360,17 +3344,17 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                                   disabled={togglingActiveId === hw.id}
                                   onClick={() => handleToggleAssignmentActive(hw)}
                                   className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                                    hw.isActive === false || hw.status === 'closed' || isHomeworkAutoClosedByDeadline(hw)
+                                    hw.isActive === false || hw.status === 'closed'
                                       ? 'text-amber-500 hover:bg-emerald-500/10 hover:text-emerald-500'
                                       : 'text-text-muted hover:text-amber-500 hover:bg-amber-500/10'
                                   }`}
                                   title={
-                                    hw.isActive === false || hw.status === 'closed' || isHomeworkAutoClosedByDeadline(hw)
+                                    hw.isActive === false || hw.status === 'closed'
                                       ? 'إعادة فتح الواجب للطلاب'
                                       : 'إغلاق الواجب مؤقتاً'
                                   }
                                 >
-                                  {hw.isActive === false || hw.status === 'closed' || isHomeworkAutoClosedByDeadline(hw) ? (
+                                  {hw.isActive === false || hw.status === 'closed' ? (
                                     <Unlock className="w-3.5 h-3.5" />
                                   ) : (
                                     <Lock className="w-3.5 h-3.5" />

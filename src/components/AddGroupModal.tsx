@@ -9,14 +9,13 @@ import { isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { normalizeEgyptianPhone } from '../utils/contactsStandardizer';
 import { NewGroupContactsPromptModal } from './NewGroupContactsPromptModal';
 import { Group, Student } from '../types';
-import { findDuplicateStudentByName } from '../utils/nameUtils';
 
 interface AddGroupModalProps {
   onClose: () => void;
 }
 
 export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
-  const { addGroup, addStudent, students, generateGroupScheduleLessons, triggerToast, profile, language, t, _t } = useApp();
+  const { addGroup, addStudent, generateGroupScheduleLessons, profile, language, t, _t } = useApp();
 
   const [isAiImportOpen, setIsAiImportOpen] = useState(false);
   const [createdRosterForPrompt, setCreatedRosterForPrompt] = useState<{
@@ -42,17 +41,6 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
       }
       if (!studentParentPhone.trim()) {
         alert(_t('رقم الهاتف أو اليوزر نيم لولي الأمر مطلوب', 'Parent phone number or WhatsApp username is required', 'Telefonnummer oder WhatsApp-Benutzername der Eltern ist erforderlich'));
-        return;
-      }
-      const dupStudent = findDuplicateStudentByName(students, studentName);
-      if (dupStudent) {
-        const dupMsg = _t(
-          `يوجد طالب مسجل مسبقاً بهذا الاسم (${dupStudent.name}). يرجى تعديل الاسم لتجنب التكرار.`,
-          `A student with this name already exists (${dupStudent.name}). Please enter a distinct name.`,
-          `Ein Schüler mit diesem Namen existiert bereits (${dupStudent.name}).`
-        );
-        if (triggerToast) triggerToast(dupMsg);
-        else alert(dupMsg);
         return;
       }
     }
@@ -106,25 +94,19 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
       const cleanStudentUser = hasStudentVal ? cleanWhatsAppUsername(studentPhone) : '';
       const finalStudentPhone = hasStudentVal ? (isStudentUser ? `@${cleanStudentUser}` : normalizeEgyptianPhone(studentPhone)) : '';
 
-      try {
-        createdStudent = addStudent({
-          name: studentName.trim(),
-          groupId: createdGroup.id,
-          grade: studentGrade || data.grade,
-          parentName: finalParentName,
-          parentPhone: finalPhone,
-          parentUsername: isUser ? cleanUser : undefined,
-          parentContactType: isUser ? 'username' : 'phone',
-          studentPhone: finalStudentPhone || undefined,
-          studentUsername: isStudentUser ? cleanStudentUser : undefined,
-          studentContactType: isStudentUser ? 'username' : (hasStudentVal ? 'phone' : undefined),
-          notes: studentNotes.trim()
-        });
-      } catch (err: any) {
-        if (triggerToast) {
-          triggerToast(err?.message || _t('تعذر إضافة الطالب بسبب تكرار الاسم.', 'Failed to add student due to duplicate name.'));
-        }
-      }
+      createdStudent = addStudent({
+        name: studentName.trim(),
+        groupId: createdGroup.id,
+        grade: studentGrade || data.grade,
+        parentName: finalParentName,
+        parentPhone: finalPhone,
+        parentUsername: isUser ? cleanUser : undefined,
+        parentContactType: isUser ? 'username' : 'phone',
+        studentPhone: finalStudentPhone || undefined,
+        studentUsername: isStudentUser ? cleanStudentUser : undefined,
+        studentContactType: isStudentUser ? 'username' : (hasStudentVal ? 'phone' : undefined),
+        notes: studentNotes.trim()
+      });
     }
 
     // Always auto generate calendar lessons for new groups

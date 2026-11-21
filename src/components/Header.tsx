@@ -1,10 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson } from '../types';
-import { normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
-import { useLocalDateKey } from '../hooks/useLocalDateKey';
-import { getDashboardTodaySummary } from '../utils/dashboardStatsUtils';
-
+import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
+import { isPendingStatus, pickAuthoritativeLesson, normalizeTime } from '../utils/lessonUtils';
+import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
 import { Bell, CheckCircle2, Clock, Trash2, Award, History, BarChart2, Settings, Menu, Sparkles, BookOpen, Layers, X, Users, Gamepad2, Video, SlidersHorizontal } from 'lucide-react';
 import { NotificationsModal } from './NotificationsModal';
 import { motion, AnimatePresence } from 'motion/react';
@@ -22,8 +21,6 @@ export const Header: React.FC = () => {
     profile, 
     notifications, 
     lessons, 
-    getFullLessonsSnapshot,
-    groupWeeklySessions,
     groups,
     students,
     dismissedDashboardLessonIds = [],
@@ -265,24 +262,88 @@ export const Header: React.FC = () => {
   }, [_t, teacherFirstName]);
 
   // Today's Date String
-  const todayStr = useLocalDateKey();
+  const todayStr = useMemo(() => formatLocalDate(new Date()), []);
 
-  // Canonical Today Summary (matches SmartDailySummaryWidget: active non-cancelled, non-dismissed lessons + biweekly-filtered unique students)
-  const todaySummary = useMemo(() => (
-    getDashboardTodaySummary({
-      todayStr,
-      lessons: getFullLessonsSnapshot(),
-      groups,
-      groupWeeklySessions,
-      students,
-      dismissedDashboardLessonIds,
-    })
-  ), [todayStr, lessons, getFullLessonsSnapshot, groups, groupWeeklySessions, students, dismissedDashboardLessonIds]);
+  // Today's lessons
+  const todaysLessons = useMemo(() => {
+    const active = lessons
+      .filter(l => !l.deleted && l.date === todayStr && !dismissedDashboardLessonIds.includes(l.id))
+      .filter(l => {
+        if (
+          l.groupId && 
+          l.groupId !== 'quick_group' && 
+          l.status === 'scheduled' && 
+          (!l.report || (!l.report.attendanceStatus && !l.report.teacherNotes && !l.report.homeworkTitle && l.report.quizScore === undefined)) &&
+          (!l.studentPayments || Object.keys(l.studentPayments).length === 0) &&
+          (!l.amountPaid || l.amountPaid === 0)
+        ) {
+          const grp = groups.find(g => g.id === l.groupId && !g.deleted);
+          if (grp) {
+            if (grp.scheduleRecurrence && grp.scheduleRecurrence !== 'weekly') {
+              if (!isDateMatchingGroupRecurrence(grp.scheduleRecurrence, l.date)) {
+                return false;
+              }
+            }
+            const activeSlots = getGroupScheduleSlots(grp);
+            if (activeSlots.length > 0) {
+              const lDate = parseLocalDate(l.date);
+              const lDayNum = lDate.getDay();
+              const matchesSlot = activeSlots.some(s => getDayNumber(s.day) === lDayNum && s.time === l.time);
+              if (!matchesSlot) return false;
+            }
+          }
+        }
+        return true;
+      });
 
-  const lessonsCount = todaySummary.lessonsCount;
-  const todayStudentsCount = todaySummary.studentsCount;
-  const percentDone = todaySummary.percentDone;
-  const cancelledTodayCount = todaySummary.cancelledCount;
+    const slotMap = new Map<string, Lesson>();
+    active.forEach(l => {
+      const normTime = normalizeTime(l.time) || l.time;
+      const key = l.groupId && l.groupId !== 'quick_group'
+        ? `${l.groupId}_${l.date}_${normTime}`
+        : l.id;
+      const existing = slotMap.get(key);
+      if (!existing) {
+        slotMap.set(key, l);
+      } else {
+        slotMap.set(key, pickAuthoritativeLesson(existing, l).survivor);
+      }
+    });
+
+    return Array.from(slotMap.values());
+  }, [lessons, groups, dismissedDashboardLessonIds, todayStr]);
+
+  // Total lessons count
+  const lessonsCount = todaysLessons.length;
+
+  // Unique students scheduled today (or total active students)
+  const todayStudentsCount = useMemo(() => {
+    const studentSet = new Set<string>();
+    todaysLessons.forEach(l => {
+      if (l.studentId) {
+        studentSet.add(l.studentId);
+      } else if (l.groupId && l.groupId !== 'quick_group') {
+        const groupStudents = students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === l.groupId);
+        if (groupStudents.length > 0) {
+          groupStudents.forEach(s => studentSet.add(s.id));
+        } else {
+          studentSet.add(`group_${l.groupId}`);
+        }
+      } else if (l.studentName) {
+        studentSet.add(l.studentName);
+      }
+    });
+    return studentSet.size > 0 ? studentSet.size : (students?.length || 0);
+  }, [todaysLessons, students]);
+
+  // Completed / resolved count & percent done
+  const closedCount = useMemo(() => {
+    return todaysLessons.filter(l => l.status === 'completed' || l.status === 'cancelled').length;
+  }, [todaysLessons]);
+
+  const percentDone = useMemo(() => {
+    return lessonsCount > 0 ? Math.round((closedCount / lessonsCount) * 100) : 0;
+  }, [lessonsCount, closedCount]);
 
   return (
     <>
@@ -317,15 +378,6 @@ export const Header: React.FC = () => {
                   <p 
                     style={{ fontSize: 'clamp(10.5px, 2.7vw, 12px)' }}
                     className="font-medium text-text-muted dark:text-slate-400 tracking-tight leading-tight truncate flex items-center gap-1.5 mt-0.5"
-                    title={
-                      cancelledTodayCount > 0
-                        ? _t(
-                            `${lessonsCount} حصص نشطة (تم استبعاد ${cancelledTodayCount} ملغاة)`,
-                            `${lessonsCount} active lessons (${cancelledTodayCount} cancelled excluded)`,
-                            `${lessonsCount} aktive Lektionen (${cancelledTodayCount} abgesagt ausgeschlossen)`
-                          )
-                        : undefined
-                    }
                   >
                     <span className="font-semibold text-slate-700 dark:text-slate-300">{lessonsCount} {_t('حصص', 'Lessons', 'Lektionen')}</span>
                     <span className="text-slate-300 dark:text-slate-600 select-none">•</span>

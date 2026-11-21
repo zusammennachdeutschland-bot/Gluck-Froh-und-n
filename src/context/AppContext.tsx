@@ -14,14 +14,7 @@ import {
   GroupWeeklySession, ZoomMeetingRecord, ZoomMeetingHistory, GrainRecordingMatch,
   LanHostStatus
 } from '../types';
-import {
-  recalculateAllAccountBalances,
-  computeAccountBalance,
-  shouldSettlePendingCycleRecord,
-  splitPaymentAcrossLessons,
-  allocateAdvancePaymentFIFO,
-  reconcilePaymentFinanceTransaction
-} from '../services/financeService';
+import { recalculateAllAccountBalances, computeAccountBalance, shouldSettlePendingCycleRecord, splitPaymentAcrossLessons } from '../services/financeService';
 import { 
   clearActiveLessonNotification, getPendingScheduledNotifications, 
   cancelScheduledNotification, cancelAllScheduledNotifications, rebuildAllNotificationSchedules,
@@ -33,16 +26,13 @@ import { getStudentCyclePricing, calculateEstimatedPastDate, sanitizePaymentLess
 import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence, getAlternatingWeek } from '../utils/scheduleUtils';
 import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
 import { getPrunedLessonIds, addPrunedLessonIds, executeLessonCleanup, analyzeLessonCleanup, formatLocalDateStr, LAST_CLEANUP_DATE_KEY } from '../services/lessonCleanupService';
-import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, applyLessonCompletionMutation, checkOverlap, getGroupCycleInfo, calculateSequentialSessionNumber, resolveLessonCycleNumber, buildGroupCycleAnchorFields, compareLessonsChronologically, resequenceScheduledLessonsAfterChange, isGroupPerLesson, shouldRetainLessonInActiveWindow, findInvalidBiweeklyAutoLessons, buildLessonSlotSet, makeLessonSlotKey, hasStudentCustomPricingOverride, reconcileStudentForGroupMove } from '../utils/lessonUtils';
-import { findDuplicateStudentByName } from '../utils/nameUtils';
-import { createPersistedStudentDocument, deletePersistedStudentDocumentPayload } from '../utils/studentDocumentUtils';
+import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo, calculateSequentialSessionNumber, resolveLessonCycleNumber, buildGroupCycleAnchorFields, compareLessonsChronologically, resequenceScheduledLessonsAfterChange, isGroupPerLesson, shouldRetainLessonInActiveWindow, findInvalidBiweeklyAutoLessons, buildLessonSlotSet, makeLessonSlotKey } from '../utils/lessonUtils';
 import { translations, TranslationKey } from '../i18n/translations';
 import { syncTodayLessonsToWidget } from '../services/widgetService';
 import { runSyncMigration } from '../services/sync/syncMigration';
 import { trackLocalMutation, trackLocalDeletion, getActiveRecords, detectLocalOriginPlatform } from '../services/sync/mutationTracker';
 import { hydrateVerbGroupSet } from '../shared/verbGroupSync';
 import { normalizeLernstudioSet, stripHeavyGrammarMediaForSync } from '../shared/grammarEngine';
-import { mergeHodVisitMigration } from '../utils/hodVisitMigration';
 import {
   mergeEntities,
   mergeRecentlyDeleted,
@@ -105,11 +95,6 @@ import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesServ
 import { loadGrainGroupLearningRecords, saveGrainGroupLearningRecords, sanitizeGrainGroupLearningRecord } from '../services/grainService';
 import { loadZoomUiMeta, sanitizeZoomRecordForStorage } from '../services/zoomService';
 import { DEFAULT_ZOOM_TIMEZONE, reconcileGroupWeeklySessions, resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
-import { logZoomReminderPipeline } from '../utils/zoomReminderDiagnostics';
-import { enqueueLessonSyncTask } from '../services/lessonSyncQueue';
-import { runLessonPersistencePipeline, createLessonReportCompletionUpdater, filterActiveLessonRows } from '../services/lessonPersistencePipeline';
-import { mergeLessonSyncSnapshot, preserveCompletedLessonStatuses } from '../utils/lessonSync';
-import { isLessonPipelineTraceEnabled, traceLessonPipeline } from '../utils/lessonPipelineDiagnostics';
 
 export const DEFAULT_BOTTOM_NAV_ORDER = [
   'home',
@@ -206,7 +191,7 @@ interface AppContextType {
   moveStudent: (studentId: string, newGroupId: string) => void;
   moveStudentsBulk: (studentIds: string[], newGroupId: string) => void;
   archiveStudent: (id: string) => void;
-  uploadStudentDocument: (studentId: string, file: File, category: 'homework' | 'exam' | 'doc') => Promise<StudentDocument>;
+  uploadStudentDocument: (studentId: string, file: File, category: 'homework' | 'exam' | 'doc') => void;
   deleteStudentDocument: (studentId: string, docId: string) => void;
 
   // Lessons
@@ -223,8 +208,8 @@ interface AppContextType {
   deleteLesson: (id: string) => void;
   deleteFutureGroupLessons: (groupId: string, fromDate: string, currentLessonId?: string) => void;
   deleteAllGroupLessons: (groupId: string, onlyScheduled?: boolean) => void;
-  saveLessonReport: (lessonId: string, report: LessonReport, packageCount?: number, sessionNumber?: number, fallbackLesson?: Lesson) => void;
-  cancelLesson: (lessonId: string, notes?: string, fallbackLesson?: Lesson) => void;
+  saveLessonReport: (lessonId: string, report: LessonReport, packageCount?: number, sessionNumber?: number) => void;
+  cancelLesson: (lessonId: string, notes?: string) => void;
   generateGroupScheduleLessons: (groupId: string, days: string[], time: string, numWeeks?: number, customDayTimes?: Record<string, string>, groupOverride?: Group) => void;
   previewInvalidBiweeklyAutoLessons: () => Promise<Lesson[]>;
   cleanupInvalidBiweeklyAutoLessons: (lessonIds?: string[]) => Promise<number>;
@@ -517,7 +502,8 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-// Module-level serialized storage queue for payments.
+// Module-level serialized storage sync queues to eliminate concurrent read-modify-write race conditions
+let lessonSyncQueue: Promise<void> = Promise.resolve();
 let paymentSyncQueue: Promise<void> = Promise.resolve();
 
 export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any }> = ({ children, initialData }) => {
@@ -972,34 +958,84 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const sixtyDaysAgo = new Date();
     sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
     const cutoffStr = formatLocalDate(sixtyDaysAgo);
+
     const oneYearAgo = new Date();
     oneYearAgo.setDate(oneYearAgo.getDate() - 365);
     const maxCutoffStr = formatLocalDate(oneYearAgo);
-    if (!isLessonPipelineTraceEnabled()) {
-      return filterActiveLessonRows(raw, cutoffStr, maxCutoffStr, students, groups);
-    }
-    const filtered = raw.filter(lesson =>
-      shouldRetainLessonInActiveWindow(lesson, cutoffStr, maxCutoffStr, students, groups)
+
+    const filtered = (Array.isArray(raw) ? raw : []).filter(l =>
+      shouldRetainLessonInActiveWindow(l, cutoffStr, maxCutoffStr, students, groups)
     );
-    const retainedIds = new Set(filtered.map(lesson => lesson.id));
-    traceLessonPipeline('filterActiveLessons: retained rows', filtered, {
-      removedIds: raw.filter(lesson => lesson?.id && !retainedIds.has(lesson.id)).map(lesson => lesson.id),
-      note: `Input rows: ${raw.length}; retained rows: ${filtered.length}`
+
+    const bestLessons = new Map<string, Lesson>();
+    filtered.forEach(lesson => {
+      if (lesson.groupId && lesson.groupId !== 'quick_group') {
+        const key = `${lesson.groupId}_${lesson.date}_${lesson.time}`;
+        const existingBest = bestLessons.get(key);
+        if (!existingBest) {
+          bestLessons.set(key, lesson);
+        } else {
+          const score = (l: Lesson) => {
+             let s = 0;
+             if (l.status !== 'scheduled') s += 100;
+             if (l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid') s += 100;
+             if ((l.amountPaid || 0) > 0) s += 50;
+             if (l.report && Object.keys(l.report).length > 0) s += 50;
+             if (l.studentPayments && Object.keys(l.studentPayments).length > 0) s += 50;
+             return s;
+          };
+          const currentScore = score(lesson);
+          const bestScore = score(existingBest);
+          let winner = currentScore > bestScore ? lesson : existingBest;
+          let loser = winner === lesson ? existingBest : lesson;
+
+          if (currentScore === bestScore) {
+             if (lesson.updatedAt && existingBest.updatedAt && lesson.updatedAt > existingBest.updatedAt) {
+               winner = lesson;
+               loser = existingBest;
+             } else if (!existingBest.updatedAt && lesson.updatedAt) {
+               winner = lesson;
+               loser = existingBest;
+             }
+          }
+
+          // Preserve paid status if either record was marked paid
+          const isEitherPaid = winner.paymentStatus === 'paid' || loser.paymentStatus === 'paid' ||
+                               winner.report?.paymentStatus === 'paid' || loser.report?.paymentStatus === 'paid';
+          if (isEitherPaid) {
+            winner = {
+              ...winner,
+              paymentStatus: 'paid',
+              amountPaid: Math.max(winner.amountPaid || 0, loser.amountPaid || 0),
+              report: winner.report ? { ...winner.report, paymentStatus: 'paid' } : loser.report
+            };
+          }
+
+          bestLessons.set(key, winner);
+        }
+      }
     });
-    const active = filterActiveLessonRows(raw, cutoffStr, maxCutoffStr, students, groups);
-    const activeIds = new Set(active.map(lesson => lesson.id));
-    traceLessonPipeline('filterActiveLessons: after group-slot deduplication', active, {
-      removedIds: filtered.filter(lesson => lesson?.id && !activeIds.has(lesson.id)).map(lesson => lesson.id),
-      note: `Before slot deduplication: ${filtered.length}; after: ${active.length}`
+
+    const seenIds = new Set<string>();
+    return filtered.filter(lesson => {
+      if (!lesson || !lesson.id || seenIds.has(lesson.id)) {
+        return false;
+      }
+      if (lesson.groupId && lesson.groupId !== 'quick_group') {
+        const key = `${lesson.groupId}_${lesson.date}_${lesson.time}`;
+        if (bestLessons.get(key)?.id !== lesson.id) {
+          return false;
+        }
+      }
+      seenIds.add(lesson.id);
+      return true;
     });
-    return active;
   };
 
   // One-time startup deduplication across all existing lessons & payments (students is already initialized above)
   const initialLessonDeduplication = useMemo(() => {
     const saved = initialData['dl_lessons'];
     const raw: Lesson[] = Array.isArray(saved) ? saved : [];
-    traceLessonPipeline('startup: dl_lessons loaded from storage', raw);
     const prunedIds = getPrunedLessonIds();
     const filteredRaw = raw.filter(l => l && l.id && !prunedIds.has(l.id));
     return deduplicateLessonList(filteredRaw, students);
@@ -1282,26 +1318,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   // Safe atomic full-storage manipulation methods to prevent synchronization race conditions or phantom resurrection
   const updateFullLessonsStorage = useCallback(async (updater: (allLessons: Lesson[]) => Lesson[]): Promise<Lesson[]> => {
-    return enqueueLessonSyncTask(async () => {
-      const persistedBefore = await storage.getItem<Lesson[]>('dl_lessons');
-      const inMemorySnapshot = fullLessonsRef.current || [];
-      const persistedRows = Array.isArray(persistedBefore) ? persistedBefore : [];
-      const deduped = await runLessonPersistencePipeline({
-        persistedBefore: persistedRows,
-        inMemorySnapshot,
-        fallbackLessons: lessons,
-        updater,
-        students,
-        filterActiveLessons,
-        setFullHistory: rows => { fullLessonsRef.current = rows; },
-        setActiveLessons: setLessons,
-        writeStorage: rows => storage.setItem('dl_lessons', rows),
-        trace: isLessonPipelineTraceEnabled() ? traceLessonPipeline : undefined
+    return new Promise<Lesson[]>((resolve, reject) => {
+      lessonSyncQueue = lessonSyncQueue.then(async () => {
+        try {
+          const full = (fullLessonsRef.current && fullLessonsRef.current.length > 0)
+            ? fullLessonsRef.current
+            : ((await storage.getItem<Lesson[]>('dl_lessons')) || lessons);
+          const rawUpdated = updater(full || []);
+          
+          // Deduplicate by lesson.id strictly (keeping the latest occurrence)
+          const seen = new Set<string>();
+          const dedupedById: Lesson[] = [];
+          for (let i = rawUpdated.length - 1; i >= 0; i--) {
+            const item = rawUpdated[i];
+            if (item && item.id && !seen.has(item.id)) {
+              seen.add(item.id);
+              dedupedById.unshift(item);
+            }
+          }
+          
+          // Comprehensive lesson deduplication
+          const { deduplicated: deduped } = deduplicateLessonList(dedupedById, students);
+
+          fullLessonsRef.current = deduped;
+          setLessons(filterActiveLessons(deduped));
+          await storage.setItem('dl_lessons', deduped);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('gluck-local-data-mutated'));
+          }
+          resolve(deduped);
+        } catch (e) {
+          reject(e);
+        }
+      }).catch(err => {
+        console.error('updateFullLessonsStorage error:', err);
+        reject(err);
       });
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('gluck-local-data-mutated'));
-      }
-      return deduped;
     });
   }, [lessons, students]);
 
@@ -1316,15 +1368,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           
           // Deduplicate by payment.id strictly
           const seen = new Set<string>();
-          const reversedDedupedById: PaymentRecord[] = [];
+          const dedupedById: PaymentRecord[] = [];
           for (let i = rawUpdated.length - 1; i >= 0; i--) {
             const item = rawUpdated[i];
             if (item && item.id && !seen.has(item.id)) {
               seen.add(item.id);
-              reversedDedupedById.push(item);
+              dedupedById.unshift(item);
             }
           }
-          const dedupedById = reversedDedupedById.reverse();
 
           // Comprehensive payment deduplication
           const { deduplicated: deduped } = deduplicatePaymentsList(dedupedById);
@@ -1363,54 +1414,59 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       ? fullLessonsRef.current
       : lessons;
       
-    // Index paid lessons strictly per student; restrict date-signature fallback ONLY to legacy records lacking lessonIds
+    // Index paid lessons and dates strictly per student to avoid cross-student interference in group lessons
     const paidLessonIdsByStudent = new Map<string, Set<string>>();
-    const legacyPaidDateSignaturesByStudent = new Map<string, Set<string>>();
+    const paidDateSignaturesByStudent = new Map<string, Set<string>>();
 
     allPayments.forEach(p => {
       if (!p.deleted && (p.status === 'paid' || p.status === 'exempted' || p.paymentType === 'exemption')) {
         const stId = p.studentId;
         if (!stId) return;
 
-        const realIds: string[] = [];
-        if (p.lessonId && !p.lessonId.startsWith('virtual_')) realIds.push(p.lessonId);
+        if (!paidLessonIdsByStudent.has(stId)) paidLessonIdsByStudent.set(stId, new Set<string>());
+        const stIds = paidLessonIdsByStudent.get(stId)!;
+        if (p.lessonId) stIds.add(p.lessonId);
         if (p.lessonIds && Array.isArray(p.lessonIds)) {
           p.lessonIds.forEach(id => {
-            if (id && !id.startsWith('virtual_') && !realIds.includes(id)) realIds.push(id);
+            if (!id.startsWith('virtual_')) stIds.add(id);
           });
         }
 
-        if (realIds.length > 0) {
-          if (!paidLessonIdsByStudent.has(stId)) paidLessonIdsByStudent.set(stId, new Set<string>());
-          const stIds = paidLessonIdsByStudent.get(stId)!;
-          realIds.forEach(id => stIds.add(id));
-        } else if (p.lessonDates && Array.isArray(p.lessonDates)) {
-          if (!legacyPaidDateSignaturesByStudent.has(stId)) legacyPaidDateSignaturesByStudent.set(stId, new Set<string>());
-          const stDates = legacyPaidDateSignaturesByStudent.get(stId)!;
+        if (!paidDateSignaturesByStudent.has(stId)) paidDateSignaturesByStudent.set(stId, new Set<string>());
+        const stDates = paidDateSignaturesByStudent.get(stId)!;
+        if (p.lessonDates && Array.isArray(p.lessonDates)) {
           p.lessonDates.forEach(dStr => {
             if (!dStr || typeof dStr !== 'string') return;
             const match = dStr.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
             if (match) {
               const dIso = normalizeDateToISO(match[1]);
-              if (dIso) stDates.add(`${stId}_${dIso}_${p.groupId || ''}`);
+              stDates.add(`${stId}_${dIso}`);
             }
           });
         }
       }
     });
 
-    // Also collect explicit paid IDs from all lessons directly per student
+    // Also collect paid status from all lessons directly per student
     allCurrentLessons.forEach(l => {
       if (!l.deleted) {
         if (l.studentId && (l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid')) {
           if (!paidLessonIdsByStudent.has(l.studentId)) paidLessonIdsByStudent.set(l.studentId, new Set<string>());
           paidLessonIdsByStudent.get(l.studentId)!.add(l.id);
+          if (l.date) {
+            if (!paidDateSignaturesByStudent.has(l.studentId)) paidDateSignaturesByStudent.set(l.studentId, new Set<string>());
+            paidDateSignaturesByStudent.get(l.studentId)!.add(`${l.studentId}_${l.date}`);
+          }
         }
         if (l.studentPayments && typeof l.studentPayments === 'object') {
           Object.entries(l.studentPayments).forEach(([stId, sp]: [string, any]) => {
             if (sp?.paymentStatus === 'paid' || sp?.status === 'paid') {
               if (!paidLessonIdsByStudent.has(stId)) paidLessonIdsByStudent.set(stId, new Set<string>());
               paidLessonIdsByStudent.get(stId)!.add(l.id);
+              if (l.date) {
+                if (!paidDateSignaturesByStudent.has(stId)) paidDateSignaturesByStudent.set(stId, new Set<string>());
+                paidDateSignaturesByStudent.get(stId)!.add(`${stId}_${l.date}`);
+              }
             }
           });
         }
@@ -1419,25 +1475,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             if (sp?.paymentStatus === 'paid' || sp?.status === 'paid') {
               if (!paidLessonIdsByStudent.has(stId)) paidLessonIdsByStudent.set(stId, new Set<string>());
               paidLessonIdsByStudent.get(stId)!.add(l.id);
+              if (l.date) {
+                if (!paidDateSignaturesByStudent.has(stId)) paidDateSignaturesByStudent.set(stId, new Set<string>());
+                paidDateSignaturesByStudent.get(stId)!.add(`${stId}_${l.date}`);
+              }
             }
           });
         }
       }
     });
 
-    if (paidLessonIdsByStudent.size > 0 || legacyPaidDateSignaturesByStudent.size > 0) {
+    if (paidLessonIdsByStudent.size > 0 || paidDateSignaturesByStudent.size > 0) {
       updateFullLessonsStorage(allLessons => {
         let changed = false;
         const updated = allLessons.map(l => {
           if (l.deleted) return l;
-
+          
           if (l.studentId) {
             const stPaidIds = paidLessonIdsByStudent.get(l.studentId);
-            const stLegacyPaidDates = legacyPaidDateSignaturesByStudent.get(l.studentId);
-            const isPaid = Boolean(
-              (stPaidIds && stPaidIds.has(l.id)) ||
-              (stLegacyPaidDates && (stLegacyPaidDates.has(`${l.studentId}_${l.date}_${l.groupId || ''}`) || stLegacyPaidDates.has(`${l.studentId}_${l.date}_`)))
-            );
+            const stPaidDates = paidDateSignaturesByStudent.get(l.studentId);
+            const isPaid = (stPaidIds && stPaidIds.has(l.id)) || (stPaidDates && stPaidDates.has(`${l.studentId}_${l.date}`));
             if (isPaid && l.paymentStatus !== 'paid') {
               changed = true;
               return wrapMutation({
@@ -1458,65 +1515,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       });
     }
 
-    // Index paid records by student for O(P) settlement checks without bare (dueDate, amountDue) collisions
-    const paidRealIdSetsByStudent = new Map<string, Set<string>[]>();
-    allPayments.forEach(paid => {
-      if (!paid.deleted && paid.status === 'paid' && paid.studentId) {
-        const ids = new Set<string>();
-        if (paid.lessonId && !paid.lessonId.startsWith('virtual_')) ids.add(paid.lessonId);
-        if (Array.isArray(paid.lessonIds)) {
-          paid.lessonIds.forEach(id => {
-            if (id && !id.startsWith('virtual_')) ids.add(id);
-          });
-        }
-        if (ids.size > 0) {
-          let arr = paidRealIdSetsByStudent.get(paid.studentId);
-          if (!arr) {
-            arr = [];
-            paidRealIdSetsByStudent.set(paid.studentId, arr);
-          }
-          arr.push(ids);
-        }
-      }
-    });
-
-    // Settle any lingering pending payment records whose exact lessons (or legacy date+group) are already paid FOR THAT SPECIFIC STUDENT
+    // Settle any lingering pending payment records whose lessons or dates are already paid FOR THAT SPECIFIC STUDENT
     updateFullPaymentsStorage(allP => {
       let paymentsChanged = false;
       const updatedP = allP.map(p => {
         if (!p.deleted && ((p.status as string) === 'pending' || (p.status as string) === 'not_yet' || (p.status as string) === 'unpaid')) {
           const stId = p.studentId;
           const stPaidLessonIds = stId ? paidLessonIdsByStudent.get(stId) : undefined;
-          const stLegacyPaidDates = stId ? legacyPaidDateSignaturesByStudent.get(stId) : undefined;
+          const stPaidDateSignatures = stId ? paidDateSignaturesByStudent.get(stId) : undefined;
 
           const realIds = (p.lessonIds || []).filter(id => !id.startsWith('virtual_'));
           const hasCoveredPaidIds = Boolean(
-            stPaidLessonIds &&
+            stPaidLessonIds && 
             stPaidLessonIds instanceof Set &&
-            realIds.length > 0 &&
+            realIds.length > 0 && 
             realIds.every(id => Boolean(stPaidLessonIds?.has(id)))
           );
 
-          // Date fallback applies ONLY when pending record lacks real lessonIds
           let hasCoveredPaidDates = false;
-          if (realIds.length === 0 && stLegacyPaidDates && stLegacyPaidDates instanceof Set && Array.isArray(p.lessonDates) && p.lessonDates.length > 0) {
+          if (stPaidDateSignatures && stPaidDateSignatures instanceof Set && Array.isArray(p.lessonDates) && p.lessonDates.length > 0) {
             const pDates: string[] = [];
             p.lessonDates.forEach(dStr => {
               const match = dStr?.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
               if (match) pDates.push(normalizeDateToISO(match[1]));
             });
-            if (
-              pDates.length > 0 &&
-              pDates.every(dIso => Boolean(stLegacyPaidDates?.has(`${stId}_${dIso}_${p.groupId || ''}`) || (!p.groupId && stLegacyPaidDates?.has(`${stId}_${dIso}_`))))
-            ) {
+            if (pDates.length > 0 && pDates.every(dIso => Boolean(stPaidDateSignatures?.has(`${stId}_${dIso}`)))) {
               hasCoveredPaidDates = true;
             }
           }
 
-          const paidIdSets = stId ? (paidRealIdSetsByStudent.get(stId) || []) : [];
-          const hasMatchingPaidRecord = realIds.length > 0 && paidIdSets.some(idSet =>
-            realIds.some(id => idSet.has(id))
-          );
+          const hasMatchingPaidRecord = allP.some(paid => {
+            if (paid.id === p.id || paid.deleted || paid.status !== 'paid') return false;
+            if (paid.studentId !== p.studentId) return false;
+            if (realIds.length > 0 && paid.lessonIds?.some((id: string) => realIds.includes(id))) return true;
+            if (p.dueDate && paid.dueDate && p.dueDate === paid.dueDate && p.amountDue === paid.amountDue) return true;
+            return false;
+          });
 
           if (hasCoveredPaidIds || hasCoveredPaidDates || hasMatchingPaidRecord) {
             paymentsChanged = true;
@@ -1636,15 +1670,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const [hodVisits, setHodVisits] = useState<VisitRecord[]>(() => {
     const saved = initialData['hod_visit_records'];
-    const migrationKey = 'hod_visit_records_migrated_v1';
-    const migrationAlreadyDone = Boolean(initialData[migrationKey]);
-    const legacyProfileVisits = ((initialData['dl_profile'] as any)?.schoolSettings?.visitRecords || []) as VisitRecord[];
-    const canonicalVisits: VisitRecord[] = Array.isArray(saved) ? saved : [];
-    const raw = mergeHodVisitMigration(canonicalVisits, legacyProfileVisits, migrationAlreadyDone);
-    if (!migrationAlreadyDone) {
-      storage.setItem(migrationKey, true);
-      storage.setItem('hod_visit_records', raw);
-    }
+    const raw: VisitRecord[] = Array.isArray(saved) ? saved : [];
     const seen = new Set<string>();
     return raw.map((item, idx) => {
       const id = item.id || `hod_vst_${Date.now()}_${idx}`;
@@ -1681,6 +1707,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   useEffect(() => {
     if (!isInitializedRef.current) return;
     storage.setItem('hod_visit_records', hodVisits);
+
+    // Keep profile.schoolSettings.visitRecords synchronized with hodVisits while respecting purge tombstones
+    const purgedVisitIds = new Set<string>(
+      (recentlyDeletedRef.current?.purgedRecords || [])
+        .filter((p) => p && p.id)
+        .map((p) => p.id.trim())
+    );
+    setProfile(prev => {
+      const existingSettings = (prev?.schoolSettings as any) || {};
+      const existingVisits = (existingSettings.visitRecords || []).filter(
+        (v: any) => v?.id && !purgedVisitIds.has(String(v.id).trim())
+      );
+      const map = new Map<string, VisitRecord>();
+      existingVisits.forEach((v: any) => v?.id && map.set(v.id, v));
+      (hodVisits || []).forEach(v => {
+        if (v?.id && !purgedVisitIds.has(String(v.id).trim()) && !v.deleted) {
+          map.set(v.id, v);
+        }
+      });
+      const merged = Array.from(map.values());
+
+      if ((existingSettings.visitRecords || []).length === merged.length && merged.every((v: any, i: number) => v.id === (existingSettings.visitRecords || [])[i]?.id)) {
+        return prev;
+      }
+
+      const updated = {
+        ...prev,
+        schoolSettings: {
+          ...existingSettings,
+          visitRecords: merged
+        } as any
+      };
+      storage.setItem('dl_profile', updated);
+      return updated;
+    });
   }, [hodVisits]);
 
   // School & Lesson Notes State with SyncableRecord schema
@@ -1807,31 +1868,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const groupWeeklySessionsRef = useRef<GroupWeeklySession[]>(groupWeeklySessions);
   useEffect(() => {
     groupWeeklySessionsRef.current = groupWeeklySessions;
-    logZoomReminderPipeline('AppContext groupWeeklySessions state/hydration', {
-      count: groupWeeklySessions.length,
-      rows: groupWeeklySessions.map(session => ({
-        id: session.id, groupId: session.groupId, deleted: Boolean(session.deleted),
-        meetingSource: session.meetingSource, syncState: session.syncState,
-        hasZoomJoinUrl: Boolean((session.zoomJoinUrl || '').trim()),
-        weekday: session.weekday, startTime: session.startTime
-      }))
-    });
     if (!isInitializedRef.current) return;
-    const cleaned = groupWeeklySessions.map((x) => sanitizeZoomRecordForStorage(x));
-    void storage.setItem('glueck_group_weekly_sessions_v1', cleaned).then(async () => {
-      const persisted = await storage.getItem<GroupWeeklySession[]>('glueck_group_weekly_sessions_v1');
-      logZoomReminderPipeline('AppContext groupWeeklySessions persisted read-after-write', {
-        count: Array.isArray(persisted) ? persisted.length : 0,
-        rows: (Array.isArray(persisted) ? persisted : []).map(session => ({
-          id: session.id, groupId: session.groupId, deleted: Boolean(session.deleted),
-          meetingSource: session.meetingSource, syncState: session.syncState,
-          hasZoomJoinUrl: Boolean((session.zoomJoinUrl || '').trim()),
-          weekday: session.weekday, startTime: session.startTime
-        }))
-      });
-    }).catch(error => logZoomReminderPipeline('AppContext groupWeeklySessions persistence failed', {
-      message: error instanceof Error ? error.message : String(error)
-    }));
+    storage.setItem('glueck_group_weekly_sessions_v1', groupWeeklySessions.map((x) => sanitizeZoomRecordForStorage(x)));
   }, [groupWeeklySessions]);
 
   const [zoomMeetingRecords, setZoomMeetingRecords] = useState<ZoomMeetingRecord[]>(() => {
@@ -1872,41 +1910,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     matches?: GrainRecordingMatch[];
   }) => {
     if (snapshot.sessions) {
-      logZoomReminderPipeline('AppContext applyZoomWorkspaceSnapshot incoming sessions', {
-        count: snapshot.sessions.length,
-        rows: snapshot.sessions.map(session => ({
-          id: session.id, groupId: session.groupId, deleted: Boolean(session.deleted),
-          meetingSource: session.meetingSource, syncState: session.syncState,
-          hasZoomJoinUrl: Boolean((session.zoomJoinUrl || '').trim()),
-          weekday: session.weekday, startTime: session.startTime
-        }))
-      });
       const cleaned = snapshot.sessions.map((x) => sanitizeZoomRecordForStorage(x));
-      logZoomReminderPipeline('AppContext applyZoomWorkspaceSnapshot sanitized sessions', {
-        count: cleaned.length,
-        rows: cleaned.map(session => ({
-          id: session.id, groupId: session.groupId, deleted: Boolean(session.deleted),
-          meetingSource: session.meetingSource, syncState: session.syncState,
-          hasZoomJoinUrl: Boolean((session.zoomJoinUrl || '').trim()),
-          weekday: session.weekday, startTime: session.startTime
-        }))
-      });
       groupWeeklySessionsRef.current = cleaned;
       setGroupWeeklySessions(cleaned);
-      void storage.setItem('glueck_group_weekly_sessions_v1', cleaned).then(async () => {
-        const persisted = await storage.getItem<GroupWeeklySession[]>('glueck_group_weekly_sessions_v1');
-        logZoomReminderPipeline('AppContext applyZoomWorkspaceSnapshot persisted sessions', {
-          count: Array.isArray(persisted) ? persisted.length : 0,
-          rows: (Array.isArray(persisted) ? persisted : []).map(session => ({
-            id: session.id, groupId: session.groupId, deleted: Boolean(session.deleted),
-            meetingSource: session.meetingSource, syncState: session.syncState,
-            hasZoomJoinUrl: Boolean((session.zoomJoinUrl || '').trim()),
-            weekday: session.weekday, startTime: session.startTime
-          }))
-        });
-      }).catch(error => logZoomReminderPipeline('AppContext applyZoomWorkspaceSnapshot persistence failed', {
-        message: error instanceof Error ? error.message : String(error)
-      }));
+      storage.setItem('glueck_group_weekly_sessions_v1', cleaned);
       autoSyncEngine.notifyMutation('groupWeeklySessions', 'bulk_zoom_update');
 
       // Automatically refresh meetingLink on upcoming/in-progress online lessons so every
@@ -2408,10 +2415,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
     const baseLessonsLen = (fullLessonsRef.current && fullLessonsRef.current.length > 0) ? fullLessonsRef.current.length : lessons.length;
     if (snap.lessons.length !== baseLessonsLen) {
-      traceLessonPipeline('external sync snapshot: before replacing full lesson history', fullLessonsRef.current, {
-        note: `incoming rows=${snap.lessons.length}; current rows=${baseLessonsLen}`
-      });
-      traceLessonPipeline('external sync snapshot: incoming lesson history', snap.lessons);
       fullLessonsRef.current = snap.lessons;
       storage.setItem('dl_lessons', snap.lessons);
       setLessons(filterActiveLessons(snap.lessons));
@@ -2584,28 +2587,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     if (!isInitializedRef.current) return;
     function syncLessons() {
       if (!lessons) return;
-      // Capture only for adding genuinely missing active records. The full store
-      // is authoritative for every ID it already contains.
       const currentLessons = lessons;
-      enqueueLessonSyncTask(async () => {
-        const stored = await storage.getItem<Lesson[]>('dl_lessons');
-        const full = Array.isArray(stored) ? stored : (fullLessonsRef.current || []);
+      lessonSyncQueue = lessonSyncQueue.then(async () => {
+        const full = (await storage.getItem<Lesson[]>('dl_lessons')) || fullLessonsRef.current || [];
+        const activeMap = new Map<string, Lesson>(currentLessons.map(l => [l.id, l]));
+        const fullIds = new Set(full.map(l => l.id));
+
         const prunedIds = getPrunedLessonIds();
-        traceLessonPipeline('syncLessons: persisted full history before merge', full);
-        traceLessonPipeline('syncLessons: current React projection', currentLessons);
-        const merged = mergeLessonSyncSnapshot(full, currentLessons, prunedIds);
-
-        // A stale React projection cannot change an existing full-store record.
-        // Skip the write entirely when it contributes no new IDs and no pruning.
-        if (merged.length === full.length) return;
-
-        fullLessonsRef.current = merged;
-        traceLessonPipeline('syncLessons: merged full history before write', merged, {
-          removedIds: prunedIds,
-          note: `merged rows=${merged.length}; previous rows=${full.length}`
+        const merged: Lesson[] = [];
+        (full as Lesson[]).forEach((l: Lesson) => {
+          if (l && l.id && prunedIds.has(l.id)) return; // Skip pruned records
+          if (activeMap.has(l.id)) {
+            merged.push(activeMap.get(l.id)!);
+          } else {
+            // Historical or tombstoned lesson, preserve in storage
+            merged.push(l);
+          }
         });
-        await storage.setItem('dl_lessons', merged);
-        traceLessonPipeline('syncLessons: persisted full history after write', (await storage.getItem<Lesson[]>('dl_lessons')) || []);
+
+        currentLessons.forEach(l => {
+          if (l && l.id && prunedIds.has(l.id)) return; // Skip pruned records
+          if (!fullIds.has(l.id)) {
+            merged.push(l);
+          }
+        });
+
+        // Strict deduplication by lesson ID (keeping latest occurrence)
+        const seen = new Set<string>();
+        const deduped: Lesson[] = [];
+        for (let i = merged.length - 1; i >= 0; i--) {
+          const item = merged[i];
+          if (item && item.id && !seen.has(item.id)) {
+            seen.add(item.id);
+            deduped.unshift(item);
+          }
+        }
+
+        fullLessonsRef.current = deduped;
+        await storage.setItem('dl_lessons', deduped);
       }).catch(err => console.error('Lesson sync error:', err));
     }
     syncLessons();
@@ -2734,7 +2753,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
     if (triggerType !== 'manual') {
       // Check if already shown today
-      if (normalizeDateToISO(inspirationSettings.lastShownDate || '') === normalizeDateToISO(todayStr)) {
+      if (inspirationSettings.lastShownDate === todayStr) {
         // If already shown today and displayMethod includes in_app card, load the active card if not dismissed
         if (!isInspirationDismissedToday && inspirationSettings.lastShownMessageId && (inspirationSettings.displayMethod === 'in_app' || inspirationSettings.displayMethod === 'both')) {
           const shownMsg = inspirationMessages.find(m => m.id === inspirationSettings.lastShownMessageId);
@@ -2747,7 +2766,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
       // Check specific frequency rules
       if (inspirationSettings.frequency === 'before_first_lesson' && triggerType !== 'before_lesson') {
-        const todaysLessons = lessons.filter(l => normalizeDateToISO(l.date) === normalizeDateToISO(todayStr) && l.status !== 'cancelled');
+        const todaysLessons = lessons.filter(l => l.date === todayStr && l.status !== 'cancelled');
         if (todaysLessons.length === 0) {
           return; // No lessons today yet
         }
@@ -2818,7 +2837,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const nowMins = now.getHours() * 60 + now.getMinutes();
 
       lessons.forEach((lesson) => {
-        if (lesson.deleted || normalizeDateToISO(lesson.date) !== normalizeDateToISO(todayStr) || lesson.status !== 'scheduled') return;
+        if (lesson.deleted || lesson.date !== todayStr || lesson.status !== 'scheduled') return;
 
         const timeParts = lesson.time.split(':').map(n => parseInt(n, 10));
         if (timeParts.length < 2 || isNaN(timeParts[0]) || isNaN(timeParts[1])) return;
@@ -2875,14 +2894,137 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     return () => clearInterval(interval);
   }, [lessons, profile.enableLessonAlerts, profile.enableBrowserPush, notifiedLessonAlerts, notificationSettings.masterEnabled, notificationSettings.lessonReminder.enabled, language]);
 
-  // Future recurring group occurrences are projected from group schedules; storage holds actual or edited lessons only.
+  // Auto-sync recurring group schedules directly into calendar (#27 Set optimization)
+  useEffect(() => {
+    if (!groups || groups.length === 0) return;
+
+    const sourceLessons = (fullLessonsRef.current && fullLessonsRef.current.length > 0)
+      ? fullLessonsRef.current
+      : lessons;
+    const newAutoLessons: Lesson[] = [];
+    const today = new Date();
+    const existingSlotSet = buildLessonSlotSet(sourceLessons);
+    const groupLessonCounts = new Map<string, number>();
+    for (const l of sourceLessons) {
+      if (!l.deleted && l.status !== 'cancelled' && l.groupId) {
+        groupLessonCounts.set(l.groupId, (groupLessonCounts.get(l.groupId) || 0) + 1);
+      }
+    }
+
+    groups.forEach(group => {
+      if (group.deleted || group.status === 'archived') return;
+      const slots = getGroupScheduleSlots(group);
+      if (slots.length === 0) return;
+
+      const isPerLesson = isGroupPerLesson(group);
+      const perSessionPrice = isPerLesson && group.pricePerSession
+        ? group.pricePerSession
+        : Math.round((group.monthlyPackagePrice || 1200) / (group.sessionCount || 4));
+      let groupAddedCount = 0;
+      const baseGroupCount = groupLessonCounts.get(group.id) || 0;
+
+      // Maintain a rolling window of exactly 14 days of auto-generated future lessons
+      const ROLLING_FUTURE_WINDOW_DAYS = 14;
+      const prunedIds = getPrunedLessonIds();
+
+      for (let dayOffset = 0; dayOffset <= ROLLING_FUTURE_WINDOW_DAYS; dayOffset++) {
+        const d = new Date();
+        d.setDate(today.getDate() + dayOffset);
+        if (!isDateMatchingGroupRecurrence(group.scheduleRecurrence, d)) continue;
+        const dayNum = d.getDay();
+
+        const matchingSlot = slots.find(s => getDayNumber(s.day) === dayNum);
+        if (matchingSlot) {
+          const dateStr = formatLocalDate(d);
+          const sessionTime = matchingSlot.time || '17:00';
+          const slotKey = makeLessonSlotKey(group.id, dateStr, sessionTime);
+          const autoLessonId = `l_auto_${group.id}_${dateStr}_${sessionTime.replace(':', '')}`;
+
+          // If this slot was explicitly pruned or already exists with a non-deleted record, do not auto-generate
+          if (prunedIds.has(autoLessonId)) continue;
+          if (sourceLessons.some(l => l && l.id === autoLessonId)) continue;
+
+          // If group already has a completed, cancelled, or in-progress session on this date, do not auto-generate another scheduled session
+          const existingForGroupOnDate = sourceLessons.filter(l => l.groupId === group.id && l.date === dateStr && !l.deleted);
+          const hasHandledOnDate = existingForGroupOnDate.some(
+            l => l.status === 'completed' || l.status === 'cancelled' || l.status === 'in_progress' || (l.report && l.report.attendanceStatus)
+          );
+          const daySlotsCount = slots.filter(s => getDayNumber(s.day) === dayNum).length || 1;
+          if (hasHandledOnDate && existingForGroupOnDate.length >= daySlotsCount) {
+            continue;
+          }
+
+          if (!existingSlotSet.has(slotKey)) {
+            existingSlotSet.add(slotKey);
+            const sessionNumber = isPerLesson
+              ? 1
+              : ((((group.startingSessionNumber || 1) - 1 + baseGroupCount + groupAddedCount) % (group.sessionCount || 4)) + 1);
+            groupAddedCount += 1;
+
+            newAutoLessons.push(wrapMutation({
+              id: autoLessonId,
+              groupId: group.id,
+              groupName: group.name,
+              title: `${group.name} Lektion`,
+              date: dateStr,
+              time: sessionTime,
+              durationMinutes: group.lessonDurationMinutes || 60,
+              type: group.type,
+              grade: group.grade,
+              sessionNumber,
+              totalSessionsInPackage: isPerLesson ? 1 : (group.sessionCount || 4),
+              status: 'scheduled',
+              paymentStatus: 'pending',
+              amountDue: perSessionPrice,
+              amountPaid: 0,
+              meetingLink: group.type === 'online'
+                ? resolveActiveZoomLinkForLesson({
+                    group,
+                    lesson: { groupId: group.id, date: dateStr, time: sessionTime },
+                    groupWeeklySessions: groupWeeklySessionsRef.current,
+                    defaultZoomLink: profile.defaultZoomLink
+                  })
+                : undefined,
+              locationAddress: group.type === 'offline' ? (group.address || 'Cairo Center') : undefined,
+              scheduleRecurrence: group.scheduleRecurrence || 'weekly',
+              biweeklyWeek: getAlternatingWeek(d),
+              isAutoGenerated: true
+            } as Lesson));
+          }
+        }
+      }
+    });
+
+    if (newAutoLessons.length > 0) {
+      updateFullLessonsStorage(prev => {
+        const prevSlotSet = buildLessonSlotSet(prev);
+        const prevIdSet = new Set(prev.map(l => l?.id).filter(Boolean));
+        const deduplicated = newAutoLessons.filter(
+          nl => !prevIdSet.has(nl.id) && !prevSlotSet.has(makeLessonSlotKey(nl.groupId || '', nl.date, nl.time))
+        );
+        if (deduplicated.length === 0) return prev;
+        let combined = [...prev, ...deduplicated];
+        const affectedGroupIds = new Set(deduplicated.map(l => l.groupId).filter(Boolean) as string[]);
+        affectedGroupIds.forEach(gid => {
+          const grp = groups.find(g => g.id === gid);
+          if (grp) {
+            combined = resequenceScheduledLessonsAfterChange(combined, { groupId: grp.id, groupName: grp.name }, {
+              group: grp,
+              students
+            });
+          }
+        });
+        return combined;
+      });
+    }
+  }, [groups]);
 
   const updateProfile = (updates: Partial<TeacherProfile>) => {
+    if (updates.schoolSettings?.visitRecords && Array.isArray(updates.schoolSettings.visitRecords)) {
+      setHodVisits(updates.schoolSettings.visitRecords);
+    }
     setProfile(prev => {
-      const merged = { ...prev, ...updates };
-      // HOD visits live only in hod_visit_records; never persist/re-import the legacy profile copy.
-      const { visitRecords: _legacyVisitRecords, ...schoolSettings } = (merged.schoolSettings || {}) as any;
-      const updated = { ...merged, schoolSettings } as TeacherProfile;
+      const updated = { ...prev, ...updates };
       storage.setItem('dl_profile', updated);
       return updated;
     });
@@ -2893,7 +3035,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const registerFinanceActivity = useCallback(() => {
     setProfile(prev => {
       const today = formatLocalDate();
-      if (normalizeDateToISO(prev.financeLastActivityDate || '') === normalizeDateToISO(today)) return prev; // Already registered today
+      if (prev.financeLastActivityDate === today) return prev; // Already registered today
       
       let newStreak = (prev.financeStreak || 0) + 1;
       if (prev.financeLastActivityDate) {
@@ -2918,95 +3060,116 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   // Sync simulation with Google Cloud
   // Explicit Refresh Calendar & Dashboard function
   const refreshCalendarAndDashboard = () => {
+    // Get current valid group and student IDs & maps
     const currentGroupsMap = new Map<string, Group>(groups.filter(g => !g.deleted).map(g => [g.id, g]));
     const currentGroupIds = new Set(currentGroupsMap.keys());
     const currentStudentIds = new Set(students.filter(s => !s.deleted).map(s => s.id));
     const currentStudentNames = new Set(students.filter(s => !s.deleted && Boolean(s.name)).map(s => s.name.toLowerCase()));
     const todayStr = formatLocalDate();
 
-    const sourceLessons = getFullLessonsSnapshot();
-    const filteredAndDeduplicated = filterActiveLessons(sourceLessons);
     const staleLessonIds = new Set<string>();
-    const refreshedLessons = filteredAndDeduplicated
-      .filter(lesson => {
-        if (lesson.groupId && lesson.groupId !== 'quick_group' && !currentGroupIds.has(lesson.groupId)) {
-          staleLessonIds.add(lesson.id);
-          return false;
-        }
-        if (lesson.studentId && !currentStudentIds.has(lesson.studentId)) {
-          staleLessonIds.add(lesson.id);
-          return false;
-        }
-        if (lesson.studentName && !lesson.isQuickLesson && !currentStudentNames.has(lesson.studentName.toLowerCase()) && !lesson.groupId) {
-          staleLessonIds.add(lesson.id);
-          return false;
-        }
-        if (
-          lesson.groupId && lesson.groupId !== 'quick_group' && !lesson.deleted &&
-          lesson.status === 'scheduled' && normalizeDateToISO(lesson.date) >= todayStr &&
-          (!lesson.report || (!lesson.report.attendanceStatus && !lesson.report.teacherNotes && !lesson.report.homeworkTitle && lesson.report.quizScore === undefined)) &&
-          (!lesson.studentPayments || Object.keys(lesson.studentPayments).length === 0) &&
-          (!lesson.amountPaid || lesson.amountPaid === 0)
-        ) {
-          const targetGroup = currentGroupsMap.get(lesson.groupId);
-          if (targetGroup) {
-            const activeSlots = getGroupScheduleSlots(targetGroup);
-            if (activeSlots.length > 0) {
-              const dayNum = new Date(lesson.date + 'T00:00:00').getDay();
-              if (!activeSlots.some(slot => getDayNumber(slot.day) === dayNum && slot.time === lesson.time)) {
-                staleLessonIds.add(lesson.id);
-                return false;
-              }
-              const daySlotsCount = activeSlots.filter(slot => getDayNumber(slot.day) === dayNum).length || 1;
-              const completedCountOnDate = filteredAndDeduplicated.filter(
-                l => l.groupId === lesson.groupId &&
-                  normalizeDateToISO(l.date) === normalizeDateToISO(lesson.date) &&
-                  !l.deleted && (l.status === 'completed' || (l.report && l.report.attendanceStatus))
-              ).length;
-              if (completedCountOnDate >= daySlotsCount) {
-                staleLessonIds.add(lesson.id);
-                return false;
+
+    // Clean up orphaned, duplicate, and stale lessons, and synchronize denormalized names
+    setLessons(prev => {
+      const filteredAndDeduplicated = filterActiveLessons(prev);
+
+      return filteredAndDeduplicated
+        .filter(lesson => {
+          // If group lesson and group no longer exists
+          if (lesson.groupId && lesson.groupId !== 'quick_group' && !currentGroupIds.has(lesson.groupId)) {
+            staleLessonIds.add(lesson.id);
+            return false;
+          }
+          // If student lesson and student no longer exists
+          if (lesson.studentId && !currentStudentIds.has(lesson.studentId)) {
+            staleLessonIds.add(lesson.id);
+            return false;
+          }
+          if (lesson.studentName && !lesson.isQuickLesson && !currentStudentNames.has(lesson.studentName.toLowerCase()) && !lesson.groupId) {
+            staleLessonIds.add(lesson.id);
+            return false;
+          }
+
+          // Clean up stale future scheduled lessons that do not match the group's current schedule slots
+          if (
+            lesson.groupId && 
+            lesson.groupId !== 'quick_group' && 
+            !lesson.deleted &&
+            lesson.status === 'scheduled' && 
+            lesson.date >= todayStr && 
+            (!lesson.report || (!lesson.report.attendanceStatus && !lesson.report.teacherNotes && !lesson.report.homeworkTitle && lesson.report.quizScore === undefined)) &&
+            (!lesson.studentPayments || Object.keys(lesson.studentPayments).length === 0) &&
+            (!lesson.amountPaid || lesson.amountPaid === 0)
+          ) {
+            const targetGroup = currentGroupsMap.get(lesson.groupId);
+            if (targetGroup) {
+              const activeSlots = getGroupScheduleSlots(targetGroup);
+              if (activeSlots.length > 0) {
+                const lDate = new Date(lesson.date + 'T00:00:00');
+                const lDayNum = lDate.getDay();
+                const matchesAnySlot = activeSlots.some(s => getDayNumber(s.day) === lDayNum && s.time === lesson.time);
+                if (!matchesAnySlot) {
+                  staleLessonIds.add(lesson.id);
+                  return false; // Safely purge stale future session from older schedule
+                }
+
+                // Also purge unstarted scheduled session if group ALREADY completed its session(s) on this date
+                const daySlotsCount = activeSlots.filter(s => getDayNumber(s.day) === lDayNum).length || 1;
+                const completedCountOnDate = filteredAndDeduplicated.filter(
+                  l => l.groupId === lesson.groupId &&
+                       l.date === lesson.date &&
+                       !l.deleted &&
+                       (l.status === 'completed' || (l.report && l.report.attendanceStatus))
+                ).length;
+
+                if (completedCountOnDate >= daySlotsCount) {
+                  staleLessonIds.add(lesson.id);
+                  return false; // Safely purge redundant unstarted scheduled session since group already completed session today
+                }
               }
             }
           }
-        }
-        return true;
-      })
-      .map(lesson => {
-        if (lesson.status === 'completed' || lesson.status === 'cancelled' || lesson.status === 'in_progress') {
-          return lesson;
-        }
-        if (lesson.groupId && currentGroupsMap.has(lesson.groupId)) {
-          const grp = currentGroupsMap.get(lesson.groupId)!;
-          const isNameStale = lesson.groupName !== grp.name;
-          const isDefaultTitle = !lesson.title || lesson.title.includes('Lektion') || lesson.title.includes('Lesson') || lesson.title === lesson.groupName;
-          if (isNameStale || (isDefaultTitle && !lesson.title.startsWith(grp.name))) {
-            return wrapMutation({
-              ...lesson,
-              groupName: grp.name,
-              title: isDefaultTitle ? `${grp.name} Lektion` : lesson.title,
-              grade: grp.grade || lesson.grade,
-              type: grp.type || lesson.type
-            } as Lesson);
+
+          return true;
+        })
+        .map(lesson => {
+          // Synchronize group metadata to fix any stale group names on lessons
+          if (lesson.groupId && currentGroupsMap.has(lesson.groupId)) {
+            const grp = currentGroupsMap.get(lesson.groupId)!;
+            const isNameStale = lesson.groupName !== grp.name;
+            const isDefaultTitle = !lesson.title || lesson.title.includes('Lektion') || lesson.title.includes('Lesson') || lesson.title === lesson.groupName;
+
+            if (isNameStale || (isDefaultTitle && !lesson.title.startsWith(grp.name))) {
+              return wrapMutation({
+                ...lesson,
+                groupName: grp.name,
+                title: isDefaultTitle ? `${grp.name} Lektion` : lesson.title,
+                grade: grp.grade || lesson.grade,
+                type: grp.type || lesson.type
+              } as Lesson);
+            }
           }
-        }
-        return lesson;
-      });
+          return lesson;
+        });
+    });
 
-    setLessons(refreshedLessons);
-    const refreshedById = new Map(refreshedLessons.map(lesson => [lesson.id, lesson]));
-    void updateFullLessonsStorage(all => all.map(lesson => {
-      if (staleLessonIds.has(lesson.id)) return wrapDeletion(lesson);
-      return refreshedById.get(lesson.id) || lesson;
-    }));
-
+    // Clean up orphaned payments with proper sync tombstones
     setPayments(prev => prev.map(payment => {
       const isOrphanedGroup = payment.groupId && payment.groupId !== 'quick_group' && !currentGroupIds.has(payment.groupId);
       const isOrphanedStudent = payment.studentId && !payment.studentId.startsWith('temp_') && !currentStudentIds.has(payment.studentId);
-      return isOrphanedGroup || isOrphanedStudent ? wrapDeletion(payment) : payment;
+      if (isOrphanedGroup || isOrphanedStudent) {
+        return wrapDeletion(payment);
+      }
+      return payment;
     }));
 
-    setTimeout(() => {}, 600);
+    if (staleLessonIds.size > 0) {
+      updateFullLessonsStorage(all => all.map(l => staleLessonIds.has(l.id) ? wrapDeletion(l) : l));
+    }
+
+    // Trigger visual sync completion feedback
+    setTimeout(() => {
+    }, 600);
   };
 
   const purgeOrphanedRecords = useCallback(async (params: {
@@ -3289,7 +3452,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const isHistoricalOrLocked = (l: Lesson) => {
       if (l.groupId !== id) return true;
       if (l.deleted) return true;
-      if (normalizeDateToISO(l.date) < normalizeDateToISO(todayStr)) return true;
+      if (l.date < todayStr) return true;
       if (l.status !== 'scheduled') return true;
       if (l.report && (l.report.attendanceStatus || l.report.teacherNotes || l.report.homeworkTitle || l.report.quizScore !== undefined)) return true;
       if (l.studentPayments && Object.keys(l.studentPayments).length > 0) return true;
@@ -3299,29 +3462,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
     // Pre-calculate new generated lessons using authoritative full lessons snapshot so RAM & Storage stay 100% consistent
     const fullSourceLessons = (fullLessonsRef.current && fullLessonsRef.current.length > 0) ? fullLessonsRef.current : lessons;
-    const isPerLessonBool = Boolean(
-      updatedGroup.paymentCycle === 'per_lesson' ||
-      updatedGroup.paymentModel === 'per_session' ||
-      (updatedGroup.sessionCount !== undefined && updatedGroup.sessionCount <= 1)
-    );
-    const perSessionPrice = isPerLessonBool && updatedGroup.pricePerSession
-      ? updatedGroup.pricePerSession
-      : Math.round((updatedGroup.monthlyPackagePrice || effectivePrice || 1200) / mergedSessionCount);
-
-    const existingPerSessionPrice = isGroupPerLesson(existingGroup) && existingGroup.pricePerSession
-      ? existingGroup.pricePerSession
-      : Math.round((existingGroup.monthlyPackagePrice || 1200) / (existingGroup.sessionCount || 4));
-    const pricingChanged =
-      effectivePrice !== (existingGroup.monthlyPackagePrice ?? 1200) ||
-      perSessionPrice !== existingPerSessionPrice ||
-      mergedSessionCount !== (existingGroup.sessionCount || 4) ||
-      isPerLesson !== isGroupPerLesson(existingGroup);
-
     const newGeneratedLessons: Lesson[] = [];
     if (scheduleChanged && newSlots.length > 0) {
-      const pastGroupLessonsCount = fullSourceLessons.filter(l => l.groupId === id && !l.deleted && l.status !== 'cancelled' && (normalizeDateToISO(l.date) < normalizeDateToISO(todayStr) || isHistoricalOrLocked(l))).length;
+      const pastGroupLessonsCount = fullSourceLessons.filter(l => l.groupId === id && !l.deleted && l.status !== 'cancelled' && (l.date < todayStr || isHistoricalOrLocked(l))).length;
       const startingNum = updatedGroup.startingSessionNumber || 1;
       const sessionCount = updatedGroup.sessionCount || 4;
+
+      const isPerLessonBool = Boolean(
+        updatedGroup.paymentCycle === 'per_lesson' ||
+        updatedGroup.paymentModel === 'per_session' ||
+        (updatedGroup.sessionCount !== undefined && updatedGroup.sessionCount <= 1)
+      );
+      const perSessionPrice = isPerLessonBool && updatedGroup.pricePerSession
+        ? updatedGroup.pricePerSession
+        : Math.round((updatedGroup.monthlyPackagePrice || 1200) / sessionCount);
 
       const existingSlotSet = buildLessonSlotSet(fullSourceLessons);
       const today = new Date();
@@ -3335,73 +3489,59 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           continue;
         }
 
-        const matchingSlots = newSlots.filter(s => getDayNumber(s.day) === dayNum);
-        if (matchingSlots.length > 0) {
+        const matchingSlot = newSlots.find(s => getDayNumber(s.day) === dayNum);
+        if (matchingSlot) {
           const dateStr = formatLocalDate(d);
-          // If group already completed all its scheduled sessions on this date, do not generate duplicate/extra slots
-          const existingForGroupOnDate = fullSourceLessons.filter(
-            l => l.groupId === id && normalizeDateToISO(l.date) === normalizeDateToISO(dateStr) && !l.deleted
-          );
+          const sessionTime = matchingSlot.time || '17:00';
+          const slotKey = makeLessonSlotKey(id, dateStr, sessionTime);
+
+          // If group already has a completed session on this date, do not generate duplicate/extra slots
+          const existingForGroupOnDate = lessons.filter(l => l.groupId === id && l.date === dateStr && !l.deleted);
           const hasCompletedOnDate = existingForGroupOnDate.some(
             l => l.status === 'completed' || (l.report && l.report.attendanceStatus)
           );
-          if (hasCompletedOnDate && existingForGroupOnDate.length >= matchingSlots.length) {
+          const daySlotsCount = newSlots.filter(s => getDayNumber(s.day) === dayNum).length || 1;
+          if (hasCompletedOnDate && existingForGroupOnDate.length >= daySlotsCount) {
             continue;
           }
 
-          for (const matchingSlot of matchingSlots) {
-            const sessionTime = matchingSlot.time || '17:00';
-            const slotKey = makeLessonSlotKey(id, dateStr, sessionTime);
+          if (!existingSlotSet.has(slotKey)) {
+            existingSlotSet.add(slotKey);
+            const currentSessionIndex = pastGroupLessonsCount + newGeneratedLessons.length;
+            const sessionNumber = ((startingNum - 1 + currentSessionIndex) % sessionCount) + 1;
 
-            if (!existingSlotSet.has(slotKey)) {
-              existingSlotSet.add(slotKey);
-              const currentSessionIndex = pastGroupLessonsCount + newGeneratedLessons.length;
-              const sessionNumber = ((startingNum - 1 + currentSessionIndex) % sessionCount) + 1;
-
-              newGeneratedLessons.push(wrapMutation({
-                id: `l_auto_${updatedGroup.id}_${dateStr}_${sessionTime.replace(':', '')}`,
-                groupId: updatedGroup.id,
-                groupName: updatedGroup.name,
-                title: `${updatedGroup.name} Lektion`,
-                date: dateStr,
-                time: sessionTime,
-                durationMinutes: updatedGroup.lessonDurationMinutes || 60,
-                type: updatedGroup.type,
-                grade: updatedGroup.grade,
-                sessionNumber,
-                totalSessionsInPackage: sessionCount,
-                status: 'scheduled',
-                paymentStatus: 'pending',
-                amountDue: perSessionPrice,
-                amountPaid: 0,
-                meetingLink: updatedGroup.type === 'online'
-                  ? resolveActiveZoomLinkForLesson({
-                      group: updatedGroup,
-                      lesson: { groupId: updatedGroup.id, date: dateStr, time: sessionTime },
-                      groupWeeklySessions: groupWeeklySessionsRef.current,
-                    })
-                  : undefined,
-                locationAddress: updatedGroup.type === 'offline' ? (updatedGroup.address || 'Cairo Center') : undefined,
-                scheduleRecurrence: updatedGroup.scheduleRecurrence || 'weekly',
-                biweeklyWeek: getAlternatingWeek(d)
-              } as Lesson));
-            }
+            newGeneratedLessons.push(wrapMutation({
+              id: `l_auto_${updatedGroup.id}_${dateStr}_${sessionTime.replace(':', '')}`,
+              groupId: updatedGroup.id,
+              groupName: updatedGroup.name,
+              title: `${updatedGroup.name} Lektion`,
+              date: dateStr,
+              time: sessionTime,
+              durationMinutes: updatedGroup.lessonDurationMinutes || 60,
+              type: updatedGroup.type,
+              grade: updatedGroup.grade,
+              sessionNumber,
+              totalSessionsInPackage: sessionCount,
+              status: 'scheduled',
+              paymentStatus: 'pending',
+              amountDue: perSessionPrice,
+              amountPaid: 0,
+              meetingLink: updatedGroup.type === 'online'
+                ? resolveActiveZoomLinkForLesson({
+                    group: updatedGroup,
+                    lesson: { groupId: updatedGroup.id, date: dateStr, time: sessionTime },
+                    groupWeeklySessions: groupWeeklySessionsRef.current,
+                    defaultZoomLink: profile.defaultZoomLink
+                  })
+                : undefined,
+              locationAddress: updatedGroup.type === 'offline' ? (updatedGroup.address || 'Cairo Center') : undefined,
+              scheduleRecurrence: updatedGroup.scheduleRecurrence || 'weekly',
+              biweeklyWeek: getAlternatingWeek(d)
+            } as Lesson));
           }
         }
       }
     }
-
-    // Precompute group members and custom-pricing overrides synchronously before payment updates
-    const groupStudentIds = new Set<string>();
-    const customOverrideStudentIds = new Set<string>();
-    (students || []).forEach(s => {
-      if (s.groupId === id) {
-        groupStudentIds.add(s.id);
-        if (hasStudentCustomPricingOverride(s)) {
-          customOverrideStudentIds.add(s.id);
-        }
-      }
-    });
 
     // 1. Update groups state
     setGroups(prev => prev.map(g => (g.id === id ? updatedGroup : g)));
@@ -3416,13 +3556,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           l.title === `${existingGroup.name} Lesson` ||
           l.title === existingGroup.name;
 
-        const canUpdateLessonDue =
-          pricingChanged &&
-          !isHistoricalOrLocked(l) &&
-          l.paymentStatus !== 'paid' &&
-          l.paymentStatus !== 'partial' &&
-          !(l.amountPaid && l.amountPaid > 0);
-
         return wrapMutation({
           ...l,
           groupName: updatedGroup.name,
@@ -3436,12 +3569,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
                 group: updatedGroup,
                 lesson: l,
                 groupWeeklySessions: groupWeeklySessionsRef.current,
+                defaultZoomLink: profile.defaultZoomLink
               }) || l.meetingLink)
             : undefined,
           locationAddress: updatedGroup.type === 'offline' ? (updatedGroup.address || l.locationAddress) : undefined,
           durationMinutes: updatedGroup.lessonDurationMinutes || l.durationMinutes || 60,
           totalSessionsInPackage: isPerLesson ? 1 : mergedSessionCount,
-          ...(canUpdateLessonDue ? { amountDue: perSessionPrice } : {}),
           isQuickLesson: false
         } as Lesson);
       });
@@ -3493,16 +3626,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return updated;
     });
 
-    // 3. Synchronize students of this group without overwriting explicit custom student pricing overrides
+    // 3. Synchronize students of this group with the updated payment model
+    const groupStudentIds = new Set<string>();
     setStudents(prev => {
       let studentsChanged = false;
       const updatedStudents = prev.map(s => {
         if (s.groupId !== id) return s;
         groupStudentIds.add(s.id);
-        if (hasStudentCustomPricingOverride(s)) {
-          customOverrideStudentIds.add(s.id);
-          return s;
-        }
 
         const newPaymentPlan: PaymentPlanType = isPerLesson 
           ? 'per_lesson' 
@@ -3537,13 +3667,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return prev;
     });
 
-    // 4. Synchronize pending/unpaid payment records for this group & non-override students
-    updateFullPaymentsStorage(prev => {
+    // 4. Synchronize pending/unpaid payment records for this group & its students
+    setPayments(prev => {
       let paymentsChanged = false;
       const targetBundle = isPerLesson ? 1 : mergedSessionCount;
       const updatedPayments = prev.map(p => {
-        if (p.deleted || p.status === 'paid' || p.status === 'exempted' || p.paymentType === 'exemption') return p;
-        if (p.studentId && customOverrideStudentIds.has(p.studentId)) return p;
+        if (p.status === 'paid' || p.status === 'exempted') return p;
         const matchesGroup = p.groupId === id;
         const studentBelongsToGroup = groupStudentIds.has(p.studentId || '');
         if (!matchesGroup && !studentBelongsToGroup) return p;
@@ -3553,26 +3682,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           return d.replace(/Session (\d+)\/(\d+)/g, `Session $1/${targetBundle}`);
         });
 
-        const netDue = Math.max(0, effectivePrice - (p.discountAmount || 0));
-        const alreadyPaid = Math.max(0, p.amountPaid || 0);
-        const newRemaining = Math.max(0, netDue - alreadyPaid);
-        const nextStatus: PaymentStatus =
-          newRemaining === 0 && netDue > 0 && alreadyPaid > 0
-            ? 'paid'
-            : (alreadyPaid > 0 && newRemaining > 0 ? 'partial' : p.status);
-
         return wrapMutation({
           ...p,
           bundleSize: targetBundle,
           amountDue: effectivePrice,
-          remainingBalance: newRemaining,
-          status: nextStatus,
-          paidDate: nextStatus === 'paid' ? (p.paidDate || formatLocalDate()) : p.paidDate,
           lessonDates: updatedDates
         } as PaymentRecord);
       });
 
-      return paymentsChanged ? updatedPayments : prev;
+      if (paymentsChanged) {
+        storage.setItem('dl_payments', updatedPayments);
+        return updatedPayments;
+      }
+      return prev;
     });
 
     if (updatedGroup.type === 'online' || groupWeeklySessionsRef.current.some((s) => s.groupId === id && !s.deleted)) {
@@ -3619,7 +3741,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     // Cancel / delete future scheduled lessons belonging to the deleted group from both storage and RAM
     const todayStr = formatLocalDate();
     await updateFullLessonsStorage(all => all.map(l => {
-      if (l.groupId === id && (normalizeDateToISO(l.date) >= normalizeDateToISO(todayStr) || l.status === 'scheduled' || l.status === 'in_progress' || l.status === 'pending_action') && l.status !== 'completed') {
+      if (l.groupId === id && (l.date >= todayStr || l.status === 'scheduled' || l.status === 'in_progress' || l.status === 'pending_action') && l.status !== 'completed') {
         return wrapDeletion(l);
       }
       return l;
@@ -3638,11 +3760,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   const archiveGroup = (id: string) => {
-    setGroups(prev => {
-      const next = prev.map(g => g.id === id ? wrapMutation({ ...g, status: 'archived' } as Group) : g);
-      void storage.setItem('dl_groups', next);
-      return next;
-    });
+    setGroups(prev => prev.map(g => g.id === id ? wrapMutation({ ...g, status: 'archived' } as Group) : g));
     setStudents(prev => {
       const next = prev.map(s => {
         if (s.groupId === id) {
@@ -3656,18 +3774,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         }
         return s;
       });
-      void storage.setItem('dl_students', next);
+      storage.setItem('dl_students', next);
       return next;
     });
-    void updateFullLessonsStorage(all => all.map(l => {
-      if (l.groupId === id && !l.deleted && l.status === 'scheduled') {
+    setLessons(prev => prev.map(l => {
+      if (l.groupId === id && l.status === 'scheduled') {
         return wrapDeletion(l);
       }
       return l;
     }));
-    autoSyncEngine.notifyMutation('groups', id);
-    autoSyncEngine.notifyMutation('students', id);
-    autoSyncEngine.notifyMutation('lessons', id);
     refreshCalendarAndDashboard();
   };
 
@@ -3725,14 +3840,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   // Student operations (Note: Pricing is automatically inherited from assigned group!)
   const addStudent = (studentData: Omit<Student, 'id' | 'documents' | 'joinedDate'>): Student => {
-    const trimmedName = (studentData.name || '').trim();
-    const dup = findDuplicateStudentByName(students, trimmedName);
-    if (dup) {
-      const err = new Error(`A student named "${trimmedName}" already exists. Use a distinct name.`);
-      (err as any).code = 'DUPLICATE_STUDENT_NAME';
-      throw err;
-    }
-
     const assignedGroup = studentData.groupId 
       ? (groups.find(g => g.id === studentData.groupId || (g.name && g.name.trim().toLowerCase() === studentData.groupId!.trim().toLowerCase())))
       : undefined;
@@ -3746,7 +3853,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
     const newStudent: Student = wrapMutation({
       ...studentData,
-      name: trimmedName || studentData.name,
       paymentPlan,
       bundleSize,
       pricePerLesson,
@@ -3755,11 +3861,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       documents: [],
       joinedDate: formatLocalDate()
     } as Student);
-    setStudents(prev => {
-      const next = [...prev, newStudent];
-      void storage.setItem('dl_students', next);
-      return next;
-    });
+    setStudents(prev => [...prev, newStudent]);
     autoSyncEngine.notifyMutation('students', newStudent.id);
     return newStudent;
   };
@@ -3767,16 +3869,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const updateStudent = (id: string, updates: Partial<Student>) => {
     const existingStudent = students.find(s => s.id === id);
     const oldName = existingStudent?.name;
-
-    if (updates.name !== undefined) {
-      const candidateName = updates.name.trim();
-      const dup = findDuplicateStudentByName(students, candidateName, id);
-      if (dup) {
-        const err = new Error(`A student named "${candidateName}" already exists. Use a distinct name.`);
-        (err as any).code = 'DUPLICATE_STUDENT_NAME';
-        throw err;
-      }
-    }
 
     setStudents(prev => {
       const next = prev.map(s => {
@@ -3797,51 +3889,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     });
     autoSyncEngine.notifyMutation('students', id);
 
-    // Propagate student name changes strictly by canonical studentId (never by ambiguous name match)
+    // Propagate student name changes to other synced database collections (lessons and payments)
     if (updates.name && oldName && updates.name !== oldName) {
       const newName = updates.name;
       
       const lessonUpdater = (allLessons: Lesson[]) => allLessons.map(l => {
         const matchesId = l.studentId === id;
-        const hasStudentPaymentEntry = Boolean(l.studentPayments?.[id]);
-        const hasReportPaymentEntry = Boolean(l.report?.studentPayments?.[id]);
-        if (!matchesId && !hasStudentPaymentEntry && !hasReportPaymentEntry) {
-          return l;
+        const matchesName = l.studentName === oldName;
+        if (matchesId || matchesName) {
+          let updatedTitle = l.title;
+          if (l.title && l.title.includes(oldName)) {
+            updatedTitle = l.title.replace(oldName, newName);
+          }
+          return wrapMutation({
+            ...l,
+            studentName: newName,
+            title: updatedTitle
+          } as Lesson);
         }
-
-        let updatedTitle = l.title;
-        if (matchesId && l.title && l.title.includes(oldName)) {
-          updatedTitle = l.title.replace(oldName, newName);
-        }
-        const nextStudentPayments = hasStudentPaymentEntry
-          ? {
-              ...l.studentPayments,
-              [id]: { ...l.studentPayments![id], studentName: newName }
-            }
-          : l.studentPayments;
-        const nextReport = hasReportPaymentEntry && l.report
-          ? {
-              ...l.report,
-              studentPayments: {
-                ...l.report.studentPayments,
-                [id]: { ...l.report.studentPayments![id], studentName: newName }
-              }
-            }
-          : l.report;
-
-        return wrapMutation({
-          ...l,
-          studentName: matchesId ? newName : l.studentName,
-          title: updatedTitle,
-          ...(nextStudentPayments !== l.studentPayments ? { studentPayments: nextStudentPayments } : {}),
-          ...(nextReport !== l.report ? { report: nextReport } : {})
-        } as Lesson);
+        return l;
       });
 
       updateFullLessonsStorage(lessonUpdater);
 
       const paymentUpdater = (allPayments: PaymentRecord[]) => allPayments.map(p => {
-        if (p.studentId === id) {
+        const matchesId = p.studentId === id;
+        const matchesName = p.studentName === oldName;
+        if (matchesId || matchesName) {
           let updatedNote = (p as any).note || (p as any).title;
           if (updatedNote && updatedNote.includes(oldName)) {
             updatedNote = updatedNote.replace(oldName, newName);
@@ -3974,15 +4048,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const moveStudent = (studentId: string, newGroupId: string) => {
     const targetGroup = groups.find(g => g.id === newGroupId);
-    const todayIso = formatLocalDate();
+    const newGrade = targetGroup?.grade;
     setStudents(prev => {
       const next = prev.map(s => {
         if (s.id === studentId) {
-          return wrapMutation(reconcileStudentForGroupMove(s, targetGroup, todayIso, newGroupId));
+          return wrapMutation({
+            ...s,
+            groupId: newGroupId,
+            grade: newGrade || s.grade,
+            updatedAt: Date.now()
+          } as Student);
         }
         return s;
       });
-      void storage.setItem('dl_students', next);
+      storage.setItem('dl_students', next);
       return next;
     });
     autoSyncEngine.notifyMutation('students', studentId);
@@ -3990,16 +4069,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const moveStudentsBulk = (studentIds: string[], newGroupId: string) => {
     const targetGroup = groups.find(g => g.id === newGroupId);
-    const todayIso = formatLocalDate();
+    const newGrade = targetGroup?.grade;
     const idSet = new Set(studentIds);
     setStudents(prev => {
       const next = prev.map(s => {
         if (idSet.has(s.id)) {
-          return wrapMutation(reconcileStudentForGroupMove(s, targetGroup, todayIso, newGroupId));
+          return wrapMutation({
+            ...s,
+            groupId: newGroupId,
+            grade: newGrade || s.grade,
+            updatedAt: Date.now()
+          } as Student);
         }
         return s;
       });
-      void storage.setItem('dl_students', next);
+      storage.setItem('dl_students', next);
       return next;
     });
     studentIds.forEach(id => {
@@ -4027,40 +4111,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     autoSyncEngine.notifyMutation('students', id);
   };
 
-  const uploadStudentDocument = async (
-    studentId: string,
-    file: File,
-    category: 'homework' | 'exam' | 'doc'
-  ): Promise<StudentDocument> => {
-    const newDoc = await createPersistedStudentDocument(file, category);
-    setStudents(prev => {
-      const next = prev.map(s =>
-        s.id === studentId ? wrapMutation({ ...s, documents: [newDoc, ...(s.documents || [])] } as Student) : s
-      );
-      void storage.setItem('dl_students', next);
-      return next;
-    });
-    autoSyncEngine.notifyMutation('students', studentId);
-    return newDoc;
+  const uploadStudentDocument = (studentId: string, file: File, category: 'homework' | 'exam' | 'doc') => {
+    const newDoc: StudentDocument = {
+      id: `doc_${Date.now()}`,
+      fileName: file.name,
+      fileType: file.type.includes('pdf') ? 'pdf' : file.type.includes('image') ? 'image' : 'doc',
+      fileSize: `${(file.size / 1024).toFixed(1)} KB`,
+      uploadedAt: formatLocalDate(),
+      url: URL.createObjectURL(file),
+      category
+    };
+    setStudents(prev => prev.map(s => s.id === studentId ? wrapMutation({ ...s, documents: [newDoc, ...(s.documents || [])] } as Student) : s));
   };
 
   const deleteStudentDocument = (studentId: string, docId: string) => {
-    const targetDoc = students
-      .find(s => s.id === studentId)
-      ?.documents?.find(d => d.id === docId);
-
-    setStudents(prev => {
-      const next = prev.map(s => s.id === studentId ? wrapMutation({
-        ...s,
-        documents: (s.documents || []).filter(d => d.id !== docId)
-      } as Student) : s);
-      void storage.setItem('dl_students', next);
-      return next;
-    });
-    autoSyncEngine.notifyMutation('students', studentId);
-    if (targetDoc) {
-      void deletePersistedStudentDocumentPayload(targetDoc);
-    }
+    setStudents(prev => prev.map(s => s.id === studentId ? wrapMutation({
+      ...s,
+      documents: (s.documents || []).filter(d => d.id !== docId)
+    } as Student) : s));
   };
 
   const updateStudentCertificateName = (studentId: string, certName: string) => {
@@ -4244,7 +4312,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     return active.filter(n => {
       if (params.lessonId && n.lessonId === params.lessonId) return true;
       if (params.date && params.periodNumber !== undefined && params.className) {
-        if (normalizeDateToISO(n.date || '') === normalizeDateToISO(params.date || '') && n.periodNumber === params.periodNumber && n.className?.trim().toLowerCase() === params.className.trim().toLowerCase()) {
+        if (n.date === params.date && n.periodNumber === params.periodNumber && n.className?.trim().toLowerCase() === params.className.trim().toLowerCase()) {
           return true;
         }
       }
@@ -4417,49 +4485,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return nextTxs;
     });
   }, []);
-
-  const upsertPaymentFinanceTransaction = useCallback((params: {
-    paymentId: string;
-    matchPaymentIds?: string[];
-    accountId: string;
-    amount: number;
-    date: string;
-    note: string;
-    relatedStudentId?: string;
-    categoryId?: string;
-  }) => {
-    setFinanceTransactions(prev => {
-      const result = reconcilePaymentFinanceTransaction(prev || [], [], {
-        ...params,
-        wrapMutation,
-        wrapDeletion
-      });
-      setFinanceAccounts(prevAccs => {
-        const accounts = (prevAccs && prevAccs.length > 0) ? prevAccs : [DEFAULT_FINANCE_ACCOUNT];
-        let workingAccounts = accounts;
-        if (params.accountId && !workingAccounts.some(a => a.id === params.accountId)) {
-          workingAccounts = [
-            ...workingAccounts,
-            {
-              id: params.accountId,
-              name: 'الخزينة الرئيسية (كاش)',
-              type: 'cash',
-              openingBalance: 0,
-              initialBalance: 0,
-              currentBalance: 0,
-              currency: 'EGP',
-              createdAt: new Date().toISOString(),
-              updatedAt: Date.now(),
-              version: 1
-            }
-          ];
-        }
-        return recalculateAllAccountBalances(workingAccounts, result.nextTransactions);
-      });
-      return result.nextTransactions;
-    });
-    registerFinanceActivity();
-  }, [DEFAULT_FINANCE_ACCOUNT, registerFinanceActivity]);
 
   const addFinanceRecurring = useCallback((recurringData: Omit<FinanceRecurring, 'id' | 'createdAt' | 'updatedAt' | 'originRevision' | 'originDeviceId' | 'updatedByDeviceId' | 'deleted' | 'version'>): FinanceRecurring => {
     const newRec: FinanceRecurring = {
@@ -4651,59 +4676,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       if (target) {
         setGroups(prev => {
           const exists = prev.some(g => g.id === targetId);
-          const next = exists
-            ? prev.map(g => g.id === targetId ? wrapMutation({ ...target.item, status: 'active', deleted: false } as any) : g)
-            : [...prev, wrapMutation({ ...target.item, status: 'active', deleted: false } as any)];
-          void storage.setItem('dl_groups', next);
-          return next;
+          if (exists) {
+            return prev.map(g => g.id === targetId ? wrapMutation({ ...target.item, deleted: false } as any) : g);
+          }
+          return [...prev, wrapMutation({ ...target.item, deleted: false } as any)];
         });
 
-        // Restore all non-purged students belonging to this group from BOTH recentlyDeleted AND existing student records
-        const linkedTrashStudents = recentlyDeleted.students.filter(
+        // Also restore associated non-purged students and lessons belonging to this group
+        const linkedStudents = recentlyDeleted.students.filter(
           d => (d.item.groupId === targetId || d.item.archivedGroupId === targetId) && !purgedIds.has(d.item.id.trim())
         );
-        const linkedTrashStudentMap = new Map(linkedTrashStudents.map(d => [d.item.id, d.item]));
-        const linkedStudentIds = new Set<string>(linkedTrashStudents.map(d => d.item.id));
-
-        setStudents(prev => {
-          const existingIds = new Set(prev.map(s => s.id));
-          let changed = false;
-          const updatedPrev = prev.map(s => {
-            const belongsToTarget = s.groupId === targetId || s.archivedGroupId === targetId;
-            const inTrashForTarget = linkedTrashStudentMap.has(s.id);
-            if ((belongsToTarget || inTrashForTarget) && !purgedIds.has(s.id.trim()) && (s.deleted || s.status === 'archived' || s.groupId !== targetId)) {
-              linkedStudentIds.add(s.id);
-              changed = true;
-              const baseStudent = inTrashForTarget ? linkedTrashStudentMap.get(s.id)! : s;
-              return wrapMutation({
-                ...baseStudent,
-                groupId: targetId,
-                archivedGroupId: undefined,
-                status: 'active',
-                deleted: false
-              } as any);
-            }
-            return s;
+        const linkedStudentIds = new Set(linkedStudents.map(d => d.item.id));
+        if (linkedStudents.length > 0) {
+          setStudents(prev => {
+            const existingIds = new Set(prev.map(s => s.id));
+            const restored = linkedStudents
+              .filter(d => !existingIds.has(d.item.id))
+              .map(d => wrapMutation({ ...d.item, groupId: targetId, deleted: false } as any));
+            return [
+              ...prev.map(s => linkedStudentIds.has(s.id) ? wrapMutation({ ...s, groupId: targetId, deleted: false } as any) : s),
+              ...restored
+            ];
           });
-          const restoredFromTrash = linkedTrashStudents
-            .filter(d => !existingIds.has(d.item.id))
-            .map(d => {
-              changed = true;
-              return wrapMutation({
-                ...d.item,
-                groupId: targetId,
-                archivedGroupId: undefined,
-                status: 'active',
-                deleted: false
-              } as any);
-            });
-          const next = [...updatedPrev, ...restoredFromTrash];
-          if (changed) {
-            void storage.setItem('dl_students', next);
-          }
-          return next;
-        });
-        autoSyncEngine.notifyMutation('students', targetId);
+          autoSyncEngine.notifyMutation('students', targetId);
+        }
 
         const linkedLessons = recentlyDeleted.lessons.filter(
           d =>
@@ -4733,7 +4729,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           const next = {
             ...prev,
             groups: prev.groups.filter(d => d.item.id !== targetId),
-            students: prev.students.filter(d => !linkedStudentIds.has(d.item.id) && d.item.groupId !== targetId && d.item.archivedGroupId !== targetId),
+            students: prev.students.filter(d => !linkedStudentIds.has(d.item.id)),
             lessons: prev.lessons.filter(d => !linkedLessonIds.has(d.item.id)),
             purgedRecords: prev.purgedRecords || [] // NEVER remove tombstones on restore
           };
@@ -4920,6 +4916,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         storage.setItem('hod_visit_records', filtered);
       }
       return filtered;
+    });
+
+    setProfile(prev => {
+      const existingVisits = (prev?.schoolSettings as any)?.visitRecords;
+      if (!Array.isArray(existingVisits) || existingVisits.length === 0) return prev;
+      const filteredVisits = existingVisits.filter((v: any) => v && v.id && !allPurgedIds.has(String(v.id).trim()));
+      if (filteredVisits.length === existingVisits.length) return prev;
+      const updated = {
+        ...prev,
+        schoolSettings: {
+          ...(prev.schoolSettings as any),
+          visitRecords: filteredVisits
+        }
+      };
+      storage.setItem('dl_profile', updated);
+      return updated;
     });
 
     setGoldHoldings(prev => {
@@ -5169,6 +5181,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
                 group: targetGroup,
                 lesson: { groupId: targetGroup?.id || lessonData.groupId, date: dateStr, time: lessonData.time, meetingLink: lessonData.meetingLink },
                 groupWeeklySessions: groupWeeklySessionsRef.current,
+                defaultZoomLink: profile.defaultZoomLink
               })
             : undefined,
           locationAddress: lessonData.type === 'offline' ? (lessonData.locationAddress || targetGroup?.address || '') : undefined,
@@ -5213,16 +5226,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const updateLesson = (id: string, updates: Partial<Lesson>) => {
     const updater = (allLessons: Lesson[]) => {
-      traceLessonPipeline('LessonControlModal.updateLesson: updater input', allLessons, { note: `targetId=${id}; patchStatus=${updates.status || 'unchanged'}` });
       let found = false;
       let targetItem: Lesson | undefined;
       let previousStatus: LessonStatus | undefined;
       let previousDate: string | undefined;
       let previousTime: string | undefined;
-      let previousGroupId: string | undefined;
-      let previousGroupName: string | undefined;
-      let previousStudentId: string | undefined;
-      let previousStudentName: string | undefined;
       const isExplicitFieldEdit =
         updates.status !== undefined ||
         updates.date !== undefined ||
@@ -5234,10 +5242,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           previousStatus = l.status;
           previousDate = l.date;
           previousTime = l.time;
-          previousGroupId = l.groupId;
-          previousGroupName = l.groupName;
-          previousStudentId = l.studentId;
-          previousStudentName = l.studentName;
           const nextRaw = {
             ...l,
             ...updates,
@@ -5257,10 +5261,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           previousStatus = base.status;
           previousDate = base.date;
           previousTime = base.time;
-          previousGroupId = base.groupId;
-          previousGroupName = base.groupName;
-          previousStudentId = base.studentId;
-          previousStudentName = base.studentName;
           const nextRaw = {
             ...base,
             ...updates,
@@ -5272,42 +5272,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         }
       }
 
-      const scopeChanged = Boolean(
-        targetItem &&
-        ((previousGroupId || '') !== (targetItem.groupId || '') ||
-          (previousStudentId || '') !== (targetItem.studentId || '') ||
-          (!targetItem.studentId && (previousStudentName || '') !== (targetItem.studentName || '')))
-      );
-
       const requiresResequence =
         updates.status === 'cancelled' ||
         (previousStatus === 'cancelled' && Boolean(updates.status)) ||
-        (updates.date !== undefined && normalizeDateToISO(updates.date || '') !== normalizeDateToISO(previousDate || '')) ||
+        (updates.date !== undefined && updates.date !== previousDate) ||
         (updates.time !== undefined && updates.time !== previousTime) ||
         updates.groupId !== undefined ||
         updates.studentId !== undefined;
 
       if (requiresResequence && targetItem) {
-        if (scopeChanged && (previousGroupId || previousStudentId || previousStudentName)) {
-          const prevGrp = groups.find(g => (previousGroupId && g.id === previousGroupId) || (previousGroupName && g.name === previousGroupName));
-          const prevSt = students.find(s => (previousStudentId && s.id === previousStudentId) || (previousStudentName && s.name === previousStudentName));
-          updated = resequenceScheduledLessonsAfterChange(
-            updated,
-            {
-              groupId: previousGroupId,
-              groupName: previousGroupName,
-              studentId: previousStudentId,
-              studentName: previousStudentName
-            },
-            {
-              group: prevGrp,
-              student: prevSt,
-              students,
-              wrapMutation
-            }
-          );
-        }
-
         const targetGroupId = targetItem.groupId;
         const targetStudentId = targetItem.studentId;
         const targetStudentName = targetItem.studentName;
@@ -5322,10 +5295,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         });
       }
 
-      traceLessonPipeline('LessonControlModal.updateLesson: updater output', updated, { previousLessons: allLessons, note: `targetId=${id}` });
       return updated;
     };
-    void updateFullLessonsStorage(updater);
+    updateFullLessonsStorage(updater);
     if (selectedLesson && selectedLesson.id === id) {
       setSelectedLesson(prev => prev ? { ...prev, ...updates } : null);
     }
@@ -5483,7 +5455,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const deleteFutureGroupLessons = (groupId: string, fromDate: string, currentLessonId?: string) => {
     const updater = (allLessons: Lesson[]) => allLessons.map(l => {
       if (l.groupId === groupId && !l.deleted) {
-        const isTarget = (currentLessonId && l.id === currentLessonId) || normalizeDateToISO(l.date) >= normalizeDateToISO(fromDate);
+        const isTarget = (currentLessonId && l.id === currentLessonId) || l.date >= fromDate;
         const isModifiable = l.status === 'scheduled' && (!l.report || (!l.report.attendanceStatus && !l.report.teacherNotes));
         if (isTarget && isModifiable) {
           return wrapDeletion(l);
@@ -5492,7 +5464,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return l;
     });
     updateFullLessonsStorage(updater);
-    if (selectedLesson && selectedLesson.groupId === groupId && (selectedLesson.id === currentLessonId || normalizeDateToISO(selectedLesson.date) >= normalizeDateToISO(fromDate))) {
+    if (selectedLesson && selectedLesson.groupId === groupId && (selectedLesson.id === currentLessonId || selectedLesson.date >= fromDate)) {
       closeLessonControl();
     }
     autoSyncEngine.notifyMutation('lessons', groupId);
@@ -5518,12 +5490,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     autoSyncEngine.notifyMutation('lessons', groupId);
   };
 
-  const saveLessonReport = (lessonId: string, report: LessonReport, packageCount?: number, sessionNumber?: number, fallbackLesson?: Lesson) => {
+  const saveLessonReport = (lessonId: string, report: LessonReport, packageCount?: number, sessionNumber?: number) => {
     const targetLesson =
       (fullLessonsRef.current || []).find(l => l.id === lessonId) ||
       lessons.find(l => l.id === lessonId) ||
-      (selectedLesson && selectedLesson.id === lessonId ? selectedLesson : undefined) ||
-      (fallbackLesson?.id === lessonId ? fallbackLesson : undefined);
+      (selectedLesson && selectedLesson.id === lessonId ? selectedLesson : undefined);
     if (!targetLesson) return;
 
     const targetGroup = groups.find(g => g.id === targetLesson.groupId || (g.name && targetLesson.groupId && g.name.trim().toLowerCase() === targetLesson.groupId.trim().toLowerCase()));
@@ -5573,23 +5544,76 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       ? students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === targetLesson.groupId)
       : [];
 
-    const traceEnabled = isLessonPipelineTraceEnabled();
-    if (traceEnabled) {
-      traceLessonPipeline('saveLessonReport: checkmark handler target', [targetLesson], { note: `lessonId=${lessonId}` });
-    }
-    const reportUpdater = createLessonReportCompletionUpdater({
-      lessonId,
-      report,
-      targetLesson,
-      finalSessionNumber,
-      updatedTotalSessions,
-      effectiveTargetGroup,
-      targetStudent: targetStudentObj,
-      students,
-      wrapMutation,
-      stampFieldTimestamps,
-      trace: traceEnabled ? traceLessonPipeline : undefined
-    });
+    const reportUpdater = (allLessons: Lesson[]) => {
+      let found = false;
+      const updatedStudentPayments: Record<string, StudentPaymentDetail> = {};
+      if (report.studentPayments) {
+        Object.entries(report.studentPayments).forEach(([stId, pDet]) => {
+          const stObj = students.find(s => s.id === stId);
+          updatedStudentPayments[stId] = {
+            studentId: stId,
+            studentName: stObj?.name || 'Schüler',
+            paymentStatus: pDet.status,
+            amountPaid: pDet.amount,
+            amountDue: targetLesson.amountDue || 200
+          };
+        });
+      }
+
+      const updated = allLessons.map(l => {
+        if (l.id === lessonId) {
+          found = true;
+          const mutated = wrapMutation({
+            ...l,
+            status: 'completed',
+            isAutoGenerated: false,
+            sessionNumber: finalSessionNumber,
+            totalSessionsInPackage: updatedTotalSessions,
+            topic: report.arabicTopicsExplained || report.teacherNotes || (l as any).topic,
+            paymentStatus: report.paymentStatus !== undefined ? report.paymentStatus : (l.paymentStatus || 'pending'),
+            amountPaid: report.amountPaid !== undefined ? report.amountPaid : (l.amountPaid ?? finalAmountPaid),
+            recordingLink: report.recordingLink !== undefined ? report.recordingLink : l.recordingLink,
+            recordingLink2: report.recordingLink2 !== undefined ? report.recordingLink2 : l.recordingLink2,
+            studentPayments: Object.keys(updatedStudentPayments).length > 0 ? updatedStudentPayments : l.studentPayments,
+            report
+          } as Lesson);
+          return stampFieldTimestamps(l, mutated);
+        }
+        return l;
+      });
+
+      const withCompleted = !found
+        ? [
+            stampFieldTimestamps(
+              targetLesson,
+              wrapMutation({
+                ...targetLesson,
+                status: 'completed',
+                isAutoGenerated: false,
+                sessionNumber: finalSessionNumber,
+                totalSessionsInPackage: updatedTotalSessions,
+                topic: report.arabicTopicsExplained || report.teacherNotes || (targetLesson as any).topic,
+                paymentStatus: report.paymentStatus !== undefined ? report.paymentStatus : (targetLesson.paymentStatus || 'pending'),
+                amountPaid: report.amountPaid !== undefined ? report.amountPaid : (targetLesson.amountPaid ?? finalAmountPaid),
+                recordingLink: report.recordingLink !== undefined ? report.recordingLink : targetLesson.recordingLink,
+                recordingLink2: report.recordingLink2 !== undefined ? report.recordingLink2 : targetLesson.recordingLink2,
+                studentPayments: Object.keys(updatedStudentPayments).length > 0 ? updatedStudentPayments : targetLesson.studentPayments,
+                report
+              } as Lesson)
+            ),
+            ...updated
+          ]
+        : updated;
+
+      const st = students.find(s => (targetLesson.studentId && s.id === targetLesson.studentId) || (targetLesson.studentName && s.name === targetLesson.studentName));
+      const completedPivot = withCompleted.find(l => l.id === lessonId);
+      return resequenceScheduledLessonsAfterChange(withCompleted, completedPivot, {
+        group: effectiveTargetGroup,
+        student: st,
+        students,
+        wrapMutation
+      });
+    };
 
     syncEventQueue.enqueue('lesson_updated', { lessonId, status: 'completed', timestamp: Date.now() });
     const lessonUpdatePromise = updateFullLessonsStorage(reportUpdater);
@@ -5925,12 +5949,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     /* confetti removed */
   };
 
-  const cancelLesson = (lessonId: string, notes?: string, fallbackLesson?: Lesson) => {
+  const cancelLesson = (lessonId: string, notes?: string) => {
     syncEventQueue.enqueue('session_cancelled', { lessonId, notes, timestamp: Date.now() });
 
     const updater = (allLessons: Lesson[]): Lesson[] => {
       let found = false;
-      const target = allLessons.find(l => l.id === lessonId) || (selectedLesson?.id === lessonId ? selectedLesson : null) || (fallbackLesson?.id === lessonId ? fallbackLesson : null);
+      const target = allLessons.find(l => l.id === lessonId) || (selectedLesson?.id === lessonId ? selectedLesson : null);
       const targetGroupId = target?.groupId;
       const targetStudentId = target?.studentId;
       const targetStudentName = target?.studentName;
@@ -6032,46 +6056,145 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     autoSyncEngine.notifyMutation('lessons', lessonId);
   };
 
-  /**
-   * Group schedules are the source of truth for future recurring occurrences.
-   * Do not materialize a rolling year of synthetic lessons into storage: the
-   * shared schedule projection supplies those rows to Calendar and Dashboard.
-   * Keep only future generated rows that have become real/edited lesson records.
-   */
   const generateGroupScheduleLessons = (groupId: string, days: string[], defaultTime: string, numWeeks: number = 52, customDayTimes?: Record<string, string>, groupOverride?: Group) => {
     const targetGroup = groupOverride || groups.find(g => g.id === groupId && !g.deleted);
     if (!targetGroup) return;
 
-    const todayIso = formatLocalDate();
-    updateFullLessonsStorage(prev => prev.filter(lesson => {
-      if (
-        lesson.groupId !== groupId ||
-        !lesson.isAutoGenerated ||
-        lesson.deleted ||
-        lesson.status !== 'scheduled' ||
-        normalizeDateToISO(lesson.date) < todayIso
-      ) return true;
+    const effectiveGroup: Group = {
+      ...targetGroup,
+      scheduleDays: days && days.length > 0 ? days : targetGroup.scheduleDays,
+      scheduleTime: defaultTime || targetGroup.scheduleTime,
+      scheduleDayTimes: customDayTimes || targetGroup.scheduleDayTimes,
+    };
 
-      const report = lesson.report;
-      const hasRealWork = Boolean(
-        report?.attendanceStatus ||
-        report?.teacherNotes ||
-        report?.homeworkTitle ||
-        report?.quizScore !== undefined ||
-        (lesson.studentPayments && Object.keys(lesson.studentPayments).length > 0) ||
-        (lesson.amountPaid && lesson.amountPaid > 0) ||
-        lesson.notes?.trim() ||
-        lesson.quickNotes?.trim() ||
-        lesson.topic?.trim() ||
-        lesson.whatWasTaught?.trim() ||
-        lesson.homeworkTitle?.trim() ||
-        lesson.homeworkDescription?.trim() ||
-        (lesson as any).isRescheduled ||
-        (lesson as any).rescheduledFromDate ||
-        (lesson as any).manualOverride
+    const slots = getGroupScheduleSlots(effectiveGroup);
+    if (slots.length === 0) return;
+
+    const newLessons: Lesson[] = [];
+    const today = new Date();
+
+    const activeLessons = lessons.filter(l => !l.deleted && l.status !== 'cancelled');
+    const existingSlotSet = buildLessonSlotSet(activeLessons);
+    const activeGroupLessonsCount = activeLessons.filter(l => l.groupId === groupId).length;
+    const isPerLesson = isGroupPerLesson(targetGroup);
+    const perSessionPrice = isPerLesson && targetGroup.pricePerSession
+      ? targetGroup.pricePerSession
+      : Math.round((targetGroup.monthlyPackagePrice || 1200) / (targetGroup.sessionCount || 4));
+
+    const checkOverlap = (l1: { date: string; time: string; durationMinutes: number }, l2: { date: string; time: string; durationMinutes: number }) => {
+      if (l1.date !== l2.date) return false;
+      const getMinutes = (timeStr: string) => {
+        const [h, m] = (timeStr || "00:00").split(':').map(Number);
+        return (h || 0) * 60 + (m || 0);
+      };
+      const start1 = getMinutes(l1.time);
+      const end1 = start1 + (l1.durationMinutes || 60);
+      const start2 = getMinutes(l2.time);
+      const end2 = start2 + (l2.durationMinutes || 60);
+      return start1 < end2 && start2 < end1;
+    };
+
+    for (let dayOffset = 0; dayOffset < numWeeks * 7; dayOffset++) {
+      const d = new Date();
+      d.setDate(today.getDate() + dayOffset);
+      const dayNum = d.getDay();
+
+      const matchingSlot = slots.find(s => getDayNumber(s.day) === dayNum);
+
+      if (matchingSlot) {
+        // Alternating week check (Week A vs Week B)
+        if (!isDateMatchingGroupRecurrence(targetGroup.scheduleRecurrence, d)) {
+          continue;
+        }
+
+        const dateStr = formatLocalDate(d);
+        const sessionTime = matchingSlot.time || defaultTime || '17:00';
+        const slotKey = makeLessonSlotKey(groupId, dateStr, sessionTime);
+
+        if (!existingSlotSet.has(slotKey)) {
+          const dummyLesson = { 
+            id: 'dummy', 
+            date: dateStr, 
+            time: sessionTime, 
+            durationMinutes: targetGroup.lessonDurationMinutes || 60,
+            groupId: targetGroup.id,
+            scheduleRecurrence: targetGroup.scheduleRecurrence || 'weekly'
+          };
+          
+          // Conflict check against other distinct groups
+          const hasConflict = activeLessons.some(l => 
+            l.groupId !== groupId && 
+            checkOverlap(dummyLesson, l)
+          ) || newLessons.some(l => checkOverlap(dummyLesson, l));
+          
+          if (!hasConflict) {
+            existingSlotSet.add(slotKey);
+            newLessons.push(wrapMutation({
+              id: `l_auto_${targetGroup.id}_${dateStr}_${sessionTime.replace(':', '')}`,
+              isAutoGenerated: true,
+              groupId: targetGroup.id,
+              groupName: targetGroup.name,
+              title: `${targetGroup.name} Lektion`,
+              date: dateStr,
+              time: sessionTime,
+              durationMinutes: targetGroup.lessonDurationMinutes || 60,
+              type: targetGroup.type,
+              grade: targetGroup.grade,
+              sessionNumber: isPerLesson ? 1 : ((((targetGroup.startingSessionNumber || 1) - 1 + activeGroupLessonsCount + newLessons.length) % (targetGroup.sessionCount || 4)) + 1),
+              totalSessionsInPackage: isPerLesson ? 1 : (targetGroup.sessionCount || 4),
+              status: 'scheduled',
+              paymentStatus: 'pending',
+              amountDue: perSessionPrice,
+              amountPaid: 0,
+              meetingLink: targetGroup.type === 'online'
+                ? resolveActiveZoomLinkForLesson({
+                    group: targetGroup,
+                    lesson: { groupId: targetGroup.id, date: dateStr, time: sessionTime },
+                    groupWeeklySessions: groupWeeklySessionsRef.current,
+                    defaultZoomLink: profile.defaultZoomLink
+                  })
+                : undefined,
+              locationAddress: targetGroup.type === 'offline' ? (targetGroup.address || 'Cairo Center') : undefined,
+              scheduleRecurrence: targetGroup.scheduleRecurrence || 'weekly',
+              biweeklyWeek: getAlternatingWeek(d)
+            } as Lesson));
+          }
+        }
+      }
+    }
+
+    const todayIso = formatLocalDate();
+    updateFullLessonsStorage(prev => {
+      // Soft-delete stale future scheduled lessons of this group that don't match the new alternating week recurrence
+      let cleanedPrev = prev;
+      if (targetGroup.scheduleRecurrence && targetGroup.scheduleRecurrence !== 'weekly') {
+        cleanedPrev = prev.map(l => {
+          if (l.groupId !== groupId) return l;
+          if (l.deleted || l.status !== 'scheduled' || l.date < todayIso) return l;
+          if (l.report?.attendanceStatus || l.report?.teacherNotes || (l.amountPaid && l.amountPaid > 0)) return l;
+          if (!isDateMatchingGroupRecurrence(targetGroup.scheduleRecurrence, l.date)) {
+            return wrapDeletion(l);
+          }
+          return l;
+        });
+      }
+
+      if (newLessons.length === 0) {
+        return cleanedPrev;
+      }
+
+      const existingIds = new Set(cleanedPrev.map(l => l.id));
+      const prevSlotSet = buildLessonSlotSet(cleanedPrev);
+      const deduplicated = newLessons.filter(
+        nl => !existingIds.has(nl.id) && !prevSlotSet.has(makeLessonSlotKey(nl.groupId || '', nl.date, nl.time))
       );
-      return hasRealWork;
-    }));
+      const combined = deduplicated.length > 0 ? [...cleanedPrev, ...deduplicated] : cleanedPrev;
+      return resequenceScheduledLessonsAfterChange(combined, { groupId: targetGroup.id }, {
+        group: targetGroup,
+        students,
+        wrapMutation
+      });
+    });
   };
 
   // Payments
@@ -6184,50 +6307,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   }) => {
     const today = formatLocalDate();
     const targetAccountId = data.accountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
-    const targetIds = new Set((data.lessonIds || []).filter(id => id && !id.startsWith('virtual_')));
-
-    const currentPayments = fullPaymentsRef.current && fullPaymentsRef.current.length > 0 ? fullPaymentsRef.current : payments;
-    const matchedExistingRec =
-      (data.existingPaymentRecordId ? currentPayments.find(p => p.id === data.existingPaymentRecordId && !p.deleted) : undefined) ||
-      (targetIds.size > 0
-        ? currentPayments.find(p => {
-            if (p.deleted || p.studentId !== data.studentId) return false;
-            const pIds = [p.lessonId, ...(p.lessonIds || [])].filter((id): id is string => Boolean(id) && !id.startsWith('virtual_'));
-            return pIds.length > 0 && Array.from(targetIds).every(tid => pIds.includes(tid));
-          })
-        : undefined);
-
-    const finalPaymentId = matchedExistingRec?.id || data.existingPaymentRecordId || `pay_paid_${data.studentId}_${Date.now()}`;
-    const settledAliasIds: string[] = [finalPaymentId];
+    let finalPaymentId = data.existingPaymentRecordId || `pay_paid_${data.studentId}_${Date.now()}`;
+    const targetIds = new Set((data.lessonIds || []).filter(id => !id.startsWith('virtual_')));
 
     updateFullPaymentsStorage(prev => {
       let updatedExisting = false;
 
       const next = prev.map(p => {
-        if (p.id === finalPaymentId) {
+        if (p.id === data.existingPaymentRecordId) {
           updatedExisting = true;
           return wrapMutation({
             ...p,
-            amountDue: data.amountDue ?? p.amountDue,
             amountPaid: data.amountPaid,
-            remainingBalance: Math.max(0, (data.amountDue ?? p.amountDue) - data.amountPaid - (p.discountAmount || 0)),
+            remainingBalance: Math.max(0, p.amountDue - data.amountPaid),
             status: 'paid',
-            paidDate: p.paidDate || today,
+            paidDate: today,
             lessonDates: data.lessonDates,
             lessonIds: data.lessonIds,
             financeAccountId: targetAccountId,
-            notes: data.notes || p.notes || `Bezahlt am ${today}`
+            notes: data.notes || `Bezahlt am ${today}`
           } as PaymentRecord);
         }
-        if (shouldSettlePendingCycleRecord(p, { studentId: data.studentId, groupId: data.groupId, lessonIds: data.lessonIds, lessonDates: data.lessonDates })) {
-          settledAliasIds.push(p.id);
+        // Settle any duplicate or lingering pending record for the same student that contains any of these lesson IDs or dates
+        if (shouldSettlePendingCycleRecord(p, { studentId: data.studentId, lessonIds: data.lessonIds, lessonDates: data.lessonDates })) {
           return wrapMutation({
             ...p,
             status: 'paid',
             amountPaid: p.amountDue,
             remainingBalance: 0,
-            paidDate: p.paidDate || today,
-            financeAccountId: targetAccountId,
+            paidDate: today,
             notes: `${p.notes || ''} (مسدد بالكامل)`.trim()
           } as PaymentRecord);
         }
@@ -6243,7 +6351,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           groupName: data.groupName,
           amountDue: data.amountDue,
           amountPaid: data.amountPaid,
-          remainingBalance: Math.max(0, data.amountDue - data.amountPaid),
+          remainingBalance: 0,
           dueDate: today,
           paidDate: today,
           status: 'paid',
@@ -6258,24 +6366,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return next;
     });
 
-    // Finance #6: When targetIds are specified, update ONLY those exact lesson IDs (never broadening to same-date group lessons)
+    // Update all covered lessons so they are marked as 'paid' permanently in storage
     const targetDates = new Set<string>();
-    if (targetIds.size === 0) {
-      (data.lessonDates || []).forEach(dStr => {
-        const match = dStr?.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
-        if (match) targetDates.add(normalizeDateToISO(match[1]));
-      });
-    }
+    (data.lessonDates || []).forEach(dStr => {
+      const match = dStr?.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
+      if (match) targetDates.add(normalizeDateToISO(match[1]));
+    });
 
     updateFullLessonsStorage(allLessons => {
       const matchingIndices: number[] = [];
       allLessons.forEach((l, idx) => {
-        if (l.deleted) return;
-        const matchesId = targetIds.size > 0 && targetIds.has(l.id);
-        const matchesLegacyDate = targetIds.size === 0 &&
-          (l.studentId === data.studentId || (Boolean(data.groupId) && l.groupId === data.groupId)) &&
-          targetDates.has(normalizeDateToISO(l.date));
-        if (matchesId || matchesLegacyDate) {
+        const matchesId = targetIds.has(l.id);
+        const matchesDate = (l.studentId === data.studentId || (l.groupId && l.groupId === data.groupId)) && targetDates.has(l.date);
+        if (matchesId || matchesDate) {
           matchingIndices.push(idx);
         }
       });
@@ -6338,15 +6441,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     });
 
     if (data.amountPaid > 0) {
-      upsertPaymentFinanceTransaction({
-        paymentId: finalPaymentId,
-        matchPaymentIds: settledAliasIds,
+      addFinanceTransaction({
+        type: 'income',
         amount: data.amountPaid,
         accountId: targetAccountId,
         categoryId: 'cat_student_fees',
         date: today,
         note: `دورة دراسية: ${data.studentName} (${data.groupName})` + (data.notes ? ` - ${data.notes}` : ''),
-        relatedStudentId: data.studentId
+        relatedStudentId: data.studentId,
+        relatedPaymentId: finalPaymentId
       });
     }
 
@@ -6401,46 +6504,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const today = formatLocalDate();
     const targetAccountId = data.accountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
     const finalPaymentId = `pay_adv_${data.studentId}_${Date.now()}`;
-    let settledLessonIds: string[] = [];
+
+    const newRecord: PaymentRecord = wrapMutation({
+      id: finalPaymentId,
+      studentId: data.studentId,
+      studentName: data.studentName,
+      groupId: data.groupId,
+      groupName: data.groupName,
+      amountDue: data.amount,
+      amountPaid: data.amount,
+      remainingBalance: 0,
+      dueDate: today,
+      paidDate: today,
+      status: 'paid',
+      paymentType: 'advance_payment',
+      bundleSize: data.numberOfLessons,
+      financeAccountId: targetAccountId,
+      notes: data.notes || `سداد حصص مقدماً (عدد ${data.numberOfLessons} حصص)`,
+      lessonDates: [`سداد مقدم (${data.numberOfLessons} حصص)`],
+      lessonIds: [],
+      createdAt: new Date().toISOString()
+    } as PaymentRecord);
 
     updateFullPaymentsStorage(prev => {
-      const result = allocateAdvancePaymentFIFO(prev, {
-        ...data,
-        accountId: targetAccountId,
-        today,
-        paymentId: finalPaymentId,
-        wrapMutation: wrapMutation as (item: PaymentRecord) => PaymentRecord
-      });
-      settledLessonIds = result.settledLessonIds;
-      return result.updatedPayments;
-    });
-
-    if (settledLessonIds.length > 0) {
-      const settledSet = new Set(settledLessonIds);
-      updateFullLessonsStorage(allLessons => allLessons.map(l => {
-        if (!l.deleted && settledSet.has(l.id) && l.paymentStatus !== 'paid') {
-          const sp = l.studentPayments || {};
-          const updatedSp = {
-            ...sp,
-            [data.studentId]: {
-              studentId: data.studentId,
-              studentName: data.studentName,
-              paymentStatus: 'paid' as const,
-              amountPaid: l.amountDue || 200,
-              amountDue: l.amountDue || 200
-            }
-          };
-          const isGroup = Boolean(l.groupId);
+      // Settle and resolve any existing unpaid or pending payment records for this student so they don't linger as debts
+      const cleanedPrev = prev.map(p => {
+        if (p.studentId === data.studentId && ((p.status as string) === 'not_yet' || p.status === 'pending' || (p.status as string) === 'unpaid')) {
           return wrapMutation({
-            ...l,
-            paymentStatus: isGroup ? 'partial' : 'paid',
-            studentPayments: updatedSp,
-            report: l.report ? { ...l.report, studentPayments: updatedSp } : undefined
-          } as any);
+            ...p,
+            status: 'paid',
+            amountPaid: p.amountDue,
+            remainingBalance: 0,
+            paidDate: today,
+            notes: `${p.notes || ''} (تمت التسوية بسداد مقدم)`.trim()
+          } as PaymentRecord);
         }
-        return l;
-      }));
-    }
+        return p;
+      });
+      return [newRecord, ...cleanedPrev];
+    });
 
     if (data.amount > 0) {
       addFinanceTransaction({
@@ -6455,10 +6557,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       });
     }
 
+    setStudents(prev => prev.map(s => s.id === data.studentId ? wrapMutation({ ...s, paymentStatus: 'paid' } as Student) : s));
     autoSyncEngine.notifyMutation('payments', finalPaymentId);
-    if (settledLessonIds.length > 0) {
-      autoSyncEngine.notifyMutation('lessons', data.studentId);
-    }
     /* confetti removed */
   };
 
@@ -6764,21 +6864,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       autoSyncEngine.notifyMutation('students', effectiveStudentId);
     }
 
-    // Sync corresponding payment records in payments list strictly by lesson ID for the student
+    // Sync corresponding payment records in payments list (settle strictly matching student)
     let paymentRecordId = '';
     const paymentUpdater = (prevPayments: PaymentRecord[]) => {
       let matchedAny = false;
       const updated = prevPayments.map(p => {
-        if (p.deleted) return p;
+        // Strictly match student if effectiveStudentId is present
         if (effectiveStudentId && p.studentId && p.studentId !== effectiveStudentId) {
           return p;
         }
-        const pRealIds = [p.lessonId, ...(p.lessonIds || [])].filter((id): id is string => Boolean(id) && !id.startsWith('virtual_'));
-        const matchesId = pRealIds.includes(lessonId);
-        // Only allow legacy date fallback when the payment record has no explicit lessonIds
-        const matchesLegacyDate = pRealIds.length === 0 && Boolean(effectiveStudentId) && p.studentId === effectiveStudentId &&
-          (p.lessonDates && p.lessonDates.some(d => normalizeDateToISO(d) === normalizeDateToISO(targetLesson.date)));
-        if (matchesId || matchesLegacyDate) {
+        const matchesId = p.lessonId === lessonId || (p.lessonIds && p.lessonIds.includes(lessonId));
+        const matchesDate = effectiveStudentId && p.studentId === effectiveStudentId &&
+          (p.lessonDates && p.lessonDates.some(d => d.includes(targetLesson.date)));
+        if (matchesId || matchesDate) {
           matchedAny = true;
           if (!paymentRecordId) paymentRecordId = p.id;
           const rem = Math.max(0, p.amountDue - finalPaid - (p.discountAmount || 0));
@@ -6790,8 +6888,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             remainingBalance: rem,
             status,
             lessonIds: updatedIds,
-            financeAccountId: status === 'paid' ? targetAccountId : p.financeAccountId,
-            paidDate: status === 'paid' ? (p.paidDate || today) : undefined
+            paidDate: status === 'paid' ? (p.paidDate || today) : p.paidDate
           } as PaymentRecord);
         }
         return p;
@@ -6800,10 +6897,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       if (matchedAny) {
         return updated;
       } else {
-        const studentObj = targetLesson.studentId
+        const studentObj = targetLesson.studentId 
           ? students.find(s => s.id === targetLesson.studentId)
           : (targetLesson.groupId ? students.find(s => s.groupId === targetLesson.groupId) : undefined);
-        const resolvedStudentId = effectiveStudentId || targetLesson.studentId || studentObj?.id || '';
+        const resolvedStudentId = targetLesson.studentId || studentObj?.id || '';
         const resolvedStudentName = targetLesson.studentName || studentObj?.name || targetLesson.groupName || targetLesson.title;
 
         paymentRecordId = `pay_l_${lessonId}_${Date.now()}`;
@@ -6832,25 +6929,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     updateFullPaymentsStorage(paymentUpdater);
     autoSyncEngine.notifyMutation('payments', lessonId);
 
-    const targetTxPaymentId = paymentRecordId || `pay_l_${lessonId}`;
     if (status === 'paid' && finalPaid > 0) {
-      upsertPaymentFinanceTransaction({
-        paymentId: targetTxPaymentId,
-        matchPaymentIds: [targetTxPaymentId, `pay_l_${lessonId}`],
+      addFinanceTransaction({
+        type: 'income',
         amount: finalPaid,
         accountId: targetAccountId,
         categoryId: 'cat_student_fees',
         date: today,
         note: `سداد حصة: ${targetLesson.studentName || targetLesson.groupName || targetLesson.title}`,
-        relatedStudentId: effectiveStudentId || targetLesson.studentId
+        relatedStudentId: targetLesson.studentId,
+        relatedPaymentId: paymentRecordId || `pay_l_${lessonId}`
       });
-    } else if (status === 'pending' || status === 'not_paid') {
-      const existingTx = financeTransactions.find(
-        tx => !tx.deleted && tx.type === 'income' && (tx.relatedPaymentId === targetTxPaymentId || tx.relatedPaymentId === `pay_l_${lessonId}`)
-      );
-      if (existingTx) {
-        deleteFinanceTransaction(existingTx.id);
-      }
+      /* confetti removed */
     }
   };
 
@@ -8033,21 +8123,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return { prunedCount: 0, remainingCount: currentLessons.length };
     }
 
-    const res = await executeLessonCleanup(
-      currentLessons,
-      analysis,
-      async (cleanedLessons) => {
-        await storage.setItem('dl_lessons', cleanedLessons);
-        const verified = await storage.verifyDurableReadBackValue('dl_lessons', cleanedLessons);
-        if (!verified) {
-          throw new Error('Failed to verify persisted cleaned lessons.');
-        }
-      }
-    );
+    const res = await executeLessonCleanup(currentLessons, analysis);
     setLessons(res.cleanedLessons);
     fullLessonsRef.current = res.cleanedLessons;
+    await storage.setItem('dl_lessons', res.cleanedLessons);
 
-    // Notify auto-sync engine of cleanup only after Archive -> Tombstone -> Delete all succeeded
+    // Notify auto-sync engine of cleanup
     autoSyncEngine.notifyMutation('lessons', 'cleanup_batch');
     return { prunedCount: res.prunedCount, remainingCount: res.cleanedLessons.length };
   }, [lessons, groups, students, payments, financeTransactions]);
@@ -8057,7 +8138,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     if (!isInitializedRef.current || !lessons || lessons.length === 0) return;
     const todayStr = formatLocalDateStr(new Date());
     const lastCleanDate = localStorage.getItem(LAST_CLEANUP_DATE_KEY);
-    if (normalizeDateToISO(lastCleanDate || '') !== normalizeDateToISO(todayStr)) {
+    if (lastCleanDate !== todayStr) {
       const timer = setTimeout(() => {
         executeSmartLessonCleanup(false).catch(err => console.warn('Daily auto-cleanup error:', err));
       }, 5000);
@@ -8394,23 +8475,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const localDeviceId = syncStateRef.current?.localDeviceId || 'local';
       const localPlatform = detectLocalOriginPlatform();
       
-      const mergeSnapshot = (preferred: any[], delayed: any[], entityTypeName: string) => {
-        const preferredRows = Array.isArray(preferred) ? preferred : [];
-        const delayedRows = Array.isArray(delayed) ? delayed : [];
-        const delayedById = new Map(delayedRows.filter(row => row?.id).map(row => [row.id, row]));
-        const merged = preferredRows.map(row => {
-          const stale = delayedById.get(row.id);
-          if (!stale) return row;
-          delayedById.delete(row.id);
-          return mergeEntities([row], [stale], entityTypeName).merged[0] || row;
+      if (fullLessonsRef.current && fullLessonsRef.current.length > 0) {
+        // Guarantee latest active lessons are merged synchronously regardless of async storage queue
+        const activeMap = new Map(data.lessons.map((l: any) => [l.id, l]));
+        const fullMerged = fullLessonsRef.current.map(l => activeMap.has(l.id) ? activeMap.get(l.id) : l);
+        const fullIds = new Set(fullMerged.map(l => l.id));
+        data.lessons.forEach((l: any) => {
+          if (!fullIds.has(l.id)) fullMerged.unshift(l);
         });
-        delayedById.forEach(row => merged.push(row));
-        return merged;
-      };
-
-      // full*Ref is synchronously updated by the persistence pipeline; React state may lag a render.
-      data.lessons = mergeSnapshot(fullLessonsRef.current, data.lessons, 'lessons');
-      data.payments = mergeSnapshot(fullPaymentsRef.current, data.payments, 'payments');
+        
+        // Strict deduplication
+        const seen = new Set<string>();
+        data.lessons = fullMerged.filter((l: any) => {
+          if (!l || !l.id || seen.has(l.id)) return false;
+          seen.add(l.id);
+          return true;
+        });
+      }
+      
+      if (fullPaymentsRef.current && fullPaymentsRef.current.length > 0) {
+        // Guarantee latest active payments are merged synchronously regardless of async storage queue
+        const activeMap = new Map(data.payments.map((p: any) => [p.id, p]));
+        const fullMerged = fullPaymentsRef.current.map(p => activeMap.has(p.id) ? activeMap.get(p.id) : p);
+        const fullIds = new Set(fullMerged.map(p => p.id));
+        data.payments.forEach((p: any) => {
+          if (!fullIds.has(p.id)) fullMerged.unshift(p);
+        });
+        
+        // Strict deduplication
+        const seen = new Set<string>();
+        data.payments = fullMerged.filter((p: any) => {
+          if (!p || !p.id || seen.has(p.id)) return false;
+          seen.add(p.id);
+          return true;
+        });
+      }
 
       // Include local homework assignments & submissions in P2P sync so Computer and Android stay 100% consistent via P2P
       try {
@@ -8495,25 +8594,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           break;
         }
         case 'lessons': {
-          const incoming = Array.isArray(data) ? data : [];
-          const current = Array.isArray(fullLessonsRef.current) ? fullLessonsRef.current : [];
-          const currentById = new Map(current.filter((l: any) => l?.id).map((l: any) => [l.id, l]));
-          incoming.forEach((lesson: any) => {
-            const local = currentById.get(lesson?.id);
-            if (
-              local && (local.status === 'completed' || local.status === 'cancelled') &&
-              (lesson.status === 'scheduled' || !lesson.status) &&
-              !(typeof lesson._fieldUpdatedAt?.status === 'number' &&
-                lesson._fieldUpdatedAt.status > (Number(local._fieldUpdatedAt?.status) || 0))
-            ) {
-              console.warn('[LessonSyncRegression] status regression prevented', {
-                id: lesson.id, source: 'sync-merge', from: local.status, to: lesson.status || 'scheduled'
-              });
-            }
-          });
-          const merged = mergeEntities(current, incoming, 'lessons').merged;
           const seen = new Set<string>();
-          const deduped = merged.filter((l: any) => {
+          const deduped = (Array.isArray(data) ? data : []).filter((l: any) => {
             if (!l || !l.id || seen.has(l.id)) return false;
             seen.add(l.id);
             return true;
@@ -8524,10 +8606,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           break;
         }
         case 'payments': {
-          const current = Array.isArray(fullPaymentsRef.current) ? fullPaymentsRef.current : [];
-          const merged = mergeEntities(current, Array.isArray(data) ? data : [], 'payments').merged;
           const seen = new Set<string>();
-          const deduped = merged.filter((p: any) => {
+          const deduped = (Array.isArray(data) ? data : []).filter((p: any) => {
             if (!p || !p.id || seen.has(p.id)) return false;
             seen.add(p.id);
             return true;

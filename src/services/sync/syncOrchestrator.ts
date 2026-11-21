@@ -347,9 +347,6 @@ export async function runSyncCycle(
       if (typeof exchangeRes.latencyMs === 'number') workingPeer.latencyMs = exchangeRes.latencyMs;
     }
 
-    // The local workspace may have changed during transport; refresh the merge base after exchange.
-    Object.assign(localData, dataSource.getLocalData());
-
     // 5. Ingest and sweep authoritative tombstones FIRST (before session events or entity merges)
     const { activePurgedRecords, hasAuthoritativeTombstones } = await ingestAndSweepPurgedTombstonesOnDataSource(
       localData,
@@ -365,9 +362,7 @@ export async function runSyncCycle(
         if (evt.type === 'session_cancelled' && evt.payload?.lessonId) {
           const lessonId = String(evt.payload.lessonId).trim();
           if (purgedIdSet.has(lessonId)) continue;
-          const latestLessons = dataSource.getLocalData()['lessons'] || localData['lessons'] || [];
-          const lessons = latestLessons;
-          localData['lessons'] = latestLessons;
+          const lessons = localData['lessons'] || [];
           let updated = false;
           const updatedLessons = lessons.map((l: any) => {
             if (l.id === lessonId && l.status !== 'cancelled') {
@@ -407,9 +402,7 @@ export async function runSyncCycle(
       if (Array.isArray(incomingRecords) && incomingRecords.length > 0) {
         receivedCount += incomingRecords.length;
         totalTransferred += incomingRecords.length;
-        const latestLocalData = dataSource.getLocalData();
-        const currentLocalRecords = latestLocalData[key] || localData[key] || [];
-        localData[key] = currentLocalRecords;
+        const currentLocalRecords = localData[key] || [];
         const knownLocalIds = new Set(currentLocalRecords.filter(r => r && r.id).map(r => r.id.trim()));
         const shouldDeferUnknown = !hasAuthoritativeTombstones && (key === 'groups' || key === 'students' || key === 'lessons');
 

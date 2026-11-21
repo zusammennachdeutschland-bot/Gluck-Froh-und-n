@@ -1,7 +1,7 @@
 import { Preferences } from '@capacitor/preferences';
 import { registerPlugin } from '@capacitor/core';
 import { Lesson, Student, PaymentRecord, TodoItem, Group, TeacherProfile, FinanceInstallment, FinanceRecurring } from '../types';
-import { formatLocalDate, normalizeDateToISO } from '../utils/timeUtils';
+import { formatLocalDate } from '../utils/timeUtils';
 import { calculateDuePaymentCycles } from '../utils/paymentUtils';
 import { calculateOverallAttendance } from '../utils/lessonUtils';
 import { buildWhatsAppUrl, formatWhatsAppPhone } from '../utils/phoneUtils';
@@ -31,7 +31,7 @@ const getTodayRevenue = (payments: PaymentRecord[]): number => {
   const paidOnly = payments.filter(p => p.status === 'paid');
   const dailyPayments = paidOnly.filter(p => {
     const d = p.paidDate || p.dueDate;
-    return d && normalizeDateToISO(d) === normalizeDateToISO(todayStr);
+    return d && d.startsWith(todayStr);
   });
   return dailyPayments.reduce((sum, p) => sum + (p.amountPaid || p.amountDue || 0), 0);
 };
@@ -59,7 +59,7 @@ const getWeeklyRevenue = (payments: PaymentRecord[]): number => {
   const weeklyPayments = paidOnly.filter(p => {
     const d = p.paidDate || p.dueDate;
     if (!d) return false;
-    const dateOnly = normalizeDateToISO(d);
+    const dateOnly = d.substring(0, 10);
     return dateOnly >= friStr && dateOnly <= thuStr;
   });
   return weeklyPayments.reduce((sum, p) => sum + (p.amountPaid || p.amountDue || 0), 0);
@@ -96,7 +96,7 @@ export const syncTodayLessonsToWidget = async (lessons: Lesson[]) => {
   try {
     const todayStr = formatLocalDate();
     const todaysLessons = lessons
-      .filter(l => normalizeDateToISO(l.date) === normalizeDateToISO(todayStr))
+      .filter(l => l.date === todayStr)
       .sort((a, b) => a.time.localeCompare(b.time))
       .map(l => ({
         id: l.id,
@@ -241,8 +241,8 @@ export const syncUpcomingLessonsToWidget = async (lessons: Lesson[], students: S
   try {
     const todayStr = formatLocalDate();
     const upcoming = lessons
-      .filter(l => normalizeDateToISO(l.date) >= normalizeDateToISO(todayStr) && l.status === 'scheduled')
-      .sort((a, b) => normalizeDateToISO(a.date).localeCompare(normalizeDateToISO(b.date)) || a.time.localeCompare(b.time))
+      .filter(l => l.date >= todayStr && l.status === 'scheduled')
+      .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time))
       .slice(0, 5)
       .map(l => ({
         id: l.id,
@@ -272,7 +272,7 @@ export const syncContactRemindersToWidget = async (
   try {
     const todayStr = formatLocalDate();
     const todayLessons = lessons
-      .filter(l => normalizeDateToISO(l.date) === normalizeDateToISO(todayStr))
+      .filter(l => l.date === todayStr)
       .sort((a, b) => a.time.localeCompare(b.time));
 
     const contactItems: Array<{
@@ -461,7 +461,7 @@ export const syncAllWidgetsToNative = async (data: {
       financeRecurring = []
     } = data;
     const todayStr = formatLocalDate();
-    const todayLessons = lessons.filter(l => normalizeDateToISO(l.date) === normalizeDateToISO(todayStr));
+    const todayLessons = lessons.filter(l => l.date === todayStr);
 
     const monthlyRev = getMonthlyRevenue(payments);
     const attendanceRate = getAttendanceRate(lessons, students);

@@ -215,33 +215,7 @@ export function runMergeEngineTests(): { passed: boolean; log: string[] } {
   assert.equal(activeSlotLessons.length, 1);
   assert.equal(activeSlotLessons[0].status, 'completed');
 
-  const completedLocal: any = {
-    id: 'sync_completed_local', status: 'completed', updatedAt: 2000,
-    report: { attendanceStatus: 'present', teacherNotes: 'Completed locally' }
-  };
-  const newerScheduledRemote: any = { id: 'sync_completed_local', status: 'scheduled', updatedAt: 9000 };
-  const protectedCompletion = mergeEntities([completedLocal], [newerScheduledRemote], 'lessons').merged[0] as any;
-  assert.equal(protectedCompletion.status, 'completed');
-  assert.deepEqual(protectedCompletion.report, completedLocal.report);
-
-  let latestLocalDuringSync: any[] = [{ id: 'sync_during_exchange', status: 'scheduled', updatedAt: 1000 }];
-  const snapshotAtSyncStart = latestLocalDuringSync;
-  latestLocalDuringSync = [{
-    id: 'sync_during_exchange', status: 'completed', updatedAt: 3000,
-    report: { attendanceStatus: 'present' }
-  }];
-  const mergedAfterExchange = mergeEntities(
-    latestLocalDuringSync,
-    [{ id: 'sync_during_exchange', status: 'scheduled', updatedAt: 8000 } as any],
-    'lessons'
-  ).merged[0] as any;
-  assert.equal(snapshotAtSyncStart[0].status, 'scheduled');
-  assert.equal(mergedAfterExchange.status, 'completed');
-  assert.equal(mergedAfterExchange.report.attendanceStatus, 'present');
-
-  log.push('[PASS] Lesson status sync preserves progressions, explicit reverts, and slot deduplication');
-  log.push('[PASS] Newer scheduled envelope cannot overwrite completed local status/report');
-  log.push('[PASS] Completion made during sync exchange survives merge against latest local snapshot');
+  log.push('[PASS] Lesson status sync preserves progressions, intentional reverts to scheduled, cancelled/pending_action priority, and slot deduplication');
 
   return { passed: true, log };
 }

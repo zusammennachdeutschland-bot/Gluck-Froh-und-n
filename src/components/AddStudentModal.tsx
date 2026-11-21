@@ -6,7 +6,7 @@ import { GradeLevel, ScheduleRecurrence } from '../types';
 import { X, UserPlus, Info, Phone, AtSign, Sparkles, Repeat, RotateCcw } from 'lucide-react';
 import { isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
-import { transliterateArabicNameToEnglish, ensureTwoPartName, findDuplicateStudentByName } from '../utils/nameUtils';
+import { transliterateArabicNameToEnglish, ensureTwoPartName } from '../utils/nameUtils';
 import { normalizeEgyptianPhone } from '../utils/contactsStandardizer';
 
 interface AddStudentModalProps {
@@ -15,7 +15,7 @@ interface AddStudentModalProps {
 }
 
 export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initialGroupId }) => {
-  const { groups, students, addStudent, triggerToast, t, _t, language } = useApp();
+  const { groups, students, addStudent, t, _t, language } = useApp();
 
   // Helper for inline translations
   
@@ -147,14 +147,9 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
       ));
       return;
     }
-    const duplicate = findDuplicateStudentByName(students, name);
-    if (duplicate) {
-      triggerToast(_t(
-        `يوجد طالب آخر مسجل بنفس الاسم "${name.trim()}". يرجى استخدام اسم مميز لتجنب تضارب السجلات.`,
-        `A student named "${name.trim()}" already exists. Please use a distinct name.`,
-        `Ein Schüler mit dem Namen "${name.trim()}" existiert bereits. Bitte wählen Sie einen eindeutigen Namen.`
-      ));
-      return;
+    const isDuplicate = students.some(s => (s.name || '').toLowerCase() === (name || '').toLowerCase() && s.groupId === groupId);
+    if (isDuplicate) {
+      if (!window.confirm(t('duplicate_student_warning') || 'طالب بنفس الاسم موجود بالفعل. هل تريد المتابعة؟ / A student with the same name already exists in this group. Do you want to continue?')) return;
     }
 
     const isParentUser = parentContactType === 'username' || isWhatsAppUsername(parentPhone);
@@ -168,30 +163,26 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
 
     const finalParentName = parentName.trim() || `أم ${name.trim()}`;
 
-    try {
-      addStudent({
-        name: name.trim(),
-        certificateName: certificateName.trim(),
-        gender,
-        groupId,
-        scheduleRecurrence,
-        grade: grade || selectedGroup?.grade || 'Grade 7',
-        parentName: finalParentName,
-        parentPhone: finalParentPhone,
-        parentUsername: isParentUser ? cleanParentUser : undefined,
-        parentContactType: isParentUser ? 'username' : 'phone',
-        studentPhone: finalStudentPhone,
-        studentUsername: isStudentUser ? cleanStudentUser : undefined,
-        studentContactType: isStudentUser ? 'username' : (hasStudentVal ? 'phone' : undefined),
-        notes,
-        avatarUrl: ''
-      });
-    } catch (err: any) {
-      triggerToast(err?.message || _t('تعذر إضافة الطالب.', 'Failed to add student.', 'Schüler konnte nicht hinzugefügt werden.'));
-      return;
-    }
+    addStudent({
+      name,
+      certificateName: certificateName.trim(),
+      gender,
+      groupId,
+      scheduleRecurrence,
+      grade: grade || selectedGroup?.grade || 'Grade 7',
+      parentName: finalParentName,
+      parentPhone: finalParentPhone,
+      parentUsername: isParentUser ? cleanParentUser : undefined,
+      parentContactType: isParentUser ? 'username' : 'phone',
+      studentPhone: finalStudentPhone,
+      studentUsername: isStudentUser ? cleanStudentUser : undefined,
+      studentContactType: isStudentUser ? 'username' : (hasStudentVal ? 'phone' : undefined),
+      notes,
+      avatarUrl: ''
+    });
 
     storage.removeItem('dl_draft_add_student');
+    /* confetti removed */
     onClose();
   };
 

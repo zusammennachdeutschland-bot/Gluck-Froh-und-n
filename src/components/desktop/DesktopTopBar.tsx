@@ -9,7 +9,7 @@ import { SyncCenterModal } from '../sync/SyncCenterModal';
 import { SyncHeaderButton } from '../sync/SyncHeaderButton';
 import { pairWithPeer } from '../../services/sync/syncClient';
 import { motion } from 'motion/react';
-import { formatLocalDate, normalizeDateToISO } from '../../utils/timeUtils';
+import { formatLocalDate } from '../../utils/timeUtils';
 
 interface DesktopTopBarProps {
   onOpenSyncModal?: () => void;
@@ -153,7 +153,7 @@ export const DesktopTopBar: React.FC<DesktopTopBarProps> = () => {
     const currentMins = now.getHours() * 60 + now.getMinutes();
 
     return lessons.find(l => {
-      if (normalizeDateToISO(l.date) !== todayStr || l.status === 'completed' || l.status === 'cancelled') return false;
+      if (l.date !== todayStr || l.status === 'completed' || l.status === 'cancelled') return false;
       const [h, m] = (l.time || '00:00').split(':').map(Number);
       const lessonMins = h * 60 + m;
       const diff = lessonMins - currentMins;

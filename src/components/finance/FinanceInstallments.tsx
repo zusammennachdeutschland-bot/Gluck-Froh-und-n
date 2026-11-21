@@ -3,7 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { Plus, CreditCard, CalendarDays, Wallet, AlertCircle, CheckCircle2, MoreVertical, Edit2, Trash2, Bell, Landmark, ShieldCheck } from 'lucide-react';
 import { FinanceInstallment } from '../../types';
 import { AddFinanceInstallmentModal } from './modals/AddFinanceInstallmentModal';
-import { formatLocalDate, advanceDueDateByFrequency } from '../../utils/timeUtils';
+import { parseLocalDate, formatLocalDate } from '../../utils/timeUtils';
 
 export const FinanceInstallments: React.FC = () => {
   const { 
@@ -43,7 +43,18 @@ export const FinanceInstallments: React.FC = () => {
     
     let nextDue = inst.nextDueDate || inst.firstDueDate || todayStr;
     if (newStatus === 'active') {
-      nextDue = advanceDueDateByFrequency(nextDue, inst.frequency);
+      const baseDate = parseLocalDate(nextDue);
+      const dayOfMonth = baseDate.getDate();
+      const due = new Date(baseDate);
+      if (inst.frequency === 'monthly') {
+        due.setMonth(due.getMonth() + 1);
+        if (due.getDate() !== dayOfMonth) {
+          due.setDate(0);
+        }
+      } else if (inst.frequency === 'weekly') {
+        due.setDate(due.getDate() + 7);
+      }
+      nextDue = formatLocalDate(due);
     }
 
     updateFinanceInstallment(inst.id, {

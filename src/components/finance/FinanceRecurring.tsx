@@ -3,7 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { Plus, Repeat, CalendarCheck, CheckCircle2, MoreVertical, Edit2, Trash2, CalendarDays, Wallet, AlertCircle, TrendingUp, TrendingDown, Bell } from 'lucide-react';
 import { FinanceRecurring as FinanceRecurringType } from '../../types';
 import { AddFinanceRecurringModal } from './modals/AddFinanceRecurringModal';
-import { formatLocalDate, advanceDueDateByFrequency } from '../../utils/timeUtils';
+import { parseLocalDate, formatLocalDate } from '../../utils/timeUtils';
 
 export const FinanceRecurring: React.FC = () => {
   const { 
@@ -32,12 +32,27 @@ export const FinanceRecurring: React.FC = () => {
       note: rec.name + ' - ' + _t('دفع متكرر', 'Recurring Payment', 'Wiederkehrende Zahlung')
     });
 
+    // Determine next due date based on frequency using local calendar math
     const baseDueStr = rec.nextDueDate || rec.startDate || todayStr;
-    const nextDueStr = advanceDueDateByFrequency(baseDueStr, rec.frequency);
+    const baseDate = parseLocalDate(baseDueStr);
+    const dayOfMonth = baseDate.getDate();
+
+    let nextDue = new Date(baseDate);
+    if (rec.frequency === 'monthly') {
+      nextDue.setMonth(nextDue.getMonth() + 1);
+      // If month rolled over too far (e.g. Jan 31 -> Mar 2), clamp to last day of expected month
+      if (nextDue.getDate() !== dayOfMonth) {
+        nextDue.setDate(0);
+      }
+    } else if (rec.frequency === 'weekly') {
+      nextDue.setDate(nextDue.getDate() + 7);
+    } else if (rec.frequency === 'yearly') {
+      nextDue.setFullYear(nextDue.getFullYear() + 1);
+    }
 
     updateFinanceRecurring(rec.id, {
       lastPaidDate: todayStr,
-      nextDueDate: nextDueStr
+      nextDueDate: formatLocalDate(nextDue)
     });
 
     setPayingId(null);

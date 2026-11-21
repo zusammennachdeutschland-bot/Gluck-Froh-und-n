@@ -20,12 +20,3 @@ android/app/release.keystore.b64
 /chat-attachments/
 /conversation-attachments/
 /android/app/src/main/assets/public/assets/aistudio/
-
-# Android / Gradle generated build and cache files
-**/.gradle/
-**/build/
-local.properties
-.idea/
-.cxx/
-.externalNativeBuild/
-/android/app/src/main/assets/

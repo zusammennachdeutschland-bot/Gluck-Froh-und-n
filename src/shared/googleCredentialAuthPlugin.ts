@@ -214,52 +214,34 @@ export async function invokeNativeGoogleCredentialSignOut(): Promise<GoogleCrede
   return NativeGoogleCredentialAuth.signOut();
 }
 
-function withNativeCalendarTimeout<T>(promise: Promise<T>, timeoutMs: number, code: string): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(Object.assign(new Error('Google Calendar native operation timed out. Please try again.'), { code }));
-    }, timeoutMs);
-  });
-  return Promise.race([promise, timeout]).finally(() => {
-    if (timeoutId) clearTimeout(timeoutId);
-  });
-}
-
 export async function invokeNativeGoogleCalendarAuthorize(
   options?: GoogleCalendarAuthorizeOptions
 ): Promise<GoogleCalendarAuthorizeResult> {
-  if (!testAdapter?.authorizeCalendar && typeof NativeGoogleCredentialAuth.authorizeCalendar !== 'function') {
+  if (testAdapter?.authorizeCalendar) {
+    return testAdapter.authorizeCalendar(options);
+  }
+  if (typeof NativeGoogleCredentialAuth.authorizeCalendar !== 'function') {
     throw Object.assign(
       new Error('Native Android Google Calendar authorization plugin is unavailable in this build. Please update the Android app.'),
       { code: 'PLUGIN_UNAVAILABLE' }
     );
   }
-  const operation = testAdapter?.authorizeCalendar
-    ? testAdapter.authorizeCalendar(options)
-    : NativeGoogleCredentialAuth.authorizeCalendar!(options);
-  // Silent startup verification must never hold the settings screen hostage.
-  // Interactive consent gets a longer window than the native 120s consent watchdog.
-  return withNativeCalendarTimeout(
-    operation,
-    options?.silentOnly ? 25000 : 135000,
-    options?.silentOnly ? 'CALENDAR_SILENT_AUTH_TIMEOUT' : 'CALENDAR_AUTH_TIMEOUT'
-  );
+  return NativeGoogleCredentialAuth.authorizeCalendar(options);
 }
 
 export async function invokeNativeClearCalendarToken(accessToken: string): Promise<{ cleared: boolean }> {
   if (!accessToken) return { cleared: false };
   try {
-    const operation = testAdapter?.clearCalendarToken
-      ? testAdapter.clearCalendarToken({ accessToken })
-      : typeof NativeGoogleCredentialAuth.clearCalendarToken === 'function'
-        ? NativeGoogleCredentialAuth.clearCalendarToken({ accessToken })
-        : Promise.resolve({ cleared: false });
-    return await withNativeCalendarTimeout(operation, 5000, 'CALENDAR_CLEAR_TOKEN_TIMEOUT');
+    if (testAdapter?.clearCalendarToken) {
+      return await testAdapter.clearCalendarToken({ accessToken });
+    }
+    if (typeof NativeGoogleCredentialAuth.clearCalendarToken === 'function') {
+      return await NativeGoogleCredentialAuth.clearCalendarToken({ accessToken });
+    }
   } catch {
-    // Native cleanup is best-effort; local disconnect must still complete.
-    return { cleared: false };
+    // Non-fatal cleanup error
   }
+  return { cleared: false };
 }
 
 export async function invokeNativeRevokeCalendarAccess(
@@ -268,16 +250,16 @@ export async function invokeNativeRevokeCalendarAccess(
 ): Promise<{ revoked: boolean }> {
   if (!accountEmail) return { revoked: false };
   try {
-    const operation = testAdapter?.revokeCalendarAccess
-      ? testAdapter.revokeCalendarAccess({ accountEmail, scope })
-      : typeof NativeGoogleCredentialAuth.revokeCalendarAccess === 'function'
-        ? NativeGoogleCredentialAuth.revokeCalendarAccess({ accountEmail, scope })
-        : Promise.resolve({ revoked: false });
-    return await withNativeCalendarTimeout(operation, 5000, 'CALENDAR_REVOKE_TIMEOUT');
+    if (testAdapter?.revokeCalendarAccess) {
+      return await testAdapter.revokeCalendarAccess({ accountEmail, scope });
+    }
+    if (typeof NativeGoogleCredentialAuth.revokeCalendarAccess === 'function') {
+      return await NativeGoogleCredentialAuth.revokeCalendarAccess({ accountEmail, scope });
+    }
   } catch {
-    // Native cleanup is best-effort; local disconnect must still complete.
-    return { revoked: false };
+    // Non-fatal cleanup error
   }
+  return { revoked: false };
 }
 
 export function subscribeNativeCalendarAuthProcessRestored(

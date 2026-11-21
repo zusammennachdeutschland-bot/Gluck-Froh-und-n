@@ -777,8 +777,7 @@ function MainApp() {
 
 import { migrateFromLocalStorageToIndexedDB } from './services/migrationService';
 import { storage } from './services/storageService';
-import { sanitizeInitialData, clearAllLocalDataAndReset, ZOOM_STORAGE_KEYS } from './services/dataSanitizer';
-import { mergeHodVisitMigration } from './utils/hodVisitMigration';
+import { sanitizeInitialData, clearAllLocalDataAndReset } from './services/dataSanitizer';
 import { HomeworkPlayerPage } from './pages/HomeworkPlayerPage';
 
 function isHomeworkLocation(): boolean {
@@ -840,12 +839,11 @@ export default function App() {
         'dl_notifications', 'dl_notification_settings', 'dl_inspiration_settings', 'dl_inspiration_messages',
         'dl_last_backup_time', 'dl_dismissed_dashboard_lessons', 'dl_recently_deleted',
         'dl_active_lesson_session', 'dl_active_lesson_session_updated_at', 'dl_notified_lesson_alerts', 'dl_local_backup_data',
-        'hod_german_students', 'hod_complaints', 'hod_student_action_plans', 'hod_visit_records', 'hod_visit_records_migrated_v1',
+        'hod_german_students', 'hod_complaints', 'hod_student_action_plans', 'hod_visit_records',
         'dl_school_notes', 'dl_finance_accounts', 'dl_finance_categories', 'dl_finance_transactions',
         'dl_finance_recurring', 'dl_finance_installments', 'dl_finance_notifications',
         'gluck_gold_holdings', 'gluck_gold_settings', 'dl_lernstudio_sets',
-        'dl_settings', 'dl_sync_state',
-        ...ZOOM_STORAGE_KEYS
+        'dl_settings', 'dl_sync_state'
       ];
       
       const values = await Promise.all(keys.map(async (k) => {
@@ -860,30 +858,6 @@ export default function App() {
       keys.forEach((key, idx) => {
         rawDict[key] = values[idx];
       });
-
-      // Import legacy profile visits once, before AppProvider initializes its state.
-      // Await durable writes so a restart cannot replay the legacy source after a deletion.
-      const hodVisitMigrationKey = 'hod_visit_records_migrated_v1';
-      if (!rawDict[hodVisitMigrationKey]) {
-        const migratedVisits = mergeHodVisitMigration(
-          Array.isArray(rawDict['hod_visit_records']) ? rawDict['hod_visit_records'] : [],
-          Array.isArray(rawDict['dl_profile']?.schoolSettings?.visitRecords)
-            ? rawDict['dl_profile'].schoolSettings.visitRecords
-            : [],
-          false
-        );
-        rawDict['hod_visit_records'] = migratedVisits;
-        try {
-          await storage.setItem('hod_visit_records', migratedVisits);
-          await storage.setItem(hodVisitMigrationKey, true);
-          rawDict[hodVisitMigrationKey] = true;
-        } catch (migrationError) {
-          // Keep the migrated rows available in this session; retry on the next
-          // startup rather than failing the entire app initialization.
-          console.warn('HOD visit migration could not be persisted yet:', migrationError);
-          rawDict[hodVisitMigrationKey] = false;
-        }
-      }
 
       // Self-healing: Sanitize all collections, arrays, and objects
       const safeData = sanitizeInitialData(rawDict);

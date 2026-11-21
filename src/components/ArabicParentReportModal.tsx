@@ -4,7 +4,7 @@ import { Lesson, Student, TeacherProfile, LessonReport } from '../types';
 import { useApp } from '../context/AppContext';
 import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername, formatContactDisplay } from '../utils/phoneUtils';
 import { getTeacherArabicName } from '../utils/teacherUtils';
-import { formatTimeDisplay, parseLocalDate, getLocalDateStr, normalizeDateToISO } from '../utils/timeUtils';
+import { formatTimeDisplay, parseLocalDate, getLocalDateStr } from '../utils/timeUtils';
 import { isLikelyFemaleStudent, getStudentRoleLabel, getArabicAttendanceString } from '../utils/genderUtils';
 import { calculateSequentialSessionNumber, resolveLessonCycleNumber, resolveTaughtTodayTopic, resolveStudentReportAttendance, resolveReportHomework, resolvePreviousHomeworkStatusText } from '../utils/lessonUtils';
 import { getTimeBasedGreeting, getCairoHour } from '../utils/greetingUtils';
@@ -127,7 +127,7 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
   const [showDispatchQueueModal, setShowDispatchQueueModal] = useState(false);
 
   // Check if this lesson is scheduled for today
-  const isLessonToday = Boolean(lesson.date && normalizeDateToISO(lesson.date) === getLocalDateStr());
+  const isLessonToday = Boolean(lesson.date && lesson.date === getLocalDateStr());
 
   // Find the associated group robustly (by groupId, student's groupId, groupName, or title match)
   const safeLessonTitleLower = typeof lesson.title === 'string' ? lesson.title.toLowerCase() : '';
@@ -749,7 +749,7 @@ export const ArabicParentReportModal: React.FC<ArabicParentReportModalProps> = (
     const bulkLang: 'ar' | 'en' | 'de' = reportLanguage === 'en' ? 'en' : reportLanguage === 'de' ? 'de' : 'ar';
     const nextHomework = formatCurrentHomeworkWithOnline(homeworkInfo.text, bulkLang);
     
-    const isLessonToday = Boolean(lesson.date && normalizeDateToISO(lesson.date) === getLocalDateStr());
+    const isLessonToday = Boolean(lesson.date && lesson.date === getLocalDateStr());
     const dayName = getLessonArabicDay(lesson.date, lesson.dayOfWeek);
     const dateFormatted = formatArabicDate(lesson.date);
     const timeFormatted = formatArabicTime(lesson.time);
@@ -1065,7 +1065,7 @@ ${topicBlock}${hwBlock}${prevHwBlock}${recordingSection}
       studentNote = (activeStudentId ? (localReport?.studentNotes?.[activeStudentId] || lesson.report?.studentNotes?.[activeStudentId]) : '') || '';
     }
 
-    const isLessonToday = Boolean(lesson.date && normalizeDateToISO(lesson.date) === getLocalDateStr());
+    const isLessonToday = Boolean(lesson.date && lesson.date === getLocalDateStr());
     const dayName = getLessonArabicDay(lesson.date, lesson.dayOfWeek);
     const dateFormatted = formatArabicDate(lesson.date);
     const timeFormatted = formatArabicTime(lesson.time);

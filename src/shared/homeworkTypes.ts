@@ -179,8 +179,6 @@ export interface HomeworkAssignment {
   maxAttempts: number;
   allowReplay: boolean;
   deadline?: string;
-  dueDate?: string; // Optional due date (YYYY-MM-DD or ISO); auto-closes 14 days after dueDate unless manually reopened
-  manualReopenedAt?: number; // Timestamp (ms) when teacher manually reopened an auto-closed or past-due assignment
   isActive: boolean;
   status?: 'active' | 'closed' | 'deleted';
   deleted?: boolean; // Server-authoritative deletion tombstone; never restore a deleted assignment.

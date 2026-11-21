@@ -600,15 +600,7 @@ export const LessonControlModal: React.FC = () => {
       const pricing = targetStudent ? getStudentCyclePricing(targetStudent, targetGroup) : null;
       const defaultAmt = selectedLesson.amountPaid || selectedLesson.amountDue || pricing?.amountDue || pricing?.pricePerSession || 200;
       setPaymentAmountInput(defaultAmt);
-      const stIdForLookup = targetStudent?.id || selectedLesson.studentId;
-      const existingLessonPayment = (payments || []).find(p =>
-        !p.deleted &&
-        (!stIdForLookup || !p.studentId || p.studentId === stIdForLookup) &&
-        (p.lessonId === selectedLesson.id || (Array.isArray(p.lessonIds) && p.lessonIds.includes(selectedLesson.id)))
-      );
-      if (existingLessonPayment?.financeAccountId && financeAccounts.some(a => a.id === existingLessonPayment.financeAccountId && !a.deleted)) {
-        setSelectedReceivingAccountId(existingLessonPayment.financeAccountId);
-      } else if (targetGroup?.defaultFinanceAccountId && financeAccounts.some(a => a.id === targetGroup.defaultFinanceAccountId && !a.deleted)) {
+      if (targetGroup?.defaultFinanceAccountId && financeAccounts.some(a => a.id === targetGroup.defaultFinanceAccountId && !a.deleted)) {
         setSelectedReceivingAccountId(targetGroup.defaultFinanceAccountId);
       } else {
         setSelectedReceivingAccountId(financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash');
@@ -1281,6 +1273,7 @@ export const LessonControlModal: React.FC = () => {
                       group: targetGroup,
                       lesson: selectedLesson,
                       groupWeeklySessions,
+                      defaultZoomLink: profile.defaultZoomLink
                     })}
                     target="_blank"
                     rel="noreferrer"
@@ -2589,18 +2582,13 @@ export const LessonControlModal: React.FC = () => {
                             <select
                               value={selectedReceivingAccountId}
                               onChange={(e) => {
-                                const newAccId = e.target.value;
-                                setSelectedReceivingAccountId(newAccId);
+                                setSelectedReceivingAccountId(e.target.value);
                                 if (isLessonPaid) {
+                                  // Re-sync with new account
                                   const studentId = targetStudent?.id || selectedLesson.studentId || selectedLesson.id || 'quick_student';
                                   const studentName = targetStudent?.name || selectedLesson.studentName || selectedLesson.title;
                                   const groupId = targetGroup?.id || selectedLesson.groupId || '';
                                   const groupName = targetGroup?.name || selectedLesson.groupName || 'Gruppe';
-                                  const existingRec = (payments || []).find(p =>
-                                    !p.deleted &&
-                                    p.studentId === studentId &&
-                                    (p.lessonId === selectedLesson.id || (Array.isArray(p.lessonIds) && p.lessonIds.includes(selectedLesson.id)))
-                                  );
                                   markCyclePaymentPaid({
                                     studentId,
                                     studentName,
@@ -2608,11 +2596,10 @@ export const LessonControlModal: React.FC = () => {
                                     groupName,
                                     amountDue: paymentAmountInput,
                                     amountPaid: paymentAmountInput,
-                                    lessonDates: existingRec?.lessonDates?.length ? existingRec.lessonDates : [selectedLesson.date],
-                                    lessonIds: existingRec?.lessonIds?.length ? existingRec.lessonIds : [selectedLesson.id],
-                                    existingPaymentRecordId: existingRec?.id,
-                                    accountId: newAccId,
-                                    notes: existingRec?.notes || `سداد حصة: ${studentName} (${selectedLesson.date})`
+                                    lessonDates: [selectedLesson.date],
+                                    lessonIds: [selectedLesson.id],
+                                    accountId: e.target.value,
+                                    notes: `سداد حصة: ${studentName} (${selectedLesson.date})`
                                   });
                                 }
                               }}

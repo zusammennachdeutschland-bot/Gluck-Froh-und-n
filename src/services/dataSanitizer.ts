@@ -22,14 +22,7 @@ import {
   INITIAL_INSPIRATION_MESSAGES
 } from '../data/initialData';
 import { isDateMatchingGroupRecurrence, getAlternatingWeek } from '../utils/scheduleUtils';
-import { formatLocalDate, normalizeDateToISO } from '../utils/timeUtils';
-
-export const ZOOM_STORAGE_KEYS = [
-  'glueck_group_weekly_sessions_v1',
-  'glueck_zoom_meeting_records_v1',
-  'glueck_zoom_meeting_history_v1',
-  'glueck_grain_recording_matches_v1',
-] as const;
+import { formatLocalDate } from '../utils/timeUtils';
 
 export function sanitizeInitialData(rawData: Record<string, any>): Record<string, any> {
   const sanitized: Record<string, any> = { ...rawData };
@@ -155,7 +148,7 @@ export function sanitizeInitialData(rawData: Record<string, any>): Record<string
       return {
         ...l,
         id: String(l.id || `lsn_${Date.now()}_${idx}`),
-        date: normalizeDateToISO(typeof l.date === 'string' ? l.date : ''),
+        date: typeof l.date === 'string' ? l.date : '',
         time: typeof l.time === 'string' ? l.time : '',
         scheduleRecurrence: rec,
         biweeklyWeek: l.biweeklyWeek || (l.date ? getAlternatingWeek(l.date) : undefined)

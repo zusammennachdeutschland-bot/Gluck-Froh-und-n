@@ -1,6 +1,5 @@
 import { TextToSpeech } from '@capacitor-community/text-to-speech';
 import { Toast } from '@capacitor/toast';
-import { getActiveCloudUser } from './firebaseCloudSync';
 
 /**
  * Cross-Platform German Text-To-Speech Utility
@@ -10,7 +9,6 @@ import { getActiveCloudUser } from './firebaseCloudSync';
 let isAudioUnlocked = false;
 let cachedGermanVoice: SpeechSynthesisVoice | null = null;
 let activeAudio: HTMLAudioElement | null = null;
-let activeAudioObjectUrl: string | null = null;
 
 // Audio unlocker for mobile WebViews restricted media autoplay
 if (typeof window !== 'undefined') {
@@ -69,57 +67,34 @@ if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
 /**
  * HTML5 Audio Fallback via Backend Proxy (/api/tts) for 100% reliable web pronunciation
  */
-const releaseActiveAudioObjectUrl = () => {
-  if (activeAudioObjectUrl) {
-    URL.revokeObjectURL(activeAudioObjectUrl);
-    activeAudioObjectUrl = null;
-  }
-};
-
-const playAudioFallback = async (cleanText: string, rate: number = 0.85): Promise<boolean> => {
-  try {
-    if (activeAudio) {
-      activeAudio.pause();
-      activeAudio = null;
-    }
-    releaseActiveAudioObjectUrl();
-
-    const user = getActiveCloudUser();
-    if (!user) return false;
-    const token = await user.getIdToken();
-    if (!token) return false;
-
-    const ttsUrl = `/api/tts?text=${encodeURIComponent(cleanText)}&lang=de`;
-    const response = await fetch(ttsUrl, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!response.ok) return false;
-
-    const objectUrl = URL.createObjectURL(await response.blob());
-    activeAudioObjectUrl = objectUrl;
-    const audio = new Audio(objectUrl);
-    activeAudio = audio;
-    audio.playbackRate = Math.min(Math.max(rate, 0.5), 1.5);
-
-    return await new Promise<boolean>((resolve) => {
-      const finish = (success: boolean) => {
-        if (activeAudio === audio) activeAudio = null;
-        if (activeAudioObjectUrl === objectUrl) releaseActiveAudioObjectUrl();
-        resolve(success);
+const playAudioFallback = (cleanText: string, rate: number = 0.85): Promise<boolean> => {
+  return new Promise((resolve) => {
+    try {
+      if (activeAudio) {
+        activeAudio.pause();
+        activeAudio = null;
+      }
+      const ttsUrl = `/api/tts?text=${encodeURIComponent(cleanText)}&lang=de`;
+      const audio = new Audio(ttsUrl);
+      activeAudio = audio;
+      audio.playbackRate = Math.min(Math.max(rate, 0.5), 1.5);
+      audio.onended = () => {
+        activeAudio = null;
+        resolve(true);
       };
-      audio.onended = () => finish(true);
-      audio.onerror = () => finish(false);
+      audio.onerror = () => {
+        activeAudio = null;
+        resolve(false);
+      };
       audio.play().catch((err) => {
         console.warn('HTML5 Audio fallback play error:', err);
-        finish(false);
+        activeAudio = null;
+        resolve(false);
       });
-    });
-  } catch (err) {
-    console.warn('HTML5 Audio fallback request failed:', err);
-    releaseActiveAudioObjectUrl();
-    activeAudio = null;
-    return false;
-  }
+    } catch {
+      resolve(false);
+    }
+  });
 };
 
 /**
@@ -137,7 +112,6 @@ export const stopGermanSpeech = async () => {
     }
     activeAudio = null;
   }
-  releaseActiveAudioObjectUrl();
 
   // Stop native Capacitor TTS if active
   try {

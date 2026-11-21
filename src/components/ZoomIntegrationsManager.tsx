@@ -61,7 +61,6 @@ import {
   verifyOrSilentlyReauthorizeGoogleCalendar
 } from '../services/calendarSyncService';
 import { ZoomCleanupRebuildSection } from './ZoomCleanupRebuildSection';
-import { logZoomReminderPipeline } from '../utils/zoomReminderDiagnostics';
 
 const COMMON_TIMEZONES = [
   'Africa/Cairo',
@@ -134,8 +133,6 @@ export const ZoomIntegrationsManager: React.FC = () => {
   } | null>(null);
   const [lastCalendarSyncResult, setLastCalendarSyncResult] = useState<CalendarSyncResult | null>(null);
   const [isConnectingCalendar, setIsConnectingCalendar] = useState(false);
-  const [isDisconnectingCalendar, setIsDisconnectingCalendar] = useState(false);
-  const calendarConnectAttemptRef = useRef(0);
   const [calendarConn, setCalendarConn] = useState<GoogleCalendarConnectionState>(() =>
     getGoogleCalendarConnectionState()
   );
@@ -271,91 +268,6 @@ export const ZoomIntegrationsManager: React.FC = () => {
     return { total, zoomSynced, calSynced, needsAttention, deletedOrphanCalEvents };
   }, [activeSessions, livePreviewSummary.reconciledSessions]);
 
-  const handleCopyMeetingsForAi = async () => {
-    const exportData = {
-      purpose: 'Create recurring calendar events from the following existing Zoom meeting schedule.',
-      instructions: [
-        'Create one calendar event for each meeting below.',
-        'Preserve the exact meeting title, weekday, local start time, duration, timezone, recurrence interval, Zoom join URL, meeting ID, passcode, and host email.',
-        'All times are local wall-clock times in each event timezone.',
-        'recurrence=weekly means every week; recurrence=biweekly_a or biweekly_b means every two weeks. Keep the A/B cycle distinction and do not convert it to weekly.',
-        'The app does not store a recurrence start date for these weekly templates. Determine the next matching date from the current date in the event timezone, and ask me if a historical or specific start date is required.',
-        'Do not invent missing details. If a field is null, leave it unset.',
-        'Do not change or shorten Zoom URLs or remove passcodes.'
-      ],
-      exportedAt: new Date().toISOString(),
-      timezoneReference: timezoneInput || DEFAULT_ZOOM_TIMEZONE,
-      meetingCount: activeSessions.length,
-      meetings: activeSessions.map((session) => ({
-        title: session.standardizedTitle,
-        groupName: session.groupNameSnapshot || null,
-        sessionCode: session.sessionCode,
-        sessionId: session.id,
-        groupId: session.groupId,
-        weekday: session.weekdayName,
-        weekdayIndexSundayZero: session.weekday,
-        localStartTime: session.startTime,
-        durationMinutes: session.durationMinutes,
-        timezone: session.timezone || timezoneInput || DEFAULT_ZOOM_TIMEZONE,
-        recurrence: session.recurrence,
-        recurrenceInterval: session.recurrence === 'weekly' ? 1 : 2,
-        recurrenceCycle: session.recurrence === 'biweekly_a' ? 'A' : session.recurrence === 'biweekly_b' ? 'B' : null,
-        zoomMeetingId: session.zoomMeetingId || null,
-        zoomJoinUrl: session.zoomJoinUrl || null,
-        zoomPasscode: session.zoomPasscode || null,
-        zoomHostEmail: session.zoomHostEmail || null,
-        meetingSource: session.meetingSource,
-        sessionStatus: session.syncState,
-        calendarSyncStatus: session.calendarSyncStatus || 'not_synced'
-      }))
-    };
-
-    const textToCopy = [
-      'Please use this complete meeting data to create the recurring events in my calendar:',
-      '',
-      JSON.stringify(exportData, null, 2)
-    ].join('\\n');
-
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(textToCopy);
-      } else {
-        throw new Error('Clipboard API unavailable');
-      }
-      triggerToast(_t(
-        `تم نسخ بيانات ${activeSessions.length} اجتماع بالكامل. الصقها في أي AI.`,
-        `Copied complete data for ${activeSessions.length} meetings. Paste it into any AI.`,
-        `Daten für ${activeSessions.length} Meetings kopiert.`
-      ));
-    } catch {
-      try {
-        const textarea = document.createElement('textarea');
-        textarea.value = textToCopy;
-        textarea.setAttribute('readonly', 'true');
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        textarea.style.pointerEvents = 'none';
-        document.body.appendChild(textarea);
-        textarea.select();
-        textarea.setSelectionRange(0, textarea.value.length);
-        const copied = document.execCommand('copy');
-        document.body.removeChild(textarea);
-        if (!copied) throw new Error('Legacy clipboard copy failed');
-        triggerToast(_t(
-          'تم نسخ بيانات الاجتماعات بالكامل.',
-          'Complete meeting data copied.',
-          'Vollständige Meeting-Daten kopiert.'
-        ));
-      } catch {
-        triggerToast(_t(
-          'تعذر النسخ تلقائيًا. استخدم زر تصدير .ics كبديل.',
-          'Automatic copy failed. Use Export .ics as a fallback.',
-          'Automatisches Kopieren fehlgeschlagen. Exportiere stattdessen .ics.'
-        ));
-      }
-    }
-  };
-
   const handleSaveCredentials = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!accountIdInput.trim() || !clientIdInput.trim() || !clientSecretInput.trim()) return;
@@ -488,24 +400,6 @@ export const ZoomIntegrationsManager: React.FC = () => {
         }
       });
 
-      logZoomReminderPipeline('Zoom Manager bulk-sync completed before applyZoomWorkspaceSnapshot', {
-        completed: result.completed,
-        succeededCount: result.succeededCount,
-        failedCount: result.failedCount,
-        skippedCount: result.skippedCount,
-        processedSessionIds: result.processedSessionIds,
-        errors: result.errors,
-        sessions: result.sessions.map(session => ({
-          id: session.id,
-          groupId: session.groupId,
-          deleted: Boolean(session.deleted),
-          meetingSource: session.meetingSource,
-          syncState: session.syncState,
-          hasZoomJoinUrl: Boolean((session.zoomJoinUrl || '').trim()),
-          weekday: session.weekday,
-          startTime: session.startTime
-        }))
-      });
       applyZoomWorkspaceSnapshot({
         sessions: result.sessions,
         records: result.records,
@@ -578,16 +472,9 @@ export const ZoomIntegrationsManager: React.FC = () => {
   };
 
   const handleConnectGoogleCalendar = async (forcePrompt = false) => {
-    const attemptId = ++calendarConnectAttemptRef.current;
     setIsConnectingCalendar(true);
     try {
       const authRes = await requestGoogleCalendarAccessToken(forcePrompt);
-      // If the user disconnected while the native consent screen was open, do not
-      // allow its late result to silently restore the connection.
-      if (attemptId !== calendarConnectAttemptRef.current) {
-        await disconnectGoogleCalendar();
-        return;
-      }
       if (authRes.ok) {
         triggerToast(
           authRes.accountEmail
@@ -618,31 +505,15 @@ export const ZoomIntegrationsManager: React.FC = () => {
           authRes.error || _t('فشل ربط Google Calendar', 'Google Calendar authorization failed')
         );
       }
-    } catch (err: any) {
-      const message =
-        (typeof err?.message === 'string' && err.message.trim()) ||
-        _t('حدث خطأ أثناء ربط Google Calendar', 'An unexpected error occurred while connecting Google Calendar');
-      console.error('[Glück Calendar] Connection flow failed:', err);
-      triggerToast(message);
     } finally {
       setIsConnectingCalendar(false);
     }
   };
 
   const handleDisconnectGoogleCalendar = async () => {
-    // Invalidate any in-flight connect attempt so a late consent result cannot reconnect.
-    calendarConnectAttemptRef.current += 1;
-    setIsDisconnectingCalendar(true);
-    setIsConnectingCalendar(false);
-    try {
-      await disconnectGoogleCalendar();
-      setLastCalendarSyncResult(null);
-      triggerToast(_t('تم فصل Google Calendar وإلغاء صلاحية الربط', 'Google Calendar disconnected and access revoked'));
-    } catch (err: any) {
-      triggerToast(err?.message || _t('تعذر فصل Google Calendar بالكامل', 'Could not fully disconnect Google Calendar'));
-    } finally {
-      setIsDisconnectingCalendar(false);
-    }
+    await disconnectGoogleCalendar();
+    setLastCalendarSyncResult(null);
+    triggerToast(_t('تم فصل جلسة Google Calendar', 'Google Calendar session disconnected'));
   };
 
   const openCalendarSyncModal = (targetSession: GroupWeeklySession | null = null) => {
@@ -758,19 +629,18 @@ export const ZoomIntegrationsManager: React.FC = () => {
   const handleRowSync = async (session: GroupWeeklySession) => {
     setBusySessionId(session.id);
     try {
-      const reconciledBaseSessions = livePreviewSummary.reconciledSessions;
       const res =
         session.meetingSource === 'zoom_api' && session.zoomMeetingId
           ? await updateZoomMeetingForSession({
               session,
-              sessions: reconciledBaseSessions,
+              sessions: groupWeeklySessions,
               records: zoomMeetingRecords,
               history: zoomMeetingHistory,
               timezone: timezoneInput || DEFAULT_ZOOM_TIMEZONE
             })
           : await createOrReplaceZoomMeetingForSession({
               session,
-              sessions: reconciledBaseSessions,
+              sessions: groupWeeklySessions,
               records: zoomMeetingRecords,
               history: zoomMeetingHistory,
               timezone: timezoneInput || DEFAULT_ZOOM_TIMEZONE
@@ -782,10 +652,9 @@ export const ZoomIntegrationsManager: React.FC = () => {
         history: res.history
       });
       setMeta(loadZoomUiMeta());
-      const syncedTitle = res.updatedSession?.standardizedTitle || session.standardizedTitle;
       triggerToast(
         res.ok
-          ? _t(`تمت المزامنة: ${syncedTitle}`, `Synced: ${syncedTitle}`)
+          ? _t(`تمت المزامنة: ${session.standardizedTitle}`, `Synced: ${session.standardizedTitle}`)
           : res.error || _t('فشل المزامنة', 'Sync failed')
       );
     } finally {
@@ -1455,15 +1324,6 @@ export const ZoomIntegrationsManager: React.FC = () => {
                   <button
                     type="button"
                     disabled={activeSessions.length === 0}
-                    onClick={handleCopyMeetingsForAi}
-                    className="min-h-[44px] px-3.5 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-text-main text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap"
-                  >
-                    <Copy className="w-3.5 h-3.5 shrink-0" />
-                    <span>{_t('نسخ بيانات الاجتماعات للـ AI', 'Copy meetings for AI')}</span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={activeSessions.length === 0}
                     onClick={() => downloadSessionsIcsFile(activeSessions, 'glueck_zoom_schedule.ics')}
                     className="min-h-[44px] px-3.5 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-text-main text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap"
                   >
@@ -1480,18 +1340,6 @@ export const ZoomIntegrationsManager: React.FC = () => {
                     className="w-full min-h-[38px] px-3 rounded-xl text-xs font-medium text-text-muted hover:text-text-main hover:bg-surface-hover cursor-pointer"
                   >
                     {_t('تغيير حساب Google Calendar', 'Switch Google Calendar account')}
-                  </button>
-                )}
-
-                {(calendarConn.status !== 'disconnected' || isConnectingCalendar) && (
-                  <button
-                    type="button"
-                    onClick={handleDisconnectGoogleCalendar}
-                    disabled={isDisconnectingCalendar}
-                    className="w-full min-h-[40px] px-3 rounded-xl border border-rose-500/30 bg-rose-500/5 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-                  >
-                    <ShieldOff className="w-3.5 h-3.5" />
-                    <span>{isDisconnectingCalendar ? _t('جاري إلغاء الربط...', 'Disconnecting...') : _t('إلغاء ربط Google Calendar', 'Disconnect Google Calendar')}</span>
                   </button>
                 )}
               </div>
@@ -1719,7 +1567,6 @@ export const ZoomIntegrationsManager: React.FC = () => {
           zoomConnected={meta.connected}
           timezone={timezoneInput || DEFAULT_ZOOM_TIMEZONE}
           calendarConn={calendarConn}
-          isCalendarConnecting={isConnectingCalendar}
           onConnectCalendar={handleConnectGoogleCalendar}
         />
       )}

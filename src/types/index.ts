@@ -911,9 +911,6 @@ export interface StudentDocument {
   fileSize: string;
   uploadedAt: string;
   url: string;
-  dataUrl?: string;
-  storageKey?: string;
-  mimeType?: string;
   category: 'homework' | 'exam' | 'doc';
 }
 
@@ -930,8 +927,6 @@ export interface Student extends SyncableRecord {
   gender?: 'male' | 'female';
   groupId: string;
   archivedGroupId?: string;
-  groupHistory?: Array<{ groupId: string; leftDate?: string }>;
-  previousGroupIds?: string[];
   grade: GradeLevel;
   parentName: string;
   parentPhone: string;

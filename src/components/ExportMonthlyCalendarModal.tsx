@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { formatLocalDate, normalizeDateToISO } from '../utils/timeUtils';
+import { formatLocalDate } from '../utils/timeUtils';
 import { getProjectedLessonsForRange } from '../utils/scheduleUtils';
 import { 
   X, Calendar as CalendarIcon, Download, Share2, CheckCircle2, ArrowRight, 
@@ -95,14 +95,13 @@ export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProp
     const isCurrentMonthSelection = (selectedYear === currentYear && selectedMonth === currentMonthIndex);
 
     const filteredLessons = monthAllLessons.filter(l => {
-      const lessonDateKey = normalizeDateToISO(l.date);
-      if (!lessonDateKey || !lessonDateKey.startsWith(yearMonthPrefix)) return false;
+      if (!l.date || !l.date.startsWith(yearMonthPrefix)) return false;
       if (l.groupId && !activeGroupIds.has(l.groupId)) return false;
 
       // If current month, exclude past lessons outside rules
       if (isCurrentMonthSelection) {
-        if (lessonDateKey < todayStr) return false;
-        if (lessonDateKey === todayStr) {
+        if (l.date < todayStr) return false;
+        if (l.date === todayStr) {
           const [hStr, mStr] = (l.time || '00:00').split(':');
           const lessonStartMins = parseInt(hStr || '0', 10) * 60 + parseInt(mStr || '0', 10);
           const duration = l.durationMinutes || 60;
@@ -144,6 +143,7 @@ export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProp
             group: targetGroup,
             lesson: l,
             groupWeeklySessions,
+            defaultZoomLink: profile.defaultZoomLink
           })
         : '';
       const address = l.locationAddress || targetGroup?.address || '';

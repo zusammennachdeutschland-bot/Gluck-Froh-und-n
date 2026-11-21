@@ -2,7 +2,6 @@ import React from 'react';
 import { Student } from '../types';
 import { Phone, MessageCircle, X, User, Flame } from 'lucide-react';
 import { buildWhatsAppUrl, cleanPhoneNumberForTel, formatContactDisplay } from '../utils/phoneUtils';
-import { hasUsableTelPhone, hasUsableWhatsAppContact } from '../utils/timelineCardUtils';
 
 interface SelectParentCallModalProps {
   isOpen: boolean;
@@ -31,12 +30,9 @@ export const SelectParentCallModal: React.FC<SelectParentCallModalProps> = ({
     }
   };
 
-  const handleWhatsApp = (contact?: string) => {
-    if (!hasUsableWhatsAppContact(contact)) return;
-    const url = buildWhatsAppUrl(contact);
-    if (url && url !== 'https://wa.me/') {
-      window.open(url, '_blank');
-    }
+  const handleWhatsApp = (phone?: string) => {
+    const url = buildWhatsAppUrl(phone);
+    window.open(url, '_blank');
   };
 
   return (
@@ -91,12 +87,7 @@ export const SelectParentCallModal: React.FC<SelectParentCallModalProps> = ({
           ) : (
             students.map((st) => {
               const primaryPhone = st.parentPhone || st.phone;
-              const whatsAppContact = hasUsableWhatsAppContact(primaryPhone)
-                ? primaryPhone
-                : (st.parentUsername ? `@${st.parentUsername.replace(/^@/, '')}` : '');
-              const canCallParent = hasUsableTelPhone(primaryPhone);
-              const canWhatsAppParent = hasUsableWhatsAppContact(whatsAppContact);
-              const displayPhone = primaryPhone ? formatContactDisplay(primaryPhone) : (whatsAppContact ? formatContactDisplay(whatsAppContact) : '');
+              const displayPhone = primaryPhone ? formatContactDisplay(primaryPhone) : '';
 
               return (
                 <div key={st.id} className="pt-2 first:pt-0 flex items-center justify-between gap-2">
@@ -127,9 +118,9 @@ export const SelectParentCallModal: React.FC<SelectParentCallModalProps> = ({
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button
                       type="button"
-                      disabled={!canCallParent}
+                      disabled={!primaryPhone}
                       onClick={() => handleCall(primaryPhone)}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-primary text-white hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold transition-all shadow-2xs cursor-pointer active:scale-95"
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-primary text-white hover:bg-primary-hover disabled:opacity-40 text-xs font-bold transition-all shadow-2xs cursor-pointer active:scale-95"
                       title={_t('اتصال بولي الأمر', 'Call Parent', 'Anrufen')}
                     >
                       <Phone className="w-3.5 h-3.5" />
@@ -137,14 +128,9 @@ export const SelectParentCallModal: React.FC<SelectParentCallModalProps> = ({
                     </button>
                     <button
                       type="button"
-                      disabled={!canWhatsAppParent}
-                      onClick={() => handleWhatsApp(whatsAppContact)}
-                      className="p-1.5 rounded-lg bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer active:scale-95"
-                      title={
-                        canWhatsAppParent
-                          ? _t('واتساب', 'WhatsApp', 'WhatsApp')
-                          : _t('لا يوجد رقم واتساب', 'No WhatsApp contact', 'Kein WhatsApp-Kontakt')
-                      }
+                      onClick={() => handleWhatsApp(primaryPhone)}
+                      className="p-1.5 rounded-lg bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border transition-all cursor-pointer active:scale-95"
+                      title={_t('واتساب', 'WhatsApp', 'WhatsApp')}
                     >
                       <MessageCircle className="w-4 h-4" />
                     </button>

@@ -1,4 +1,4 @@
-import { Group, Lesson, LessonReport, PaymentPlanType, PaymentRecord, Student } from '../types';
+import { Group, Lesson, LessonReport, PaymentRecord, Student } from '../types';
 import { normalizeDateToISO } from './timeUtils';
 import { isDateMatchingGroupRecurrence } from './scheduleUtils';
 
@@ -70,37 +70,6 @@ export interface LessonCycleOptions {
   forceRecalculate?: boolean;
 }
 
-interface LessonChronoKey {
-  dateTime: string;
-  createdAt: number;
-  id: string;
-}
-
-const buildLessonChronoKey = (lesson: Partial<Lesson>): LessonChronoKey => {
-  const dateStr = (lesson.date || '').trim();
-  const timeStr = normalizeTime(lesson.time) || '00:00';
-  const rawCreated = (lesson as any).createdAt;
-  const createdAt = typeof rawCreated === 'number'
-    ? rawCreated
-    : (rawCreated ? Date.parse(String(rawCreated)) : NaN);
-  return {
-    dateTime: `${dateStr}T${timeStr}`,
-    createdAt,
-    id: String(lesson.id || '')
-  };
-};
-
-const compareChronoKeys = (a: LessonChronoKey, b: LessonChronoKey): number => {
-  if (a.dateTime !== b.dateTime) {
-    return a.dateTime < b.dateTime ? -1 : 1;
-  }
-  if (Number.isFinite(a.createdAt) && Number.isFinite(b.createdAt) && a.createdAt !== b.createdAt) {
-    return a.createdAt - b.createdAt;
-  }
-  if (a.id === b.id) return 0;
-  return a.id.localeCompare(b.id);
-};
-
 /**
  * Deterministic chronological comparator for lessons:
  * 1. Date (YYYY-MM-DD) + normalized time (HH:MM, fallback '00:00')
@@ -116,7 +85,7 @@ export const compareLessonsChronologically = (
   const timeA = `${dateA}T${normalizeTime(a.time) || '00:00'}`;
   const timeB = `${dateB}T${normalizeTime(b.time) || '00:00'}`;
   if (timeA !== timeB) {
-    return timeA < timeB ? -1 : 1;
+    return timeA.localeCompare(timeB);
   }
 
   const rawCreatedA = (a as any).createdAt;
@@ -127,81 +96,55 @@ export const compareLessonsChronologically = (
     return createdA - createdB;
   }
 
-  const idA = String(a.id || '');
-  const idB = String(b.id || '');
-  return idA === idB ? 0 : idA.localeCompare(idB);
+  return String(a.id || '').localeCompare(String(b.id || ''));
 };
 
-interface CompiledScopeMatcher {
-  targetGroupId: string;
-  targetGroupName: string;
-  targetStudentId: string;
-  targetStudentName: string;
-  resolvedTargetStudentGroupId: string;
-  match: (candidate: Partial<Lesson>) => boolean;
-}
-
-const compileScopeMatcher = (
+const doesLessonMatchScope = (
+  candidate: Partial<Lesson>,
   targetLesson: Partial<Lesson>,
-  options?: LessonCycleOptions,
-  studentGroupById?: Map<string, string>
-): CompiledScopeMatcher => {
+  options?: LessonCycleOptions
+): boolean => {
   const targetGroupId = (targetLesson.groupId || options?.group?.id || '').trim();
   const targetGroupName = (options?.group?.name || targetLesson.groupName || '').trim().toLowerCase();
   const targetStudentId = (targetLesson.studentId || options?.student?.id || '').trim();
   const rawTargetStudentName = targetLesson.studentName || (targetLesson as any).quickStudentName || options?.student?.name;
   const targetStudentName = rawTargetStudentName ? normalizeName(rawTargetStudentName) : '';
-  let resolvedTargetStudentGroupId = '';
-  if (targetStudentId) {
-    resolvedTargetStudentGroupId =
-      studentGroupById?.get(targetStudentId) ??
-      options?.students?.find(s => s.id === targetStudentId)?.groupId ??
-      '';
-  }
 
-  const match = (candidate: Partial<Lesson>): boolean => {
-    if (targetGroupId) {
-      if ((candidate.groupId || '').trim() === targetGroupId) return true;
-      if (!candidate.groupId && targetGroupName) {
-        const cGroupName = (candidate.groupName || '').trim().toLowerCase();
-        if (cGroupName && cGroupName === targetGroupName) return true;
-      }
-      return false;
-    }
-
-    if (targetGroupName) {
+  if (targetGroupId) {
+    if ((candidate.groupId || '').trim() === targetGroupId) return true;
+    if (!candidate.groupId && targetGroupName) {
       const cGroupName = (candidate.groupName || '').trim().toLowerCase();
       if (cGroupName && cGroupName === targetGroupName) return true;
     }
-
-    // Individual / private student scope (no group)
-    if (targetStudentId) {
-      if (!candidate.groupId && (candidate.studentId || '').trim() === targetStudentId) {
-        return true;
-      }
-      if (resolvedTargetStudentGroupId && candidate.groupId && resolvedTargetStudentGroupId === candidate.groupId) {
-        return true;
-      }
-    }
-
-    if (targetStudentName && !candidate.groupId) {
-      const cName = normalizeName(candidate.studentName || (candidate as any).quickStudentName);
-      if (cName && (cName === targetStudentName || cName.includes(targetStudentName) || targetStudentName.includes(cName))) {
-        return true;
-      }
-    }
-
     return false;
-  };
+  }
 
-  return {
-    targetGroupId,
-    targetGroupName,
-    targetStudentId,
-    targetStudentName,
-    resolvedTargetStudentGroupId,
-    match
-  };
+  if (targetGroupName) {
+    const cGroupName = (candidate.groupName || '').trim().toLowerCase();
+    if (cGroupName && cGroupName === targetGroupName) return true;
+  }
+
+  // Individual / private student scope (no group)
+  if (targetStudentId) {
+    if (!candidate.groupId && (candidate.studentId || '').trim() === targetStudentId) {
+      return true;
+    }
+    if (options?.students && candidate.groupId) {
+      const st = options.students.find(s => s.id === targetStudentId);
+      if (st?.groupId && st.groupId === candidate.groupId) {
+        return true;
+      }
+    }
+  }
+
+  if (targetStudentName && !candidate.groupId) {
+    const cName = normalizeName(candidate.studentName || (candidate as any).quickStudentName);
+    if (cName && (cName === targetStudentName || cName.includes(targetStudentName) || targetStudentName.includes(cName))) {
+      return true;
+    }
+  }
+
+  return false;
 };
 
 /**
@@ -272,9 +215,10 @@ export const resolveLessonCycleNumber = (
   );
 
   const safeAllLessons = Array.isArray(allLessons) ? allLessons : [];
+  const scopeLessons = safeAllLessons.filter(l => l && doesLessonMatchScope(l, lesson, options));
 
   // Fallback only when no lesson collection was supplied at all (e.g. isolated preview with empty array)
-  if (safeAllLessons.length === 0) {
+  if (scopeLessons.length === 0 && safeAllLessons.length === 0) {
     const fallbackNum = (typeof lesson.sessionNumber === 'number' && lesson.sessionNumber >= 1)
       ? (((lesson.sessionNumber - 1) % totalCycleSessions) + 1)
       : startingSessionNumber;
@@ -288,46 +232,34 @@ export const resolveLessonCycleNumber = (
     };
   }
 
-  // One-pass O(n) rank computation: count active in-scope lessons strictly before target (and anchor)
-  // without sorting allLessons.
-  const scopeMatcher = compileScopeMatcher(lesson, options);
-  const targetKey = buildLessonChronoKey(lesson);
-  const targetId = lesson.id || '';
+  const activeScopeLessons = scopeLessons.filter(l => !l.deleted && l.status !== 'cancelled');
+
+  // Ensure the target lesson is represented in the chronological list even if it's an unsaved draft/probe
+  const hasTargetInList = Boolean(
+    lesson.id && activeScopeLessons.some(l => l.id === lesson.id)
+  );
+  const chronologicalList: Array<Partial<Lesson>> = hasTargetInList
+    ? [...activeScopeLessons]
+    : [...activeScopeLessons, lesson];
+
+  chronologicalList.sort(compareLessonsChronologically);
+
+  let sequenceIndex = -1;
+  if (lesson.id) {
+    sequenceIndex = chronologicalList.findIndex(l => l.id === lesson.id);
+  }
+  if (sequenceIndex === -1) {
+    sequenceIndex = chronologicalList.findIndex(l => l === lesson);
+  }
+  if (sequenceIndex === -1) {
+    sequenceIndex = 0;
+  }
+
   const hasValidAnchor = Boolean(
     options?.group?.cycleAnchorSessionNumber &&
     options.group.cycleAnchorSessionNumber >= 1 &&
     (options.group.cycleAnchorLessonId || options.group.cycleAnchorDate)
   );
-  const anchorLessonId = hasValidAnchor ? options?.group?.cycleAnchorLessonId : undefined;
-
-  let hasTargetInList = false;
-  let beforeTargetCount = 0;
-  let anchorKeyFromId: LessonChronoKey | null = null;
-  const activeKeys: LessonChronoKey[] | null = hasValidAnchor ? [] : null;
-
-  for (let i = 0; i < safeAllLessons.length; i++) {
-    const l = safeAllLessons[i];
-    if (!l || l.deleted || l.status === 'cancelled') continue;
-    if (!scopeMatcher.match(l)) continue;
-
-    if (targetId && l.id === targetId) {
-      hasTargetInList = true;
-    }
-
-    const key = buildLessonChronoKey(l);
-    if (activeKeys) {
-      activeKeys.push(key);
-      if (anchorLessonId && !anchorKeyFromId && l.id === anchorLessonId) {
-        anchorKeyFromId = key;
-      }
-    }
-
-    if (compareChronoKeys(key, targetKey) < 0) {
-      beforeTargetCount++;
-    }
-  }
-
-  const sequenceIndex = beforeTargetCount;
 
   let sessionNumber: number;
   let cycleIndex: number;
@@ -338,29 +270,20 @@ export const resolveLessonCycleNumber = (
       Math.max(1, Math.floor(options.group.cycleAnchorSessionNumber!))
     );
     let anchorIndex = -1;
-    let anchorRefKey: LessonChronoKey | null = anchorKeyFromId;
-
-    if (!anchorRefKey && options.group.cycleAnchorDate) {
-      anchorRefKey = {
-        dateTime: `${options.group.cycleAnchorDate.trim()}T${normalizeTime(options.group.cycleAnchorTime) || options.group.cycleAnchorTime || '00:00'}`,
-        createdAt: NaN,
-        id: options.group.cycleAnchorLessonId || ''
+    if (options.group.cycleAnchorLessonId) {
+      anchorIndex = chronologicalList.findIndex(l => l.id === options.group!.cycleAnchorLessonId);
+    }
+    if (anchorIndex === -1 && options.group.cycleAnchorDate) {
+      const anchorProbe: Partial<Lesson> = {
+        id: options.group.cycleAnchorLessonId || '',
+        date: options.group.cycleAnchorDate,
+        time: normalizeTime(options.group.cycleAnchorTime) || options.group.cycleAnchorTime || '00:00'
       };
+      const firstAtOrAfter = chronologicalList.findIndex(
+        l => compareLessonsChronologically(l, anchorProbe) >= 0
+      );
+      anchorIndex = firstAtOrAfter === -1 ? chronologicalList.length : firstAtOrAfter;
     }
-
-    if (anchorRefKey && activeKeys) {
-      let beforeAnchorCount = 0;
-      for (let i = 0; i < activeKeys.length; i++) {
-        if (compareChronoKeys(activeKeys[i], anchorRefKey) < 0) {
-          beforeAnchorCount++;
-        }
-      }
-      if (!hasTargetInList && compareChronoKeys(targetKey, anchorRefKey) < 0) {
-        beforeAnchorCount++;
-      }
-      anchorIndex = beforeAnchorCount;
-    }
-
     if (anchorIndex !== -1) {
       const delta = sequenceIndex - anchorIndex;
       sessionNumber = ((((anchorSessionNum - 1 + delta) % totalCycleSessions) + totalCycleSessions) % totalCycleSessions) + 1;
@@ -560,29 +483,6 @@ export const calculateSequentialSessionNumber = (
  * Re-calculates and synchronizes sessionNumber and totalSessionsInPackage across all
  * non-deleted, non-cancelled lessons of the same group (or private student) in chronological order.
  */
-/**
- * Shared completion mutation used by the dashboard checkmark and persistence tests.
- * Keeping the lookup/fallback behavior here prevents the UI handler and regression
- * coverage from implementing subtly different completion paths.
- */
-export const applyLessonCompletionMutation = (
-  allLessons: Lesson[],
-  lessonId: string,
-  createCompletedLesson: (lesson: Lesson) => Lesson,
-  fallbackLesson?: Lesson
-): { lessons: Lesson[]; found: boolean } => {
-  let found = false;
-  const updated = (Array.isArray(allLessons) ? allLessons : []).map(lesson => {
-    if (lesson?.id !== lessonId) return lesson;
-    found = true;
-    return createCompletedLesson(lesson);
-  });
-  if (!found && fallbackLesson?.id === lessonId) {
-    return { lessons: [createCompletedLesson(fallbackLesson), ...updated], found: false };
-  }
-  return { lessons: updated, found };
-};
-
 export const resequenceScheduledLessonsAfterChange = (
   allLessons: Lesson[],
   changedLesson: Partial<Lesson> | null | undefined,
@@ -599,159 +499,45 @@ export const resequenceScheduledLessonsAfterChange = (
   const st = options?.student;
   const wrap = options?.wrapMutation || (<T>(item: T) => item);
 
-  const studentGroupById = new Map<string, string>();
-  for (const student of options?.students || []) {
-    if (student?.id && student.groupId) studentGroupById.set(student.id, student.groupId);
-  }
-  const scopeMatcher = compileScopeMatcher(changedLesson, { group: grp, student: st, students: options?.students }, studentGroupById);
-
-  const hasValidAnchor = Boolean(
-    grp?.cycleAnchorSessionNumber && grp.cycleAnchorSessionNumber >= 1 &&
-    (grp.cycleAnchorLessonId || grp.cycleAnchorDate)
-  );
-  const anchorLessonId = hasValidAnchor ? grp?.cycleAnchorLessonId : undefined;
-
+  const result = [...allLessons];
   const scopeIndices: number[] = [];
-  const scopeKeys: LessonChronoKey[] = [];
-  let isAlreadySorted = true;
-  let prevKey: LessonChronoKey | null = null;
-  let anchorSlot = -1;
 
-  for (let idx = 0; idx < allLessons.length; idx++) {
-    const lesson = allLessons[idx];
-    if (!lesson || lesson.deleted || lesson.status === 'cancelled') continue;
-    if (!scopeMatcher.match(lesson)) continue;
-
-    const key = buildLessonChronoKey(lesson);
-    const slot = scopeIndices.length;
-    scopeIndices.push(idx);
-    scopeKeys.push(key);
-
-    if (prevKey !== null && compareChronoKeys(prevKey, key) > 0) {
-      isAlreadySorted = false;
+  result.forEach((l, idx) => {
+    if (!l || l.deleted || l.status === 'cancelled') return;
+    if (doesLessonMatchScope(l, changedLesson, { group: grp, student: st, students: options?.students })) {
+      scopeIndices.push(idx);
     }
-    prevKey = key;
+  });
 
-    if (anchorLessonId && anchorSlot === -1 && lesson.id === anchorLessonId) {
-      anchorSlot = slot;
-    }
-  }
+  scopeIndices.sort((idxA, idxB) => compareLessonsChronologically(result[idxA], result[idxB]));
 
-  const scopeCount = scopeIndices.length;
-  if (scopeCount === 0) return allLessons;
+  for (const idx of scopeIndices) {
+    const l = result[idx];
+    const resolution = resolveLessonCycleNumber(l, result, {
+      group: grp,
+      student: st,
+      students: options?.students,
+      forceRecalculate: true,
+    });
 
-  let orderedSlots: number[] | null = null;
-  if (!isAlreadySorted) {
-    orderedSlots = new Array<number>(scopeCount);
-    for (let i = 0; i < scopeCount; i++) orderedSlots[i] = i;
-    orderedSlots.sort((slotA, slotB) => compareChronoKeys(scopeKeys[slotA], scopeKeys[slotB]));
-    if (anchorLessonId && anchorSlot !== -1) {
-      for (let i = 0; i < scopeCount; i++) {
-        if (orderedSlots[i] === anchorSlot) {
-          anchorSlot = i;
-          break;
-        }
-      }
+    if (
+      l.sessionNumber !== resolution.sessionNumber ||
+      l.totalSessionsInPackage !== resolution.totalCycleSessions
+    ) {
+      result[idx] = wrap({
+        ...l,
+        sessionNumber: resolution.sessionNumber,
+        totalSessionsInPackage: resolution.totalCycleSessions,
+      });
     }
   }
 
-  let anchorIndex = -1;
-  if (hasValidAnchor && grp) {
-    anchorIndex = anchorSlot;
-    if (anchorIndex === -1 && grp.cycleAnchorDate) {
-      const anchorKey: LessonChronoKey = {
-        dateTime: `${grp.cycleAnchorDate.trim()}T${normalizeTime(grp.cycleAnchorTime) || grp.cycleAnchorTime || '00:00'}`,
-        createdAt: NaN,
-        id: grp.cycleAnchorLessonId || ''
-      };
-      let low = 0;
-      let high = scopeCount;
-      while (low < high) {
-        const mid = (low + high) >>> 1;
-        const key = scopeKeys[orderedSlots ? orderedSlots[mid] : mid];
-        if (compareChronoKeys(key, anchorKey) < 0) low = mid + 1;
-        else high = mid;
-      }
-      anchorIndex = low;
-    }
-  }
-
-  // Hoist cycle invariants outside the sequencing pass
-  const grpIsPerLesson = isGroupPerLesson(grp);
-  const hasGroupOrStudent = Boolean(grp || st);
-  const fixedIsPerLesson = hasGroupOrStudent
-    ? Boolean(grpIsPerLesson || (!grp && st && (st.paymentPlan === 'per_lesson' || st.bundleSize === 1)))
-    : false;
-  const fixedGroupOrStudentTotal = fixedIsPerLesson
-    ? 1
-    : (grp?.sessionCount && grp.sessionCount > 1)
-      ? grp.sessionCount
-      : (st?.bundleSize && st.bundleSize > 1)
-        ? st.bundleSize
-        : 0;
-  const rawStartingSession = grp?.startingSessionNumber || 1;
-  const rawAnchorSession = Math.floor(grp?.cycleAnchorSessionNumber || 1);
-  const useAnchor = Boolean(hasValidAnchor && grp && anchorIndex !== -1);
-
-  let result: Lesson[] | null = null;
-  for (let sequenceIndex = 0; sequenceIndex < scopeCount; sequenceIndex++) {
-    const slot = orderedSlots ? orderedSlots[sequenceIndex] : sequenceIndex;
-    const idx = scopeIndices[slot];
-    const lesson = allLessons[idx];
-
-    const isPerLesson = hasGroupOrStudent
-      ? fixedIsPerLesson
-      : lesson.totalSessionsInPackage === 1;
-    const totalCycleSessions = isPerLesson
-      ? 1
-      : fixedGroupOrStudentTotal > 0
-        ? fixedGroupOrStudentTotal
-        : (lesson.totalSessionsInPackage && lesson.totalSessionsInPackage > 1)
-          ? lesson.totalSessionsInPackage
-          : 4;
-
-    let sessionNumber = 1;
-    if (!isPerLesson) {
-      const startingSessionNumber = Math.min(totalCycleSessions, Math.max(1, rawStartingSession));
-      if (useAnchor) {
-        const anchorSessionNumber = Math.min(totalCycleSessions, Math.max(1, rawAnchorSession));
-        const delta = sequenceIndex - anchorIndex;
-        sessionNumber = ((((anchorSessionNumber - 1 + delta) % totalCycleSessions) + totalCycleSessions) % totalCycleSessions) + 1;
-      } else {
-        sessionNumber = ((startingSessionNumber - 1 + sequenceIndex) % totalCycleSessions) + 1;
-      }
-    }
-
-    if (lesson.sessionNumber !== sessionNumber || lesson.totalSessionsInPackage !== totalCycleSessions) {
-      if (!result) result = [...allLessons];
-      result[idx] = wrap({ ...lesson, sessionNumber, totalSessionsInPackage: totalCycleSessions });
-    }
-  }
-
-  return result || allLessons;
+  return result;
 };
 
 export const normalizeTime = (t?: string): string => {
   if (!t || typeof t !== 'string') return '';
-  if (t.length === 5 && t.charCodeAt(2) === 58) {
-    const c0 = t.charCodeAt(0);
-    const c1 = t.charCodeAt(1);
-    const c3 = t.charCodeAt(3);
-    const c4 = t.charCodeAt(4);
-    if (c0 >= 48 && c0 <= 57 && c1 >= 48 && c1 <= 57 && c3 >= 48 && c3 <= 57 && c4 >= 48 && c4 <= 57) {
-      return t;
-    }
-  }
   const clean = t.trim();
-  if (clean.length === 5 && clean.charCodeAt(2) === 58) {
-    const c0 = clean.charCodeAt(0);
-    const c1 = clean.charCodeAt(1);
-    const c3 = clean.charCodeAt(3);
-    const c4 = clean.charCodeAt(4);
-    if (c0 >= 48 && c0 <= 57 && c1 >= 48 && c1 <= 57 && c3 >= 48 && c3 <= 57 && c4 >= 48 && c4 <= 57) {
-      return clean;
-    }
-  }
   const ampmMatch = clean.match(/^(\d{1,2}):(\d{2})\s*(am|pm|ص|م)$/i);
   if (ampmMatch) {
     let h = parseInt(ampmMatch[1], 10);
@@ -773,33 +559,10 @@ export const normalizeName = (name?: string): string => {
   return name.trim().toLowerCase().replace(/[_–—\-]+/g, ' ').replace(/\s+/g, ' ');
 };
 
-const getRawTimeMinutes = (t: string): number => {
-  if (!t) return 0;
-  if (t.length === 5 && t.charCodeAt(2) === 58) {
-    const h0 = t.charCodeAt(0) - 48;
-    const h1 = t.charCodeAt(1) - 48;
-    const m0 = t.charCodeAt(3) - 48;
-    const m1 = t.charCodeAt(4) - 48;
-    if (h0 >= 0 && h0 <= 9 && h1 >= 0 && h1 <= 9 && m0 >= 0 && m0 <= 9 && m1 >= 0 && m1 <= 9) {
-      return (h0 * 10 + h1) * 60 + (m0 * 10 + m1);
-    }
-  }
-  const colonIdx = t.indexOf(':');
-  if (colonIdx === -1) {
-    const h = Number(t) || 0;
-    return h * 60;
-  }
-  const h = Number(t.slice(0, colonIdx)) || 0;
-  const rest = t.slice(colonIdx + 1);
-  const nextColon = rest.indexOf(':');
-  const m = Number(nextColon === -1 ? rest : rest.slice(0, nextColon)) || 0;
-  return h * 60 + m;
-};
-
 export const checkOverlap = (l1: any, l2: any) => {
   if (!l1 || !l2) return false;
   if (l1.id === l2.id) return false;
-  if (normalizeDateToISO(l1.date) !== normalizeDateToISO(l2.date)) return false;
+  if (l1.date !== l2.date) return false;
   
   // Completed and cancelled sessions have already concluded or been voided; they must NEVER trigger active schedule conflicts
   const isL1Done = l1.status === 'completed' || l1.status === 'cancelled' || (l1.report && l1.report.attendanceStatus === 'completed');
@@ -823,9 +586,16 @@ export const checkOverlap = (l1: any, l2: any) => {
     return false;
   }
 
-  const s1 = getRawTimeMinutes(l1.time);
+  const getMins = (t: string) => {
+    if (!t) return 0;
+    const parts = t.split(':').map(Number);
+    const h = parts[0] || 0;
+    const m = parts[1] || 0;
+    return h * 60 + m;
+  };
+  const s1 = getMins(l1.time);
   const e1 = s1 + (l1.durationMinutes || 60);
-  const s2 = getRawTimeMinutes(l2.time);
+  const s2 = getMins(l2.time);
   const e2 = s2 + (l2.durationMinutes || 60);
   return s1 < e2 && s2 < e1;
 };
@@ -869,7 +639,7 @@ export const isSameLessonTarget = (l1: any, l2: any, students?: any[]): boolean 
 export const areDuplicateLessons = (l1: any, l2: any, students?: any[]): boolean => {
   if (!l1 || !l2 || l1.id === l2.id) return false;
   if (l1.deleted || l2.deleted) return false;
-  if (normalizeDateToISO(l1.date) !== normalizeDateToISO(l2.date)) return false;
+  if (l1.date !== l2.date) return false;
   
   if (!isSameLessonTarget(l1, l2, students)) return false;
 
@@ -877,11 +647,9 @@ export const areDuplicateLessons = (l1: any, l2: any, students?: any[]): boolean
   const t2 = normalizeTime(l2.time);
   const sameTime = !t1 || !t2 || t1 === t2;
   const overlaps = checkOverlap(l1, l2);
-  // Session numbers are cycle labels, not unique lesson identities. Different time slots
-  // on the same date may legitimately share a session number (especially projected
-  // recurring slots, which are resequenced only after a real lesson is saved).
-  // Only the same slot or an overlapping slot is a duplicate occurrence.
-  return sameTime || overlaps;
+  const sameSession = l1.sessionNumber && l2.sessionNumber && l1.sessionNumber === l2.sessionNumber;
+
+  return sameTime || overlaps || sameSession;
 };
 
 export const pickAuthoritativeLesson = (l1: any, l2: any): { survivor: any; duplicate: any } => {
@@ -982,131 +750,6 @@ export const pickAuthoritativeLesson = (l1: any, l2: any): { survivor: any; dupl
   return { survivor, duplicate };
 };
 
-interface IndexedLessonMeta {
-  id: string;
-  normDate: string;
-  normTime: string;
-  rawStartMin: number;
-  rawEndMin: number;
-  isDone: boolean;
-  rawGroupId: string;
-  groupId: string;
-  studentId: string;
-  studentGroupId: string;
-  normName: string;
-  nameTokens: string[];
-  normTitle: string;
-  recurrence: string;
-}
-
-interface HotIdentityBucket {
-  kind: 'hot';
-  all: number[];
-  byTime: Map<string, number[]>;
-  noTime: number[];
-  overlapTimed: number[];
-}
-
-type IdentityBucket = number[] | HotIdentityBucket;
-
-const HOT_BUCKET_THRESHOLD = 48;
-
-const extractLessonMeta = (lesson: any, studentsById: Map<string, any>): IndexedLessonMeta => {
-  const normDate = normalizeDateToISO(lesson.date);
-  const normTime = normalizeTime(lesson.time);
-  const rawStartMin = getRawTimeMinutes(lesson.time);
-  const rawEndMin = rawStartMin + (lesson.durationMinutes || 60);
-  const isDone = Boolean(
-    lesson.status === 'completed' ||
-    lesson.status === 'cancelled' ||
-    (lesson.report && lesson.report.attendanceStatus === 'completed')
-  );
-  const rawGroupId = lesson.groupId || '';
-  const groupId = rawGroupId && rawGroupId !== 'quick_group' ? rawGroupId : '';
-  const studentId = lesson.studentId || '';
-  const studentGroupRaw = studentId ? (studentsById.get(studentId)?.groupId || '') : '';
-  const studentGroupId = studentGroupRaw && studentGroupRaw !== 'quick_group' ? studentGroupRaw : '';
-  const normName = normalizeName(lesson.studentName || lesson.quickStudentName);
-  const nameTokens = normName ? normName.split(/\s+/).filter(Boolean) : [];
-  const normTitle = normalizeName(lesson.title);
-  return {
-    id: lesson.id,
-    normDate,
-    normTime,
-    rawStartMin,
-    rawEndMin,
-    isDone,
-    rawGroupId,
-    groupId,
-    studentId,
-    studentGroupId,
-    normName,
-    nameTokens,
-    normTitle: normTitle.length > 5 ? normTitle : '',
-    recurrence: lesson.scheduleRecurrence || ''
-  };
-};
-
-const areDuplicateLessonMetas = (a: IndexedLessonMeta, b: IndexedLessonMeta): boolean => {
-  if (a.id === b.id) return false;
-  if (a.normDate !== b.normDate) return false;
-
-  // Target equivalence (exact match to isSameLessonTarget)
-  let sameTarget = false;
-  if (a.groupId && b.groupId && a.groupId === b.groupId) {
-    sameTarget = true;
-  } else if (a.studentId && b.studentId && a.studentId === b.studentId) {
-    sameTarget = true;
-  } else if (a.normName && b.normName && (a.normName === b.normName || a.normName.includes(b.normName) || b.normName.includes(a.normName))) {
-    sameTarget = true;
-  } else {
-    const stId = a.studentId || b.studentId;
-    const rawGrpId = a.rawGroupId || b.rawGroupId;
-    if (stId && rawGrpId && rawGrpId !== 'quick_group') {
-      const stGroupId = a.studentId ? a.studentGroupId : b.studentGroupId;
-      if (stGroupId === rawGrpId) {
-        sameTarget = true;
-      }
-    }
-    if (!sameTarget && a.normTitle && b.normTitle && a.normTitle === b.normTitle) {
-      sameTarget = true;
-    }
-  }
-  if (!sameTarget) return false;
-
-  // Time / overlap equivalence (exact match to areDuplicateLessons + checkOverlap)
-  if (!a.normTime || !b.normTime || a.normTime === b.normTime) {
-    return true;
-  }
-  if (a.isDone || b.isDone) {
-    return false;
-  }
-  if (a.groupId && b.groupId && a.groupId === b.groupId) {
-    return false;
-  }
-  if (
-    (a.recurrence === 'biweekly_a' && b.recurrence === 'biweekly_b') ||
-    (a.recurrence === 'biweekly_b' && b.recurrence === 'biweekly_a')
-  ) {
-    return false;
-  }
-  return a.rawStartMin < b.rawEndMin && b.rawStartMin < a.rawEndMin;
-};
-
-const insertIntoHotBucket = (bucket: HotIdentityBucket, index: number, meta: IndexedLessonMeta) => {
-  bucket.all.push(index);
-  if (!meta.normTime) {
-    bucket.noTime.push(index);
-  } else {
-    let timeList = bucket.byTime.get(meta.normTime);
-    if (!timeList) bucket.byTime.set(meta.normTime, (timeList = []));
-    timeList.push(index);
-    if (!meta.isDone) {
-      bucket.overlapTimed.push(index);
-    }
-  }
-};
-
 export const deduplicateLessonList = (
   lessons: any[],
   students?: any[]
@@ -1117,208 +760,34 @@ export const deduplicateLessonList = (
 
   const removedIds = new Set<string>();
   const idMap = new Map<string, string>();
-  const studentsById = new Map<string, any>();
-  for (const student of students || []) {
-    if ((student as any)?.id) studentsById.set((student as any).id, student);
-  }
-
-  const activeList: any[] = [];
-  const activeMetas: IndexedLessonMeta[] = [];
-  const deletedList: any[] = [];
-  const nameTokenFrequency = new Map<string, number>();
-
-  for (let i = 0; i < lessons.length; i++) {
-    const lesson = lessons[i];
-    if (!lesson?.id) continue;
-    if (lesson.deleted) {
-      deletedList.push(lesson);
-      continue;
-    }
-    const meta = extractLessonMeta(lesson, studentsById);
-    activeList.push(lesson);
-    activeMetas.push(meta);
-
-    const tokens = meta.nameTokens;
-    const tokenCount = tokens.length;
-    if (tokenCount === 1) {
-      const tok = tokens[0];
-      nameTokenFrequency.set(tok, (nameTokenFrequency.get(tok) || 0) + 1);
-    } else if (tokenCount > 1) {
-      const seenTok = new Set<string>();
-      for (let t = 0; t < tokenCount; t++) {
-        const tok = tokens[t];
-        if (!seenTok.has(tok)) {
-          seenTok.add(tok);
-          nameTokenFrequency.set(tok, (nameTokenFrequency.get(tok) || 0) + 1);
-        }
-      }
-    }
-  }
+  const activeList = lessons.filter(l => l && l.id && !l.deleted);
+  const deletedList = lessons.filter(l => l && l.id && l.deleted);
 
   const survivors: any[] = [];
-  const survivorMetas: IndexedLessonMeta[] = [];
-  const byDate = new Map<string, Map<string, IdentityBucket>>();
-  const seenStamp = new Uint32Array(activeList.length);
-  let scanGen = 0;
 
-  const getIdentityKeys = (meta: IndexedLessonMeta): string[] => {
-    const keys: string[] = [];
-    if (meta.groupId) keys.push(`g:${meta.groupId}`);
-    if (meta.studentId) {
-      keys.push(`s:${meta.studentId}`);
-      if (meta.studentGroupId && meta.studentGroupId !== meta.groupId) {
-        keys.push(`g:${meta.studentGroupId}`);
-      }
-    }
-    if (meta.normName) {
-      keys.push(`n:${meta.normName}`);
-      const tokens = meta.nameTokens;
-      for (let t = 0; t < tokens.length; t++) {
-        const tok = tokens[t];
-        if ((nameTokenFrequency.get(tok) || 0) <= 64) {
-          keys.push(`w:${tok}`);
-        }
-      }
-    }
-    if (meta.normTitle) {
-      keys.push(`t:${meta.normTitle}`);
-    }
-    return keys;
-  };
+  for (const candidate of activeList) {
+    if (removedIds.has(candidate.id)) continue;
 
-  const addIndexEntry = (dateBuckets: Map<string, IdentityBucket>, key: string, index: number, meta: IndexedLessonMeta) => {
-    const existing = dateBuckets.get(key);
-    if (!existing) {
-      dateBuckets.set(key, [index]);
-      return;
-    }
-    if (Array.isArray(existing)) {
-      existing.push(index);
-      if (existing.length >= HOT_BUCKET_THRESHOLD) {
-        const hot: HotIdentityBucket = {
-          kind: 'hot',
-          all: existing,
-          byTime: new Map(),
-          noTime: [],
-          overlapTimed: []
-        };
-        for (let j = 0; j < existing.length; j++) {
-          const sIdx = existing[j];
-          const sMeta = survivorMetas[sIdx];
-          if (!sMeta.normTime) {
-            hot.noTime.push(sIdx);
-          } else {
-            let timeList = hot.byTime.get(sMeta.normTime);
-            if (!timeList) hot.byTime.set(sMeta.normTime, (timeList = []));
-            timeList.push(sIdx);
-            if (!sMeta.isDone) {
-              hot.overlapTimed.push(sIdx);
-            }
-          }
-        }
-        dateBuckets.set(key, hot);
-      }
-      return;
-    }
-    insertIntoHotBucket(existing, index, meta);
-  };
+    // Check if candidate is duplicate with any already accepted survivor
+    const existingIndex = survivors.findIndex(s => areDuplicateLessons(s, candidate, students));
 
-  const scanCandidateIndices = (
-    list: number[] | undefined,
-    candMeta: IndexedLessonMeta,
-    gen: number,
-    bestIndex: number
-  ): number => {
-    if (!list) return bestIndex;
-    for (let j = 0; j < list.length; j++) {
-      const sIdx = list[j];
-      if (sIdx >= bestIndex) continue;
-      if (seenStamp[sIdx] === gen) continue;
-      seenStamp[sIdx] = gen;
-      if (areDuplicateLessonMetas(survivorMetas[sIdx], candMeta)) {
-        bestIndex = sIdx;
-      }
-    }
-    return bestIndex;
-  };
+    if (existingIndex >= 0) {
+      const existingSurvivor = survivors[existingIndex];
+      const { survivor, duplicate } = pickAuthoritativeLesson(existingSurvivor, candidate);
 
-  for (let i = 0; i < activeList.length; i++) {
-    const candidate = activeList[i];
-    const candMeta = activeMetas[i];
-
-    if (!candMeta.normDate) {
-      survivors.push(candidate);
-      survivorMetas.push(candMeta);
-      continue;
-    }
-
-    let dateBuckets = byDate.get(candMeta.normDate);
-    if (!dateBuckets) {
-      // First lesson seen on this date: zero lookup overhead
-      dateBuckets = new Map();
-      byDate.set(candMeta.normDate, dateBuckets);
-      const index = survivors.length;
-      survivors.push(candidate);
-      survivorMetas.push(candMeta);
-      const keys = getIdentityKeys(candMeta);
-      for (let k = 0; k < keys.length; k++) {
-        dateBuckets.set(keys[k], [index]);
-      }
-      continue;
-    }
-
-    const keys = getIdentityKeys(candMeta);
-    let existingIndex = activeList.length;
-    let gen = 0;
-
-    for (let k = 0; k < keys.length; k++) {
-      const bucket = dateBuckets.get(keys[k]);
-      if (!bucket) continue;
-      if (gen === 0) {
-        gen = ++scanGen;
-      }
-      if (Array.isArray(bucket)) {
-        existingIndex = scanCandidateIndices(bucket, candMeta, gen, existingIndex);
-      } else if (!candMeta.normTime) {
-        existingIndex = scanCandidateIndices(bucket.all, candMeta, gen, existingIndex);
-      } else {
-        existingIndex = scanCandidateIndices(bucket.byTime.get(candMeta.normTime), candMeta, gen, existingIndex);
-        existingIndex = scanCandidateIndices(bucket.noTime, candMeta, gen, existingIndex);
-        if (!candMeta.isDone) {
-          existingIndex = scanCandidateIndices(bucket.overlapTimed, candMeta, gen, existingIndex);
-        }
-      }
-      if (existingIndex === 0) break;
-    }
-
-    if (existingIndex < survivors.length) {
-      const { survivor, duplicate } = pickAuthoritativeLesson(survivors[existingIndex], candidate);
       survivors[existingIndex] = survivor;
       removedIds.add(duplicate.id);
       idMap.set(duplicate.id, survivor.id);
-      const winnerMeta = survivor.id === candidate.id ? candMeta : extractLessonMeta(survivor, studentsById);
-      survivorMetas[existingIndex] = winnerMeta;
-      if (winnerMeta.normDate) {
-        const winnerDateBuckets = winnerMeta.normDate === candMeta.normDate
-          ? dateBuckets
-          : (byDate.get(winnerMeta.normDate) || (() => { const m = new Map(); byDate.set(winnerMeta.normDate, m); return m; })());
-        const winnerKeys = winnerMeta === candMeta ? keys : getIdentityKeys(winnerMeta);
-        for (let k = 0; k < winnerKeys.length; k++) {
-          addIndexEntry(winnerDateBuckets, winnerKeys[k], existingIndex, winnerMeta);
-        }
-      }
     } else {
-      const index = survivors.length;
       survivors.push(candidate);
-      survivorMetas.push(candMeta);
-      for (let k = 0; k < keys.length; k++) {
-        addIndexEntry(dateBuckets, keys[k], index, candMeta);
-      }
     }
   }
 
-  const deduplicated = [...survivors, ...deletedList.filter(item => !removedIds.has(item.id))];
-  return { deduplicated, removedIds, idMap, hasChanges: removedIds.size > 0 };
+  const hasChanges = removedIds.size > 0;
+  // Keep deleted list if needed or return only survivors
+  const deduplicated = [...survivors, ...deletedList.filter(d => !removedIds.has(d.id))];
+
+  return { deduplicated, removedIds, idMap, hasChanges };
 };
 
 export const deduplicatePaymentsList = (
@@ -1359,215 +828,124 @@ export const deduplicatePaymentsList = (
     }
   }
 
-  // Deduplicate paid payments among themselves (indexed by id and studentId for O(n) scaling)
+  // Deduplicate paid payments among themselves (keeping the most detailed / highest amount)
   const dedupedPaid: any[] = [];
-  const paidIdxById = new Map<string, number>();
-  const paidIndicesByStudent = new Map<string, number[]>();
-
-  const getRealPaymentLessonIds = (p: any): string[] => {
-    const ids: string[] = [];
-    if (p.lessonId && !String(p.lessonId).startsWith('virtual_')) {
-      ids.push(String(p.lessonId));
-    }
-    if (Array.isArray(p.lessonIds)) {
-      for (const id of p.lessonIds) {
-        if (typeof id === 'string' && id && !id.startsWith('virtual_') && !ids.includes(id)) {
-          ids.push(id);
-        }
-      }
-    }
-    return ids;
-  };
-
-  const getNormalizedPaymentDateSet = (p: any): string[] => {
-    if (!Array.isArray(p.lessonDates)) return [];
-    const dates: string[] = [];
-    for (const dStr of p.lessonDates) {
-      if (typeof dStr !== 'string') continue;
-      const match = dStr.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
-      if (match) {
-        const iso = normalizeDateToISO(match[1]);
-        if (iso && !dates.includes(iso)) dates.push(iso);
-      }
-    }
-    return dates.sort();
-  };
-
   for (const p of paidPayments) {
-    let existingIdx = paidIdxById.get(p.id) ?? -1;
-    const studentPaidIndices = paidIndicesByStudent.get(p.studentId || '');
-    const pRealIds = getRealPaymentLessonIds(p);
-    const pNormDates = getNormalizedPaymentDateSet(p);
-
-    if (existingIdx < 0 && studentPaidIndices) {
-      for (let i = 0; i < studentPaidIndices.length; i++) {
-        const idx = studentPaidIndices[i];
-        const d = dedupedPaid[idx];
-        const dRealIds = getRealPaymentLessonIds(d);
-        let matched = false;
-        if (dRealIds.length > 0 && pRealIds.length > 0) {
-          if (dRealIds.length === pRealIds.length && dRealIds.every((id: string) => pRealIds.includes(id))) {
-            matched = true;
-          }
-        } else if (dRealIds.length === 0 && pRealIds.length === 0) {
-          // Legacy records lacking lessonIds: only collapse when exact group, bundle, dueDate, amountDue AND lessonDates match
-          const dNormDates = getNormalizedPaymentDateSet(d);
-          const datesMatch = dNormDates.length > 0 && pNormDates.length > 0 &&
-            dNormDates.length === pNormDates.length &&
-            dNormDates.every((val, di) => val === pNormDates[di]);
-          if (
-            datesMatch &&
-            (d.groupId || '') === (p.groupId || '') &&
-            d.dueDate && p.dueDate && d.dueDate === p.dueDate &&
-            d.bundleSize === p.bundleSize &&
-            d.amountDue === p.amountDue
-          ) {
-            matched = true;
-          }
-        }
-        if (matched) {
-          existingIdx = idx;
-          break;
-        }
+    const existingIdx = dedupedPaid.findIndex(d => {
+      if (d.id === p.id) return true;
+      if (d.studentId !== p.studentId) return false;
+      // Check if both reference the exact same lesson IDs
+      if (Array.isArray(d.lessonIds) && Array.isArray(p.lessonIds) && d.lessonIds.length > 0 && p.lessonIds.length > 0) {
+        const hasSameIds = d.lessonIds.length === p.lessonIds.length && d.lessonIds.every((id: string) => p.lessonIds.includes(id));
+        if (hasSameIds) return true;
       }
-    }
+      if (d.dueDate && p.dueDate && d.dueDate === p.dueDate && d.bundleSize === p.bundleSize && d.amountDue === p.amountDue) {
+        return true;
+      }
+      return false;
+    });
 
     if (existingIdx >= 0) {
       const existing = dedupedPaid[existingIdx];
       const winner = (p.amountPaid || 0) >= (existing.amountPaid || 0) ? p : existing;
       const loser = winner === p ? existing : p;
       dedupedPaid[existingIdx] = winner;
-      if (winner.id !== existing.id) {
-        paidIdxById.set(winner.id, existingIdx);
-      }
       removedIds.add(loser.id);
       modified = true;
     } else {
-      const newIdx = dedupedPaid.length;
       dedupedPaid.push(p);
-      if (!paidIdxById.has(p.id)) paidIdxById.set(p.id, newIdx);
-      const stKey = p.studentId || '';
-      let list = paidIndicesByStudent.get(stKey);
-      if (!list) paidIndicesByStudent.set(stKey, (list = []));
-      list.push(newIdx);
     }
   }
 
   // Helper sets from paid records - indexed strictly per student so one student's payment never affects other students
   const paidLessonIdsByStudent = new Map<string, Set<string>>();
-  const legacyPaidDateSignaturesByStudent = new Map<string, Set<string>>();
+  const paidDateSignaturesByStudent = new Map<string, Set<string>>();
 
   dedupedPaid.forEach(p => {
     const stId = p.studentId;
     if (!stId) return;
 
-    const realIds = getRealPaymentLessonIds(p);
-    if (realIds.length > 0) {
-      let stIdsSet = paidLessonIdsByStudent.get(stId);
-      if (!stIdsSet) {
-        stIdsSet = new Set<string>();
-        paidLessonIdsByStudent.set(stId, stIdsSet);
-      }
-      realIds.forEach(id => stIdsSet!.add(id));
-    } else if (Array.isArray(p.lessonDates) && p.lessonDates.length > 0) {
-      // Only legacy records without real lessonIds contribute to date-signature fallback
-      let stDatesSet = legacyPaidDateSignaturesByStudent.get(stId);
-      if (!stDatesSet) {
-        stDatesSet = new Set<string>();
-        legacyPaidDateSignaturesByStudent.set(stId, stDatesSet);
-      }
-      getNormalizedPaymentDateSet(p).forEach(iso => {
-        stDatesSet!.add(`${stId}_${iso}_${p.groupId || ''}`);
+    if (!paidLessonIdsByStudent.has(stId)) {
+      paidLessonIdsByStudent.set(stId, new Set<string>());
+    }
+    const stIdsSet = paidLessonIdsByStudent.get(stId)!;
+    if (p.lessonId) stIdsSet.add(p.lessonId);
+    if (Array.isArray(p.lessonIds)) {
+      p.lessonIds.forEach((id: string) => {
+        if (!id.startsWith('virtual_')) stIdsSet.add(id);
+      });
+    }
+
+    if (!paidDateSignaturesByStudent.has(stId)) {
+      paidDateSignaturesByStudent.set(stId, new Set<string>());
+    }
+    const stDatesSet = paidDateSignaturesByStudent.get(stId)!;
+    if (Array.isArray(p.lessonDates)) {
+      p.lessonDates.forEach((dStr: string) => {
+        const match = dStr?.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
+        if (match) {
+          const iso = normalizeDateToISO(match[1]);
+          stDatesSet.add(`${stId}_${iso}`);
+        }
       });
     }
   });
 
   // Filter and deduplicate pending payments against PAID records of the SAME STUDENT and against each other
   const dedupedPending: any[] = [];
-  const pendingIndicesByStudent = new Map<string, number[]>();
-
   for (const p of pendingPayments) {
     const stId = p.studentId;
     const studentPaidLessonIds = stId ? paidLessonIdsByStudent.get(stId) : undefined;
-    const studentLegacyPaidDates = stId ? legacyPaidDateSignaturesByStudent.get(stId) : undefined;
+    const studentPaidDateSignatures = stId ? paidDateSignaturesByStudent.get(stId) : undefined;
 
     // Check if this pending payment is ALREADY COVERED by any paid record OF THE SAME STUDENT
-    const realLessonIds = getRealPaymentLessonIds(p);
+    const realLessonIds = (p.lessonIds || []).filter((id: string) => typeof id === 'string' && !id.startsWith('virtual_'));
     const isIdsCoveredByPaid = Boolean(
-      studentPaidLessonIds &&
+      studentPaidLessonIds && 
+      studentPaidLessonIds instanceof Set &&
       studentPaidLessonIds.size > 0 &&
-      realLessonIds.length > 0 &&
-      realLessonIds.every((id: string) => Boolean(studentPaidLessonIds.has(id)))
+      realLessonIds.length > 0 && 
+      realLessonIds.every((id: string) => Boolean(studentPaidLessonIds?.has(id)))
     );
-
-    // Date coverage fallback applies ONLY when pending record has zero real lessonIds (legacy)
+    
+    // Check if dates are covered by paid records OF THE SAME STUDENT
     let isDatesCoveredByPaid = false;
-    if (realLessonIds.length === 0 && studentLegacyPaidDates && studentLegacyPaidDates.size > 0) {
-      const parsedDates = getNormalizedPaymentDateSet(p);
-      if (
-        parsedDates.length > 0 &&
-        parsedDates.every(dIso => Boolean(studentLegacyPaidDates.has(`${stId}_${dIso}_${p.groupId || ''}`)))
-      ) {
+    if (studentPaidDateSignatures && studentPaidDateSignatures instanceof Set && studentPaidDateSignatures.size > 0 && Array.isArray(p.lessonDates) && p.lessonDates.length > 0) {
+      const parsedDates: string[] = [];
+      p.lessonDates.forEach((dStr: string) => {
+        const match = dStr?.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
+        if (match) parsedDates.push(normalizeDateToISO(match[1]));
+      });
+      if (parsedDates.length > 0 && parsedDates.every(dIso => Boolean(studentPaidDateSignatures?.has(`${stId}_${dIso}`)))) {
         isDatesCoveredByPaid = true;
       }
     }
 
-    // Direct overlap with a paid payment of the EXACT SAME student strictly by lesson ID
-    const studentPaidIndices = paidIndicesByStudent.get(stId || '');
-    let matchesPaidPayment = false;
-    if (studentPaidIndices && realLessonIds.length > 0) {
-      for (let i = 0; i < studentPaidIndices.length; i++) {
-        const paid = dedupedPaid[studentPaidIndices[i]];
-        const paidRealIds = getRealPaymentLessonIds(paid);
-        if (paidRealIds.length > 0 && paidRealIds.every((id: string) => realLessonIds.includes(id)) && realLessonIds.every((id: string) => paidRealIds.includes(id))) {
-          matchesPaidPayment = true;
-          break;
-        }
-      }
-    }
+    // Direct overlap with a paid payment of the EXACT SAME student
+    const matchesPaidPayment = dedupedPaid.some(paid => {
+      if (paid.studentId !== p.studentId) return false;
+      if (realLessonIds.length > 0 && paid.lessonIds?.some((id: string) => realLessonIds.includes(id))) return true;
+      if (p.lessonId && (paid.lessonId === p.lessonId || paid.lessonIds?.includes(p.lessonId))) return true;
+      if (p.dueDate && paid.dueDate && p.dueDate === paid.dueDate && p.amountDue === paid.amountDue) return true;
+      return false;
+    });
 
     if (isIdsCoveredByPaid || isDatesCoveredByPaid || matchesPaidPayment) {
+      // This pending payment is obsolete / already paid for THIS student!
       removedIds.add(p.id);
       modified = true;
       continue;
     }
 
-    // Deduplicate pending payments against other pending payments of the same student strictly by lessonIds (or legacy context)
-    const stKey = stId || '';
-    const studentPendingIndices = pendingIndicesByStudent.get(stKey);
-    const pNormDates = getNormalizedPaymentDateSet(p);
-    let existingPendingIdx = -1;
-    if (studentPendingIndices) {
-      for (let i = 0; i < studentPendingIndices.length; i++) {
-        const idx = studentPendingIndices[i];
-        const c = dedupedPending[idx];
-        if (c.id === p.id) {
-          existingPendingIdx = idx;
-          break;
-        }
-        const cRealIds = getRealPaymentLessonIds(c);
-        if (cRealIds.length > 0 && realLessonIds.length > 0) {
-          if (cRealIds.some((lid: string) => realLessonIds.includes(lid))) {
-            existingPendingIdx = idx;
-            break;
-          }
-        } else if (cRealIds.length === 0 && realLessonIds.length === 0) {
-          const cNormDates = getNormalizedPaymentDateSet(c);
-          const datesMatch = cNormDates.length > 0 && pNormDates.length > 0 &&
-            cNormDates.length === pNormDates.length &&
-            cNormDates.every((val, di) => val === pNormDates[di]);
-          if (
-            datesMatch &&
-            (c.groupId || '') === (p.groupId || '') &&
-            (c.dueDate || '') === (p.dueDate || '') &&
-            (c.amountDue || 0) === (p.amountDue || 0)
-          ) {
-            existingPendingIdx = idx;
-            break;
-          }
-        }
+    // Deduplicate pending payments against other pending payments
+    const existingPendingIdx = dedupedPending.findIndex(c => {
+      if (c.studentId !== p.studentId) return false;
+      if (c.dueDate === p.dueDate && c.amountDue === p.amountDue) return true;
+      if (Array.isArray(c.lessonIds) && Array.isArray(p.lessonIds) && c.lessonIds.length > 0 && p.lessonIds.length > 0) {
+        if (c.lessonIds.some((lid: string) => p.lessonIds.includes(lid))) return true;
       }
-    }
+      return false;
+    });
 
     if (existingPendingIdx >= 0) {
       const existing = dedupedPending[existingPendingIdx];
@@ -1577,11 +955,7 @@ export const deduplicatePaymentsList = (
       removedIds.add(loser.id);
       modified = true;
     } else {
-      const newIdx = dedupedPending.length;
       dedupedPending.push(p);
-      let list = pendingIndicesByStudent.get(stKey);
-      if (!list) pendingIndicesByStudent.set(stKey, (list = []));
-      list.push(newIdx);
     }
   }
 
@@ -1632,9 +1006,7 @@ export const shouldRetainLessonInActiveWindow = (
 ): boolean => {
   if (!lesson || lesson.deleted) return false;
   if (!lesson.date || typeof lesson.date !== 'string') return true;
-  const lessonDateKey = normalizeDateToISO(lesson.date);
-  if (!lessonDateKey) return true;
-  if (lessonDateKey >= normalizeDateToISO(cutoffStr)) return true;
+  if (lesson.date >= cutoffStr) return true;
   // Never evict a group's cycle anchor lesson from the active RAM window
   if (lesson.groupId && Array.isArray(groups) && groups.length > 0) {
     const anchorGrp = groups.find(g => g && !g.deleted && g.id === lesson.groupId);
@@ -1645,7 +1017,7 @@ export const shouldRetainLessonInActiveWindow = (
   if (lesson.status === 'scheduled' || isPendingStatus(lesson.status)) return true;
 
   if (lesson.status !== 'completed') return false;
-  if (lessonDateKey < normalizeDateToISO(maxCutoffStr)) return false;
+  if (lesson.date < maxCutoffStr) return false;
 
   const lessonPayStatus = String(lesson.paymentStatus || '');
   const reportPayStatus = String(lesson.report?.paymentStatus || '');
@@ -1751,7 +1123,7 @@ export const findInvalidBiweeklyAutoLessons = (
     if (!String(l.id || '').startsWith('l_auto_')) return false;
     if (l.status !== 'scheduled') return false;
     if (!l.date) return false;
-    if (fromDateStr && normalizeDateToISO(l.date) < normalizeDateToISO(fromDateStr)) return false;
+    if (fromDateStr && l.date < fromDateStr) return false;
 
     const grp = l.groupId ? groupsMap.get(l.groupId) : undefined;
     const effectiveRecurrence =
@@ -1995,85 +1367,5 @@ export function shouldShowLessonPaymentCollection(params: {
   const total = params.cycleTotalSessions || 0;
   const current = params.currentSessionNumber || 0;
   return total <= 1 || current >= total;
-}
-
-export function hasStudentCustomPricingOverride(student: Partial<Student> | null | undefined): boolean {
-  if (!student) return false;
-  if (student.customBundlePrice !== undefined && student.customBundlePrice !== null && student.customBundlePrice > 0) {
-    return true;
-  }
-  if (
-    student.paymentPlan === 'custom_bundle' &&
-    ((student.customBundlePrice ?? 0) > 0 || (student.pricePerLesson ?? 0) > 0)
-  ) {
-    return true;
-  }
-  return false;
-}
-
-export function reconcileStudentForGroupMove(
-  student: Student,
-  targetGroup: Group | undefined,
-  todayIso: string,
-  newGroupId: string
-): Student {
-  const prevGroupId = (student.groupId || '').trim();
-  const existingHistory = Array.isArray(student.groupHistory) ? [...student.groupHistory] : [];
-  const existingPrevIds = Array.isArray(student.previousGroupIds) ? [...student.previousGroupIds] : [];
-  if (prevGroupId && prevGroupId !== newGroupId) {
-    existingHistory.push({ groupId: prevGroupId, leftDate: todayIso });
-    if (!existingPrevIds.includes(prevGroupId)) {
-      existingPrevIds.push(prevGroupId);
-    }
-  }
-
-  if (!targetGroup) {
-    return {
-      ...student,
-      groupId: newGroupId,
-      ...(prevGroupId && prevGroupId !== newGroupId
-        ? { groupHistory: existingHistory, previousGroupIds: existingPrevIds }
-        : {}),
-      updatedAt: Date.now()
-    } as Student;
-  }
-
-  const isPerLesson = isGroupPerLesson(targetGroup);
-  const sessionCount = isPerLesson ? 1 : Math.max(2, targetGroup.sessionCount || 4);
-  const newPaymentPlan: PaymentPlanType = isPerLesson
-    ? 'per_lesson'
-    : sessionCount === 4
-    ? '4_lessons'
-    : sessionCount === 8
-    ? '8_lessons'
-    : sessionCount === 12
-    ? '12_lessons'
-    : 'custom_bundle';
-  const effectiveGroupFee = isPerLesson
-    ? (targetGroup.pricePerSession ?? targetGroup.monthlyPackagePrice ?? 0)
-    : (targetGroup.monthlyPackagePrice || 1200);
-  const newPricePerLesson = isPerLesson
-    ? effectiveGroupFee
-    : Math.round(effectiveGroupFee / sessionCount);
-
-  const hasExplicitCustomBundlePrice =
-    student.customBundlePrice !== undefined &&
-    student.customBundlePrice !== null &&
-    student.customBundlePrice > 0;
-
-  return {
-    ...student,
-    groupId: newGroupId,
-    grade: targetGroup.grade || student.grade,
-    paymentPlan: newPaymentPlan,
-    bundleSize: sessionCount,
-    monthlyFee: effectiveGroupFee,
-    pricePerLesson: newPricePerLesson,
-    ...(hasExplicitCustomBundlePrice ? { customBundlePrice: student.customBundlePrice } : {}),
-    ...(prevGroupId && prevGroupId !== newGroupId
-      ? { groupHistory: existingHistory, previousGroupIds: existingPrevIds }
-      : {}),
-    updatedAt: Date.now()
-  } as Student;
 }
 

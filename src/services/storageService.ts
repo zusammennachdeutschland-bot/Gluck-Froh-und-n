@@ -29,20 +29,14 @@ try {
   console.warn('localStorage is not available in this context (probably blocked in iframe).', e);
 }
 
-const NON_CRITICAL_CACHE_LOCALSTORAGE_KEYS = [
+const HEAVY_EVICTABLE_LOCALSTORAGE_KEYS = [
   'dl_auto_backup_history_snapshots',
   'dl_local_backup_data',
-  'dl_restore_point_snapshot',
   'dl_lernstudio_sets',
-  'dl_web_scheduled_notifications'
-];
-
-const CRITICAL_DATA_MIRROR_KEYS = new Set([
+  'dl_web_scheduled_notifications',
   'dl_lessons',
   'dl_payments'
-]);
-
-const verifiedPrimaryDbMirrorKeys = new Set<string>();
+];
 
 const LOCALFORAGE_ONLY_HEAVY_KEYS = new Set([
   'dl_auto_backup_history_snapshots',
@@ -96,22 +90,6 @@ export function __getSimulatedPrimaryDbValueForTests(key: string): any {
   return simulatedPrimaryDbStore.get(key);
 }
 
-export function __setPrimaryDbVerifiedKeyForTests(key: string, verified: boolean): void {
-  if (verified) {
-    verifiedPrimaryDbMirrorKeys.add(key);
-  } else {
-    verifiedPrimaryDbMirrorKeys.delete(key);
-  }
-}
-
-export function isPrimaryDbVerifiedForKey(key: string): boolean {
-  if (!key) return false;
-  if (simulatePrimaryDbForTests) {
-    return verifiedPrimaryDbMirrorKeys.has(key) && simulatedPrimaryDbStore.has(key);
-  }
-  return verifiedPrimaryDbMirrorKeys.has(key);
-}
-
 const hasLocalStorageRuntime = (): boolean => {
   if (isLocalStorageSupported) return true;
   try {
@@ -128,8 +106,8 @@ export const safeLocalStorageSetItem = (
 ): boolean => {
   if (!hasLocalStorageRuntime()) return false;
 
-  // Skip mirroring massive backup snapshots or pending queues into 5MB localStorage ONLY if already verified in IndexedDB
-  if (savedInPrimaryDb && isPrimaryDbVerifiedForKey(key) && (isHeavyStorageKey(key) || valStr.length > MAX_LOCALSTORAGE_MIRROR_BYTES)) {
+  // Skip mirroring massive backup snapshots or pending queues into 5MB localStorage if already persisted in IndexedDB
+  if (savedInPrimaryDb && (isHeavyStorageKey(key) || valStr.length > MAX_LOCALSTORAGE_MIRROR_BYTES)) {
     try {
       localStorage.removeItem(key);
     } catch {
@@ -143,136 +121,30 @@ export const safeLocalStorageSetItem = (
     return true;
   } catch (e) {
     if (isQuotaExceededError(e)) {
-      const canRetryWrite = !savedInPrimaryDb || valStr.length <= MAX_LOCALSTORAGE_MIRROR_BYTES;
-
-      // Pass 1: Evict non-critical cache / redundant snapshot keys from localStorage one-by-one
-      for (const evictKey of NON_CRITICAL_CACHE_LOCALSTORAGE_KEYS) {
+      // Evict heavy/redundant keys from localStorage (they remain safe in IndexedDB / memoryStore)
+      for (const evictKey of HEAVY_EVICTABLE_LOCALSTORAGE_KEYS) {
         if (evictKey === key) continue;
-        // Preserve dl_restore_point_snapshot unless primary DB has verified it or all other caches are cleared
-        if (evictKey === 'dl_restore_point_snapshot' && !isPrimaryDbVerifiedForKey(evictKey)) {
-          continue;
-        }
         try {
           localStorage.removeItem(evictKey);
         } catch {
           // ignore
         }
-        if (canRetryWrite) {
-          try {
-            localStorage.setItem(key, valStr);
-            return true;
-          } catch (retryErr) {
-            if (!isQuotaExceededError(retryErr)) {
-              console.warn('localStorage write failed after cache eviction for key:', key, retryErr);
-              return false;
-            }
-          }
-        }
       }
-
-      // Pass 2: Evict redundant localStorage mirrors of dl_lessons / dl_payments ONLY when verified intact in primary IndexedDB
-      for (const criticalKey of CRITICAL_DATA_MIRROR_KEYS) {
-        if (criticalKey === key) continue;
-        if (!isPrimaryDbVerifiedForKey(criticalKey)) {
-          continue;
-        }
+      // Retry writing the target key if it fits
+      if (!savedInPrimaryDb || valStr.length <= MAX_LOCALSTORAGE_MIRROR_BYTES) {
         try {
-          localStorage.removeItem(criticalKey);
-        } catch {
-          // ignore
+          localStorage.setItem(key, valStr);
+          return true;
+        } catch (retryErr) {
+          console.warn('localStorage quota still exceeded after eviction for key:', key, retryErr);
+          return false;
         }
-        if (canRetryWrite) {
-          try {
-            localStorage.setItem(key, valStr);
-            return true;
-          } catch (retryErr) {
-            if (!isQuotaExceededError(retryErr)) {
-              console.warn('localStorage write failed after verified mirror eviction for key:', key, retryErr);
-              return false;
-            }
-          }
-        }
-      }
-
-      if (canRetryWrite) {
-        console.warn('localStorage quota exceeded with no safe eviction remaining for key:', key);
       }
       return false;
     }
     console.warn('Error writing to localStorage:', key, e);
     return false;
   }
-};
-
-let lastLessonStorageTraceSnapshot: Array<{ id: string; status: string }> = [];
-
-const traceLessonStorageBoundary = <T>(operation: 'read' | 'write', key: string, value: T): T => {
-  if (key !== 'dl_lessons') return value;
-  try {
-    if (typeof localStorage === 'undefined' || localStorage.getItem('gluck_debug_lesson_pipeline') !== '1') return value;
-    const rows = Array.isArray(value) ? value as Array<{ id?: string; status?: string }> : [];
-    const current = rows.filter(row => row?.id).map(row => ({ id: String(row.id), status: String(row.status || '') }));
-    const currentById = new Map(current.map(row => [row.id, row.status]));
-    const previousById = new Map(lastLessonStorageTraceSnapshot.map(row => [row.id, row.status]));
-    const removedIds = lastLessonStorageTraceSnapshot.filter(row => !currentById.has(row.id)).map(row => row.id);
-    const statusChanged = current.flatMap(row => {
-      const previous = previousById.get(row.id);
-      return previous !== undefined && previous !== row.status
-        ? [{ id: row.id, from: previous, to: row.status }]
-        : [];
-    });
-    console.info(`[Glück lesson pipeline] storage ${operation} dl_lessons`, {
-      count: current.length, rows: current, removedIds, statusChanged
-    });
-    lastLessonStorageTraceSnapshot = current;
-  } catch (error) {
-    console.warn('[Glück lesson pipeline] storage trace failed', error);
-  }
-  return value;
-};
-
-export const reconcileLessonStorageCopies = <T extends { id: string; status?: string; updatedAt?: any; _fieldUpdatedAt?: Record<string, any>; report?: any }>(
-  primaryRows: T[],
-  mirrorRows: T[]
-): T[] => {
-  const byId = new Map<string, T>();
-  const timestamp = (value: any): number => {
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    if (typeof value === 'string' && value.trim()) {
-      const parsed = Date.parse(value);
-      return Number.isFinite(parsed) ? parsed : 0;
-    }
-    return 0;
-  };
-  const statusRank: Record<string, number> = {
-    scheduled: 0, pending_action: 1, in_progress: 2, cancelled: 3, completed: 4
-  };
-  for (const row of [...(Array.isArray(primaryRows) ? primaryRows : []), ...(Array.isArray(mirrorRows) ? mirrorRows : [])]) {
-    if (!row?.id) continue;
-    const current = byId.get(row.id);
-    if (!current) {
-      byId.set(row.id, row);
-      continue;
-    }
-    const currentUpdated = timestamp(current.updatedAt);
-    const incomingUpdated = timestamp(row.updatedAt);
-    const incomingWins = incomingUpdated > currentUpdated;
-    const base = incomingWins ? row : current;
-    const currentStatusUpdated = timestamp(current._fieldUpdatedAt?.status) || currentUpdated;
-    const incomingStatusUpdated = timestamp(row._fieldUpdatedAt?.status) || incomingUpdated;
-    let statusSource = incomingStatusUpdated > currentStatusUpdated ? row : current;
-    if (incomingStatusUpdated === currentStatusUpdated &&
-        (statusRank[row.status || ''] ?? -1) > (statusRank[current.status || ''] ?? -1)) {
-      statusSource = row;
-    }
-    const merged = { ...base } as T;
-    if (statusSource.status !== undefined) merged.status = statusSource.status;
-    if (merged.status === 'completed' && (!merged.report || Object.keys(merged.report || {}).length === 0)) {
-      merged.report = current.report || row.report;
-    }
-    byId.set(row.id, merged);
-  }
-  return Array.from(byId.values());
 };
 
 const writeDebounceTimers: Record<string, any> = {};
@@ -286,56 +158,15 @@ export const storage = {
     try {
       if (simulatePrimaryDbForTests) {
         if (simulatedPrimaryDbStore.has(key)) {
-          let val = simulatedPrimaryDbStore.get(key);
-          if (key === 'dl_lessons' && Array.isArray(val) && hasLocalStorageRuntime()) {
-            try {
-              const mirrorRaw = localStorage.getItem(key);
-              if (mirrorRaw !== null) {
-                const mirror = JSON.parse(mirrorRaw);
-                if (Array.isArray(mirror)) {
-                  val = reconcileLessonStorageCopies(val, mirror);
-                  simulatedPrimaryDbStore.set(key, val);
-                  safeLocalStorageSetItem(key, JSON.stringify(val), true);
-                }
-              }
-            } catch (reconcileError) {
-              console.warn('Could not reconcile simulated durable lesson snapshots:', reconcileError);
-            }
-          }
+          const val = simulatedPrimaryDbStore.get(key);
           memoryStore[key] = val;
-          return traceLessonStorageBoundary('read', key, val);
+          return val;
         }
       } else if (isLocalforageSupported) {
         const val = await localforage.getItem<T>(key);
         if (val !== null && val !== undefined) {
-          if (key === 'dl_lessons' && Array.isArray(val) && hasLocalStorageRuntime()) {
-            // IndexedDB may contain an older successful snapshot when a later write
-            // fell back to localStorage. Reconcile both durable copies on every boot.
-            try {
-              const mirrorRaw = localStorage.getItem(key);
-              if (mirrorRaw !== null) {
-                const mirror = JSON.parse(mirrorRaw);
-                if (Array.isArray(mirror)) {
-                  const reconciled = reconcileLessonStorageCopies(val as any[], mirror as any[]) as T;
-                  memoryStore[key] = reconciled;
-                  const serialized = JSON.stringify(reconciled);
-                  try {
-                    await localforage.setItem(key, reconciled);
-                    verifiedPrimaryDbMirrorKeys.add(key);
-                  } catch (repairError) {
-                    verifiedPrimaryDbMirrorKeys.delete(key);
-                    console.warn('Could not repair IndexedDB lesson snapshot from localStorage mirror:', repairError);
-                  }
-                  safeLocalStorageSetItem(key, serialized, verifiedPrimaryDbMirrorKeys.has(key));
-                  return traceLessonStorageBoundary('read', key, reconciled);
-                }
-              }
-            } catch (reconcileError) {
-              console.warn('Could not reconcile durable lesson snapshots:', reconcileError);
-            }
-          }
           memoryStore[key] = val;
-          return traceLessonStorageBoundary('read', key, val);
+          return val;
         }
       }
     } catch (e: any) {
@@ -353,7 +184,7 @@ export const storage = {
           try {
             const parsed = JSON.parse(val) as T;
             memoryStore[key] = parsed;
-            return traceLessonStorageBoundary('read', key, parsed);
+            return parsed;
           } catch {
             memoryStore[key] = val as unknown as T;
             return val as unknown as T;
@@ -364,7 +195,7 @@ export const storage = {
       console.warn('Error reading from localStorage:', key, e);
     }
 
-    return traceLessonStorageBoundary('read', key, (memoryStore[key] !== undefined ? memoryStore[key] : null) as T | null);
+    return (memoryStore[key] !== undefined ? memoryStore[key] : null) as T | null;
   },
 
   async setItem<T>(key: string, value: T): Promise<void> {
@@ -382,11 +213,10 @@ export const storage = {
     try {
       if (simulatePrimaryDbForTests) {
         simulatedPrimaryDbStore.set(key, value);
-        savedInForage = simulatedPrimaryDbStore.has(key);
+        savedInForage = true;
       } else if (isLocalforageSupported) {
         await localforage.setItem(key, value);
-        const readBack = await localforage.getItem(key);
-        savedInForage = readBack !== null && readBack !== undefined;
+        savedInForage = true;
       }
     } catch (e: any) {
       if (typeof e?.message === 'string' && e.message.includes('No available storage method')) {
@@ -395,13 +225,6 @@ export const storage = {
         forageError = e;
         console.warn('Error writing to localforage:', key, e);
       }
-    }
-
-    if (savedInForage) {
-      verifiedPrimaryDbMirrorKeys.add(key);
-    } else {
-      // If primary DB failed on this write, do not allow stale primary DB status to authorize localStorage eviction
-      verifiedPrimaryDbMirrorKeys.delete(key);
     }
 
     let savedInLocalStorage = false;
@@ -423,7 +246,6 @@ export const storage = {
 
     // Update memory store only after durable write succeeded
     memoryStore[key] = value;
-    traceLessonStorageBoundary('write', key, value);
   },
 
   async flushPendingWrites(): Promise<void> {
@@ -633,7 +455,6 @@ export const storage = {
         : new Error(`Durable storage remove failed for key: ${key}`);
     }
 
-    verifiedPrimaryDbMirrorKeys.delete(key);
     delete memoryStore[key];
   },
 
@@ -642,7 +463,6 @@ export const storage = {
       clearTimeout(writeDebounceTimers[k]);
       delete writeDebounceTimers[k];
     }
-    verifiedPrimaryDbMirrorKeys.clear();
     // Clear memory store
     for (const key in memoryStore) {
       delete memoryStore[key];

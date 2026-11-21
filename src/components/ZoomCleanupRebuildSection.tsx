@@ -37,7 +37,6 @@ interface ZoomCleanupRebuildSectionProps {
   timezone: string;
   zoomConnected: boolean;
   calendarConn: GoogleCalendarConnectionState;
-  isCalendarConnecting: boolean;
   onConnectCalendar: (forcePrompt?: boolean) => Promise<void>;
 }
 
@@ -45,7 +44,6 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
   timezone,
   zoomConnected,
   calendarConn,
-  isCalendarConnecting,
   onConnectCalendar
 }) => {
   const {
@@ -372,14 +370,10 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
             </span>
             <button
               type="button"
-              disabled={isCalendarConnecting}
-              onClick={() => void onConnectCalendar(calendarConn.status === 'reconnect_required' || calendarConn.status === 'expired')}
-              className="min-h-[36px] px-3.5 rounded-xl bg-primary hover:bg-primary-hover text-primary-fg font-bold text-xs cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-wait inline-flex items-center gap-1.5"
+              onClick={() => onConnectCalendar(calendarConn.status === 'reconnect_required' || calendarConn.status === 'expired')}
+              className="min-h-[36px] px-3.5 rounded-xl bg-primary hover:bg-primary-hover text-primary-fg font-bold text-xs cursor-pointer transition-colors"
             >
-              {isCalendarConnecting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-              {isCalendarConnecting
-                ? _t('جاري الربط...', 'Connecting...')
-                : _t('ربط Google Calendar', 'Connect Calendar')}
+              {_t('ربط Google Calendar', 'Connect Calendar')}
             </button>
           </div>
         )}

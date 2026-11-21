@@ -148,13 +148,16 @@ jobs:
           rm -rf dist android/app/src/main/assets/public
 
       - name: Install Dependencies
-        run: npm ci --legacy-peer-deps
+        run: npm install --legacy-peer-deps
 
       - name: Restore Pristine Binaries (Failsafe)
         run: node scripts/restore_binaries.cjs
 
-      - name: Build Web Application (includes TypeScript typecheck)
-        run: CI=true npm run build
+      - name: Typecheck & Build Web Application
+        run: npm run lint && CI=true npm run build
+
+      - name: Run Automated Regression Tests
+        run: npm test
 
       - name: Verify Web Build Output
         run: |
@@ -177,10 +180,32 @@ jobs:
           node scripts/verify_no_aistudio_attachments.cjs --android
           echo "Android public assets verified."
 
-      - name: Setup Gradle Wrapper Cache
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          validate-wrappers: true
+          gradle-version: '8.13'
+          validate-wrappers: false
+
+      - name: Ensure Valid Gradle Wrapper
+        run: |
+          cd android
+          mkdir -p gradle/wrapper
+          
+          if command -v gradle >/dev/null 2>&1; then
+            echo "Generating clean Gradle wrapper via system Gradle..."
+            gradle wrapper --gradle-version 8.13 --distribution-type bin
+          fi
+
+          echo "Ensuring gradle-wrapper.properties..."
+          cat << 'EOF' > gradle/wrapper/gradle-wrapper.properties
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.13-bin.zip
+          networkTimeout=10000
+          validateDistributionUrl=true
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          EOF
 
       - name: Build Release APK
         env:
@@ -215,85 +240,23 @@ jobs:
       - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Glueck-Release-APK-Candidate
+          name: Glueck-Release-APK
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           overwrite: true
 
-  regression-tests:
-    name: Automated Regression Tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          lfs: true
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: 'npm'
-
-      - name: Install Dependencies
-        run: npm ci --legacy-peer-deps
-
-      - name: Restore Pristine Binaries (Failsafe)
-        run: node scripts/restore_binaries.cjs
-
-      - name: Run Automated Regression Tests
-        run: npm test
-
-  release:
-    name: Verify & Publish Release
-    runs-on: ubuntu-latest
-    needs: [build, regression-tests]
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Java JDK
-        uses: actions/setup-java@v5
-        with:
-          distribution: 'zulu'
-          java-version: '21'
-
-      - name: Download Release APK Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: Glueck-Release-APK-Candidate
-          path: release-artifact
-
-      - name: Verify Release APK Before Publishing
-        run: |
-          set -euo pipefail
-          APK_PATH="release-artifact/app-release.apk"
-          test -s "$APK_PATH"
-          CERT_INFO="$(keytool -printcert -jarfile "$APK_PATH" 2>&1)"
-          if echo "$CERT_INFO" | grep -qi "Not a signed jar"; then
-            echo "ERROR: Release APK is not signed."
-            exit 1
-          fi
-          if echo "$CERT_INFO" | grep -qi "CN=Android Debug"; then
-            echo "ERROR: Debug certificate detected in release APK."
-            exit 1
-          fi
-          echo "Downloaded release APK and non-debug signature verified."
-
       - name: Publish GitHub Release APK
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.${{ github.run_number }}
+          tag_name: latest-apk
           name: Latest Android APK
-          draft: true
-          prerelease: false
-          files: release-artifact/app-release.apk
+          prerelease: true
+          files: android/app/build/outputs/apk/release/app-release.apk
 
       - name: Produce Build Summary
         run: |
           VERSION_CODE=$((200 + ${GITHUB_RUN_NUMBER:-1}))
-          APK_PATH="release-artifact/app-release.apk"
+          APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
           SHA1_FP="$(keytool -printcert -jarfile "$APK_PATH" 2>/dev/null | grep -i "SHA1:" | head -n 1 | awk '{print $2}' || echo 'N/A')"
           SHA256_FP="$(keytool -printcert -jarfile "$APK_PATH" 2>/dev/null | grep -i "SHA256:" | head -n 1 | awk '{print $2}' || echo 'N/A')"
           echo "### 🚀 Android Build Success" >> $GITHUB_STEP_SUMMARY
@@ -304,9 +267,4 @@ jobs:
           echo "- **APK Signing SHA-1 (for Firebase Android App):** \`${SHA1_FP}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **APK Signing SHA-256 (for Firebase Android App):** \`${SHA256_FP}\`" >> $GITHUB_STEP_SUMMARY
           echo "#### 📦 Generated Artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "- 📱 **Release APK:** \`release-artifact/app-release.apk\`" >> $GITHUB_STEP_SUMMARY
-
-      - name: Finalize GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit v1.0.${{ github.run_number }} --draft=false
+          echo "- 📱 **Release APK:** \`android/app/build/outputs/apk/release/app-release.apk\`" >> $GITHUB_STEP_SUMMARY

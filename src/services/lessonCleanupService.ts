@@ -63,20 +63,17 @@ export function getPrunedLessonIds(): Set<string> {
   }
 }
 
-export const MAX_PRUNED_ARCHIVE_ITEMS = 1000;
-
 /**
- * Add IDs to the pruned tombstone set. Throws on persistence failure so cleanup can abort/roll back cleanly.
+ * Add IDs to the pruned tombstone set.
  */
 export function addPrunedLessonIds(ids: string[]): void {
   if (typeof window === 'undefined' || ids.length === 0) return;
-  const current = getPrunedLessonIds();
-  ids.forEach((id) => current.add(id));
-  const serialized = JSON.stringify(Array.from(current));
   try {
-    localStorage.setItem(PRUNED_LESSON_IDS_KEY, serialized);
-  } catch (err: any) {
-    throw new Error(`Failed to persist pruned lesson tombstones (${err?.message || 'Storage error'}).`);
+    const current = getPrunedLessonIds();
+    ids.forEach((id) => current.add(id));
+    localStorage.setItem(PRUNED_LESSON_IDS_KEY, JSON.stringify(Array.from(current)));
+  } catch {
+    // Ignore storage quota
   }
 }
 
@@ -399,17 +396,15 @@ export function exportPrunedLessonsBackupJson(prunedLessons: Lesson[]): void {
 }
 
 /**
- * Executes the safe cleanup in strict order: Archive -> Tombstone -> Delete.
+ * Executes the safe cleanup.
  * 1. Verifies financial invariance passed.
- * 2. Snapshots pre-cleanup archive and tombstones.
- * 3. Saves pruned lessons to internal archive storage capped at MAX_PRUNED_ARCHIVE_ITEMS (1,000) and verifies readback.
- * 4. Persists IDs to the tombstone set; if tombstone write fails, rolls back archive immediately and aborts.
- * 5. If an optional commitCleanedLessons callback is supplied and fails during delete/persist, rolls back both archive and tombstones cleanly.
+ * 2. Saves pruned lessons to internal archive storage (aborts if backup write fails).
+ * 3. Adds IDs to the tombstone set to prevent re-import from Firestore caches.
+ * 4. Returns the cleaned lessons array.
  */
 export async function executeLessonCleanup(
   currentLessons: Lesson[],
-  analysis: LessonCleanupAnalysis,
-  onCommitCleanedLessons?: (cleanedLessons: Lesson[]) => Promise<void>
+  analysis: LessonCleanupAnalysis
 ): Promise<LessonCleanupResult> {
   if (!analysis.financialInvarianceVerified) {
     throw new Error('Cannot execute lesson cleanup: financial invariance verification failed.');
@@ -423,100 +418,31 @@ export async function executeLessonCleanup(
   const prunedLessons = currentLessons.filter((l) => prunableIds.has(l.id));
   const cleanedLessons = currentLessons.filter((l) => !prunableIds.has(l.id));
 
-  let previousArchive: Lesson[] | null = null;
-  let archiveWasMutated = false;
-  let previousTombstonesRaw: string | null = null;
-  let tombstonesWereMutated = false;
-
-  if (typeof localStorage !== 'undefined') {
-    try {
-      previousTombstonesRaw = localStorage.getItem(PRUNED_LESSON_IDS_KEY);
-    } catch {
-      previousTombstonesRaw = null;
-    }
-  }
-
-  const rollbackArchiveAndTombstones = async () => {
-    if (tombstonesWereMutated && typeof localStorage !== 'undefined') {
-      try {
-        if (previousTombstonesRaw === null) {
-          localStorage.removeItem(PRUNED_LESSON_IDS_KEY);
-        } else {
-          localStorage.setItem(PRUNED_LESSON_IDS_KEY, previousTombstonesRaw);
-        }
-      } catch {
-        // Best-effort tombstone rollback
-      }
-    }
-    if (archiveWasMutated) {
-      try {
-        if (previousArchive === null) {
-          await storage.removeItem(PRUNED_LESSONS_BACKUP_KEY);
-        } else {
-          await storage.setItem(PRUNED_LESSONS_BACKUP_KEY, previousArchive);
-        }
-      } catch {
-        // Best-effort archive rollback
-      }
-    }
-  };
-
-  // Step 1: ARCHIVE — save pruned lessons to archive BEFORE tombstoning or deleting
+  // 1. Save to local storage archive BEFORE deleting any lessons. If archiving fails, abort cleanup!
   if (prunedLessons.length > 0) {
     try {
-      previousArchive = await storage.getItem<Lesson[]>(PRUNED_LESSONS_BACKUP_KEY);
-      const existingArchive = Array.isArray(previousArchive) ? previousArchive : [];
+      const existingArchive = (await storage.getItem<Lesson[]>(PRUNED_LESSONS_BACKUP_KEY)) || [];
       const existingIds = new Set(existingArchive.map((l) => l.id));
       const newToArchive = prunedLessons.filter((l) => !existingIds.has(l.id));
       const combinedArchive = [...existingArchive, ...newToArchive];
-      // Keep at most MAX_PRUNED_ARCHIVE_ITEMS (1,000) archived items
-      const truncatedArchive = combinedArchive.slice(-MAX_PRUNED_ARCHIVE_ITEMS);
+      // Keep at most 5000 archived items
+      const truncatedArchive = combinedArchive.slice(-5000);
       await storage.setItem(PRUNED_LESSONS_BACKUP_KEY, truncatedArchive);
-      archiveWasMutated = true;
-      const verified = await storage.verifyDurableReadBack([PRUNED_LESSONS_BACKUP_KEY]);
-      if (!verified) {
-        throw new Error('Archive readback verification failed.');
-      }
     } catch (err: any) {
-      await rollbackArchiveAndTombstones();
       throw new Error(
         `Failed to save pruned lessons archive before deletion (${err?.message || 'Storage error'}). Cleanup aborted.`
       );
     }
   }
 
-  // Step 2: TOMBSTONE — record tombstone IDs strictly; roll back archive on failure
-  if (prunableIds.size > 0) {
-    try {
-      addPrunedLessonIds(Array.from(prunableIds));
-      tombstonesWereMutated = true;
-    } catch (err: any) {
-      await rollbackArchiveAndTombstones();
-      throw new Error(
-        `Failed to record pruned lesson tombstones (${err?.message || 'Storage error'}). Cleanup aborted and archive rolled back.`
-      );
-    }
-  }
+  // 2. Record tombstone IDs so cloud sync will never resurrect them
+  addPrunedLessonIds(Array.from(prunableIds));
 
-  // Step 3: DELETE — apply cleaned lessons deletion atomically if callback provided
-  if (onCommitCleanedLessons) {
-    try {
-      await onCommitCleanedLessons(cleanedLessons);
-    } catch (err: any) {
-      await rollbackArchiveAndTombstones();
-      throw new Error(
-        `Failed to persist cleaned lessons (${err?.message || 'Storage error'}). Cleanup rolled back.`
-      );
-    }
-  }
-
-  // Step 4: Mark last cleanup date only after archive, tombstone, and delete succeed
+  // 3. Mark last cleanup date
   try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(LAST_CLEANUP_DATE_KEY, formatLocalDateStr(new Date()));
-    }
+    localStorage.setItem(LAST_CLEANUP_DATE_KEY, formatLocalDateStr(new Date()));
   } catch {
-    // Non-fatal metadata write
+    // Ignore
   }
 
   return {

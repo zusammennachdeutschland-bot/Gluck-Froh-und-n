@@ -4,7 +4,7 @@ import {
 } from '../types';
 import { calculatePeriodsTimings, parseTimeToMinutes, getSchoolSettings } from '../utils/schoolUtils';
 import { normalizeClassCode } from '../utils/classNormalizer';
-import { formatLocalDate, normalizeDateToISO } from '../utils/timeUtils';
+import { formatLocalDate } from '../utils/timeUtils';
 
 export interface GenerationResult {
   settings: TermVisitPlannerSettings;
@@ -307,7 +307,7 @@ export function generateTermVisitPlan(
 
     // Active App lessons for HOD on this date
     (hodLessons || []).forEach(l => {
-      if (normalizeDateToISO(l.date) === normalizeDateToISO(dateStr) && l.time && l.status !== 'cancelled') {
+      if (l.date === dateStr && l.time && l.status !== 'cancelled') {
         const [lHrs, lMins] = l.time.split(':').map(Number);
         if (!isNaN(lHrs) && !isNaN(lMins)) {
           const lTotalMin = lHrs * 60 + lMins;
@@ -497,9 +497,7 @@ export function generateTermVisitPlan(
 
   // Sort visits chronologically
   plannedVisits.sort((a, b) => {
-    const dateA = normalizeDateToISO(a.date);
-    const dateB = normalizeDateToISO(b.date);
-    if (dateA !== dateB) return dateA.localeCompare(dateB);
+    if (a.date !== b.date) return a.date.localeCompare(b.date);
     return a.periodNumber - b.periodNumber;
   });
 

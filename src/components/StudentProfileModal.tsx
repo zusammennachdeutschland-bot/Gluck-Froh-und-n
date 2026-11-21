@@ -17,9 +17,8 @@ import { CreateCertificateModal } from './certificates/CreateCertificateModal';
 import { CertificatePreviewModal } from './certificates/CertificatePreviewModal';
 import { downloadCertificatePDF, shareCertificateWhatsApp } from '../utils/certificateExportUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
-import { ensureTwoPartName, transliterateArabicNameToEnglish, findDuplicateStudentByName } from '../utils/nameUtils';
+import { ensureTwoPartName, transliterateArabicNameToEnglish } from '../utils/nameUtils';
 import { normalizeEgyptianPhone } from '../utils/contactsStandardizer';
-import { resolveStudentDocumentDownloadUrl } from '../utils/studentDocumentUtils';
 
 interface StudentProfileModalProps {
   student: Student;
@@ -28,7 +27,7 @@ interface StudentProfileModalProps {
 }
 
 export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ student, onClose, initialTab = 'overview' }) => {
-  const { students, groups, lessons, payments, certificates, profile, uploadStudentDocument, deleteStudentDocument, updateStudent, updateStudentCertificateName, deleteStudent, archiveStudent, triggerToast, t, _t } = useApp();
+  const { students, groups, lessons, payments, certificates, profile, uploadStudentDocument, deleteStudentDocument, updateStudent, updateStudentCertificateName, deleteStudent, archiveStudent, t, _t } = useApp();
 
   // Always resolve the live, updated student record from AppContext
   const currentStudent = (students || []).find(s => s.id === student.id) || student;
@@ -264,21 +263,6 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
 
   const handleSaveStudent = (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmedEditName = editName.trim();
-    if (!trimmedEditName) {
-      triggerToast(_t('اسم الطالب مطلوب.', 'Student name is required.', 'Schülername ist erforderlich.'));
-      return;
-    }
-    const duplicate = findDuplicateStudentByName(students, trimmedEditName, currentStudent.id);
-    if (duplicate) {
-      triggerToast(_t(
-        `يوجد طالب آخر مسجل بنفس الاسم "${trimmedEditName}". يرجى اختيار اسم مميز.`,
-        `Another student named "${trimmedEditName}" already exists. Please use a distinct name.`,
-        `Ein anderer Schüler mit dem Namen "${trimmedEditName}" existiert bereits.`
-      ));
-      return;
-    }
-
     const isParentUser = editParentContactType === 'username' || isWhatsAppUsername(editParentPhone);
     const cleanParentUser = cleanWhatsAppUsername(editParentPhone);
     const finalParentPhone = isParentUser 
@@ -292,30 +276,25 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
       ? (isStudentUser ? (cleanStudentUser ? `@${cleanStudentUser}` : '') : normalizeEgyptianPhone(editStudentPhone.trim())) 
       : '';
 
-    try {
-      updateStudent(currentStudent.id, {
-        name: trimmedEditName,
-        certificateName: editCertificateName.trim(),
-        gender: editGender,
-        groupId: editStatus === 'archived' ? '' : editGroupId,
-        archivedGroupId: editStatus === 'archived' ? (editGroupId || currentStudent.groupId || currentStudent.archivedGroupId || '') : currentStudent.archivedGroupId,
-        scheduleRecurrence: editScheduleRecurrence,
-        grade: editGrade,
-        parentName: editParentName.trim(),
-        parentPhone: finalParentPhone,
-        parentUsername: isParentUser ? cleanParentUser : '',
-        parentContactType: isParentUser ? 'username' : 'phone',
-        studentPhone: finalStudentPhone,
-        studentUsername: isStudentUser ? cleanStudentUser : '',
-        studentContactType: isStudentUser ? 'username' : (hasStudentVal ? 'phone' : 'phone'),
-        notes: editNotes.trim(),
-        status: editStatus,
-        updatedAt: Date.now()
-      });
-    } catch (err: any) {
-      triggerToast(err?.message || _t('تعذر حفظ تعديلات الطالب.', 'Unable to save student changes.', 'Änderungen konnten nicht gespeichert werden.'));
-      return;
-    }
+    updateStudent(currentStudent.id, {
+      name: editName.trim(),
+      certificateName: editCertificateName.trim(),
+      gender: editGender,
+      groupId: editStatus === 'archived' ? '' : editGroupId,
+      archivedGroupId: editStatus === 'archived' ? (editGroupId || currentStudent.groupId || currentStudent.archivedGroupId || '') : currentStudent.archivedGroupId,
+      scheduleRecurrence: editScheduleRecurrence,
+      grade: editGrade,
+      parentName: editParentName.trim(),
+      parentPhone: finalParentPhone,
+      parentUsername: isParentUser ? cleanParentUser : '',
+      parentContactType: isParentUser ? 'username' : 'phone',
+      studentPhone: finalStudentPhone,
+      studentUsername: isStudentUser ? cleanStudentUser : '',
+      studentContactType: isStudentUser ? 'username' : (hasStudentVal ? 'phone' : 'phone'),
+      notes: editNotes.trim(),
+      status: editStatus,
+      updatedAt: Date.now()
+    });
 
     setSaveSuccessToast(true);
     setTimeout(() => {
@@ -324,30 +303,11 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
     }, 1000);
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      await uploadStudentDocument(student.id, file, selectedCategory);
-    } catch (err: any) {
-      triggerToast(err?.message || _t('تعذر حفظ الملف.', 'Failed to store uploaded file.', 'Datei konnte nicht gespeichert werden.'));
-    } finally {
-      e.target.value = '';
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      uploadStudentDocument(student.id, e.target.files[0], selectedCategory);
+      /* confetti removed */
     }
-  };
-
-  const handleDownloadDocument = async (doc: NonNullable<Student['documents']>[number]) => {
-    const resolvedUrl = await resolveStudentDocumentDownloadUrl(doc);
-    if (!resolvedUrl) {
-      triggerToast(_t('هذا الملف غير متاح محلياً على هذا الجهاز.', 'This document payload is not available locally on this device.', 'Diese Datei ist auf diesem Gerät nicht verfügbar.'));
-      return;
-    }
-    const anchor = document.createElement('a');
-    anchor.href = resolvedUrl;
-    anchor.download = doc.fileName;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
   };
 
   const cleanParentPhone = cleanPhoneNumberForTel(student.parentPhone);
@@ -918,12 +878,12 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
 
                 {/* Uploaded Files List */}
                 <div className="space-y-2">
-                  {(currentStudent.documents || []).length === 0 ? (
+                  {(student.documents || []).length === 0 ? (
                     <p className="text-xs text-text-muted/70 text-center py-4 italic">
                       Keine Dokumente hochgeladen.
                     </p>
                   ) : (
-                    (currentStudent.documents || []).map((doc) => (
+                    (student.documents || []).map((doc) => (
                       <div
                         key={doc.id}
                         className="p-3 bg-slate-50/50 dark:bg-slate-800/30 rounded-xl border border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs"
@@ -941,16 +901,16 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
                         </div>
 
                         <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => void handleDownloadDocument(doc)}
-                            className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors text-primary cursor-pointer"
+                          <a
+                            href={doc.url}
+                            download={doc.fileName}
+                            className="p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors text-primary"
                             title="Herunterladen"
                           >
                             <Download className="w-4 h-4" />
-                          </button>
+                          </a>
                           <button
-                            onClick={() => deleteStudentDocument(currentStudent.id, doc.id)}
+                            onClick={() => deleteStudentDocument(student.id, doc.id)}
                             className="p-1.5 hover:bg-red-100 text-red-600 rounded-lg transition-colors cursor-pointer"
                             title="Löschen"
                           >

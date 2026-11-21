@@ -2,7 +2,7 @@ import { checkOverlap } from "../utils/lessonUtils";
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson, Group, Student } from '../types';
-import { parseLocalDate, formatLocalDate, normalizeDateToISO } from '../utils/timeUtils';
+import { parseLocalDate, formatLocalDate } from '../utils/timeUtils';
 import { getProjectedLessonsForRange, getCurrentAlternatingWeek, getAlternatingWeek, getRecurrenceLabel } from '../utils/scheduleUtils';
 import { 
   Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, ChevronDown,
@@ -199,7 +199,7 @@ export const ScheduleView: React.FC = () => {
   // DAY VIEW CALCULATIONS
   const dayLessons = useMemo(() => {
     return activeLessons
-      .filter((l) => normalizeDateToISO(l.date) === normalizeDateToISO(selectedDate))
+      .filter((l) => l.date === selectedDate)
       .sort((a, b) => a.time.localeCompare(b.time));
   }, [activeLessons, selectedDate]);
 
@@ -241,7 +241,7 @@ export const ScheduleView: React.FC = () => {
       const d = new Date(monday);
       d.setDate(monday.getDate() + i);
       const dateStr = formatLocalDate(d);
-      const lessonsOnDay = activeLessons.filter((l) => normalizeDateToISO(l.date) === normalizeDateToISO(dateStr)).sort((a, b) => a.time.localeCompare(b.time));
+      const lessonsOnDay = activeLessons.filter((l) => l.date === dateStr).sort((a, b) => a.time.localeCompare(b.time));
 
       days.push({
         dateStr,
@@ -277,7 +277,7 @@ export const ScheduleView: React.FC = () => {
 
     for (let day = 1; day <= daysInMonth; day++) {
       const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      const lessonsOnDay = activeLessons.filter((l) => normalizeDateToISO(l.date) === normalizeDateToISO(dateStr));
+      const lessonsOnDay = activeLessons.filter((l) => l.date === dateStr);
 
       gridDays.push({
         dayNumber: day,
@@ -445,10 +445,11 @@ export const ScheduleView: React.FC = () => {
             group: targetGroup,
             lesson: l,
             groupWeeklySessions,
+            defaultZoomLink: profile.defaultZoomLink
           })
         : '';
       const location = isOnlineLesson
-        ? resolvedOnlineLink
+        ? (resolvedOnlineLink || l.meetingLink || targetGroup?.zoomLink || '')
         : (l.locationAddress || targetGroup?.address || '');
 
       icsContent.push('BEGIN:VEVENT');
