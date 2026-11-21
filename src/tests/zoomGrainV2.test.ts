@@ -338,6 +338,13 @@ async function runZoomGrainV2Tests() {
     const migratedMon = resumedRes.sessions.find((s) => s.weekday === 1)!;
     assert.equal(migratedMon.meetingSource, 'zoom_api');
     assert.equal(migratedMon.syncState, 'synced');
+    const activeGroupSessions = resumedRes.sessions.filter((s) => s.groupId === groupV1.id && !s.deleted);
+    assert.equal(new Set(activeGroupSessions.map((s) => s.zoomJoinUrl)).size, 1,
+      'Creating a Zoom meeting from the group UI must replace every active slot URL with one canonical group URL');
+    assert.ok(activeGroupSessions.every((s) => s.zoomMeetingId === migratedMon.zoomMeetingId),
+      'Every active group session must reference the same current Zoom meeting ID');
+    assert.equal(resumedRes.records.filter((r) => r.groupId === groupV1.id && r.status === 'active').length, 1,
+      'All previous active meeting records across the group must be superseded');
     assert.ok(
       resumedRes.history.some(
         (h) =>
