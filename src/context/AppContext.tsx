@@ -98,7 +98,7 @@ import { loadZoomUiMeta, sanitizeZoomRecordForStorage } from '../services/zoomSe
 import { DEFAULT_ZOOM_TIMEZONE, reconcileGroupWeeklySessions, resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
 import { logZoomReminderPipeline } from '../utils/zoomReminderDiagnostics';
 import { enqueueLessonSyncTask } from '../services/lessonSyncQueue';
-import { runLessonPersistencePipeline, createLessonReportCompletionUpdater } from '../services/lessonPersistencePipeline';
+import { runLessonPersistencePipeline, createLessonReportCompletionUpdater, filterActiveLessonRows } from '../services/lessonPersistencePipeline';
 import { mergeLessonSyncSnapshot, preserveCompletedLessonStatuses } from '../utils/lessonSync';
 import { traceLessonPipeline } from '../utils/lessonPipelineDiagnostics';
 
@@ -963,80 +963,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const sixtyDaysAgo = new Date();
     sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
     const cutoffStr = formatLocalDate(sixtyDaysAgo);
-
     const oneYearAgo = new Date();
     oneYearAgo.setDate(oneYearAgo.getDate() - 365);
     const maxCutoffStr = formatLocalDate(oneYearAgo);
-
-    const sourceRows = Array.isArray(raw) ? raw : [];
-    const filtered = sourceRows.filter(l =>
-      shouldRetainLessonInActiveWindow(l, cutoffStr, maxCutoffStr, students, groups)
+    const filtered = raw.filter(lesson =>
+      shouldRetainLessonInActiveWindow(lesson, cutoffStr, maxCutoffStr, students, groups)
     );
     const retainedIds = new Set(filtered.map(lesson => lesson.id));
     traceLessonPipeline('filterActiveLessons: retained rows', filtered, {
-      removedIds: sourceRows.filter(lesson => lesson?.id && !retainedIds.has(lesson.id)).map(lesson => lesson.id),
-      note: `Input rows: ${sourceRows.length}; retained rows: ${filtered.length}`
+      removedIds: raw.filter(lesson => lesson?.id && !retainedIds.has(lesson.id)).map(lesson => lesson.id),
+      note: `Input rows: ${raw.length}; retained rows: ${filtered.length}`
     });
-
-    const bestLessons = new Map<string, Lesson>();
-    filtered.forEach(lesson => {
-      if (lesson.groupId && lesson.groupId !== 'quick_group') {
-        const key = `${lesson.groupId}_${lesson.date}_${lesson.time}`;
-        const existingBest = bestLessons.get(key);
-        if (!existingBest) {
-          bestLessons.set(key, lesson);
-        } else {
-          const score = (l: Lesson) => {
-             let s = 0;
-             if (l.status !== 'scheduled') s += 100;
-             if (l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid') s += 100;
-             if ((l.amountPaid || 0) > 0) s += 50;
-             if (l.report && Object.keys(l.report).length > 0) s += 50;
-             if (l.studentPayments && Object.keys(l.studentPayments).length > 0) s += 50;
-             return s;
-          };
-          const currentScore = score(lesson);
-          const bestScore = score(existingBest);
-          let winner = currentScore > bestScore ? lesson : existingBest;
-          let loser = winner === lesson ? existingBest : lesson;
-
-          if (currentScore === bestScore) {
-             if (lesson.updatedAt && existingBest.updatedAt && lesson.updatedAt > existingBest.updatedAt) {
-               winner = lesson;
-               loser = existingBest;
-             } else if (!existingBest.updatedAt && lesson.updatedAt) {
-               winner = lesson;
-               loser = existingBest;
-             }
-          }
-
-          // Preserve paid status if either record was marked paid
-          const isEitherPaid = winner.paymentStatus === 'paid' || loser.paymentStatus === 'paid' ||
-                               winner.report?.paymentStatus === 'paid' || loser.report?.paymentStatus === 'paid';
-          if (isEitherPaid) {
-            winner = {
-              ...winner,
-              paymentStatus: 'paid',
-              amountPaid: Math.max(winner.amountPaid || 0, loser.amountPaid || 0),
-              report: winner.report ? { ...winner.report, paymentStatus: 'paid' } : loser.report
-            };
-          }
-
-          bestLessons.set(key, winner);
-        }
-      }
-    });
-
-    const seenIds = new Set<string>();
-    const active = filtered.filter(lesson => {
-      if (!lesson || !lesson.id || seenIds.has(lesson.id)) return false;
-      if (lesson.groupId && lesson.groupId !== 'quick_group') {
-        const key = `${lesson.groupId}_${lesson.date}_${lesson.time}`;
-        if (bestLessons.get(key)?.id !== lesson.id) return false;
-      }
-      seenIds.add(lesson.id);
-      return true;
-    });
+    const active = filterActiveLessonRows(raw, cutoffStr, maxCutoffStr, students, groups);
     const activeIds = new Set(active.map(lesson => lesson.id));
     traceLessonPipeline('filterActiveLessons: after group-slot deduplication', active, {
       removedIds: filtered.filter(lesson => lesson?.id && !activeIds.has(lesson.id)).map(lesson => lesson.id),
