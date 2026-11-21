@@ -1,6 +1,54 @@
 import type { Lesson, Group, Student, LessonReport } from '../types';
-import { applyLessonCompletionMutation, deduplicateLessonList, resequenceScheduledLessonsAfterChange } from '../utils/lessonUtils';
+import { applyLessonCompletionMutation, deduplicateLessonList, resequenceScheduledLessonsAfterChange, shouldRetainLessonInActiveWindow } from '../utils/lessonUtils';
 import { preserveCompletedLessonStatuses } from '../utils/lessonSync';
+
+
+export const filterActiveLessonRows = (
+  raw: Lesson[],
+  cutoffStr: string,
+  maxCutoffStr: string,
+  students: Student[],
+  groups: Group[]
+): Lesson[] => {
+  const sourceRows = Array.isArray(raw) ? raw : [];
+  const filtered = sourceRows.filter(lesson =>
+    shouldRetainLessonInActiveWindow(lesson, cutoffStr, maxCutoffStr, students, groups)
+  );
+  const bestLessons = new Map<string, Lesson>();
+  const score = (lesson: Lesson) => {
+    let value = 0;
+    if (lesson.status !== 'scheduled') value += 100;
+    if (lesson.paymentStatus === 'paid' || lesson.report?.paymentStatus === 'paid') value += 100;
+    if ((lesson.amountPaid || 0) > 0) value += 50;
+    if (lesson.report && Object.keys(lesson.report).length > 0) value += 50;
+    if (lesson.studentPayments && Object.keys(lesson.studentPayments).length > 0) value += 50;
+    return value;
+  };
+  for (const lesson of filtered) {
+    if (!lesson.groupId || lesson.groupId === 'quick_group') continue;
+    const key = `${lesson.groupId}_${lesson.date}_${lesson.time}`;
+    const current = bestLessons.get(key);
+    if (!current) bestLessons.set(key, lesson);
+    else {
+      const candidateScore = score(lesson);
+      const currentScore = score(current);
+      if (candidateScore > currentScore ||
+        (candidateScore === currentScore && lesson.updatedAt && (!current.updatedAt || lesson.updatedAt > current.updatedAt))) {
+        bestLessons.set(key, lesson);
+      }
+    }
+  }
+  const seenIds = new Set<string>();
+  return filtered.filter(lesson => {
+    if (!lesson?.id || seenIds.has(lesson.id)) return false;
+    if (lesson.groupId && lesson.groupId !== 'quick_group') {
+      const key = `${lesson.groupId}_${lesson.date}_${lesson.time}`;
+      if (bestLessons.get(key)?.id !== lesson.id) return false;
+    }
+    seenIds.add(lesson.id);
+    return true;
+  });
+};
 
 export interface LessonPipelineTrace {
   (stage: string, lessons: Lesson[], details?: { removedIds?: Iterable<string>; note?: string }): void;
