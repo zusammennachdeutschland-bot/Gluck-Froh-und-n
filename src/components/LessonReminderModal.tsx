@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { Lesson, Group } from '../types';
+import { Lesson, Group, GroupWeeklySession, ZoomMeetingRecord, ZoomMeetingHistory } from '../types';
 import { buildWhatsAppUrl, formatWhatsAppPhone, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { getUpcomingGroupSchedule, isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
 import { getGroupCycleInfo, calculateSequentialSessionNumber, resolveLessonCycleNumber, compareLessonsChronologically, computeStartingSessionNumberForTargetLesson } from '../utils/lessonUtils';
@@ -10,7 +10,8 @@ import {
 } from 'lucide-react';
 import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { getTimeBasedGreeting } from '../utils/greetingUtils';
-import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
+import { resolveActiveZoomLinkForLesson, resolveActiveWeeklySessionForLesson } from '../services/zoomSessionStandardizer';
+import { setManualZoomLinkForSession } from '../services/zoomService';
 
 interface LessonReminderModalProps {
   lesson?: Lesson | null;
@@ -38,7 +39,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   recipientPhone,
   onClose,
 }) => {
-  const { groups, students, lessons, getFullLessonsSnapshot, setLessonSessionNumberAnchor, groupWeeklySessions, profile, updateGroup, updateLesson, updateProfile, language, t, _t, reportLanguage, setReportLanguage, reportT } = useApp();
+  const { groups, students, lessons, getFullLessonsSnapshot, setLessonSessionNumberAnchor, groupWeeklySessions, zoomMeetingRecords, zoomMeetingHistory, applyZoomWorkspaceSnapshot, profile, updateGroup, updateLesson, updateProfile, language, t, _t, reportLanguage, setReportLanguage, reportT } = useApp();
 
   const currentMsgLang = reportLanguage || 'ar';
   const msgT = (ar: string, en: string, de?: string) => {
@@ -426,15 +427,68 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     }, 400);
   };
 
-  // Save Zoom link back to group or profile
+  // Save Zoom link back to canonical session
   const handleSaveZoomLink = () => {
     if (!zoomLink.trim()) return;
     setIsSavingZoom(true);
     if (targetGroup) {
-      updateGroup(targetGroup.id, { zoomLink: zoomLink.trim() });
+      let activeSession = resolveActiveWeeklySessionForLesson({
+        group: targetGroup,
+        lesson: effectiveTargetLesson,
+        groupWeeklySessions,
+        targetDay: upcomingSchedule?.day,
+        targetTime: lesson?.time || upcomingSchedule?.time
+      });
+
+      let nextSessions = [...groupWeeklySessions];
+      if (!activeSession) {
+        const newSessionId = `gws_${targetGroup.id}_${upcomingSchedule?.day ?? 1}_${(lesson?.time || upcomingSchedule?.time || '17:00').replace(':', '')}_${Math.random().toString(36).slice(2, 6)}`;
+        const newSession: GroupWeeklySession = {
+          id: newSessionId,
+          groupId: targetGroup.id,
+          groupNameSnapshot: targetGroup.name,
+          weekday: Number(upcomingSchedule?.day ?? 1),
+          weekdayName: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][Number(upcomingSchedule?.day ?? 1)] || 'Monday',
+          startTime: lesson?.time || upcomingSchedule?.time || '17:00',
+          durationMinutes: targetGroup.lessonDurationMinutes || 60,
+          timezone: 'Africa/Cairo',
+          recurrence: 'weekly',
+          sessionCode: `${targetGroup.name.slice(0, 5).toUpperCase()}-SESSION`,
+          standardizedTitle: `${targetGroup.name} Session`,
+          meetingSource: 'manual',
+          syncState: 'manual',
+          calendarEventUid: `gluck-session-${newSessionId}@glueck.app`,
+          calendarSyncStatus: 'not_synced',
+          updatedAt: Date.now(),
+          originDeviceId: 'local',
+          originRevision: 1,
+          deleted: false
+        };
+        nextSessions.push(newSession);
+        activeSession = newSession;
+      }
+
+      const res = setManualZoomLinkForSession({
+        session: activeSession,
+        manualUrl: zoomLink.trim(),
+        sessions: nextSessions,
+        records: zoomMeetingRecords,
+        history: zoomMeetingHistory
+      });
+
+      if (res.ok) {
+        applyZoomWorkspaceSnapshot({
+          sessions: res.sessions,
+          records: res.records,
+          history: res.history
+        });
+      } else {
+        updateProfile({ defaultZoomLink: zoomLink.trim() });
+      }
     } else {
       updateProfile({ defaultZoomLink: zoomLink.trim() });
     }
+
     setTimeout(() => {
       setIsSavingZoom(false);
       setZoomSaveSuccess(true);

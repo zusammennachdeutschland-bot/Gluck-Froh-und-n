@@ -108,20 +108,24 @@ service cloud.firestore {
       allow get: if isValidId(docId);
     }
 
-    // Shared Lernstudio library: every authenticated teacher account sees and shares published custom sets.
-    // Unauthenticated access and unpublished draft reads/writes are denied; Vercel reads via Firebase Admin SDK.
+    // Shared Lernstudio library: every authenticated teacher account reads published or legacy sets; unpublished drafts are strictly owner-only.
     match /lernstudio_sets/{setId} {
-      allow get, list: if isSignedIn() && isValidId(setId);
+      allow get, list: if isSignedIn() && isValidId(setId) && (
+        (resource.data.published == true) ||
+        (resource.data.createdByUid == request.auth.uid) ||
+        (!('published' in resource.data))
+      );
       allow create: if isSignedIn()
         && isValidId(setId)
         && isValidLernstudioSet(incoming())
         && incoming().id == setId
-        && (incoming().createdByUid == request.auth.uid || (!('createdByUid' in incoming()) || incoming().createdByUid == ''));
+        && incoming().createdByUid == request.auth.uid;
       allow update: if isSignedIn()
         && isValidId(setId)
         && isValidLernstudioSet(incoming())
         && incoming().id == setId
-        && existing().createdByUid == request.auth.uid;
+        && existing().createdByUid == request.auth.uid
+        && incoming().createdByUid == existing().createdByUid;
       allow delete: if isSignedIn()
         && isValidId(setId)
         && existing().createdByUid == request.auth.uid;
@@ -198,65 +202,65 @@ service cloud.firestore {
         && (
           incoming().ownerUid == get(/databases/$(database)/documents/homework_assignments/$(incoming().assignmentId)).data.ownerUid
           || (
-            (!('ownerUid' in get(/databases/$(database)/documents/homework_assignments/$(incoming().assignmentId)).data) || get(/databases/$(database)/documents/homework_assignments/$(incoming().assignmentId)).data.ownerUid == '')
-            && incoming().ownerUid == ('legacy_unclaimed_' + incoming().assignmentId)
+            get(/databases/$(database)/documents/homework_assignments/$(incoming().assignmentId)).data.ownerUid == ''
           )
         );
 
-      allow update: if isValidId(submissionId)
+      allow update: if isSignedIn()
+        && isValidId(submissionId)
         && isValidHomeworkSubmission(incoming())
         && incoming().id == submissionId
-        && incoming().assignmentId == existing().assignmentId
-        && (
-          // Tier 1: Owning teacher updating or backfilling legacy submission
-          (
-            isSignedIn()
-            && incoming().ownerUid == request.auth.uid
-            && (
-              existing().ownerUid == request.auth.uid
-              || (
-                (!('ownerUid' in existing()) || existing().ownerUid == '' || existing().ownerUid == ('legacy_unclaimed_' + existing().assignmentId))
-                && exists(/databases/$(database)/documents/homework_assignments/$(existing().assignmentId))
-                && get(/databases/$(database)/documents/homework_assignments/$(existing().assignmentId)).data.ownerUid == request.auth.uid
-              )
-            )
-          )
-          // Tier 2: Student updating their own active attempt (cannot overwrite another student, change studentName, alter a completed submission, or bypass attemptSecret)
-          || (
-            incoming().ownerUid == existing().ownerUid
-            && incoming().studentName == existing().studentName
-            && (!('attemptSecret' in existing()) || existing().attemptSecret == '' || ('attemptSecret' in incoming() && incoming().attemptSecret == existing().attemptSecret))
-            && (existing().completedAt == '' || incoming().completedAt != '')
-            && (!('status' in existing()) || existing().status != 'completed')
-            && exists(/databases/$(database)/documents/homework_assignments/$(existing().assignmentId))
-            && (!('deleted' in get(/databases/$(database)/documents/homework_assignments/$(existing().assignmentId)).data) || get(/databases/$(database)/documents/homework_assignments/$(existing().assignmentId)).data.deleted != true)
-            && get(/databases/$(database)/documents/homework_assignments/$(existing().assignmentId)).data.isActive == true
-            && (
-              get(/databases/$(database)/documents/homework_assignments/$(existing().assignmentId)).data.ownerUid == incoming().ownerUid
-              || (
-                (!('ownerUid' in get(/databases/$(database)/documents/homework_assignments/$(existing().assignmentId)).data) || get(/databases/$(database)/documents/homework_assignments/$(existing().assignmentId)).data.ownerUid == '')
-                && incoming().ownerUid == ('legacy_unclaimed_' + existing().assignmentId)
-              )
-            )
-          )
-        );
+        && existing().ownerUid == request.auth.uid
+        && incoming().ownerUid == existing().ownerUid;
 
       allow delete: if isSignedIn()
         && isValidId(submissionId)
         && existing().ownerUid == request.auth.uid;
     }
 
-    // Teacher Full App Cloud Sync (STRICTLY Isolated by UID - Pillar 8)
-    match /user_workspaces/{userId}/categories/{docId} {
-      allow get, list: if isOwner(userId) || (isSignedIn() && request.auth.token.email != null && (resource == null || resource.data.ownerEmail == request.auth.token.email));
-      
-      allow create, update: if isOwner(userId)
-        && isValidId(userId)
-        && isValidId(docId)
+    // Teacher Workspace Sync Chunks (Strictly isolated by owning teacher)
+    match /workspace_chunks/{chunkId} {
+      allow get, list: if isSignedIn() && existing().ownerUid == request.auth.uid;
+
+      allow create: if isSignedIn()
+        && isValidId(chunkId)
         && isValidWorkspaceChunk(incoming())
-        && incoming().id == docId;
-      
-      allow delete: if isOwner(userId) || (isSignedIn() && request.auth.token.email != null && resource.data.ownerEmail == request.auth.token.email);
+        && incoming().id == chunkId
+        && incoming().ownerUid == request.auth.uid;
+
+      allow update: if isSignedIn()
+        && isValidId(chunkId)
+        && isValidWorkspaceChunk(incoming())
+        && incoming().id == chunkId
+        && existing().ownerUid == request.auth.uid
+        && incoming().ownerUid == existing().ownerUid;
+
+      allow delete: if isSignedIn()
+        && isValidId(chunkId)
+        && existing().ownerUid == request.auth.uid;
+    }
+
+    // Homework Assignment Short Links Index (For fast shortId resolution by students)
+    match /homework_assignment_short_links/{shortId} {
+      allow get: if isValidShortId(shortId);
+      allow list: if isSignedIn() && existing().ownerUid == request.auth.uid;
+
+      allow create: if isSignedIn()
+        && isValidShortId(shortId)
+        && isValidHomeworkShortLink(incoming())
+        && incoming().shortId == shortId
+        && incoming().ownerUid == request.auth.uid;
+
+      allow update: if isSignedIn()
+        && isValidShortId(shortId)
+        && isValidHomeworkShortLink(incoming())
+        && incoming().shortId == shortId
+        && existing().ownerUid == request.auth.uid
+        && incoming().ownerUid == existing().ownerUid;
+
+      allow delete: if isSignedIn()
+        && isValidShortId(shortId)
+        && existing().ownerUid == request.auth.uid;
     }
   }
 }
