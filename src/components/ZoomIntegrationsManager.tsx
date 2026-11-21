@@ -134,6 +134,8 @@ export const ZoomIntegrationsManager: React.FC = () => {
   } | null>(null);
   const [lastCalendarSyncResult, setLastCalendarSyncResult] = useState<CalendarSyncResult | null>(null);
   const [isConnectingCalendar, setIsConnectingCalendar] = useState(false);
+  const [isDisconnectingCalendar, setIsDisconnectingCalendar] = useState(false);
+  const calendarConnectAttemptRef = useRef(0);
   const [calendarConn, setCalendarConn] = useState<GoogleCalendarConnectionState>(() =>
     getGoogleCalendarConnectionState()
   );
@@ -491,9 +493,16 @@ export const ZoomIntegrationsManager: React.FC = () => {
   };
 
   const handleConnectGoogleCalendar = async (forcePrompt = false) => {
+    const attemptId = ++calendarConnectAttemptRef.current;
     setIsConnectingCalendar(true);
     try {
       const authRes = await requestGoogleCalendarAccessToken(forcePrompt);
+      // If the user disconnected while the native consent screen was open, do not
+      // allow its late result to silently restore the connection.
+      if (attemptId !== calendarConnectAttemptRef.current) {
+        await disconnectGoogleCalendar();
+        return;
+      }
       if (authRes.ok) {
         triggerToast(
           authRes.accountEmail
@@ -536,9 +545,19 @@ export const ZoomIntegrationsManager: React.FC = () => {
   };
 
   const handleDisconnectGoogleCalendar = async () => {
-    await disconnectGoogleCalendar();
-    setLastCalendarSyncResult(null);
-    triggerToast(_t('تم فصل جلسة Google Calendar', 'Google Calendar session disconnected'));
+    // Invalidate any in-flight connect attempt so a late consent result cannot reconnect.
+    calendarConnectAttemptRef.current += 1;
+    setIsDisconnectingCalendar(true);
+    setIsConnectingCalendar(false);
+    try {
+      await disconnectGoogleCalendar();
+      setLastCalendarSyncResult(null);
+      triggerToast(_t('تم فصل Google Calendar وإلغاء صلاحية الربط', 'Google Calendar disconnected and access revoked'));
+    } catch (err: any) {
+      triggerToast(err?.message || _t('تعذر فصل Google Calendar بالكامل', 'Could not fully disconnect Google Calendar'));
+    } finally {
+      setIsDisconnectingCalendar(false);
+    }
   };
 
   const openCalendarSyncModal = (targetSession: GroupWeeklySession | null = null) => {
@@ -1367,6 +1386,18 @@ export const ZoomIntegrationsManager: React.FC = () => {
                     className="w-full min-h-[38px] px-3 rounded-xl text-xs font-medium text-text-muted hover:text-text-main hover:bg-surface-hover cursor-pointer"
                   >
                     {_t('تغيير حساب Google Calendar', 'Switch Google Calendar account')}
+                  </button>
+                )}
+
+                {(calendarConn.status !== 'disconnected' || isConnectingCalendar) && (
+                  <button
+                    type="button"
+                    onClick={handleDisconnectGoogleCalendar}
+                    disabled={isDisconnectingCalendar}
+                    className="w-full min-h-[40px] px-3 rounded-xl border border-rose-500/30 bg-rose-500/5 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <ShieldOff className="w-3.5 h-3.5" />
+                    <span>{isDisconnectingCalendar ? _t('جاري إلغاء الربط...', 'Disconnecting...') : _t('إلغاء ربط Google Calendar', 'Disconnect Google Calendar')}</span>
                   </button>
                 )}
               </div>
