@@ -3067,7 +3067,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
             lesson.groupId !== 'quick_group' && 
             !lesson.deleted &&
             lesson.status === 'scheduled' && 
-            lesson.date >= todayStr && 
+            normalizeDateToISO(lesson.date) >= todayStr && 
             (!lesson.report || (!lesson.report.attendanceStatus && !lesson.report.teacherNotes && !lesson.report.homeworkTitle && lesson.report.quizScore === undefined)) &&
             (!lesson.studentPayments || Object.keys(lesson.studentPayments).length === 0) &&
             (!lesson.amountPaid || lesson.amountPaid === 0)
@@ -3088,7 +3088,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
                 const daySlotsCount = activeSlots.filter(s => getDayNumber(s.day) === lDayNum).length || 1;
                 const completedCountOnDate = filteredAndDeduplicated.filter(
                   l => l.groupId === lesson.groupId &&
-                       l.date === lesson.date &&
+                       normalizeDateToISO(l.date) === normalizeDateToISO(lesson.date) &&
                        !l.deleted &&
                        (l.status === 'completed' || (l.report && l.report.attendanceStatus))
                 ).length;
