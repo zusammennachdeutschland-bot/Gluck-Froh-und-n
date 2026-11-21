@@ -119,6 +119,46 @@ const runScenario = async (entryPoint: 'home' | 'modal') => {
   assertStatuses(final, expectedAfterTaleen, `${entryPoint}: final restarted state`);
 };
 
+
+const runPersistedOnlyLessonRecovery = async () => {
+  const persisted: Lesson[] = [
+    makeLesson('judy-0800', 'Judy', '08:00', 'completed', 'judy-private'),
+    makeLesson('kinda-0900', 'Kinda und Judy', '09:00', 'completed', 'kinda-group'),
+    makeLesson('taleen-1000', 'Taleen Private', '10:00', 'scheduled', 'taleen-private')
+  ];
+  // Reproduce the divergence: the non-empty in-memory ref is stale and has lost
+  // two IDs that are still present in durable dl_lessons.
+  let memory: Lesson[] = [persisted[2]];
+  let active: Lesson[] = [];
+  await storage.setItem('dl_lessons', persisted);
+  await enqueueLessonSyncTask(async () => {
+    const stored = (await storage.getItem<Lesson[]>('dl_lessons')) || [];
+    const updater = createLessonReportCompletionUpdater({
+      lessonId: 'taleen-1000',
+      report: { attendanceStatus: 'present' } as LessonReport,
+      targetLesson: persisted[2],
+      finalSessionNumber: 1,
+      updatedTotalSessions: 1,
+      students: [],
+      wrapMutation: <T>(item: T) => item
+    });
+    memory = await runLessonPersistencePipeline({
+      persistedBefore: stored,
+      inMemorySnapshot: memory,
+      updater,
+      students: [],
+      filterActiveLessons: rows => filterActiveLessonRows(rows, '0000-01-01', '0000-01-01', [], []),
+      setFullHistory: rows => { memory = rows; },
+      setActiveLessons: rows => { active = rows; },
+      writeStorage: rows => storage.setItem('dl_lessons', rows)
+    });
+  });
+  await waitForLessonSyncQueue();
+  assertStatuses(memory, expectedAfterTaleen, 'stale memory recovery: authoritative history union');
+  assertStatuses(active, expectedAfterTaleen, 'stale memory recovery: active state');
+  assertStatuses((await storage.getItem<Lesson[]>('dl_lessons')) || [], expectedAfterTaleen, 'stale memory recovery: durable write and restart');
+};
+
 const runScaleTests = () => {
   const dedupRows: Lesson[] = Array.from({ length: 5000 }, (_, index) => makeLesson(
     `scale-${index}`, `Student Unique ${index}`,
@@ -150,6 +190,7 @@ const run = async () => {
   try {
     await runScenario('home');
     await runScenario('modal');
+    await runPersistedOnlyLessonRecovery();
     runScaleTests();
     console.log('✓ Shared production lesson persistence pipeline regression passed for Home and LessonControlModal paths.');
   } finally {
