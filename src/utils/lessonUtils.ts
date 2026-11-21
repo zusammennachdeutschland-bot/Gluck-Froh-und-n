@@ -639,7 +639,7 @@ export const isSameLessonTarget = (l1: any, l2: any, students?: any[]): boolean 
 export const areDuplicateLessons = (l1: any, l2: any, students?: any[]): boolean => {
   if (!l1 || !l2 || l1.id === l2.id) return false;
   if (l1.deleted || l2.deleted) return false;
-  if (l1.date !== l2.date) return false;
+  if (normalizeDateToISO(l1.date) !== normalizeDateToISO(l2.date)) return false;
   
   if (!isSameLessonTarget(l1, l2, students)) return false;
 
