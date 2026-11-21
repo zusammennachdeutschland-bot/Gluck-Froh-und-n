@@ -540,8 +540,30 @@ export const resequenceScheduledLessonsAfterChange = (
     }
   }
 
-  // Sort the scope once; do not filter and sort the same collection for every row.
-  scopeIndices.sort((idxA, idxB) => compareLessonsChronologically(result[idxA], result[idxB]));
+  // Decorate once so date/time normalization and createdAt parsing are not repeated
+  // for every comparator invocation. This is one O(n log n) ordering pass.
+  const sortFields = new Map<number, { dateTime: string; createdAt: number; id: string }>();
+  for (const index of scopeIndices) {
+    const lesson = result[index];
+    const rawCreatedAt = (lesson as any).createdAt;
+    const createdAt = typeof rawCreatedAt === 'number'
+      ? rawCreatedAt
+      : (rawCreatedAt ? Date.parse(String(rawCreatedAt)) : NaN);
+    sortFields.set(index, {
+      dateTime: `${(lesson.date || '').trim()}T${normalizeTime(lesson.time) || '00:00'}`,
+      createdAt,
+      id: String(lesson.id || '')
+    });
+  }
+  scopeIndices.sort((idxA, idxB) => {
+    const a = sortFields.get(idxA)!;
+    const b = sortFields.get(idxB)!;
+    if (a.dateTime !== b.dateTime) return a.dateTime.localeCompare(b.dateTime);
+    if (Number.isFinite(a.createdAt) && Number.isFinite(b.createdAt) && a.createdAt !== b.createdAt) {
+      return a.createdAt - b.createdAt;
+    }
+    return a.id.localeCompare(b.id);
+  });
   const ordered = scopeIndices.map(idx => result[idx]);
   const orderedIndexById = new Map<string, number>();
   ordered.forEach((lesson, index) => { if (lesson.id) orderedIndexById.set(lesson.id, index); });
