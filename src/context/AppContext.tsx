@@ -5366,7 +5366,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       effectiveTargetGroup,
       targetStudent: targetStudentObj,
       students,
-      wrapMutation
+      wrapMutation,
+      stampFieldTimestamps
     });
 
     syncEventQueue.enqueue('lesson_updated', { lessonId, status: 'completed', timestamp: Date.now() });
