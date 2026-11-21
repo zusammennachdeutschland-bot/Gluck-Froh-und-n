@@ -2,7 +2,8 @@ import { isPendingStatus, isGroupPerLesson, calculateSequentialSessionNumber, re
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson, Group, Student, LessonReport, AttendanceStatus, PaymentStatus } from '../types';
-import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
+import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
+import { isLessonOnDate, isLessonCompatibleWithGroupSchedule } from '../utils/dailyLessonUtils';
 import { getGroupScheduleSlots, getDayNumber, isStudentMatchingLessonWeek, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
 import { storage } from '../services/storageService';
 import { 
@@ -334,12 +335,12 @@ export const TodaysProgressTimeline: React.FC = () => {
     const resolvedSlotKeys = new Set<string>();
     lessons.forEach(l => {
       if (!l.deleted && !isPendingStatus(l.status) && l.groupId && l.groupId !== 'quick_group' && l.date && l.time) {
-        resolvedSlotKeys.add(`${l.groupId}_${l.date}_${normalizeTime(l.time) || l.time}`);
+        resolvedSlotKeys.add(`${l.groupId}_${normalizeDateToISO(l.date)}_${normalizeTime(l.time) || l.time}`);
       }
     });
     return lessons
       .filter(l => {
-        if (l.deleted || l.date >= todayStr || !isPendingStatus(l.status) || dismissedDashboardLessonIds.includes(l.id)) {
+        if (l.deleted || normalizeDateToISO(l.date) >= todayStr || !isPendingStatus(l.status) || dismissedDashboardLessonIds.includes(l.id)) {
           return false;
         }
         if (l.groupId && l.groupId !== 'quick_group' && l.date && l.time) {
@@ -354,36 +355,8 @@ export const TodaysProgressTimeline: React.FC = () => {
   // 2. TODAY'S LESSONS: Lessons scheduled for today, excluding deleted items & stale slots from changed group schedules
   const todaysLessons = useMemo(() => {
     const active = lessons
-      .filter(l => !l.deleted && l.date === todayStr && !dismissedDashboardLessonIds.includes(l.id))
-      .filter(l => {
-        // If it's a scheduled uncompleted lesson for a group, ensure it matches current schedule slots
-        if (
-          l.groupId && 
-          l.groupId !== 'quick_group' && 
-          l.status === 'scheduled' && 
-          (!l.report || (!l.report.attendanceStatus && !l.report.teacherNotes && !l.report.homeworkTitle && l.report.quizScore === undefined)) &&
-          (!l.studentPayments || Object.keys(l.studentPayments).length === 0) &&
-          (!l.amountPaid || l.amountPaid === 0)
-        ) {
-          const grp = groups.find(g => g.id === l.groupId && !g.deleted);
-          if (grp) {
-            // Filter out lessons if date doesn't match group alternating week recurrence
-            if (grp.scheduleRecurrence && grp.scheduleRecurrence !== 'weekly') {
-              if (!isDateMatchingGroupRecurrence(grp.scheduleRecurrence, l.date)) {
-                return false;
-              }
-            }
-            const activeSlots = getGroupScheduleSlots(grp);
-            if (activeSlots.length > 0) {
-              const lDate = parseLocalDate(l.date);
-              const lDayNum = lDate.getDay();
-              const matchesSlot = activeSlots.some(s => getDayNumber(s.day) === lDayNum && s.time === l.time);
-              if (!matchesSlot) return false;
-            }
-          }
-        }
-        return true;
-      });
+      .filter(l => !l.deleted && isLessonOnDate(l, todayStr) && !dismissedDashboardLessonIds.includes(l.id))
+      .filter(l => isLessonCompatibleWithGroupSchedule(l, groups.find(g => g.id === l.groupId && !g.deleted)))
 
     // Deduplicate: If multiple entries exist for the same group slot on this date, always keep the authoritative one (completed/cancelled/in_progress > scheduled)
     const slotMap = new Map<string, Lesson>();
