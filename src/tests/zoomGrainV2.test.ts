@@ -319,7 +319,7 @@ async function runZoomGrainV2Tests() {
     assert.equal(partialRes.succeededCount, 1);
     assert.equal(firstSkipIds.length, 1);
 
-    // Resume from checkpoint — only remaining session should be created
+    // Resume from checkpoint — the first group-wide creation already supplied the canonical link to every slot
     const resumePreview = buildZoomMigrationPreview({
       groups: [groupV1],
       existingSessions: partialRes.sessions
@@ -332,8 +332,8 @@ async function runZoomGrainV2Tests() {
       skipSessionIds: new Set(firstSkipIds)
     });
     assert.equal(resumedRes.completed, true);
-    assert.equal(resumedRes.succeededCount, 1, 'Resume must only process remaining session');
-    assert.equal(createdZoomTopics.length, 2, 'Total Zoom meetings created across pause+resume must be exactly 2');
+    assert.equal(resumedRes.succeededCount, 0, 'Resume must not create another meeting after the group already has one canonical URL');
+    assert.equal(createdZoomTopics.length, 1, 'One group-wide canonical Zoom meeting must cover every weekly slot');
 
     const migratedMon = resumedRes.sessions.find((s) => s.weekday === 1)!;
     assert.equal(migratedMon.meetingSource, 'zoom_api');
