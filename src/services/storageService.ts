@@ -193,7 +193,7 @@ export const storage = {
         const val = await localforage.getItem<T>(key);
         if (val !== null && val !== undefined) {
           memoryStore[key] = val;
-          return val;
+          return traceLessonStorageBoundary('read', key, val);
         }
       }
     } catch (e: any) {
