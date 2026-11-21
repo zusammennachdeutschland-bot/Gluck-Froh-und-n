@@ -850,7 +850,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
               </div>
               <span className="text-[10px] text-amber-700 dark:text-amber-300 font-medium shrink-0">
                 {_t('زامن جلسة Zoom من إدارة Zoom أولاً', 'Sync the Zoom session from Zoom Manager first', 'Synchronisieren Sie die Zoom-Sitzung zuerst im Zoom-Manager')}
-              </span>>
+              </span>
             </div>
           )}
         </div>
