@@ -872,9 +872,16 @@ export default function App() {
           false
         );
         rawDict['hod_visit_records'] = migratedVisits;
-        await storage.setItem('hod_visit_records', migratedVisits);
-        await storage.setItem(hodVisitMigrationKey, true);
-        rawDict[hodVisitMigrationKey] = true;
+        try {
+          await storage.setItem('hod_visit_records', migratedVisits);
+          await storage.setItem(hodVisitMigrationKey, true);
+          rawDict[hodVisitMigrationKey] = true;
+        } catch (migrationError) {
+          // Keep the migrated rows available in this session; retry on the next
+          // startup rather than failing the entire app initialization.
+          console.warn('HOD visit migration could not be persisted yet:', migrationError);
+          rawDict[hodVisitMigrationKey] = false;
+        }
       }
 
       // Self-healing: Sanitize all collections, arrays, and objects
