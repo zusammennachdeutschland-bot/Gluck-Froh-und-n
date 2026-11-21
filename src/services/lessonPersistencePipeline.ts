@@ -101,9 +101,10 @@ export const createLessonReportCompletionUpdater = (args: {
   students: Student[];
   wrapMutation: <T>(item: T) => T;
   stampFieldTimestamps?: (previous: Lesson, next: Lesson) => Lesson;
+  trace?: LessonPipelineTrace;
 }): ((allLessons: Lesson[]) => Lesson[]) => {
   const { lessonId, report, targetLesson, finalSessionNumber, updatedTotalSessions,
-    effectiveTargetGroup, targetStudent, students, wrapMutation, stampFieldTimestamps = (_previous, next) => next } = args;
+    effectiveTargetGroup, targetStudent, students, wrapMutation, stampFieldTimestamps = (_previous, next) => next, trace } = args;
   return (allLessons) => {
     const createCompletedRecord = (lesson: Lesson): Lesson => {
       const mutated = wrapMutation({
@@ -134,13 +135,16 @@ export const createLessonReportCompletionUpdater = (args: {
     return stampFieldTimestamps(lesson, mutated);
     };
     const completion = applyLessonCompletionMutation(allLessons, lessonId, createCompletedRecord, targetLesson);
+    trace?.('saveLessonReport: after completed status/report mutation', completion.lessons, { previousLessons: allLessons, note: `targetId=${lessonId}; found=${completion.found}` });
     const pivot = completion.lessons.find(lesson => lesson.id === lessonId);
-    return resequenceScheduledLessonsAfterChange(completion.lessons, pivot, {
+    const resequenced = resequenceScheduledLessonsAfterChange(completion.lessons, pivot, {
       group: effectiveTargetGroup,
       student: targetStudent,
       students,
       wrapMutation
     });
+    trace?.('saveLessonReport: after resequence', resequenced, { previousLessons: completion.lessons, note: `targetId=${lessonId}` });
+    return resequenced;
   };
 };
 
