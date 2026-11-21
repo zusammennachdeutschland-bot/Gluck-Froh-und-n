@@ -1030,7 +1030,6 @@ async function runZoomGrainV2Tests() {
       group: multiSlotGroup,
       lesson: staleThuLesson,
       groupWeeklySessions: standardizedSessions,
-      defaultZoomLink: 'https://zoom.us/j/99999999999'
     });
     assert.equal(
       resolvedThu,
@@ -1043,7 +1042,6 @@ async function runZoomGrainV2Tests() {
       group: multiSlotGroup,
       lesson: { id: 'lesson_mon_stale', groupId: multiSlotGroup.id, date: '2026-11-16', time: '16:00', type: 'online', meetingLink: 'https://zoom.us/j/11111111111?pwd=OLD_DELETED_LINK' },
       groupWeeklySessions: standardizedSessions,
-      defaultZoomLink: 'https://zoom.us/j/99999999999'
     });
     assert.equal(
       resolvedMon,
@@ -1064,7 +1062,6 @@ async function runZoomGrainV2Tests() {
     const resolvedLegacy = resolveActiveZoomLinkForLesson({
       group: { id: 'grp_legacy', type: 'online', zoomLink: 'https://zoom.us/j/55566677788' },
       groupWeeklySessions: standardizedSessions,
-      defaultZoomLink: 'https://zoom.us/j/99999999999'
     });
     assert.equal(resolvedLegacy, 'https://zoom.us/j/55566677788');
 
