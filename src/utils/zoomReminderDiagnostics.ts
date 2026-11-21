@@ -1,6 +1,35 @@
 import type { Group, GroupWeeklySession, Lesson } from '../types';
 import { normalize24HourTime, normalizeWeekdayIndex, resolveActiveWeeklySessionForLesson } from './zoomSessionStandardizer';
 
+export type ZoomReminderIdentityReason = 'LESSON_GROUP_ID_MATCHED' | 'STALE_LESSON_GROUP_ID_USED_KNOWN_PROP_GROUP' | 'GROUP_PROP_MATCHED' | 'NO_TRUSTED_GROUP_OBJECT';
+
+export function resolveReminderGroupIdentity(params: {
+  lessonGroupId?: string | null;
+  suppliedGroup?: Partial<Group> | null;
+  groups: Group[];
+}): { group: Group | Partial<Group> | null; resolverGroupId?: string; identityReasonCode: ZoomReminderIdentityReason } {
+  const lessonGroupId = String(params.lessonGroupId || '').trim();
+  const suppliedGroupId = String(params.suppliedGroup?.id || '').trim();
+  if (lessonGroupId) {
+    const exactGroup = (params.groups || []).find(group => group?.id === lessonGroupId);
+    if (exactGroup) return { group: exactGroup, resolverGroupId: exactGroup.id, identityReasonCode: 'LESSON_GROUP_ID_MATCHED' };
+  }
+  if (suppliedGroupId) {
+    const knownSuppliedGroup = (params.groups || []).find(group => group?.id === suppliedGroupId);
+    if (knownSuppliedGroup) return {
+      group: knownSuppliedGroup,
+      resolverGroupId: knownSuppliedGroup.id,
+      identityReasonCode: lessonGroupId && lessonGroupId !== suppliedGroupId
+        ? 'STALE_LESSON_GROUP_ID_USED_KNOWN_PROP_GROUP'
+        : 'GROUP_PROP_MATCHED'
+    };
+    if (!lessonGroupId || suppliedGroupId === lessonGroupId) {
+      return { group: params.suppliedGroup as Group, resolverGroupId: suppliedGroupId, identityReasonCode: 'GROUP_PROP_MATCHED' };
+    }
+  }
+  return { group: null, resolverGroupId: lessonGroupId || undefined, identityReasonCode: 'NO_TRUSTED_GROUP_OBJECT' };
+}
+
 export type ZoomReminderResolutionReason =
   | 'RESOLVED_EXACT_SLOT'
   | 'RESOLVED_GROUP_WIDE_FALLBACK'
@@ -33,6 +62,8 @@ export interface ZoomReminderResolutionDiagnostics {
     startTime: string;
   }>;
   resolvedSessionId?: string;
+  resolverGroupId?: string;
+  identityReasonCode?: ZoomReminderIdentityReason;
 }
 
 export function diagnoseZoomReminderResolution(params: {
@@ -42,6 +73,8 @@ export function diagnoseZoomReminderResolution(params: {
   groupWeeklySessions?: GroupWeeklySession[] | null;
   targetDay?: string | number | null;
   targetTime?: string | null;
+  resolverGroupId?: string | null;
+  identityReasonCode?: ZoomReminderIdentityReason;
 }): ZoomReminderResolutionDiagnostics {
   const lesson = params.lesson || params.effectiveLesson;
   const effectiveLesson = params.effectiveLesson || lesson;
@@ -50,7 +83,7 @@ export function diagnoseZoomReminderResolution(params: {
   const effectiveLessonGroupId = effectiveLesson?.groupId || undefined;
   // The effective lesson owns the group identity. The supplied group object is contextual
   // and may be stale when a lesson was opened from an imported/duplicate group record.
-  const groupId = effectiveLessonGroupId || lessonGroupId || targetGroupId;
+  const groupId = params.resolverGroupId || effectiveLessonGroupId || lessonGroupId || targetGroupId;
   const date = effectiveLesson?.date || lesson?.date;
   const time = effectiveLesson?.time || params.targetTime;
   const weekdayFromDate = (() => {
@@ -106,7 +139,9 @@ export function diagnoseZoomReminderResolution(params: {
       weekday: Number(row.weekday),
       startTime: String(row.startTime || '')
     })),
-    resolvedSessionId: resolved?.id
+    resolvedSessionId: resolved?.id,
+    resolverGroupId: groupId || undefined,
+    identityReasonCode: params.identityReasonCode
   };
 }
 
