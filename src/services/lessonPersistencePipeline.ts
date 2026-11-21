@@ -32,10 +32,20 @@ export const filterActiveLessonRows = (
     else {
       const candidateScore = score(lesson);
       const currentScore = score(current);
-      if (candidateScore > currentScore ||
-        (candidateScore === currentScore && lesson.updatedAt && (!current.updatedAt || lesson.updatedAt > current.updatedAt))) {
-        bestLessons.set(key, lesson);
+      let winner = candidateScore > currentScore ? lesson : current;
+      const loser = winner === lesson ? current : lesson;
+      if (candidateScore === currentScore &&
+        lesson.updatedAt && (!current.updatedAt || lesson.updatedAt > current.updatedAt)) winner = lesson;
+      const paid = winner.paymentStatus === 'paid' || loser.paymentStatus === 'paid' ||
+        winner.report?.paymentStatus === 'paid' || loser.report?.paymentStatus === 'paid';
+      if (paid) {
+        winner = {
+          ...winner, paymentStatus: 'paid',
+          amountPaid: Math.max(winner.amountPaid || 0, loser.amountPaid || 0),
+          report: winner.report ? { ...winner.report, paymentStatus: 'paid' } : loser.report
+        };
       }
+      bestLessons.set(key, winner);
     }
   }
   const seenIds = new Set<string>();
