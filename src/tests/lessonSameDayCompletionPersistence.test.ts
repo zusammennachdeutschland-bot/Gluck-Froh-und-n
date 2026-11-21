@@ -19,6 +19,11 @@ const makeLesson = (
 } as Lesson);
 
 const assertStatuses = (lessons: Lesson[], expected: Record<string, string>, boundary: string) => {
+  assert.deepEqual(
+    lessons.map(lesson => lesson.id).sort(),
+    Object.keys(expected).sort(),
+    `${boundary}: all three lesson IDs must exist exactly once`
+  );
   for (const [id, status] of Object.entries(expected)) {
     assert.equal(lessons.find(lesson => lesson.id === id)?.status, status, `${boundary}: ${id} must remain ${status}`);
   }
