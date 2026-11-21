@@ -483,6 +483,29 @@ export const calculateSequentialSessionNumber = (
  * Re-calculates and synchronizes sessionNumber and totalSessionsInPackage across all
  * non-deleted, non-cancelled lessons of the same group (or private student) in chronological order.
  */
+/**
+ * Shared completion mutation used by the dashboard checkmark and persistence tests.
+ * Keeping the lookup/fallback behavior here prevents the UI handler and regression
+ * coverage from implementing subtly different completion paths.
+ */
+export const applyLessonCompletionMutation = (
+  allLessons: Lesson[],
+  lessonId: string,
+  createCompletedLesson: (lesson: Lesson) => Lesson,
+  fallbackLesson?: Lesson
+): { lessons: Lesson[]; found: boolean } => {
+  let found = false;
+  const updated = (Array.isArray(allLessons) ? allLessons : []).map(lesson => {
+    if (lesson?.id !== lessonId) return lesson;
+    found = true;
+    return createCompletedLesson(lesson);
+  });
+  if (!found && fallbackLesson?.id === lessonId) {
+    return { lessons: [createCompletedLesson(fallbackLesson), ...updated], found: false };
+  }
+  return { lessons: updated, found };
+};
+
 export const resequenceScheduledLessonsAfterChange = (
   allLessons: Lesson[],
   changedLesson: Partial<Lesson> | null | undefined,
