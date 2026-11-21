@@ -2746,7 +2746,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
       // Check specific frequency rules
       if (inspirationSettings.frequency === 'before_first_lesson' && triggerType !== 'before_lesson') {
-        const todaysLessons = lessons.filter(l => l.date === todayStr && l.status !== 'cancelled');
+        const todaysLessons = lessons.filter(l => normalizeDateToISO(l.date) === normalizeDateToISO(todayStr) && l.status !== 'cancelled');
         if (todaysLessons.length === 0) {
           return; // No lessons today yet
         }
@@ -2817,7 +2817,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const nowMins = now.getHours() * 60 + now.getMinutes();
 
       lessons.forEach((lesson) => {
-        if (lesson.deleted || lesson.date !== todayStr || lesson.status !== 'scheduled') return;
+        if (lesson.deleted || normalizeDateToISO(lesson.date) !== normalizeDateToISO(todayStr) || lesson.status !== 'scheduled') return;
 
         const timeParts = lesson.time.split(':').map(n => parseInt(n, 10));
         if (timeParts.length < 2 || isNaN(timeParts[0]) || isNaN(timeParts[1])) return;
@@ -2878,7 +2878,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const updateProfile = (updates: Partial<TeacherProfile>) => {
     setProfile(prev => {
-      const updated = { ...prev, ...updates };
+      const merged = { ...prev, ...updates };
+      // HOD visits live only in hod_visit_records; never persist/re-import the legacy profile copy.
+      const { visitRecords: _legacyVisitRecords, ...schoolSettings } = (merged.schoolSettings || {}) as any;
+      const updated = { ...merged, schoolSettings } as TeacherProfile;
       storage.setItem('dl_profile', updated);
       return updated;
     });
@@ -3306,7 +3309,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const isHistoricalOrLocked = (l: Lesson) => {
       if (l.groupId !== id) return true;
       if (l.deleted) return true;
-      if (l.date < todayStr) return true;
+      if (normalizeDateToISO(l.date) < normalizeDateToISO(todayStr)) return true;
       if (l.status !== 'scheduled') return true;
       if (l.report && (l.report.attendanceStatus || l.report.teacherNotes || l.report.homeworkTitle || l.report.quizScore !== undefined)) return true;
       if (l.studentPayments && Object.keys(l.studentPayments).length > 0) return true;
@@ -3318,7 +3321,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const fullSourceLessons = (fullLessonsRef.current && fullLessonsRef.current.length > 0) ? fullLessonsRef.current : lessons;
     const newGeneratedLessons: Lesson[] = [];
     if (scheduleChanged && newSlots.length > 0) {
-      const pastGroupLessonsCount = fullSourceLessons.filter(l => l.groupId === id && !l.deleted && l.status !== 'cancelled' && (l.date < todayStr || isHistoricalOrLocked(l))).length;
+      const pastGroupLessonsCount = fullSourceLessons.filter(l => l.groupId === id && !l.deleted && l.status !== 'cancelled' && (normalizeDateToISO(l.date) < normalizeDateToISO(todayStr) || isHistoricalOrLocked(l))).length;
       const startingNum = updatedGroup.startingSessionNumber || 1;
       const sessionCount = updatedGroup.sessionCount || 4;
 
@@ -3350,7 +3353,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           const slotKey = makeLessonSlotKey(id, dateStr, sessionTime);
 
           // If group already has a completed session on this date, do not generate duplicate/extra slots
-          const existingForGroupOnDate = lessons.filter(l => l.groupId === id && l.date === dateStr && !l.deleted);
+          const existingForGroupOnDate = lessons.filter(l => l.groupId === id && normalizeDateToISO(l.date) === normalizeDateToISO(dateStr) && !l.deleted);
           const hasCompletedOnDate = existingForGroupOnDate.some(
             l => l.status === 'completed' || (l.report && l.report.attendanceStatus)
           );
@@ -3593,7 +3596,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     // Cancel / delete future scheduled lessons belonging to the deleted group from both storage and RAM
     const todayStr = formatLocalDate();
     await updateFullLessonsStorage(all => all.map(l => {
-      if (l.groupId === id && (l.date >= todayStr || l.status === 'scheduled' || l.status === 'in_progress' || l.status === 'pending_action') && l.status !== 'completed') {
+      if (l.groupId === id && (normalizeDateToISO(l.date) >= normalizeDateToISO(todayStr) || l.status === 'scheduled' || l.status === 'in_progress' || l.status === 'pending_action') && l.status !== 'completed') {
         return wrapDeletion(l);
       }
       return l;
@@ -4770,22 +4773,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return filtered;
     });
 
-    setProfile(prev => {
-      const existingVisits = (prev?.schoolSettings as any)?.visitRecords;
-      if (!Array.isArray(existingVisits) || existingVisits.length === 0) return prev;
-      const filteredVisits = existingVisits.filter((v: any) => v && v.id && !allPurgedIds.has(String(v.id).trim()));
-      if (filteredVisits.length === existingVisits.length) return prev;
-      const updated = {
-        ...prev,
-        schoolSettings: {
-          ...(prev.schoolSettings as any),
-          visitRecords: filteredVisits
-        }
-      };
-      storage.setItem('dl_profile', updated);
-      return updated;
-    });
-
     setGoldHoldings(prev => {
       const filtered = (prev || []).filter(g => g && g.id && !allPurgedIds.has(String(g.id).trim()));
       if (filtered.length !== (prev || []).length) {
@@ -5306,7 +5293,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const deleteFutureGroupLessons = (groupId: string, fromDate: string, currentLessonId?: string) => {
     const updater = (allLessons: Lesson[]) => allLessons.map(l => {
       if (l.groupId === groupId && !l.deleted) {
-        const isTarget = (currentLessonId && l.id === currentLessonId) || l.date >= fromDate;
+        const isTarget = (currentLessonId && l.id === currentLessonId) || normalizeDateToISO(l.date) >= normalizeDateToISO(fromDate);
         const isModifiable = l.status === 'scheduled' && (!l.report || (!l.report.attendanceStatus && !l.report.teacherNotes));
         if (isTarget && isModifiable) {
           return wrapDeletion(l);
@@ -5315,7 +5302,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return l;
     });
     updateFullLessonsStorage(updater);
-    if (selectedLesson && selectedLesson.groupId === groupId && (selectedLesson.id === currentLessonId || selectedLesson.date >= fromDate)) {
+    if (selectedLesson && selectedLesson.groupId === groupId && (selectedLesson.id === currentLessonId || normalizeDateToISO(selectedLesson.date) >= normalizeDateToISO(fromDate))) {
       closeLessonControl();
     }
     autoSyncEngine.notifyMutation('lessons', groupId);
@@ -6129,7 +6116,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const matchingIndices: number[] = [];
       allLessons.forEach((l, idx) => {
         const matchesId = targetIds.has(l.id);
-        const matchesDate = (l.studentId === data.studentId || (l.groupId && l.groupId === data.groupId)) && targetDates.has(l.date);
+        const matchesDate = (l.studentId === data.studentId || (l.groupId && l.groupId === data.groupId)) && Array.from(targetDates).some(date => normalizeDateToISO(date) === normalizeDateToISO(l.date));
         if (matchesId || matchesDate) {
           matchingIndices.push(idx);
         }
