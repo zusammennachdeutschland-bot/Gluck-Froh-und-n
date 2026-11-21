@@ -3,8 +3,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson, Group, Student, LessonReport, AttendanceStatus, PaymentStatus } from '../types';
 import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
-import { isLessonOnDate, isLessonCompatibleWithGroupSchedule } from '../utils/dailyLessonUtils';
-import { getGroupScheduleSlots, getDayNumber, isStudentMatchingLessonWeek, isDateMatchingGroupRecurrence, getProjectedLessonsForRange } from '../utils/scheduleUtils';
+import { getLessonsForDate } from '../utils/dailyLessonUtils';
+import { getGroupScheduleSlots, getDayNumber, isStudentMatchingLessonWeek, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
 import { storage } from '../services/storageService';
 import { 
   CheckCircle2, Clock, PlayCircle, ChevronRight, ChevronDown, ChevronUp, AlertCircle, XCircle, X, Video, MapPin, Users, Check, MessageCircle, Phone
@@ -353,40 +353,10 @@ export const TodaysProgressTimeline: React.FC = () => {
   }, [lessons, todayStr, dismissedDashboardLessonIds]);
 
   // 2. TODAY'S LESSONS: Lessons scheduled for today, excluding deleted items & stale slots from changed group schedules
-  const todaysLessons = useMemo(() => {
-    // Use the same authoritative schedule projection source as Calendar so a
-    // recurring session is not lost from the Dashboard when its active RAM
-    // lesson record is absent from the current lesson window.
-    const authoritativeLessons = getFullLessonsSnapshot();
-    const projectedForToday = getProjectedLessonsForRange(
-      todayStr,
-      todayStr,
-      groups,
-      authoritativeLessons,
-      undefined,
-      groupWeeklySessions,
-      authoritativeLessons
-    );
-    const active = projectedForToday
-      .filter(l => !l.deleted && isLessonOnDate(l, todayStr) && !dismissedDashboardLessonIds.includes(l.id))
-      .filter(l => l.id.startsWith('l_auto_') || isLessonCompatibleWithGroupSchedule(l, groups.find(g => g.id === l.groupId && !g.deleted)));
-
-    // Deduplicate: If multiple entries exist for the same group slot on this date, always keep the authoritative one (completed/cancelled/in_progress > scheduled)
-    const slotMap = new Map<string, Lesson>();
-    active.forEach(l => {
-      const key = l.groupId && l.groupId !== 'quick_group'
-        ? `${l.groupId}_${normalizeDateToISO(l.date)}_${normalizeTime(l.time) || l.time}`
-        : l.id;
-      const existing = slotMap.get(key);
-      if (!existing) {
-        slotMap.set(key, l);
-      } else {
-        slotMap.set(key, pickAuthoritativeLesson(existing, l).survivor);
-      }
-    });
-
-    return Array.from(slotMap.values()).sort((a, b) => a.time.localeCompare(b.time));
-  }, [lessons, groups, todayStr, dismissedDashboardLessonIds, getFullLessonsSnapshot, groupWeeklySessions]);
+  const todaysLessons = useMemo(() => (
+    getLessonsForDate(todayStr, getFullLessonsSnapshot(), groups, groupWeeklySessions)
+      .filter(l => !dismissedDashboardLessonIds.includes(l.id))
+  ), [todayStr, getFullLessonsSnapshot, groups, groupWeeklySessions, dismissedDashboardLessonIds]);
 
   const getLessonState = (lesson: Lesson): 'completed' | 'cancelled' | 'active' | 'upcoming' => {
     if (lesson.status === 'completed') return 'completed';
