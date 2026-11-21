@@ -562,7 +562,7 @@ export const normalizeName = (name?: string): string => {
 export const checkOverlap = (l1: any, l2: any) => {
   if (!l1 || !l2) return false;
   if (l1.id === l2.id) return false;
-  if (l1.date !== l2.date) return false;
+  if (normalizeDateToISO(l1.date) !== normalizeDateToISO(l2.date)) return false;
   
   // Completed and cancelled sessions have already concluded or been voided; they must NEVER trigger active schedule conflicts
   const isL1Done = l1.status === 'completed' || l1.status === 'cancelled' || (l1.report && l1.report.attendanceStatus === 'completed');
@@ -1006,7 +1006,9 @@ export const shouldRetainLessonInActiveWindow = (
 ): boolean => {
   if (!lesson || lesson.deleted) return false;
   if (!lesson.date || typeof lesson.date !== 'string') return true;
-  if (lesson.date >= cutoffStr) return true;
+  const lessonDateKey = normalizeDateToISO(lesson.date);
+  if (!lessonDateKey) return true;
+  if (lessonDateKey >= normalizeDateToISO(cutoffStr)) return true;
   // Never evict a group's cycle anchor lesson from the active RAM window
   if (lesson.groupId && Array.isArray(groups) && groups.length > 0) {
     const anchorGrp = groups.find(g => g && !g.deleted && g.id === lesson.groupId);
@@ -1017,7 +1019,7 @@ export const shouldRetainLessonInActiveWindow = (
   if (lesson.status === 'scheduled' || isPendingStatus(lesson.status)) return true;
 
   if (lesson.status !== 'completed') return false;
-  if (lesson.date < maxCutoffStr) return false;
+  if (lessonDateKey < normalizeDateToISO(maxCutoffStr)) return false;
 
   const lessonPayStatus = String(lesson.paymentStatus || '');
   const reportPayStatus = String(lesson.report?.paymentStatus || '');
@@ -1123,7 +1125,7 @@ export const findInvalidBiweeklyAutoLessons = (
     if (!String(l.id || '').startsWith('l_auto_')) return false;
     if (l.status !== 'scheduled') return false;
     if (!l.date) return false;
-    if (fromDateStr && l.date < fromDateStr) return false;
+    if (fromDateStr && normalizeDateToISO(l.date) < normalizeDateToISO(fromDateStr)) return false;
 
     const grp = l.groupId ? groupsMap.get(l.groupId) : undefined;
     const effectiveRecurrence =
