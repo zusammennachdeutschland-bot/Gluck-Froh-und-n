@@ -202,7 +202,6 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
             group: selectedGroup,
             lesson: { groupId: targetGroupId, date: lessonDate, time: startTime },
             groupWeeklySessions,
-            defaultZoomLink: profile.defaultZoomLink
           })
         : undefined,
       locationAddress: lessonType === 'offline' ? (selectedGroup?.address || '') : undefined
