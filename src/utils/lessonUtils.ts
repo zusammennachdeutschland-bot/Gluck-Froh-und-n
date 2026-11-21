@@ -935,7 +935,9 @@ export const deduplicateLessonList = (
     }
 
     let existingIndex = -1;
-    for (const index of possible) {
+    // Match the original survivors.findIndex ordering when several indexed slots
+    // are candidates, preserving deterministic winner selection.
+    for (const index of Array.from(possible).sort((a, b) => a - b)) {
       if (areDuplicateLessons(survivors[index], candidate, students)) {
         existingIndex = index;
         break;
