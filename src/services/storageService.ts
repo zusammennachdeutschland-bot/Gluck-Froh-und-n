@@ -147,6 +147,33 @@ export const safeLocalStorageSetItem = (
   }
 };
 
+let lastLessonStorageTraceSnapshot: Array<{ id: string; status: string }> = [];
+
+const traceLessonStorageBoundary = <T>(operation: 'read' | 'write', key: string, value: T): T => {
+  if (key !== 'dl_lessons') return value;
+  try {
+    if (typeof localStorage === 'undefined' || localStorage.getItem('gluck_debug_lesson_pipeline') !== '1') return value;
+    const rows = Array.isArray(value) ? value as Array<{ id?: string; status?: string }> : [];
+    const current = rows.filter(row => row?.id).map(row => ({ id: String(row.id), status: String(row.status || '') }));
+    const currentById = new Map(current.map(row => [row.id, row.status]));
+    const previousById = new Map(lastLessonStorageTraceSnapshot.map(row => [row.id, row.status]));
+    const removedIds = lastLessonStorageTraceSnapshot.filter(row => !currentById.has(row.id)).map(row => row.id);
+    const statusChanged = current.flatMap(row => {
+      const previous = previousById.get(row.id);
+      return previous !== undefined && previous !== row.status
+        ? [{ id: row.id, from: previous, to: row.status }]
+        : [];
+    });
+    console.info(`[Glück lesson pipeline] storage ${operation} dl_lessons`, {
+      count: current.length, rows: current, removedIds, statusChanged
+    });
+    lastLessonStorageTraceSnapshot = current;
+  } catch (error) {
+    console.warn('[Glück lesson pipeline] storage trace failed', error);
+  }
+  return value;
+};
+
 const writeDebounceTimers: Record<string, any> = {};
 
 export const storage = {
@@ -160,7 +187,7 @@ export const storage = {
         if (simulatedPrimaryDbStore.has(key)) {
           const val = simulatedPrimaryDbStore.get(key);
           memoryStore[key] = val;
-          return val;
+          return traceLessonStorageBoundary('read', key, val);
         }
       } else if (isLocalforageSupported) {
         const val = await localforage.getItem<T>(key);
@@ -184,7 +211,7 @@ export const storage = {
           try {
             const parsed = JSON.parse(val) as T;
             memoryStore[key] = parsed;
-            return parsed;
+            return traceLessonStorageBoundary('read', key, parsed);
           } catch {
             memoryStore[key] = val as unknown as T;
             return val as unknown as T;
@@ -195,7 +222,7 @@ export const storage = {
       console.warn('Error reading from localStorage:', key, e);
     }
 
-    return (memoryStore[key] !== undefined ? memoryStore[key] : null) as T | null;
+    return traceLessonStorageBoundary('read', key, (memoryStore[key] !== undefined ? memoryStore[key] : null) as T | null);
   },
 
   async setItem<T>(key: string, value: T): Promise<void> {
@@ -246,6 +273,7 @@ export const storage = {
 
     // Update memory store only after durable write succeeded
     memoryStore[key] = value;
+    traceLessonStorageBoundary('write', key, value);
   },
 
   async flushPendingWrites(): Promise<void> {
