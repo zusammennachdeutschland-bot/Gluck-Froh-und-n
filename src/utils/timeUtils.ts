@@ -41,8 +41,8 @@ export const normalizeDateToISO = (dateStr: string): string => {
   const normalized = normalizeDigits(dateStr.trim());
   if (!normalized) return '';
 
-  const dmMatch = normalized.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})(?:$|[T\\s])/);
-  const isoMatch = normalized.match(/^(\\d{4})-(\\d{1,2})-(\\d{1,2})(?:$|[T\\s])/);
+  const dmMatch = normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:$|[T\s])/);
+  const isoMatch = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:$|[T\s])/);
   const match = dmMatch
     ? { year: Number(dmMatch[3]), month: Number(dmMatch[2]), day: Number(dmMatch[1]) }
     : isoMatch
