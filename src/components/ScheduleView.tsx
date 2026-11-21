@@ -448,7 +448,7 @@ export const ScheduleView: React.FC = () => {
           })
         : '';
       const location = isOnlineLesson
-        ? (resolvedOnlineLink || l.meetingLink || targetGroup?.zoomLink || '')
+        ? resolvedOnlineLink
         : (l.locationAddress || targetGroup?.address || '');
 
       icsContent.push('BEGIN:VEVENT');
