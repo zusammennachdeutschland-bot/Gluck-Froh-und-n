@@ -98,6 +98,7 @@ import { loadZoomUiMeta, sanitizeZoomRecordForStorage } from '../services/zoomSe
 import { DEFAULT_ZOOM_TIMEZONE, reconcileGroupWeeklySessions, resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
 import { logZoomReminderPipeline } from '../utils/zoomReminderDiagnostics';
 import { enqueueLessonSyncTask } from '../services/lessonSyncQueue';
+import { runLessonPersistencePipeline, createLessonReportCompletionUpdater } from '../services/lessonPersistencePipeline';
 import { mergeLessonSyncSnapshot, preserveCompletedLessonStatuses } from '../utils/lessonSync';
 import { traceLessonPipeline } from '../utils/lessonPipelineDiagnostics';
 
@@ -1333,59 +1334,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const updateFullLessonsStorage = useCallback(async (updater: (allLessons: Lesson[]) => Lesson[]): Promise<Lesson[]> => {
     return enqueueLessonSyncTask(async () => {
       const persistedBefore = await storage.getItem<Lesson[]>('dl_lessons');
-      const full = (fullLessonsRef.current && fullLessonsRef.current.length > 0)
-        ? fullLessonsRef.current
-        : (Array.isArray(persistedBefore) ? persistedBefore : lessons);
-      traceLessonPipeline('updateFullLessonsStorage: queue read', full, {
-        note: `Persisted rows: ${Array.isArray(persistedBefore) ? persistedBefore.length : 0}`
+      const inMemorySnapshot = fullLessonsRef.current || [];
+      const persistedRows = Array.isArray(persistedBefore) ? persistedBefore : [];
+      const deduped = await runLessonPersistencePipeline({
+        persistedBefore: persistedRows,
+        inMemorySnapshot,
+        fallbackLessons: lessons,
+        updater,
+        students,
+        filterActiveLessons,
+        setFullHistory: rows => { fullLessonsRef.current = rows; },
+        setActiveLessons: setLessons,
+        writeStorage: rows => storage.setItem('dl_lessons', rows),
+        trace: traceLessonPipeline
       });
-      const rawUpdated = updater(full || []);
-      traceLessonPipeline('updateFullLessonsStorage: updater output before completion guard', rawUpdated);
-
-      // Completion is terminal for a persisted lesson ID. A stale callback, projected
-      // row, or delayed sync payload must never downgrade it back to scheduled/in-progress.
-      const completionGuard = preserveCompletedLessonStatuses(
-        [Array.isArray(persistedBefore) ? persistedBefore : [], full || []],
-        rawUpdated
-      );
-      const guardedUpdated = completionGuard.lessons;
-      traceLessonPipeline('updateFullLessonsStorage: completion regression guard', guardedUpdated, {
-        note: completionGuard.protectedIds.size
-          ? `Prevented completed → non-terminal status regression for IDs: ${Array.from(completionGuard.protectedIds).join(', ')}`
-          : 'No completed status regressions detected'
-      });
-
-      // Deduplicate by lesson.id strictly (keeping the latest occurrence).
-      const seen = new Set<string>();
-      const dedupedById: Lesson[] = [];
-      const duplicateIds = new Set<string>();
-      for (let i = guardedUpdated.length - 1; i >= 0; i--) {
-        const item = guardedUpdated[i];
-        if (item && item.id && !seen.has(item.id)) {
-          seen.add(item.id);
-          dedupedById.unshift(item);
-        } else if (item?.id) {
-          duplicateIds.add(item.id);
-        }
-      }
-      traceLessonPipeline('updateFullLessonsStorage: ID deduplication', dedupedById, { removedIds: duplicateIds });
-
-      const semanticDeduplication = deduplicateLessonList(dedupedById, students);
-      const deduped = semanticDeduplication.deduplicated as Lesson[];
-      traceLessonPipeline('updateFullLessonsStorage: semantic deduplication', deduped, {
-        removedIds: semanticDeduplication.removedIds,
-        mergedIds: semanticDeduplication.idMap
-      });
-      fullLessonsRef.current = deduped;
-      const activeLessons = filterActiveLessons(deduped);
-      const activeIds = new Set(activeLessons.map(lesson => lesson.id));
-      traceLessonPipeline('updateFullLessonsStorage: active state before setLessons', activeLessons, {
-        removedIds: deduped.filter(lesson => lesson?.id && !activeIds.has(lesson.id)).map(lesson => lesson.id)
-      });
-      setLessons(activeLessons);
-      traceLessonPipeline('updateFullLessonsStorage: writing dl_lessons', deduped);
-      await storage.setItem('dl_lessons', deduped);
-      traceLessonPipeline('updateFullLessonsStorage: dl_lessons write complete', (await storage.getItem<Lesson[]>('dl_lessons')) || []);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('gluck-local-data-mutated'));
       }
@@ -5455,57 +5417,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       : [];
 
     traceLessonPipeline('saveLessonReport: checkmark handler target', [targetLesson], { note: `lessonId=${lessonId}` });
-    const reportUpdater = (allLessons: Lesson[]) => {
-      traceLessonPipeline('saveLessonReport: updater input', allLessons, { note: `targetId=${lessonId}` });
-      const updatedStudentPayments: Record<string, StudentPaymentDetail> = {};
-      if (report.studentPayments) {
-        Object.entries(report.studentPayments).forEach(([stId, pDet]) => {
-          const stObj = students.find(s => s.id === stId);
-          updatedStudentPayments[stId] = {
-            studentId: stId,
-            studentName: stObj?.name || 'Schüler',
-            paymentStatus: pDet.status,
-            amountPaid: pDet.amount,
-            amountDue: targetLesson.amountDue || 200
-          };
-        });
-      }
-
-      const createCompletedRecord = (lesson: Lesson): Lesson => {
-        const mutated = wrapMutation({
-          ...lesson,
-          status: 'completed',
-          isAutoGenerated: false,
-          sessionNumber: finalSessionNumber,
-          totalSessionsInPackage: updatedTotalSessions,
-          topic: report.arabicTopicsExplained || report.teacherNotes || (lesson as any).topic,
-          paymentStatus: report.paymentStatus !== undefined ? report.paymentStatus : (lesson.paymentStatus || 'pending'),
-          amountPaid: report.amountPaid !== undefined ? report.amountPaid : (lesson.amountPaid ?? finalAmountPaid),
-          recordingLink: report.recordingLink !== undefined ? report.recordingLink : lesson.recordingLink,
-          recordingLink2: report.recordingLink2 !== undefined ? report.recordingLink2 : lesson.recordingLink2,
-          studentPayments: Object.keys(updatedStudentPayments).length > 0 ? updatedStudentPayments : lesson.studentPayments,
-          report
-        } as Lesson);
-        return stampFieldTimestamps(lesson, mutated);
-      };
-      const completionMutation = applyLessonCompletionMutation(allLessons, lessonId, createCompletedRecord, targetLesson);
-      const withCompleted = completionMutation.lessons;
-      const found = completionMutation.found;
-
-      traceLessonPipeline('saveLessonReport: after completed status/report mutation', withCompleted, {
-        note: `targetId=${lessonId}; found=${found}`
-      });
-      const st = students.find(s => (targetLesson.studentId && s.id === targetLesson.studentId) || (targetLesson.studentName && s.name === targetLesson.studentName));
-      const completedPivot = withCompleted.find(l => l.id === lessonId);
-      const resequenced = resequenceScheduledLessonsAfterChange(withCompleted, completedPivot, {
-        group: effectiveTargetGroup,
-        student: st,
-        students,
-        wrapMutation
-      });
-      traceLessonPipeline('saveLessonReport: after resequence', resequenced, { note: `targetId=${lessonId}` });
-      return resequenced;
-    };
+    const reportUpdater = createLessonReportCompletionUpdater({
+      lessonId,
+      report,
+      targetLesson,
+      finalSessionNumber,
+      updatedTotalSessions,
+      effectiveTargetGroup,
+      targetStudent: targetStudentObj,
+      students,
+      wrapMutation
+    });
 
     syncEventQueue.enqueue('lesson_updated', { lessonId, status: 'completed', timestamp: Date.now() });
     const lessonUpdatePromise = updateFullLessonsStorage(reportUpdater);
