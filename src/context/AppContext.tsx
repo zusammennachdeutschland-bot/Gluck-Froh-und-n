@@ -2918,116 +2918,95 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   // Sync simulation with Google Cloud
   // Explicit Refresh Calendar & Dashboard function
   const refreshCalendarAndDashboard = () => {
-    // Get current valid group and student IDs & maps
     const currentGroupsMap = new Map<string, Group>(groups.filter(g => !g.deleted).map(g => [g.id, g]));
     const currentGroupIds = new Set(currentGroupsMap.keys());
     const currentStudentIds = new Set(students.filter(s => !s.deleted).map(s => s.id));
     const currentStudentNames = new Set(students.filter(s => !s.deleted && Boolean(s.name)).map(s => s.name.toLowerCase()));
     const todayStr = formatLocalDate();
 
+    const sourceLessons = getFullLessonsSnapshot();
+    const filteredAndDeduplicated = filterActiveLessons(sourceLessons);
     const staleLessonIds = new Set<string>();
-
-    // Clean up orphaned, duplicate, and stale lessons, and synchronize denormalized names
-    setLessons(prev => {
-      const filteredAndDeduplicated = filterActiveLessons(prev);
-
-      return filteredAndDeduplicated
-        .filter(lesson => {
-          // If group lesson and group no longer exists
-          if (lesson.groupId && lesson.groupId !== 'quick_group' && !currentGroupIds.has(lesson.groupId)) {
-            staleLessonIds.add(lesson.id);
-            return false;
-          }
-          // If student lesson and student no longer exists
-          if (lesson.studentId && !currentStudentIds.has(lesson.studentId)) {
-            staleLessonIds.add(lesson.id);
-            return false;
-          }
-          if (lesson.studentName && !lesson.isQuickLesson && !currentStudentNames.has(lesson.studentName.toLowerCase()) && !lesson.groupId) {
-            staleLessonIds.add(lesson.id);
-            return false;
-          }
-
-          // Clean up stale future scheduled lessons that do not match the group's current schedule slots
-          if (
-            lesson.groupId && 
-            lesson.groupId !== 'quick_group' && 
-            !lesson.deleted &&
-            lesson.status === 'scheduled' && 
-            normalizeDateToISO(lesson.date) >= todayStr && 
-            (!lesson.report || (!lesson.report.attendanceStatus && !lesson.report.teacherNotes && !lesson.report.homeworkTitle && lesson.report.quizScore === undefined)) &&
-            (!lesson.studentPayments || Object.keys(lesson.studentPayments).length === 0) &&
-            (!lesson.amountPaid || lesson.amountPaid === 0)
-          ) {
-            const targetGroup = currentGroupsMap.get(lesson.groupId);
-            if (targetGroup) {
-              const activeSlots = getGroupScheduleSlots(targetGroup);
-              if (activeSlots.length > 0) {
-                const lDate = new Date(lesson.date + 'T00:00:00');
-                const lDayNum = lDate.getDay();
-                const matchesAnySlot = activeSlots.some(s => getDayNumber(s.day) === lDayNum && s.time === lesson.time);
-                if (!matchesAnySlot) {
-                  staleLessonIds.add(lesson.id);
-                  return false; // Safely purge stale future session from older schedule
-                }
-
-                // Also purge unstarted scheduled session if group ALREADY completed its session(s) on this date
-                const daySlotsCount = activeSlots.filter(s => getDayNumber(s.day) === lDayNum).length || 1;
-                const completedCountOnDate = filteredAndDeduplicated.filter(
-                  l => l.groupId === lesson.groupId &&
-                       normalizeDateToISO(l.date) === normalizeDateToISO(lesson.date) &&
-                       !l.deleted &&
-                       (l.status === 'completed' || (l.report && l.report.attendanceStatus))
-                ).length;
-
-                if (completedCountOnDate >= daySlotsCount) {
-                  staleLessonIds.add(lesson.id);
-                  return false; // Safely purge redundant unstarted scheduled session since group already completed session today
-                }
+    const refreshedLessons = filteredAndDeduplicated
+      .filter(lesson => {
+        if (lesson.groupId && lesson.groupId !== 'quick_group' && !currentGroupIds.has(lesson.groupId)) {
+          staleLessonIds.add(lesson.id);
+          return false;
+        }
+        if (lesson.studentId && !currentStudentIds.has(lesson.studentId)) {
+          staleLessonIds.add(lesson.id);
+          return false;
+        }
+        if (lesson.studentName && !lesson.isQuickLesson && !currentStudentNames.has(lesson.studentName.toLowerCase()) && !lesson.groupId) {
+          staleLessonIds.add(lesson.id);
+          return false;
+        }
+        if (
+          lesson.groupId && lesson.groupId !== 'quick_group' && !lesson.deleted &&
+          lesson.status === 'scheduled' && normalizeDateToISO(lesson.date) >= todayStr &&
+          (!lesson.report || (!lesson.report.attendanceStatus && !lesson.report.teacherNotes && !lesson.report.homeworkTitle && lesson.report.quizScore === undefined)) &&
+          (!lesson.studentPayments || Object.keys(lesson.studentPayments).length === 0) &&
+          (!lesson.amountPaid || lesson.amountPaid === 0)
+        ) {
+          const targetGroup = currentGroupsMap.get(lesson.groupId);
+          if (targetGroup) {
+            const activeSlots = getGroupScheduleSlots(targetGroup);
+            if (activeSlots.length > 0) {
+              const dayNum = new Date(lesson.date + 'T00:00:00').getDay();
+              if (!activeSlots.some(slot => getDayNumber(slot.day) === dayNum && slot.time === lesson.time)) {
+                staleLessonIds.add(lesson.id);
+                return false;
+              }
+              const daySlotsCount = activeSlots.filter(slot => getDayNumber(slot.day) === dayNum).length || 1;
+              const completedCountOnDate = filteredAndDeduplicated.filter(
+                l => l.groupId === lesson.groupId &&
+                  normalizeDateToISO(l.date) === normalizeDateToISO(lesson.date) &&
+                  !l.deleted && (l.status === 'completed' || (l.report && l.report.attendanceStatus))
+              ).length;
+              if (completedCountOnDate >= daySlotsCount) {
+                staleLessonIds.add(lesson.id);
+                return false;
               }
             }
           }
-
-          return true;
-        })
-        .map(lesson => {
-          // Synchronize group metadata to fix any stale group names on lessons
-          if (lesson.groupId && currentGroupsMap.has(lesson.groupId)) {
-            const grp = currentGroupsMap.get(lesson.groupId)!;
-            const isNameStale = lesson.groupName !== grp.name;
-            const isDefaultTitle = !lesson.title || lesson.title.includes('Lektion') || lesson.title.includes('Lesson') || lesson.title === lesson.groupName;
-
-            if (isNameStale || (isDefaultTitle && !lesson.title.startsWith(grp.name))) {
-              return wrapMutation({
-                ...lesson,
-                groupName: grp.name,
-                title: isDefaultTitle ? `${grp.name} Lektion` : lesson.title,
-                grade: grp.grade || lesson.grade,
-                type: grp.type || lesson.type
-              } as Lesson);
-            }
-          }
+        }
+        return true;
+      })
+      .map(lesson => {
+        if (lesson.status === 'completed' || lesson.status === 'cancelled' || lesson.status === 'in_progress') {
           return lesson;
-        });
-    });
+        }
+        if (lesson.groupId && currentGroupsMap.has(lesson.groupId)) {
+          const grp = currentGroupsMap.get(lesson.groupId)!;
+          const isNameStale = lesson.groupName !== grp.name;
+          const isDefaultTitle = !lesson.title || lesson.title.includes('Lektion') || lesson.title.includes('Lesson') || lesson.title === lesson.groupName;
+          if (isNameStale || (isDefaultTitle && !lesson.title.startsWith(grp.name))) {
+            return wrapMutation({
+              ...lesson,
+              groupName: grp.name,
+              title: isDefaultTitle ? `${grp.name} Lektion` : lesson.title,
+              grade: grp.grade || lesson.grade,
+              type: grp.type || lesson.type
+            } as Lesson);
+          }
+        }
+        return lesson;
+      });
 
-    // Clean up orphaned payments with proper sync tombstones
+    setLessons(refreshedLessons);
+    const refreshedById = new Map(refreshedLessons.map(lesson => [lesson.id, lesson]));
+    void updateFullLessonsStorage(all => all.map(lesson => {
+      if (staleLessonIds.has(lesson.id)) return wrapDeletion(lesson);
+      return refreshedById.get(lesson.id) || lesson;
+    }));
+
     setPayments(prev => prev.map(payment => {
       const isOrphanedGroup = payment.groupId && payment.groupId !== 'quick_group' && !currentGroupIds.has(payment.groupId);
       const isOrphanedStudent = payment.studentId && !payment.studentId.startsWith('temp_') && !currentStudentIds.has(payment.studentId);
-      if (isOrphanedGroup || isOrphanedStudent) {
-        return wrapDeletion(payment);
-      }
-      return payment;
+      return isOrphanedGroup || isOrphanedStudent ? wrapDeletion(payment) : payment;
     }));
 
-    if (staleLessonIds.size > 0) {
-      updateFullLessonsStorage(all => all.map(l => staleLessonIds.has(l.id) ? wrapDeletion(l) : l));
-    }
-
-    // Trigger visual sync completion feedback
-    setTimeout(() => {
-    }, 600);
+    setTimeout(() => {}, 600);
   };
 
   const purgeOrphanedRecords = useCallback(async (params: {
@@ -8415,41 +8394,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const localDeviceId = syncStateRef.current?.localDeviceId || 'local';
       const localPlatform = detectLocalOriginPlatform();
       
-      if (fullLessonsRef.current && fullLessonsRef.current.length > 0) {
-        // Guarantee latest active lessons are merged synchronously regardless of async storage queue
-        const activeMap = new Map(data.lessons.map((l: any) => [l.id, l]));
-        const fullMerged = fullLessonsRef.current.map(l => activeMap.has(l.id) ? activeMap.get(l.id) : l);
-        const fullIds = new Set(fullMerged.map(l => l.id));
-        data.lessons.forEach((l: any) => {
-          if (!fullIds.has(l.id)) fullMerged.unshift(l);
+      const mergeSnapshot = (preferred: any[], delayed: any[], entityTypeName: string) => {
+        const preferredRows = Array.isArray(preferred) ? preferred : [];
+        const delayedRows = Array.isArray(delayed) ? delayed : [];
+        const delayedById = new Map(delayedRows.filter(row => row?.id).map(row => [row.id, row]));
+        const merged = preferredRows.map(row => {
+          const stale = delayedById.get(row.id);
+          if (!stale) return row;
+          delayedById.delete(row.id);
+          return mergeEntities([row], [stale], entityTypeName).merged[0] || row;
         });
-        
-        // Strict deduplication
-        const seen = new Set<string>();
-        data.lessons = fullMerged.filter((l: any) => {
-          if (!l || !l.id || seen.has(l.id)) return false;
-          seen.add(l.id);
-          return true;
-        });
-      }
-      
-      if (fullPaymentsRef.current && fullPaymentsRef.current.length > 0) {
-        // Guarantee latest active payments are merged synchronously regardless of async storage queue
-        const activeMap = new Map(data.payments.map((p: any) => [p.id, p]));
-        const fullMerged = fullPaymentsRef.current.map(p => activeMap.has(p.id) ? activeMap.get(p.id) : p);
-        const fullIds = new Set(fullMerged.map(p => p.id));
-        data.payments.forEach((p: any) => {
-          if (!fullIds.has(p.id)) fullMerged.unshift(p);
-        });
-        
-        // Strict deduplication
-        const seen = new Set<string>();
-        data.payments = fullMerged.filter((p: any) => {
-          if (!p || !p.id || seen.has(p.id)) return false;
-          seen.add(p.id);
-          return true;
-        });
-      }
+        delayedById.forEach(row => merged.push(row));
+        return merged;
+      };
+
+      // full*Ref is synchronously updated by the persistence pipeline; React state may lag a render.
+      data.lessons = mergeSnapshot(fullLessonsRef.current, data.lessons, 'lessons');
+      data.payments = mergeSnapshot(fullPaymentsRef.current, data.payments, 'payments');
 
       // Include local homework assignments & submissions in P2P sync so Computer and Android stay 100% consistent via P2P
       try {
@@ -8534,8 +8495,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           break;
         }
         case 'lessons': {
+          const incoming = Array.isArray(data) ? data : [];
+          const current = Array.isArray(fullLessonsRef.current) ? fullLessonsRef.current : [];
+          const currentById = new Map(current.filter((l: any) => l?.id).map((l: any) => [l.id, l]));
+          incoming.forEach((lesson: any) => {
+            const local = currentById.get(lesson?.id);
+            if (
+              local && (local.status === 'completed' || local.status === 'cancelled') &&
+              (lesson.status === 'scheduled' || !lesson.status) &&
+              !(typeof lesson._fieldUpdatedAt?.status === 'number' &&
+                lesson._fieldUpdatedAt.status > (Number(local._fieldUpdatedAt?.status) || 0))
+            ) {
+              console.warn('[LessonSyncRegression] status regression prevented', {
+                id: lesson.id, source: 'sync-merge', from: local.status, to: lesson.status || 'scheduled'
+              });
+            }
+          });
+          const merged = mergeEntities(current, incoming, 'lessons').merged;
           const seen = new Set<string>();
-          const deduped = (Array.isArray(data) ? data : []).filter((l: any) => {
+          const deduped = merged.filter((l: any) => {
             if (!l || !l.id || seen.has(l.id)) return false;
             seen.add(l.id);
             return true;
@@ -8546,8 +8524,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           break;
         }
         case 'payments': {
+          const current = Array.isArray(fullPaymentsRef.current) ? fullPaymentsRef.current : [];
+          const merged = mergeEntities(current, Array.isArray(data) ? data : [], 'payments').merged;
           const seen = new Set<string>();
-          const deduped = (Array.isArray(data) ? data : []).filter((p: any) => {
+          const deduped = merged.filter((p: any) => {
             if (!p || !p.id || seen.has(p.id)) return false;
             seen.add(p.id);
             return true;

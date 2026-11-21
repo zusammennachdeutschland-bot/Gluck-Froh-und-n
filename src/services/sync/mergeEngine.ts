@@ -498,6 +498,33 @@ export function mergeConcurrentEntityFields<T extends SyncableRecord>(
     }
   }
 
+  const statusRank: Record<string, number> = {
+    scheduled: 0,
+    pending_action: 1,
+    in_progress: 2,
+    cancelled: 3,
+    completed: 4
+  };
+  if (
+    typeof localStatus === 'string' && typeof incomingStatus === 'string' &&
+    localStatus !== incomingStatus && localStatus in statusRank && incomingStatus in statusRank
+  ) {
+    if (incomingStatusFieldTs > localStatusFieldTs) {
+      result.status = incomingStatus;
+    } else if (localStatusFieldTs > incomingStatusFieldTs) {
+      result.status = localStatus;
+    } else {
+      result.status = statusRank[incomingStatus] > statusRank[localStatus] ? incomingStatus : localStatus;
+    }
+    if (result.status === 'completed') {
+      const completedReport = (localItem as any).report || (incomingItem as any).report;
+      if (completedReport && (!result.report || Object.keys(result.report).length === 0)) {
+        result.report = completedReport;
+      }
+    }
+    usedFieldMerge = true;
+  }
+
   if (result.certificateName === undefined || result.certificateName === '') {
     result.certificateName = (localItem as any).certificateName || (incomingItem as any).certificateName || '';
   }
