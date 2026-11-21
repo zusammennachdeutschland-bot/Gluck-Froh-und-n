@@ -772,7 +772,20 @@ export function resolveActiveWeeklySessionForLesson(params: {
   );
 
   exactMatches.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  return exactMatches[0] || null;
+  if (exactMatches[0]) return exactMatches[0];
+
+  // If the lesson has no slot-specific active URL, use the group's current canonical
+  // API-managed link. Group-wide replacement keeps all active sessions in agreement.
+  const canonicalGroupSessions = params.groupWeeklySessions.filter((session) =>
+    Boolean(session) &&
+    !session.deleted &&
+    session.groupId === groupId &&
+    session.meetingSource === 'zoom_api' &&
+    session.syncState === 'synced' &&
+    Boolean((session.zoomJoinUrl || '').trim())
+  );
+  canonicalGroupSessions.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  return canonicalGroupSessions[0] || null;
 }
 
 /**
