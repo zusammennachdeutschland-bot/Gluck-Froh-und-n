@@ -98,6 +98,7 @@ import { loadZoomUiMeta, sanitizeZoomRecordForStorage } from '../services/zoomSe
 import { DEFAULT_ZOOM_TIMEZONE, reconcileGroupWeeklySessions, resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
 import { enqueueLessonSyncTask } from '../services/lessonSyncQueue';
 import { mergeLessonSyncSnapshot } from '../utils/lessonSync';
+import { traceLessonPipeline } from '../utils/lessonPipelineDiagnostics';
 
 export const DEFAULT_BOTTOM_NAV_ORDER = [
   'home',
@@ -965,9 +966,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     oneYearAgo.setDate(oneYearAgo.getDate() - 365);
     const maxCutoffStr = formatLocalDate(oneYearAgo);
 
-    const filtered = (Array.isArray(raw) ? raw : []).filter(l =>
+    const sourceRows = Array.isArray(raw) ? raw : [];
+    const filtered = sourceRows.filter(l =>
       shouldRetainLessonInActiveWindow(l, cutoffStr, maxCutoffStr, students, groups)
     );
+    const retainedIds = new Set(filtered.map(lesson => lesson.id));
+    traceLessonPipeline('filterActiveLessons: retained rows', filtered, {
+      removedIds: sourceRows.filter(lesson => lesson?.id && !retainedIds.has(lesson.id)).map(lesson => lesson.id),
+      note: `Input rows: ${sourceRows.length}; retained rows: ${filtered.length}`
+    });
 
     const bestLessons = new Map<string, Lesson>();
     filtered.forEach(lesson => {
@@ -1038,6 +1045,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const initialLessonDeduplication = useMemo(() => {
     const saved = initialData['dl_lessons'];
     const raw: Lesson[] = Array.isArray(saved) ? saved : [];
+    traceLessonPipeline('startup: dl_lessons loaded from storage', raw);
     const prunedIds = getPrunedLessonIds();
     const filteredRaw = raw.filter(l => l && l.id && !prunedIds.has(l.id));
     return deduplicateLessonList(filteredRaw, students);
@@ -1321,26 +1329,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   // Safe atomic full-storage manipulation methods to prevent synchronization race conditions or phantom resurrection
   const updateFullLessonsStorage = useCallback(async (updater: (allLessons: Lesson[]) => Lesson[]): Promise<Lesson[]> => {
     return enqueueLessonSyncTask(async () => {
+      const persistedBefore = await storage.getItem<Lesson[]>('dl_lessons');
       const full = (fullLessonsRef.current && fullLessonsRef.current.length > 0)
         ? fullLessonsRef.current
-        : ((await storage.getItem<Lesson[]>('dl_lessons')) || lessons);
+        : (Array.isArray(persistedBefore) ? persistedBefore : lessons);
+      traceLessonPipeline('updateFullLessonsStorage: queue read', full, {
+        note: `Persisted rows: ${Array.isArray(persistedBefore) ? persistedBefore.length : 0}`
+      });
       const rawUpdated = updater(full || []);
+      traceLessonPipeline('updateFullLessonsStorage: updater output', rawUpdated);
 
       // Deduplicate by lesson.id strictly (keeping the latest occurrence).
       const seen = new Set<string>();
       const dedupedById: Lesson[] = [];
+      const duplicateIds = new Set<string>();
       for (let i = rawUpdated.length - 1; i >= 0; i--) {
         const item = rawUpdated[i];
         if (item && item.id && !seen.has(item.id)) {
           seen.add(item.id);
           dedupedById.unshift(item);
+        } else if (item?.id) {
+          duplicateIds.add(item.id);
         }
       }
+      traceLessonPipeline('updateFullLessonsStorage: ID deduplication', dedupedById, { removedIds: duplicateIds });
 
-      const { deduplicated: deduped } = deduplicateLessonList(dedupedById, students);
+      const semanticDeduplication = deduplicateLessonList(dedupedById, students);
+      const deduped = semanticDeduplication.deduplicated as Lesson[];
+      traceLessonPipeline('updateFullLessonsStorage: semantic deduplication', deduped, {
+        removedIds: semanticDeduplication.removedIds,
+        mergedIds: semanticDeduplication.idMap
+      });
       fullLessonsRef.current = deduped;
-      setLessons(filterActiveLessons(deduped));
+      const activeLessons = filterActiveLessons(deduped);
+      const activeIds = new Set(activeLessons.map(lesson => lesson.id));
+      traceLessonPipeline('updateFullLessonsStorage: active state before setLessons', activeLessons, {
+        removedIds: deduped.filter(lesson => lesson?.id && !activeIds.has(lesson.id)).map(lesson => lesson.id)
+      });
+      setLessons(activeLessons);
+      traceLessonPipeline('updateFullLessonsStorage: writing dl_lessons', deduped);
       await storage.setItem('dl_lessons', deduped);
+      traceLessonPipeline('updateFullLessonsStorage: dl_lessons write complete', (await storage.getItem<Lesson[]>('dl_lessons')) || []);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('gluck-local-data-mutated'));
       }
@@ -5344,7 +5373,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       ? students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === targetLesson.groupId)
       : [];
 
+    traceLessonPipeline('saveLessonReport: checkmark handler target', [targetLesson], { note: `lessonId=${lessonId}` });
     const reportUpdater = (allLessons: Lesson[]) => {
+      traceLessonPipeline('saveLessonReport: updater input', allLessons, { note: `targetId=${lessonId}` });
       let found = false;
       const updatedStudentPayments: Record<string, StudentPaymentDetail> = {};
       if (report.studentPayments) {
@@ -5405,14 +5436,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           ]
         : updated;
 
+      traceLessonPipeline('saveLessonReport: after completed status/report mutation', withCompleted, {
+        note: `targetId=${lessonId}; found=${found}`
+      });
       const st = students.find(s => (targetLesson.studentId && s.id === targetLesson.studentId) || (targetLesson.studentName && s.name === targetLesson.studentName));
       const completedPivot = withCompleted.find(l => l.id === lessonId);
-      return resequenceScheduledLessonsAfterChange(withCompleted, completedPivot, {
+      const resequenced = resequenceScheduledLessonsAfterChange(withCompleted, completedPivot, {
         group: effectiveTargetGroup,
         student: st,
         students,
         wrapMutation
       });
+      traceLessonPipeline('saveLessonReport: after resequence', resequenced, { note: `targetId=${lessonId}` });
+      return resequenced;
     };
 
     syncEventQueue.enqueue('lesson_updated', { lessonId, status: 'completed', timestamp: Date.now() });
