@@ -175,6 +175,7 @@ let lastInvalidatedAccessToken: string | null = null;
 let inFlightCalendarAuthPromise: Promise<GoogleCalendarTokenResult> | null = null;
 // Keep silent startup verification separate: a user tap must never inherit a silent-only attempt.
 let inFlightSilentCalendarAuthPromise: Promise<GoogleCalendarTokenResult> | null = null;
+let calendarAuthGeneration = 0;
 
 // Single-shot guards for startup redirect processing and deep-link callbacks
 let webRedirectProcessingPromise: Promise<WebCalendarRedirectStartupResult> | null = null;
@@ -462,18 +463,16 @@ export function getInMemoryGoogleCalendarToken(): string | null {
 }
 
 export async function disconnectGoogleCalendar(): Promise<void> {
+  // Invalidate any startup silent-auth result before beginning native cleanup.
+  calendarAuthGeneration += 1;
   const tokenToClear = inMemoryGoogleCalendarAccessToken || lastInvalidatedAccessToken;
   const emailToRevoke = inMemoryTokenAccountEmail || currentConnectionMeta.accountEmail;
   clearInMemoryGoogleCalendarToken();
   lastInvalidatedAccessToken = null;
-  if (isAndroidNativePlatform()) {
-    if (tokenToClear) {
-      await invokeNativeClearCalendarToken(tokenToClear);
-    }
-    if (emailToRevoke) {
-      await invokeNativeRevokeCalendarAccess(emailToRevoke, GOOGLE_CALENDAR_SCOPE);
-    }
-  }
+  inFlightSilentCalendarAuthPromise = null;
+
+  // Update the UI immediately. Native Play Services cleanup is best-effort and bounded
+  // in googleCredentialAuthPlugin so a stalled bridge can never leave Disconnecting...
   persistAndEmitConnectionMeta({
     status: 'disconnected',
     scopeVerified: false,
@@ -482,6 +481,15 @@ export async function disconnectGoogleCalendar(): Promise<void> {
     platform: getCurrentPlatformTag(),
     lastMessage: 'Google Calendar disconnected.'
   });
+
+  if (isAndroidNativePlatform()) {
+    await Promise.all([
+      tokenToClear ? invokeNativeClearCalendarToken(tokenToClear) : Promise.resolve({ cleared: false }),
+      emailToRevoke
+        ? invokeNativeRevokeCalendarAccess(emailToRevoke, GOOGLE_CALENDAR_SCOPE)
+        : Promise.resolve({ revoked: false })
+    ]);
+  }
   recordCalendarOAuthStage('calendar_oauth_disconnected', { ok: true });
 }
 
@@ -1380,10 +1388,26 @@ export async function verifyOrSilentlyReauthorizeGoogleCalendar(
     if (inFlightSilentCalendarAuthPromise) {
       return inFlightSilentCalendarAuthPromise;
     }
+    const generationAtStart = calendarAuthGeneration;
     const silentAttempt = executeAndroidNativeCalendarOAuth(false, { silentOnly: true });
     inFlightSilentCalendarAuthPromise = silentAttempt;
     try {
-      return await silentAttempt;
+      const result = await silentAttempt;
+      if (generationAtStart !== calendarAuthGeneration) {
+        // A disconnect happened while Play Services was responding. Do not let
+        // a late silent result resurrect the Calendar connection.
+        clearInMemoryGoogleCalendarToken();
+        persistAndEmitConnectionMeta({
+          status: 'disconnected',
+          scopeVerified: false,
+          readVerified: false,
+          writeVerified: false,
+          platform: getCurrentPlatformTag(),
+          lastMessage: 'Google Calendar disconnected.'
+        });
+        return { ok: false, cancelled: true, code: 'DISCONNECTED_DURING_AUTH', platform: 'android_native' };
+      }
+      return result;
     } finally {
       if (inFlightSilentCalendarAuthPromise === silentAttempt) {
         inFlightSilentCalendarAuthPromise = null;
