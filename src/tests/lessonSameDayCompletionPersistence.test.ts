@@ -32,7 +32,29 @@ const assertStatuses = (lessons: Lesson[], expected: Record<string, string>, bou
 
 const run = async () => {
   __setSimulatePrimaryDbForTests(true);
+  const originalLocalStorage = (globalThis as any).localStorage;
+  const localMirror = new Map<string, string>();
+  (globalThis as any).localStorage = {
+    getItem: (key: string) => localMirror.has(key) ? localMirror.get(key)! : null,
+    setItem: (key: string, value: string) => { localMirror.set(key, value); },
+    removeItem: (key: string) => { localMirror.delete(key); }
+  };
   try {
+    // Reproduce restart with an older IndexedDB snapshot and a newer localStorage
+    // fallback snapshot after a primary write failure.
+    const stalePrimary = makeLesson('restart-status', 'Restart Status', '11:00', 'scheduled');
+    const newerMirror = {
+      ...makeLesson('restart-status', 'Restart Status', '11:00', 'completed'),
+      updatedAt: 2000,
+      report: { attendanceStatus: 'present', teacherNotes: 'Saved to fallback mirror' }
+    } as Lesson;
+    await storage.setItem('dl_lessons', [stalePrimary]);
+    localMirror.set('dl_lessons', JSON.stringify([newerMirror]));
+    const afterRestart = (await storage.getItem<Lesson[]>('dl_lessons')) || [];
+    assert.equal(afterRestart.find(lesson => lesson.id === 'restart-status')?.status, 'completed');
+    assert.equal(afterRestart.find(lesson => lesson.id === 'restart-status')?.report?.teacherNotes, 'Saved to fallback mirror');
+    console.log('✓ Restart reconciliation prefers the newer durable lesson status over a stale IndexedDB copy.');
+
     const initial: Lesson[] = [
       makeLesson('judy-0800', 'Judy', '08:00', 'completed'),
       makeLesson('kinda-0900', 'Kinda und Judy', '09:00', 'scheduled'),
@@ -120,6 +142,11 @@ const run = async () => {
     console.log('✓ Same-day lesson completion persistence regression passed (Judy, Kinda und Judy, Taleen Private).');
   } finally {
     __setSimulatePrimaryDbForTests(false);
+    if (originalLocalStorage === undefined) {
+      delete (globalThis as any).localStorage;
+    } else {
+      (globalThis as any).localStorage = originalLocalStorage;
+    }
   }
 };
 
