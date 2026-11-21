@@ -1,5 +1,5 @@
 import type { Group, GroupWeeklySession, Lesson } from '../types';
-import { normalize24HourTime, normalizeWeekdayIndex, resolveActiveWeeklySessionForLesson } from './zoomSessionStandardizer';
+import { normalize24HourTime, normalizeWeekdayIndex, resolveActiveWeeklySessionForLesson } from '../services/zoomSessionStandardizer';
 
 export type ZoomReminderIdentityReason = 'LESSON_GROUP_ID_MATCHED' | 'STALE_LESSON_GROUP_ID_USED_KNOWN_PROP_GROUP' | 'GROUP_PROP_MATCHED' | 'NO_TRUSTED_GROUP_OBJECT';
 
