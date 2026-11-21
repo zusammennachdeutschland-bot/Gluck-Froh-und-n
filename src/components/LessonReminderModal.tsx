@@ -11,7 +11,7 @@ import {
 import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { getTimeBasedGreeting } from '../utils/greetingUtils';
 import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
-import { diagnoseZoomReminderResolution, logZoomReminderPipeline, resolveReminderGroupIdentity } from '../utils/zoomReminderDiagnostics';
+import { diagnoseZoomReminderResolution, logZoomReminderPipeline, resolveReminderGroupIdentity, shouldShowZoomSyncWarning } from '../utils/zoomReminderDiagnostics';
 
 interface LessonReminderModalProps {
   lesson?: Lesson | null;
@@ -891,7 +891,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
           )}
 
           {/* Conditional: Online missing Zoom link */}
-          {isOnline && !resolvedZoomLink.trim() && (
+          {shouldShowZoomSyncWarning({ isOnline, resolvedZoomLink }) && (
             <div className="bg-amber-500/10 border border-amber-500/25 p-2 rounded-xl flex items-center justify-between gap-2 text-xs">
               <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-300 font-bold min-w-0 truncate">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />

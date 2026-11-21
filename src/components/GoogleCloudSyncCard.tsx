@@ -144,13 +144,21 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
         }
         updateProfile(updates);
 
-        migrateLegacyHomeworkForAccount({
+        const migRes = migrateLegacyHomeworkForAccount({
           uid: u.uid,
           email: u.email,
           ownedGroupIds: groups.map((g) => g.id),
           ownedSetIds: lernstudioSets.map((s) => s.id),
           ownedStudentIds: students.map((st) => st.id)
         });
+        if (migRes.status === 'failed') {
+          const warnMsg = _t(
+            'تعذر إكمال ترحيل بعض الواجبات القديمة بسبب خطأ بالتخزين. لم يتم حذف البيانات الأصلية.',
+            'Failed to migrate legacy homework due to a storage error. Original records were preserved for retry.',
+            'Migration alter Hausaufgaben fehlgeschlagen. Ursprungsdaten wurden für einen neuen Versuch erhalten.'
+          );
+          setFeedbackMsg({ type: 'error', text: warnMsg });
+        }
       }
       refreshLocalHomeworkCounters(u?.uid || null);
     });
@@ -205,13 +213,21 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
 
     try {
       if (user?.uid) {
-        migrateLegacyHomeworkForAccount({
+        const migRes = migrateLegacyHomeworkForAccount({
           uid: user.uid,
           email: user.email,
           ownedGroupIds: groups.map((g) => g.id),
           ownedSetIds: lernstudioSets.map((s) => s.id),
           ownedStudentIds: students.map((st) => st.id)
         });
+        if (migRes.status === 'failed') {
+          const warnMsg = _t(
+            'تعذر ترحيل الواجبات القديمة لحسابك الآن؛ تم الاحتفاظ بها لإعادة المحاولة.',
+            'Legacy homework migration failed; original data was preserved for retry.',
+            'Migration alter Hausaufgaben fehlgeschlagen; Originaldaten bleiben erhalten.'
+          );
+          if (triggerToast) triggerToast(warnMsg);
+        }
       }
       await flushPendingHomeworkCloudWrites().catch(() => {});
       refreshLocalHomeworkCounters(user?.uid || null);

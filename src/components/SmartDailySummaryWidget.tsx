@@ -1,9 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { calculateDuePaymentCycles } from '../utils/paymentUtils';
-import { normalizeDateToISO } from '../utils/timeUtils';
-import { normalizeTime } from '../utils/lessonUtils';
-import { getLessonsForDate } from '../utils/dailyLessonUtils';
+import { getDashboardTodaySummary } from '../utils/dashboardStatsUtils';
 import { useLocalDateKey } from '../hooks/useLocalDateKey';
 
 import { useSyncedHomeworkData } from '../hooks/useSyncedHomeworkData';
@@ -24,35 +22,24 @@ import {
 } from 'lucide-react';
 
 export const SmartDailySummaryWidget: React.FC = () => {
-  const { lessons, getFullLessonsSnapshot, groups, groupWeeklySessions, students, payments, profile, language, t, _t } = useApp();
+  const { lessons, getFullLessonsSnapshot, groups, groupWeeklySessions, students, payments, profile, dismissedDashboardLessonIds = [], language, t, _t } = useApp();
   const { assignments: syncedAssignments, submissions: syncedSubmissions, currentOwnerUid } = useSyncedHomeworkData();
   const [isAlertsExpanded, setIsAlertsExpanded] = useState(false);
 
   const todayStr = useLocalDateKey();
 
   const summary = useMemo(() => {
-    const todaysLessons = getLessonsForDate(todayStr, getFullLessonsSnapshot(), groups, groupWeeklySessions)
-      .filter(l => l.status !== 'cancelled');
-
-    const todaysLessonsCount = todaysLessons.length;
-
-    // Unique students attending today
-    const studentSet = new Set<string>();
-    todaysLessons.forEach(l => {
-      if (l.studentId) {
-        studentSet.add(l.studentId);
-      } else if (l.groupId && l.groupId !== 'quick_group') {
-        const groupStudents = students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === l.groupId);
-        if (groupStudents.length > 0) {
-          groupStudents.forEach(s => studentSet.add(s.id));
-        } else {
-          studentSet.add(`group_${l.groupId}`);
-        }
-      } else if (l.studentName) {
-        studentSet.add(l.studentName);
-      }
+    const todaySummary = getDashboardTodaySummary({
+      todayStr,
+      lessons: getFullLessonsSnapshot(),
+      groups,
+      groupWeeklySessions,
+      students,
+      dismissedDashboardLessonIds,
     });
-    const todaysStudentsCount = studentSet.size;
+    const todaysLessons = todaySummary.activeLessons;
+    const todaysLessonsCount = todaySummary.lessonsCount;
+    const todaysStudentsCount = todaySummary.studentsCount;
 
     // Revenue collected today (matching Payments View)
     const paidOnly = payments.filter(p => p.status === 'paid');
@@ -148,12 +135,12 @@ export const SmartDailySummaryWidget: React.FC = () => {
       todaysStudentsCount,
       collectedToday,
       lateStudentsCount,
-      firstLessonTime: firstLessonTime ? formatTime12h(firstLessonTime) : null,
+      firstLessonTime: todaySummary.firstLessonTime ? formatTime12h(todaySummary.firstLessonTime) : null,
       text,
       currency,
       hwInsights
     };
-  }, [lessons, getFullLessonsSnapshot, groups, groupWeeklySessions, students, payments, profile, todayStr, language, t, syncedAssignments, syncedSubmissions, currentOwnerUid]);
+  }, [lessons, getFullLessonsSnapshot, groups, groupWeeklySessions, students, payments, profile, dismissedDashboardLessonIds, todayStr, language, t, syncedAssignments, syncedSubmissions, currentOwnerUid]);
 
   const { hwInsights } = summary;
   const hasAlerts = hwInsights.alerts.length > 0;

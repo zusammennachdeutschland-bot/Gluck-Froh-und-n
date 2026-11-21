@@ -15,6 +15,7 @@ import {
   generateBackupFilename, encryptBackupData, decryptBackupData, 
   analyzeBackupPayload, validateAndSanitizeBackupPayload, hasBackupSection,
   MAX_BACKUP_FILE_SIZE_BYTES, isBackupFileSizeValid,
+  executeAtomicBackupCommit, AtomicBackupCommitEntry,
   RestoreAnalysisResult, RestoreHistoryEntry 
 } from '../utils/backupEngine';
 import { 
@@ -682,129 +683,141 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           if (hasBackupSection(parsed, 'financeRecurring') && data.financeRecurring) finalFinanceRecurring = data.financeRecurring;
           if (hasBackupSection(parsed, 'financeInstallments') && data.financeInstallments) finalFinanceInstallments = data.financeInstallments;
 
-          // ATOMIC STATE AND STORAGE COMMIT (only for sections present in the original backup file)
+          // ATOMIC STAGE -> COMMIT -> ROLLBACK TRANSACTION
+          const commitEntries: AtomicBackupCommitEntry<any>[] = [];
+
           if (hasStudents && data.students) {
-            setStudents(finalStudents);
-            await storage.setItem('dl_students', finalStudents);
+            commitEntries.push({
+              key: 'dl_students',
+              nextValue: finalStudents,
+              prevStateValue: students,
+              applyState: setStudents
+            });
           }
-
           if (hasGroups && data.groups) {
-            setGroups(finalGroups);
-            await storage.setItem('dl_groups', finalGroups);
+            commitEntries.push({
+              key: 'dl_groups',
+              nextValue: finalGroups,
+              prevStateValue: groups,
+              applyState: setGroups
+            });
           }
-
           if (hasLessons && data.lessons) {
-            await updateFullLessonsStorage(allLessons => {
-              const activeMap = new Map<string, Lesson>(finalLessons.map(l => [l.id, l]));
-              const fullIds = new Set(allLessons.map(l => l.id));
-              const merged = allLessons.map(l => activeMap.get(l.id) || l);
-              finalLessons.forEach(l => {
-                if (!fullIds.has(l.id)) merged.push(l);
-              });
-              return merged;
+            commitEntries.push({
+              key: 'dl_lessons',
+              nextValue: finalLessons,
+              prevStateValue: lessons,
+              persist: async (nextVal: Lesson[]) => {
+                await updateFullLessonsStorage(allLessons => {
+                  const activeMap = new Map<string, Lesson>(nextVal.map(l => [l.id, l]));
+                  const fullIds = new Set(allLessons.map(l => l.id));
+                  const merged = allLessons.map(l => activeMap.get(l.id) || l);
+                  nextVal.forEach(l => {
+                    if (!fullIds.has(l.id)) merged.push(l);
+                  });
+                  return merged;
+                });
+              },
+              rollbackPersist: async (prevVal: any, existed: boolean) => {
+                if (existed && Array.isArray(prevVal)) {
+                  await updateFullLessonsStorage(() => prevVal);
+                } else {
+                  await storage.removeItem('dl_lessons');
+                  setLessons(lessons);
+                }
+              }
             });
           }
-
           if (hasPayments && data.payments) {
-            await updateFullPaymentsStorage(allPayments => {
-              const activeMap = new Map<string, PaymentRecord>(finalPayments.map(p => [p.id, p]));
-              const fullIds = new Set(allPayments.map(p => p.id));
-              const merged = allPayments.map(p => activeMap.get(p.id) || p);
-              finalPayments.forEach(p => {
-                if (!fullIds.has(p.id)) merged.push(p);
-              });
-              return merged;
+            commitEntries.push({
+              key: 'dl_payments',
+              nextValue: finalPayments,
+              prevStateValue: payments,
+              persist: async (nextVal: PaymentRecord[]) => {
+                await updateFullPaymentsStorage(allPayments => {
+                  const activeMap = new Map<string, PaymentRecord>(nextVal.map(p => [p.id, p]));
+                  const fullIds = new Set(allPayments.map(p => p.id));
+                  const merged = allPayments.map(p => activeMap.get(p.id) || p);
+                  nextVal.forEach(p => {
+                    if (!fullIds.has(p.id)) merged.push(p);
+                  });
+                  return merged;
+                });
+              },
+              rollbackPersist: async (prevVal: any, existed: boolean) => {
+                if (existed && Array.isArray(prevVal)) {
+                  await updateFullPaymentsStorage(() => prevVal);
+                } else {
+                  await storage.removeItem('dl_payments');
+                  setPayments(payments);
+                }
+              }
             });
           }
-
           if ((hasProfile && data.profile) || (hasSchoolSettings && data.schoolSettings)) {
-            setProfile(finalProfile);
-            await storage.setItem('dl_profile', finalProfile);
+            commitEntries.push({
+              key: 'dl_profile',
+              nextValue: finalProfile,
+              prevStateValue: profile,
+              applyState: setProfile
+            });
           }
-
           if (hasBackupSection(parsed, 'todos') && data.todos) {
-            setTodos(finalTodos);
-            await storage.setItem('dl_quick_todos', finalTodos);
+            commitEntries.push({ key: 'dl_quick_todos', nextValue: finalTodos, prevStateValue: todos, applyState: setTodos });
           }
-
           if (hasBackupSection(parsed, 'certificates') && data.certificates) {
-            setCertificates(finalCertificates);
-            await storage.setItem('dl_certificates', finalCertificates);
+            commitEntries.push({ key: 'dl_certificates', nextValue: finalCertificates, prevStateValue: certificates, applyState: setCertificates });
           }
-
           if (hasBackupSection(parsed, 'schoolNotes') && data.schoolNotes) {
-            setSchoolNotes(finalSchoolNotes);
-            await storage.setItem('dl_school_notes', finalSchoolNotes);
+            commitEntries.push({ key: 'dl_school_notes', nextValue: finalSchoolNotes, prevStateValue: schoolNotes, applyState: setSchoolNotes });
           }
-
           if (hasBackupSection(parsed, 'notifications') && data.notifications) {
-            setNotifications(finalNotifications);
-            await storage.setItem('dl_notifications', finalNotifications);
+            commitEntries.push({ key: 'dl_notifications', nextValue: finalNotifications, prevStateValue: notifications, applyState: setNotifications });
           }
-
           if (hasBackupSection(parsed, 'notificationSettings') && data.notificationSettings) {
-            setNotificationSettings(finalNotificationSettings);
-            await storage.setItem('dl_notification_settings', finalNotificationSettings);
+            commitEntries.push({ key: 'dl_notification_settings', nextValue: finalNotificationSettings, prevStateValue: notificationSettings, applyState: setNotificationSettings });
           }
-
           if (hasBackupSection(parsed, 'inspirationSettings') && data.inspirationSettings) {
-            setInspirationSettings(finalInspirationSettings);
-            await storage.setItem('dl_inspiration_settings', finalInspirationSettings);
+            commitEntries.push({ key: 'dl_inspiration_settings', nextValue: finalInspirationSettings, prevStateValue: inspirationSettings, applyState: setInspirationSettings });
           }
-
           if (hasBackupSection(parsed, 'inspirationMessages') && data.inspirationMessages) {
-            setInspirationMessages(finalInspirationMessages);
-            await storage.setItem('dl_inspiration_messages', finalInspirationMessages);
+            commitEntries.push({ key: 'dl_inspiration_messages', nextValue: finalInspirationMessages, prevStateValue: inspirationMessages, applyState: setInspirationMessages });
           }
-
           if (hasBackupSection(parsed, 'hodStudents') && data.hodStudents) {
-            setHodStudents(finalHodStudents);
-            await storage.setItem('hod_german_students', finalHodStudents);
+            commitEntries.push({ key: 'hod_german_students', nextValue: finalHodStudents, prevStateValue: hodStudents, applyState: setHodStudents });
           }
-
           if (hasBackupSection(parsed, 'hodComplaints') && data.hodComplaints) {
-            setHodComplaints(finalHodComplaints);
-            await storage.setItem('hod_complaints', finalHodComplaints);
+            commitEntries.push({ key: 'hod_complaints', nextValue: finalHodComplaints, prevStateValue: hodComplaints, applyState: setHodComplaints });
           }
-
           if (hasBackupSection(parsed, 'hodActionPlans') && data.hodActionPlans) {
-            setHodActionPlans(finalHodActionPlans);
-            await storage.setItem('hod_student_action_plans', finalHodActionPlans);
+            commitEntries.push({ key: 'hod_student_action_plans', nextValue: finalHodActionPlans, prevStateValue: hodActionPlans, applyState: setHodActionPlans });
           }
-
           if (hasBackupSection(parsed, 'hodVisits') && data.hodVisits) {
-            setHodVisits(finalHodVisits);
-            await storage.setItem('hod_visit_records', finalHodVisits);
+            commitEntries.push({ key: 'hod_visit_records', nextValue: finalHodVisits, prevStateValue: hodVisits, applyState: setHodVisits });
           }
-
           if (hasBackupSection(parsed, 'financeAccounts') && data.financeAccounts) {
-            setFinanceAccounts(finalFinanceAccounts);
-            await storage.setItem('dl_finance_accounts', finalFinanceAccounts);
+            commitEntries.push({ key: 'dl_finance_accounts', nextValue: finalFinanceAccounts, prevStateValue: financeAccounts, applyState: setFinanceAccounts });
           }
           if (hasBackupSection(parsed, 'financeCategories') && data.financeCategories) {
-            setFinanceCategories(finalFinanceCategories);
-            await storage.setItem('dl_finance_categories', finalFinanceCategories);
+            commitEntries.push({ key: 'dl_finance_categories', nextValue: finalFinanceCategories, prevStateValue: financeCategories, applyState: setFinanceCategories });
           }
           if (hasBackupSection(parsed, 'financeTransactions') && data.financeTransactions) {
-            setFinanceTransactions(finalFinanceTransactions);
-            await storage.setItem('dl_finance_transactions', finalFinanceTransactions);
+            commitEntries.push({ key: 'dl_finance_transactions', nextValue: finalFinanceTransactions, prevStateValue: financeTransactions, applyState: setFinanceTransactions });
           }
           if (hasBackupSection(parsed, 'financeRecurring') && data.financeRecurring) {
-            setFinanceRecurring(finalFinanceRecurring);
-            await storage.setItem('dl_finance_recurring', finalFinanceRecurring);
+            commitEntries.push({ key: 'dl_finance_recurring', nextValue: finalFinanceRecurring, prevStateValue: financeRecurring, applyState: setFinanceRecurring });
           }
           if (hasBackupSection(parsed, 'financeInstallments') && data.financeInstallments) {
-            setFinanceInstallments(finalFinanceInstallments);
-            await storage.setItem('dl_finance_installments', finalFinanceInstallments);
+            commitEntries.push({ key: 'dl_finance_installments', nextValue: finalFinanceInstallments, prevStateValue: financeInstallments, applyState: setFinanceInstallments });
           }
           if (hasBackupSection(parsed, 'lernstudioSets') && data.lernstudioSets) {
-            setLernstudioSets(data.lernstudioSets);
-            await storage.setItem('dl_lernstudio_sets', data.lernstudioSets);
+            commitEntries.push({ key: 'dl_lernstudio_sets', nextValue: data.lernstudioSets, prevStateValue: lernstudioSets, applyState: setLernstudioSets });
           }
           if (hasBackupSection(parsed, 'goldHoldings') && data.goldHoldings) {
-            setGoldHoldings(data.goldHoldings);
-            await storage.setItem('gluck_gold_holdings', data.goldHoldings);
+            commitEntries.push({ key: 'gluck_gold_holdings', nextValue: data.goldHoldings, prevStateValue: goldHoldings, applyState: setGoldHoldings });
           }
+
+          await executeAtomicBackupCommit(commitEntries);
 
           bumpExternalDataVersion();
           setSimpleSuccessMsg(t('auto_all_data_restored_successful'));
@@ -827,8 +840,26 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           localStorage.setItem('dl_restore_history', JSON.stringify(updatedLogs));
 
         } catch (err: any) {
-          console.error('Simple restore failed:', err);
+          console.error('Simple restore failed (rolled back cleanly):', err);
           setSimpleErrorMsg(t('auto_failed_to_restore_data_plea'));
+          const failLog: RestoreHistoryEntry = {
+            id: 'hist_fail_' + Date.now(),
+            timestamp: new Date().toISOString(),
+            backupName: file.name,
+            mode: 'replace',
+            categories: ['students', 'groups', 'schedule', 'financial', 'notifications', 'settings'],
+            status: 'failed',
+            totalRecordsAdded: 0,
+            totalRecordsUpdated: 0,
+            notes: `Atomic restore failed and rolled back: ${err?.message || 'Storage write failure'}`
+          };
+          const updatedLogs = [failLog, ...historyLogs].slice(0, retentionCount);
+          setHistoryLogs(updatedLogs);
+          try {
+            localStorage.setItem('dl_restore_history', JSON.stringify(updatedLogs));
+          } catch {
+            // ignore logging failure
+          }
         } finally {
           setIsSimpleRestoring(false);
           // Reset file input
@@ -1314,129 +1345,142 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           }
         }
 
-        // ATOMIC STATE AND STORAGE COMMIT
+        // ATOMIC STAGE -> COMMIT -> ROLLBACK TRANSACTION
+        const commitEntries: AtomicBackupCommitEntry<any>[] = [];
+
         if (selectedRestoreCategories.includes('students') && data.students) {
-          setStudents(finalStudents);
-          await storage.setItem('dl_students', finalStudents);
+          commitEntries.push({ key: 'dl_students', nextValue: finalStudents, prevStateValue: students, applyState: setStudents });
         }
         if (selectedRestoreCategories.includes('groups') && data.groups) {
-          setGroups(finalGroups);
-          await storage.setItem('dl_groups', finalGroups);
+          commitEntries.push({ key: 'dl_groups', nextValue: finalGroups, prevStateValue: groups, applyState: setGroups });
         }
         if (selectedRestoreCategories.includes('schedule') && data.lessons) {
-          if (restoreMode === 'replace') {
-            await updateFullLessonsStorage(() => finalLessons);
-          } else {
-            await updateFullLessonsStorage(allLessons => {
-              const activeMap = new Map<string, Lesson>(finalLessons.map(l => [l.id, l]));
-              const fullIds = new Set(allLessons.map(l => l.id));
-              const merged = allLessons.map(l => activeMap.get(l.id) || l);
-              finalLessons.forEach(l => {
-                if (!fullIds.has(l.id)) merged.push(l);
-              });
-              return merged;
-            });
-          }
+          commitEntries.push({
+            key: 'dl_lessons',
+            nextValue: finalLessons,
+            prevStateValue: lessons,
+            persist: async (nextVal: Lesson[]) => {
+              if (restoreMode === 'replace') {
+                await updateFullLessonsStorage(() => nextVal);
+              } else {
+                await updateFullLessonsStorage(allLessons => {
+                  const activeMap = new Map<string, Lesson>(nextVal.map(l => [l.id, l]));
+                  const fullIds = new Set(allLessons.map(l => l.id));
+                  const merged = allLessons.map(l => activeMap.get(l.id) || l);
+                  nextVal.forEach(l => {
+                    if (!fullIds.has(l.id)) merged.push(l);
+                  });
+                  return merged;
+                });
+              }
+            },
+            rollbackPersist: async (prevVal: any, existed: boolean) => {
+              if (existed && Array.isArray(prevVal)) {
+                await updateFullLessonsStorage(() => prevVal);
+              } else {
+                await storage.removeItem('dl_lessons');
+                setLessons(lessons);
+              }
+            }
+          });
         }
         if (selectedRestoreCategories.includes('financial')) {
           if (data.payments) {
-            if (restoreMode === 'replace') {
-              await updateFullPaymentsStorage(() => finalPayments);
-            } else {
-              await updateFullPaymentsStorage(allPayments => {
-                const activeMap = new Map<string, PaymentRecord>(finalPayments.map(p => [p.id, p]));
-                const fullIds = new Set(allPayments.map(p => p.id));
-                const merged = allPayments.map(p => activeMap.get(p.id) || p);
-                finalPayments.forEach(p => {
-                  if (!fullIds.has(p.id)) merged.push(p);
-                });
-                return merged;
-              });
-            }
+            commitEntries.push({
+              key: 'dl_payments',
+              nextValue: finalPayments,
+              prevStateValue: payments,
+              persist: async (nextVal: PaymentRecord[]) => {
+                if (restoreMode === 'replace') {
+                  await updateFullPaymentsStorage(() => nextVal);
+                } else {
+                  await updateFullPaymentsStorage(allPayments => {
+                    const activeMap = new Map<string, PaymentRecord>(nextVal.map(p => [p.id, p]));
+                    const fullIds = new Set(allPayments.map(p => p.id));
+                    const merged = allPayments.map(p => activeMap.get(p.id) || p);
+                    nextVal.forEach(p => {
+                      if (!fullIds.has(p.id)) merged.push(p);
+                    });
+                    return merged;
+                  });
+                }
+              },
+              rollbackPersist: async (prevVal: any, existed: boolean) => {
+                if (existed && Array.isArray(prevVal)) {
+                  await updateFullPaymentsStorage(() => prevVal);
+                } else {
+                  await storage.removeItem('dl_payments');
+                  setPayments(payments);
+                }
+              }
+            });
           }
           if (data.financeAccounts) {
-            setFinanceAccounts(finalFinanceAccounts);
-            await storage.setItem('dl_finance_accounts', finalFinanceAccounts);
+            commitEntries.push({ key: 'dl_finance_accounts', nextValue: finalFinanceAccounts, prevStateValue: financeAccounts, applyState: setFinanceAccounts });
           }
           if (data.financeCategories) {
-            setFinanceCategories(finalFinanceCategories);
-            await storage.setItem('dl_finance_categories', finalFinanceCategories);
+            commitEntries.push({ key: 'dl_finance_categories', nextValue: finalFinanceCategories, prevStateValue: financeCategories, applyState: setFinanceCategories });
           }
           if (data.financeTransactions) {
-            setFinanceTransactions(finalFinanceTransactions);
-            await storage.setItem('dl_finance_transactions', finalFinanceTransactions);
+            commitEntries.push({ key: 'dl_finance_transactions', nextValue: finalFinanceTransactions, prevStateValue: financeTransactions, applyState: setFinanceTransactions });
           }
           if (data.financeRecurring) {
-            setFinanceRecurring(finalFinanceRecurring);
-            await storage.setItem('dl_finance_recurring', finalFinanceRecurring);
+            commitEntries.push({ key: 'dl_finance_recurring', nextValue: finalFinanceRecurring, prevStateValue: financeRecurring, applyState: setFinanceRecurring });
           }
           if (data.financeInstallments) {
-            setFinanceInstallments(finalFinanceInstallments);
-            await storage.setItem('dl_finance_installments', finalFinanceInstallments);
+            commitEntries.push({ key: 'dl_finance_installments', nextValue: finalFinanceInstallments, prevStateValue: financeInstallments, applyState: setFinanceInstallments });
           }
         }
         if (selectedRestoreCategories.includes('certificates') && data.certificates) {
-          setCertificates(finalCertificates);
-          await storage.setItem('dl_certificates', finalCertificates);
+          commitEntries.push({ key: 'dl_certificates', nextValue: finalCertificates, prevStateValue: certificates, applyState: setCertificates });
         }
         if (selectedRestoreCategories.includes('school_notes') && data.schoolNotes) {
-          setSchoolNotes(finalSchoolNotes);
-          await storage.setItem('dl_school_notes', finalSchoolNotes);
+          commitEntries.push({ key: 'dl_school_notes', nextValue: finalSchoolNotes, prevStateValue: schoolNotes, applyState: setSchoolNotes });
         }
         if (selectedRestoreCategories.includes('notifications')) {
           if (data.notifications) {
-            setNotifications(finalNotifications);
-            await storage.setItem('dl_notifications', finalNotifications);
+            commitEntries.push({ key: 'dl_notifications', nextValue: finalNotifications, prevStateValue: notifications, applyState: setNotifications });
           }
           if (finalNotificationSettings) {
-            setNotificationSettings(finalNotificationSettings);
-            await storage.setItem('dl_notification_settings', finalNotificationSettings);
+            commitEntries.push({ key: 'dl_notification_settings', nextValue: finalNotificationSettings, prevStateValue: notificationSettings, applyState: setNotificationSettings });
           }
         }
         if (selectedRestoreCategories.includes('settings')) {
           if (finalInspirationSettings) {
-            setInspirationSettings(finalInspirationSettings);
-            await storage.setItem('dl_inspiration_settings', finalInspirationSettings);
+            commitEntries.push({ key: 'dl_inspiration_settings', nextValue: finalInspirationSettings, prevStateValue: inspirationSettings, applyState: setInspirationSettings });
           }
           if (finalInspirationMessages) {
-            setInspirationMessages(finalInspirationMessages);
-            await storage.setItem('dl_inspiration_messages', finalInspirationMessages);
+            commitEntries.push({ key: 'dl_inspiration_messages', nextValue: finalInspirationMessages, prevStateValue: inspirationMessages, applyState: setInspirationMessages });
           }
           if (finalTodos) {
-            setTodos(finalTodos);
-            await storage.setItem('dl_quick_todos', finalTodos);
+            commitEntries.push({ key: 'dl_quick_todos', nextValue: finalTodos, prevStateValue: todos, applyState: setTodos });
           }
           if (data.goldHoldings) {
-            setGoldHoldings(data.goldHoldings);
-            await storage.setItem('gluck_gold_holdings', data.goldHoldings);
+            commitEntries.push({ key: 'gluck_gold_holdings', nextValue: data.goldHoldings, prevStateValue: goldHoldings, applyState: setGoldHoldings });
           }
         }
         if ((selectedRestoreCategories.includes('lernstudio') || selectedRestoreCategories.includes('settings')) && data.lernstudioSets) {
-          setLernstudioSets(data.lernstudioSets);
-          await storage.setItem('dl_lernstudio_sets', data.lernstudioSets);
+          commitEntries.push({ key: 'dl_lernstudio_sets', nextValue: data.lernstudioSets, prevStateValue: lernstudioSets, applyState: setLernstudioSets });
         }
         if (selectedRestoreCategories.includes('school_hod')) {
           if (data.hodStudents) {
-            setHodStudents(finalHodStudents);
-            await storage.setItem('hod_german_students', finalHodStudents);
+            commitEntries.push({ key: 'hod_german_students', nextValue: finalHodStudents, prevStateValue: hodStudents, applyState: setHodStudents });
           }
           if (data.hodComplaints) {
-            setHodComplaints(finalHodComplaints);
-            await storage.setItem('hod_complaints', finalHodComplaints);
+            commitEntries.push({ key: 'hod_complaints', nextValue: finalHodComplaints, prevStateValue: hodComplaints, applyState: setHodComplaints });
           }
           if (data.hodActionPlans) {
-            setHodActionPlans(finalHodActionPlans);
-            await storage.setItem('hod_student_action_plans', finalHodActionPlans);
+            commitEntries.push({ key: 'hod_student_action_plans', nextValue: finalHodActionPlans, prevStateValue: hodActionPlans, applyState: setHodActionPlans });
           }
           if (data.hodVisits) {
-            setHodVisits(finalHodVisits);
-            await storage.setItem('hod_visit_records', finalHodVisits);
+            commitEntries.push({ key: 'hod_visit_records', nextValue: finalHodVisits, prevStateValue: hodVisits, applyState: setHodVisits });
           }
         }
         if ((selectedRestoreCategories.includes('settings') || selectedRestoreCategories.includes('school_hod')) && finalProfile) {
-          setProfile(finalProfile);
-          await storage.setItem('dl_profile', finalProfile);
+          commitEntries.push({ key: 'dl_profile', nextValue: finalProfile, prevStateValue: profile, applyState: setProfile });
         }
+
+        await executeAtomicBackupCommit(commitEntries);
 
         bumpExternalDataVersion();
         console.log('restore finished');
@@ -1461,8 +1505,27 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         localStorage.setItem('dl_restore_history', JSON.stringify(updatedLogs));
 
       } catch (err: any) {
-        console.error('Restore error', err);
-        setRestoreSuccessMsg(`❌ Restore failed: ${err.message}`);
+        console.error('Restore error (rolled back cleanly)', err);
+        setRestoreProgress(0);
+        setRestoreSuccessMsg(`❌ Restore failed (rolled back): ${err.message}`);
+        const failLog: RestoreHistoryEntry = {
+          id: 'hist_fail_' + Date.now(),
+          timestamp: new Date().toISOString(),
+          backupName: restoreFileName || 'Imported_Backup.json',
+          mode: restoreMode,
+          categories: selectedRestoreCategories,
+          status: 'failed',
+          totalRecordsAdded: 0,
+          totalRecordsUpdated: 0,
+          notes: `Atomic restore failed and rolled back: ${err?.message || 'Storage write failure'}`
+        };
+        const updatedLogs = [failLog, ...historyLogs];
+        setHistoryLogs(updatedLogs);
+        try {
+          localStorage.setItem('dl_restore_history', JSON.stringify(updatedLogs));
+        } catch {
+          // ignore logging failure
+        }
       } finally {
         setIsRestoring(false);
       }
@@ -1610,8 +1673,11 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         setHistoryLogs(updatedLogs);
         localStorage.setItem('dl_restore_history', JSON.stringify(updatedLogs));
 
-      } catch (e) {
+      } catch (e: any) {
         console.error('Rollback error', e);
+        const errMsg = `❌ Rollback failed: ${e?.message || 'Storage error'}`;
+        setSimpleErrorMsg(errMsg);
+        setRestoreSuccessMsg(errMsg);
       } finally {
         setIsRollingBack(false);
       }

@@ -284,9 +284,35 @@ function isCacheableServerAssignment(assignment: any): boolean {
   if (assignment.deleted === true || assignment.revoked === true) return false;
   if (assignment.isActive === false) return false;
   if (assignment.status === 'closed' || assignment.status === 'deleted') return false;
+  const nowMs = Date.now();
+  const reopenedAt = typeof assignment.manualReopenedAt === 'number' ? assignment.manualReopenedAt : 0;
+
+  if (typeof assignment.dueDate === 'string' && assignment.dueDate.trim()) {
+    const rawDue = assignment.dueDate.trim();
+    const ymdMatch = rawDue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    let dueEndMs = NaN;
+    if (ymdMatch) {
+      const y = Number(ymdMatch[1]);
+      const m = Number(ymdMatch[2]);
+      const d = Number(ymdMatch[3]);
+      const dt = new Date(y, m - 1, d, 23, 59, 59, 999);
+      if (dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d) {
+        dueEndMs = dt.getTime();
+      }
+    } else {
+      dueEndMs = Date.parse(rawDue);
+    }
+    if (Number.isFinite(dueEndMs)) {
+      const autoCloseAtMs = dueEndMs + 14 * 24 * 60 * 60 * 1000;
+      if (nowMs >= autoCloseAtMs && reopenedAt < autoCloseAtMs) {
+        return false;
+      }
+    }
+  }
+
   if (typeof assignment.deadline === 'string' && assignment.deadline.trim()) {
     const deadlineMs = Date.parse(assignment.deadline.trim());
-    if (Number.isFinite(deadlineMs) && Date.now() > deadlineMs) {
+    if (Number.isFinite(deadlineMs) && nowMs > deadlineMs && reopenedAt < deadlineMs) {
       return false;
     }
   }

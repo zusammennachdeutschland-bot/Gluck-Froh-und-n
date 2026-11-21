@@ -1,5 +1,12 @@
 import type { Group, GroupWeeklySession, Lesson } from '../types';
-import { normalize24HourTime, normalizeWeekdayIndex, resolveActiveWeeklySessionForLesson } from '../services/zoomSessionStandardizer';
+import { normalize24HourTime, normalizeWeekdayIndex, parseIsoDateWeekday, resolveActiveWeeklySessionForLesson } from '../services/zoomSessionStandardizer';
+
+export function shouldShowZoomSyncWarning(params: {
+  isOnline: boolean;
+  resolvedZoomLink?: string | null;
+}): boolean {
+  return Boolean(params.isOnline && !String(params.resolvedZoomLink || '').trim());
+}
 
 export type ZoomReminderIdentityReason = 'LESSON_GROUP_ID_MATCHED' | 'STALE_LESSON_GROUP_ID_USED_KNOWN_PROP_GROUP' | 'GROUP_PROP_MATCHED' | 'NO_TRUSTED_GROUP_OBJECT';
 
@@ -86,12 +93,7 @@ export function diagnoseZoomReminderResolution(params: {
   const groupId = params.resolverGroupId || effectiveLessonGroupId || lessonGroupId || targetGroupId;
   const date = effectiveLesson?.date || lesson?.date;
   const time = effectiveLesson?.time || params.targetTime;
-  const weekdayFromDate = (() => {
-    const match = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(String(date || '').trim());
-    if (!match) return -1;
-    const d = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-    return Number.isNaN(d.getTime()) ? -1 : d.getDay();
-  })();
+  const weekdayFromDate = parseIsoDateWeekday(date);
   const normalizedWeekday = weekdayFromDate >= 0 ? weekdayFromDate : normalizeWeekdayIndex(params.targetDay);
   const normalizedTime = normalize24HourTime(time, '');
   const allRows = Array.isArray(params.groupWeeklySessions) ? params.groupWeeklySessions : [];
@@ -111,14 +113,14 @@ export function diagnoseZoomReminderResolution(params: {
     reasonCode = exact ? 'RESOLVED_EXACT_SLOT' : 'RESOLVED_GROUP_WIDE_FALLBACK';
   } else if (!groupId) reasonCode = 'NO_GROUP_ID';
   else if (!Array.isArray(params.groupWeeklySessions)) reasonCode = 'NO_SESSION_COLLECTION';
-  else if (normalizedWeekday < 0) reasonCode = 'INVALID_TARGET_WEEKDAY';
-  else if (!normalizedTime) reasonCode = 'INVALID_TARGET_TIME';
   else if (rows.length === 0) reasonCode = 'NO_ROWS_FOR_GROUP_ID';
   else if (!rows.some(row => !row.deleted && row.meetingSource === 'zoom_api' && row.syncState === 'synced')) {
     reasonCode = 'ROWS_NOT_ACTIVE_API_SYNCED';
   } else if (!rows.some(row => !row.deleted && row.meetingSource === 'zoom_api' && row.syncState === 'synced' && Boolean((row.zoomJoinUrl || '').trim()))) {
     reasonCode = 'ACTIVE_API_ROWS_MISSING_URL';
-  } else reasonCode = 'NO_MATCHING_GROUP_SESSION';
+  } else if (normalizedWeekday < 0) reasonCode = 'INVALID_TARGET_WEEKDAY';
+  else if (!normalizedTime) reasonCode = 'INVALID_TARGET_TIME';
+  else reasonCode = 'NO_MATCHING_GROUP_SESSION';
 
   return {
     reasonCode,

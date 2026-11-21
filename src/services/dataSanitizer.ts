@@ -24,6 +24,13 @@ import {
 import { isDateMatchingGroupRecurrence, getAlternatingWeek } from '../utils/scheduleUtils';
 import { formatLocalDate, normalizeDateToISO } from '../utils/timeUtils';
 
+export const ZOOM_STORAGE_KEYS = [
+  'glueck_group_weekly_sessions_v1',
+  'glueck_zoom_meeting_records_v1',
+  'glueck_zoom_meeting_history_v1',
+  'glueck_grain_recording_matches_v1',
+] as const;
+
 export function sanitizeInitialData(rawData: Record<string, any>): Record<string, any> {
   const sanitized: Record<string, any> = { ...rawData };
   let needsPersistCleaned = false;

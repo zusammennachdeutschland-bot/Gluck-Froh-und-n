@@ -8,6 +8,7 @@ import {
   ZoomMeetingRecord
 } from '../types';
 import { getDayNumber, getGroupScheduleSlots } from '../utils/scheduleUtils';
+import { normalizeDateToISO } from '../utils/timeUtils';
 
 export const DEFAULT_ZOOM_TIMEZONE = 'Africa/Cairo';
 export const ZOOM_MAX_TOPIC_LENGTH = 200;
@@ -555,13 +556,18 @@ export function reconcileGroupWeeklySessions(options: {
       const existing = pool[matchedIdx];
       matchedExistingIds.add(existing.id);
 
+      const normalizedExistingGroupName = String(existing.groupNameSnapshot || '').replace(/\s+/g, ' ').trim();
+      const normalizedCurrentGroupName = String(group.name || '').replace(/\s+/g, ' ').trim();
       const groupRenamed =
-        Boolean(existing.groupNameSnapshot) && existing.groupNameSnapshot !== group.name;
+        Boolean(normalizedExistingGroupName) && normalizedExistingGroupName !== normalizedCurrentGroupName;
+      const existingStartTime = normalize24HourTime(existing.startTime, '');
+      const existingDuration = Math.max(15, Number(existing.durationMinutes || durationMinutes));
+      const existingRecurrence: ScheduleRecurrence = existing.recurrence || 'weekly';
       const scheduleChanged =
         existing.weekday !== slot.weekday ||
-        existing.startTime !== slot.startTime ||
-        existing.durationMinutes !== durationMinutes ||
-        existing.recurrence !== recurrence;
+        existingStartTime !== slot.startTime ||
+        existingDuration !== durationMinutes ||
+        existingRecurrence !== recurrence;
       const topicChanged = existing.standardizedTitle !== standardizedTitle;
 
       const needsZoomPatch =
@@ -722,9 +728,9 @@ export function buildZoomMeetingRecordFromSession(
   };
 }
 
-function parseIsoDateWeekday(dateStr?: string | null): number {
-  const clean = String(dateStr || '').trim();
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(clean);
+export function parseIsoDateWeekday(dateStr?: string | null): number {
+  const iso = normalizeDateToISO(String(dateStr || '').trim());
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   if (!match) return -1;
   const year = parseInt(match[1], 10);
   const month = parseInt(match[2], 10) - 1;
@@ -734,12 +740,11 @@ function parseIsoDateWeekday(dateStr?: string | null): number {
   return d.getDay();
 }
 
-
-
 /**
- * Resolves only a current, successfully synced Zoom API session for the exact
- * group + weekday + start-time slot. No fuzzy matching across days/times and
- * no manual/legacy URL candidates are permitted.
+ * Resolves only a current, successfully synced Zoom API session for the group,
+ * preferring the exact weekday + start-time slot, then same weekday, then the
+ * group's active canonical synced API-managed session.
+ * Archived, non-synced, manual, and legacy URL candidates are strictly ignored.
  */
 export function resolveActiveWeeklySessionForLesson(params: {
   group?: Partial<Group> | null;
@@ -757,25 +762,6 @@ export function resolveActiveWeeklySessionForLesson(params: {
     weekdayFromDate >= 0 ? weekdayFromDate : normalizeWeekdayIndex(params.targetDay);
   const targetTimeHm = normalize24HourTime(params.lesson?.time || params.targetTime, '');
 
-  // Without both dimensions we cannot prove that a URL belongs to this lesson.
-  if (targetWeekday < 0 || !targetTimeHm) return null;
-
-  const exactMatches = params.groupWeeklySessions.filter((session) =>
-    Boolean(session) &&
-    !session.deleted &&
-    session.groupId === groupId &&
-    session.meetingSource === 'zoom_api' &&
-    session.syncState === 'synced' &&
-    Boolean((session.zoomJoinUrl || '').trim()) &&
-    session.weekday === targetWeekday &&
-    normalize24HourTime(session.startTime, '') === targetTimeHm
-  );
-
-  exactMatches.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  if (exactMatches[0]) return exactMatches[0];
-
-  // If the lesson has no slot-specific active URL, use the group's current canonical
-  // API-managed link. Group-wide replacement keeps all active sessions in agreement.
   const canonicalGroupSessions = params.groupWeeklySessions.filter((session) =>
     Boolean(session) &&
     !session.deleted &&
@@ -784,6 +770,25 @@ export function resolveActiveWeeklySessionForLesson(params: {
     session.syncState === 'synced' &&
     Boolean((session.zoomJoinUrl || '').trim())
   );
+  if (canonicalGroupSessions.length === 0) return null;
+
+  if (targetWeekday >= 0 && targetTimeHm) {
+    const exactMatches = canonicalGroupSessions.filter((session) =>
+      session.weekday === targetWeekday &&
+      normalize24HourTime(session.startTime, '') === targetTimeHm
+    );
+    exactMatches.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    if (exactMatches[0]) return exactMatches[0];
+  }
+
+  if (targetWeekday >= 0) {
+    const sameWeekdayMatches = canonicalGroupSessions.filter((session) => session.weekday === targetWeekday);
+    sameWeekdayMatches.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    if (sameWeekdayMatches[0]) return sameWeekdayMatches[0];
+  }
+
+  // If the lesson has no slot-specific active URL (including shifted date/time or missing schedule),
+  // use the group's current canonical API-managed synced link.
   canonicalGroupSessions.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   return canonicalGroupSessions[0] || null;
 }

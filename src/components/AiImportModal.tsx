@@ -33,7 +33,7 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
   onClose,
   onSelectGroup
 }) => {
-  const { addGroup, addStudent, generateGroupScheduleLessons, t, language } = useApp();
+  const { addGroup, addStudent, generateGroupScheduleLessons, triggerToast, t, language, _t } = useApp();
 
   const [importText, setImportText] = useState<string>('');
   const [copied, setCopied] = useState<string | null>(null);
@@ -121,6 +121,7 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
 
       createdGroups.push(newGroup);
 
+      let skippedDuplicates = 0;
       // 2. Create Students for this group
       students.forEach((st) => {
         const isParentUser = st.parentContactType === 'username' || isWhatsAppUsername(st.parentPhone);
@@ -130,23 +131,40 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
         const isStudentUser = hasStudentVal && (st.studentContactType === 'username' || isWhatsAppUsername(st.studentPhone));
         const cleanStudentUser = st.studentUsername || (isStudentUser && st.studentPhone ? st.studentPhone.replace(/^@/, '') : undefined);
 
-        const newStudent = addStudent({
-          name: st.name,
-          certificateName: st.certificateName || '',
-          studentPhone: st.studentPhone || '',
-          studentUsername: cleanStudentUser,
-          studentContactType: isStudentUser ? 'username' : (hasStudentVal ? 'phone' : undefined),
-          parentPhone: st.parentPhone,
-          parentUsername: cleanParentUser,
-          parentContactType: isParentUser ? 'username' : 'phone',
-          parentName: '',
-          groupId: newGroup.id,
-          scheduleRecurrence: st.scheduleRecurrence || group.recurrence || 'weekly',
-          grade: group.grade
-        });
-        createdAllStudents.push(newStudent);
-        totalStudentsAdded++;
+        try {
+          const newStudent = addStudent({
+            name: st.name,
+            certificateName: st.certificateName || '',
+            studentPhone: st.studentPhone || '',
+            studentUsername: cleanStudentUser,
+            studentContactType: isStudentUser ? 'username' : (hasStudentVal ? 'phone' : undefined),
+            parentPhone: st.parentPhone,
+            parentUsername: cleanParentUser,
+            parentContactType: isParentUser ? 'username' : 'phone',
+            parentName: '',
+            groupId: newGroup.id,
+            scheduleRecurrence: st.scheduleRecurrence || group.recurrence || 'weekly',
+            grade: group.grade
+          });
+          createdAllStudents.push(newStudent);
+          totalStudentsAdded++;
+        } catch (dupErr: any) {
+          if (dupErr?.code === 'DUPLICATE_STUDENT_NAME') {
+            skippedDuplicates++;
+          } else {
+            throw dupErr;
+          }
+        }
       });
+      if (skippedDuplicates > 0 && triggerToast) {
+        triggerToast(
+          _t(
+            `تم تخطي ${skippedDuplicates} طالب مسجل مسبقاً بنفس الاسم أثناء الاستيراد.`,
+            `Skipped ${skippedDuplicates} student(s) whose names already exist.`,
+            `${skippedDuplicates} bereits vorhandene Schülernamen übersprungen.`
+          )
+        );
+      }
 
       // 3. Auto-generate schedule lessons with independent day times (52 weeks rolling)
       setTimeout(() => {

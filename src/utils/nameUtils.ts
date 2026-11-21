@@ -202,3 +202,23 @@ export function normalizeSearchText(text?: string | null): string {
     .replace(/[ى]/g, 'ي')
     .replace(/[\u064B-\u065F\u0670]/g, '');
 }
+
+export function normalizeStudentNameForUniqueness(name?: string | null): string {
+  return normalizeSearchText(name).replace(/\s+/g, ' ').trim();
+}
+
+export function findDuplicateStudentByName<T extends { id: string; name?: string; deleted?: boolean }>(
+  students: T[],
+  candidateName: string,
+  excludeStudentId?: string
+): T | undefined {
+  const normalizedTarget = normalizeStudentNameForUniqueness(candidateName);
+  if (!normalizedTarget) return undefined;
+  return (students || []).find(
+    s =>
+      s &&
+      !s.deleted &&
+      s.id !== excludeStudentId &&
+      normalizeStudentNameForUniqueness(s.name) === normalizedTarget
+  );
+}

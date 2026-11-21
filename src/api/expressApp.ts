@@ -360,9 +360,35 @@ function isServerAssignmentOpen(hw: any): boolean {
   if (hw.deleted === true || hw.revoked === true) return false;
   if (hw.isActive === false) return false;
   if (hw.status === 'closed' || hw.status === 'deleted') return false;
+  const nowMs = Date.now();
+  const reopenedAt = typeof hw.manualReopenedAt === 'number' ? hw.manualReopenedAt : 0;
+
+  if (typeof hw.dueDate === 'string' && hw.dueDate.trim()) {
+    const rawDue = hw.dueDate.trim();
+    const ymdMatch = rawDue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    let dueEndMs = NaN;
+    if (ymdMatch) {
+      const y = Number(ymdMatch[1]);
+      const m = Number(ymdMatch[2]);
+      const d = Number(ymdMatch[3]);
+      const dt = new Date(y, m - 1, d, 23, 59, 59, 999);
+      if (dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d) {
+        dueEndMs = dt.getTime();
+      }
+    } else {
+      dueEndMs = Date.parse(rawDue);
+    }
+    if (Number.isFinite(dueEndMs)) {
+      const autoCloseAtMs = dueEndMs + 14 * 24 * 60 * 60 * 1000;
+      if (nowMs >= autoCloseAtMs && reopenedAt < autoCloseAtMs) {
+        return false;
+      }
+    }
+  }
+
   if (typeof hw.deadline === 'string' && hw.deadline.trim()) {
     const deadlineMs = Date.parse(hw.deadline.trim());
-    if (Number.isFinite(deadlineMs) && Date.now() > deadlineMs) {
+    if (Number.isFinite(deadlineMs) && nowMs > deadlineMs && reopenedAt < deadlineMs) {
       return false;
     }
   }

@@ -648,18 +648,19 @@ export const ZoomIntegrationsManager: React.FC = () => {
   const handleRowSync = async (session: GroupWeeklySession) => {
     setBusySessionId(session.id);
     try {
+      const reconciledBaseSessions = livePreviewSummary.reconciledSessions;
       const res =
         session.meetingSource === 'zoom_api' && session.zoomMeetingId
           ? await updateZoomMeetingForSession({
               session,
-              sessions: groupWeeklySessions,
+              sessions: reconciledBaseSessions,
               records: zoomMeetingRecords,
               history: zoomMeetingHistory,
               timezone: timezoneInput || DEFAULT_ZOOM_TIMEZONE
             })
           : await createOrReplaceZoomMeetingForSession({
               session,
-              sessions: groupWeeklySessions,
+              sessions: reconciledBaseSessions,
               records: zoomMeetingRecords,
               history: zoomMeetingHistory,
               timezone: timezoneInput || DEFAULT_ZOOM_TIMEZONE
@@ -671,9 +672,10 @@ export const ZoomIntegrationsManager: React.FC = () => {
         history: res.history
       });
       setMeta(loadZoomUiMeta());
+      const syncedTitle = res.updatedSession?.standardizedTitle || session.standardizedTitle;
       triggerToast(
         res.ok
-          ? _t(`تمت المزامنة: ${session.standardizedTitle}`, `Synced: ${session.standardizedTitle}`)
+          ? _t(`تمت المزامنة: ${syncedTitle}`, `Synced: ${syncedTitle}`)
           : res.error || _t('فشل المزامنة', 'Sync failed')
       );
     } finally {

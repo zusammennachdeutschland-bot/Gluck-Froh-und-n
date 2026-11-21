@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { PaymentRecord, Student, Group, Lesson } from '../../types';
-import { getStudentCyclePricing, calculateDuePaymentCycles, DuePaymentCycle, getStudentAdvanceLessonCredits, calculateEstimatedPastDate } from '../../utils/paymentUtils';
-import { formatLocalDate, normalizeDateToISO } from '../../utils/timeUtils';
+import { getStudentCyclePricing, calculateDuePaymentCycles, DuePaymentCycle, computeStudentAdvanceCreditsMap, getStudentAdvanceLessonCredits, calculateEstimatedPastDate } from '../../utils/paymentUtils';
+import { formatLocalDate, normalizeDateToISO, parseTimeForSort } from '../../utils/timeUtils';
 import { buildWhatsAppUrl, resolveStudentWhatsAppContact, isWhatsAppUsername, cleanWhatsAppUsername } from '../../utils/phoneUtils';
 import { getTimeBasedGreeting } from '../../utils/greetingUtils';
 import { 
@@ -161,13 +161,35 @@ export const FinanceStudentPayments: React.FC = () => {
     return dateStr.replace('Offline', _t('حصة سابقة', 'Prior Session', 'Vorherige Sitzung'));
   };
 
+  const studentsById = useMemo(() => {
+    const map = new Map<string, Student>();
+    students.forEach(s => map.set(s.id, s));
+    return map;
+  }, [students]);
+
+  const groupsById = useMemo(() => {
+    const map = new Map<string, Group>();
+    groups.forEach(g => map.set(g.id, g));
+    return map;
+  }, [groups]);
+
+  const paymentsById = useMemo(() => {
+    const map = new Map<string, PaymentRecord>();
+    payments.forEach(p => map.set(p.id, p));
+    return map;
+  }, [payments]);
+
+  const advanceCreditsByStudent = useMemo(() => {
+    return computeStudentAdvanceCreditsMap(payments, lessons);
+  }, [payments, lessons]);
+
   const handleSingleLessonWhatsApp = (lesson: Lesson) => {
-    const student = students.find(s => s.id === lesson.studentId || s.name === lesson.studentName);
+    const student = lesson.studentId ? studentsById.get(lesson.studentId) : undefined;
     const phone = student?.parentPhone || student?.studentPhone || '';
     const due = Math.max(0, (lesson.amountDue || 200) - (lesson.amountPaid || 0));
     const dummyCycle: DuePaymentCycle = {
       id: `lesson_${lesson.id}`,
-      studentId: lesson.studentId || student?.id || '',
+      studentId: lesson.studentId || '',
       studentName: lesson.studentName || student?.name || lesson.title,
       groupId: lesson.groupId || '',
       groupName: lesson.groupName || '',
@@ -239,96 +261,139 @@ export const FinanceStudentPayments: React.FC = () => {
     });
   }, [dueCycles, searchTerm, selectedGroupId]);
 
-  // CALCULATE IN PROGRESS CYCLES FOR FLEXIBLE & PRORATED BILLING
+  // CALCULATE IN PROGRESS CYCLES FOR FLEXIBLE & PRORATED BILLING (O(N) pre-indexed)
   const inProgressCycles = useMemo(() => {
     const list: DuePaymentCycle[] = [];
 
-    // Map studentId -> Set of billed lesson IDs for fast lookup
-    const studentBilledLessons = new Map<string, Set<string>>();
-    payments.forEach(p => {
-      const ids: string[] = [];
-      if (p.lessonIds && p.lessonIds.length > 0) ids.push(...p.lessonIds);
-      if (p.lessonId && !ids.includes(p.lessonId)) ids.push(p.lessonId);
+    const activeGroupsById = new Map<string, Group>();
+    const activeGroupsByLowerName = new Map<string, Group>();
+    groups.forEach(g => {
+      activeGroupsById.set(g.id, g);
+      if (g.name) activeGroupsByLowerName.set(g.name.trim().toLowerCase(), g);
+    });
 
-      // Also map dates from lessonDates to matching lessons
-      if (p.lessonDates && Array.isArray(p.lessonDates)) {
-        p.lessonDates.forEach(dStr => {
-          if (!dStr || typeof dStr !== 'string') return;
-          const match = dStr.match(/(\d{2}\/\d{2}\/\d{4}|\d{4}-\d{2}-\d{2})/);
-          if (match) {
-            const dateNormalized = normalizeDateToISO(match[1]);
-            const matchedLessons = lessons.filter(l => 
-              l.date === dateNormalized && 
-              ((p.studentId && (l.studentId === p.studentId || l.studentName === p.studentName)) || (p.groupId && l.groupId === p.groupId))
-            );
-            matchedLessons.forEach(ml => {
-              if (!ids.includes(ml.id)) ids.push(ml.id);
-            });
-          }
+    const lessonsByDate = new Map<string, Lesson[]>();
+    const lessonsByGroupId = new Map<string, Lesson[]>();
+    const lessonsByStudentId = new Map<string, Lesson[]>();
+    const lessonsByStudentName = new Map<string, Lesson[]>();
+    const pushMap = (map: Map<string, Lesson[]>, key: string, l: Lesson) => {
+      let arr = map.get(key);
+      if (!arr) {
+        arr = [];
+        map.set(key, arr);
+      }
+      arr.push(l);
+    };
+
+    for (const l of lessons) {
+      if (l.deleted) continue;
+      const dIso = normalizeDateToISO(l.date);
+      if (dIso) pushMap(lessonsByDate, dIso, l);
+      if (l.groupId) pushMap(lessonsByGroupId, l.groupId, l);
+      if (l.studentId) pushMap(lessonsByStudentId, l.studentId, l);
+      else if (l.studentName) pushMap(lessonsByStudentName, l.studentName, l);
+    }
+
+    const studentBilledLessons = new Map<string, Set<string>>();
+    const studentsWithPaidPayments = new Set<string>();
+
+    for (const p of payments) {
+      if (p.deleted) continue;
+      if (p.studentId && p.status === 'paid') {
+        studentsWithPaidPayments.add(p.studentId);
+      }
+
+      const ids: string[] = [];
+      if (p.lessonId && !p.lessonId.startsWith('virtual_')) ids.push(p.lessonId);
+      if (p.lessonIds && p.lessonIds.length > 0) {
+        p.lessonIds.forEach(id => {
+          if (id && !id.startsWith('virtual_') && !ids.includes(id)) ids.push(id);
         });
       }
 
-      if (ids.length > 0) {
-        const stId = p.studentId;
-        if (stId) {
-          if (!studentBilledLessons.has(stId)) {
-            studentBilledLessons.set(stId, new Set<string>());
+      // Legacy fallback only when payment record lacks lesson IDs
+      if (ids.length === 0 && p.lessonDates && Array.isArray(p.lessonDates)) {
+        for (const dStr of p.lessonDates) {
+          if (!dStr || typeof dStr !== 'string') continue;
+          const match = dStr.match(/(\d{2}\/\d{2}\/\d{4}|\d{4}-\d{2}-\d{2})/);
+          if (match) {
+            const dateNormalized = normalizeDateToISO(match[1]);
+            const dayLessons = lessonsByDate.get(dateNormalized) || [];
+            for (const l of dayLessons) {
+              if ((p.studentId && (l.studentId === p.studentId || (!l.studentId && l.studentName === p.studentName))) || (p.groupId && l.groupId === p.groupId)) {
+                if (!ids.includes(l.id)) ids.push(l.id);
+              }
+            }
           }
-          ids.forEach(id => studentBilledLessons.get(stId)!.add(id));
         }
       }
-    });
 
-    students.forEach(st => {
-      // Find assigned group
-      const grp = groups.find(g => g.id === st.groupId || (st.groupId && g.name && g.name.trim().toLowerCase() === st.groupId.trim().toLowerCase()));
+      if (ids.length > 0 && p.studentId) {
+        let billedSet = studentBilledLessons.get(p.studentId);
+        if (!billedSet) {
+          billedSet = new Set<string>();
+          studentBilledLessons.set(p.studentId, billedSet);
+        }
+        ids.forEach(id => billedSet!.add(id));
+      }
+    }
 
-      // Determine cycle length (N) and package price (P) using canonical pricing utility
+    for (const st of students) {
+      const grp = (st.groupId ? activeGroupsById.get(st.groupId) : undefined) ||
+        (st.groupId ? activeGroupsByLowerName.get(st.groupId.trim().toLowerCase()) : undefined);
+
       const { cycleLength, amountDue } = getStudentCyclePricing(st, grp);
       const billedIds = studentBilledLessons.get(st.id) || new Set<string>();
 
-      // Collect all completed attended lessons for this student that have NOT been billed yet (neither paid nor unpaid)
-      const stCompletedLessons = lessons.filter(l => {
-        if (l.status !== 'completed') return false;
-        if (l.paymentStatus === 'exempted') return false;
+      const candidateMap = new Map<string, Lesson>();
+      if (grp) {
+        for (const l of lessonsByGroupId.get(grp.id) || []) candidateMap.set(l.id, l);
+      }
+      for (const l of lessonsByStudentId.get(st.id) || []) candidateMap.set(l.id, l);
+      if (st.name) {
+        for (const l of lessonsByStudentName.get(st.name) || []) candidateMap.set(l.id, l);
+      }
+
+      const stCompletedLessons: Lesson[] = [];
+      candidateMap.forEach(l => {
+        if (l.status !== 'completed') return;
+        if (l.paymentStatus === 'exempted') return;
         const matchesGroup = grp ? l.groupId === grp.id : false;
-        const matchesStudent = l.studentId === st.id || l.studentName === st.name;
-        if (!matchesGroup && !matchesStudent) return false;
+        const matchesStudent = l.studentId === st.id || (!l.studentId && l.studentName === st.name);
+        if (!matchesGroup && !matchesStudent) return;
 
-        // Attendance check
         const att = l.report?.studentAttendance?.[st.id] || l.report?.attendanceStatus || 'present';
-        if (att === 'absent') return false;
+        if (att === 'absent') return;
+        if (billedIds.has(l.id)) return;
 
-        // Check if this lesson ID has already been billed
-        if (billedIds.has(l.id)) return false;
-
-        // Also exclude if already paid directly on the lesson or in studentPayments
         const stPaymentObj = l.studentPayments?.[st.id];
         const repPaymentObj = l.report?.studentPayments?.[st.id] as any;
-        const isStudentPaidInLesson = (stPaymentObj?.paymentStatus === 'paid' || (stPaymentObj as any)?.status === 'paid') || 
+        const isStudentPaidInLesson = (stPaymentObj?.paymentStatus === 'paid' || (stPaymentObj as any)?.status === 'paid') ||
                                       (repPaymentObj?.paymentStatus === 'paid' || repPaymentObj?.status === 'paid');
-        const isLessonDirectlyPaid = !l.groupId && (l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid') && 
+        const isLessonDirectlyPaid = !l.groupId && (l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid') &&
                                      (l.studentId ? l.studentId === st.id : true);
-        if (isStudentPaidInLesson || isLessonDirectlyPaid) return false;
+        if (isStudentPaidInLesson || isLessonDirectlyPaid) return;
 
-        return true;
+        stCompletedLessons.push(l);
       });
 
-      // Sort chronologically
-      stCompletedLessons.sort((a, b) => a.date.localeCompare(b.date));
+      stCompletedLessons.sort((a, b) => {
+        const da = normalizeDateToISO(a.date);
+        const db = normalizeDateToISO(b.date);
+        if (da !== db) return da.localeCompare(db);
+        const ta = parseTimeForSort(a.time);
+        const tb = parseTimeForSort(b.time);
+        if (ta !== tb) return ta - tb;
+        return a.id.localeCompare(b.id);
+      });
 
-      const hasUnpaidRec = payments.some(p => p.studentId === st.id && p.status !== 'paid');
-
-      // Determine if we need to apply starting session number offset
-      const hasPaidPayments = payments.some(p => p.studentId === st.id && p.status === 'paid');
+      const hasPaidPayments = studentsWithPaidPayments.has(st.id);
       const startSess = grp?.startingSessionNumber || 1;
       const virtualOffset = !hasPaidPayments && startSess > 1 ? (startSess - 1) : 0;
 
-      // Advance prepaid lessons check
-      const studentAdvance = getStudentAdvanceLessonCredits(st.id, payments, lessons, st.name);
-      const remainingPrepaid = studentAdvance.remainingAdvanceLessons;
+      const studentAdvance = advanceCreditsByStudent.get(st.id);
+      const remainingPrepaid = studentAdvance ? studentAdvance.remainingAdvanceLessons : 0;
 
-      // Slice out the lessons covered by prepaid credit
       const billableLessons = remainingPrepaid > 0
         ? stCompletedLessons.slice(remainingPrepaid)
         : stCompletedLessons;
@@ -338,15 +403,12 @@ export const FinanceStudentPayments: React.FC = () => {
       const reachedCycleBySessionNum = maxCompletedSessionNum > 0 && cycleLength > 1 && (maxCompletedSessionNum >= cycleLength || maxCompletedSessionNum % cycleLength === 0);
       const isCycleFinished = totalCompletedCount >= cycleLength || reachedCycleBySessionNum;
 
-      // If they have completed some lessons but cycle is NOT finished (e.g. Session 2/4)
       if (totalCompletedCount > 0 && !isCycleFinished) {
+        const grpOrStLessons = (st.groupId ? lessonsByGroupId.get(st.groupId) : undefined) || lessonsByStudentId.get(st.id) || [];
         const lessonDates: string[] = [];
         for (let i = 1; i <= virtualOffset; i++) {
-          const matched = lessons.find(l => 
-            ((st.groupId && l.groupId === st.groupId) || (l.studentId && l.studentId === st.id)) && 
-            l.sessionNumber === i
-          );
-          lessonDates.push(matched 
+          const matched = grpOrStLessons.find(l => l.sessionNumber === i);
+          lessonDates.push(matched
             ? `${formatDateDisplay(matched.date)} (Session ${i}/${cycleLength})`
             : `حصة سابقة (Session ${i}/${cycleLength})`
           );
@@ -355,7 +417,6 @@ export const FinanceStudentPayments: React.FC = () => {
           lessonDates.push(`${formatDateDisplay(l.date)} (Session ${l.sessionNumber || 1}/${cycleLength})`);
         });
 
-        // If teacher set session number higher, fill missing offline sessions
         if (maxCompletedSessionNum > 1 && lessonDates.length < maxCompletedSessionNum) {
           const existingNums = new Set<number>();
           lessonDates.forEach(d => {
@@ -364,11 +425,8 @@ export const FinanceStudentPayments: React.FC = () => {
           });
           for (let i = 1; i <= maxCompletedSessionNum; i++) {
             if (!existingNums.has(i)) {
-              const matched = lessons.find(l => 
-                ((st.groupId && l.groupId === st.groupId) || (l.studentId && l.studentId === st.id)) && 
-                l.sessionNumber === i
-              );
-              lessonDates.push(matched 
+              const matched = grpOrStLessons.find(l => l.sessionNumber === i);
+              lessonDates.push(matched
                 ? `${formatDateDisplay(matched.date)} (Session ${i}/${cycleLength})`
                 : `حصة سابقة (Session ${i}/${cycleLength})`
               );
@@ -382,29 +440,27 @@ export const FinanceStudentPayments: React.FC = () => {
         }
 
         const lessonIds = billableLessons.map(l => l.id);
-
-        // Prorated calculations based on actual billable completed lessons in the app
         const pricePerSession = amountDue / cycleLength;
         const proratedAmount = Math.round(pricePerSession * billableLessons.length);
 
         list.push({
-          id: `in_progress_cycle_${st.id}_${billableLessons[0]?.id || Date.now()}_st_${st.name.replace(/\s+/g, '_')}`,
+          id: `in_progress_cycle_${st.id}_${billableLessons[0]?.id || st.id}`,
           studentId: st.id,
           studentName: st.name,
           groupId: st.groupId || grp?.id || '',
           groupName: grp?.name || 'Gruppe',
           cycleLength,
-          amountDue: proratedAmount, // default to prorated
+          amountDue: proratedAmount,
           lessonDates,
           lessonIds,
           status: 'not_yet',
           parentPhone: st.parentPhone || st.studentPhone || '',
         });
       }
-    });
+    }
 
     return list;
-  }, [students, groups, lessons, payments]);
+  }, [students, groups, lessons, payments, advanceCreditsByStudent]);
 
   const filteredInProgressCycles = useMemo(() => {
     return inProgressCycles.filter(item => {
@@ -432,15 +488,15 @@ export const FinanceStudentPayments: React.FC = () => {
       .sort((a, b) => (b.paidDate || b.dueDate || '').localeCompare(a.paidDate || a.dueDate || ''));
   }, [payments, searchTerm, selectedGroupId]);
 
-  // Total Due Calculation
+  // Total Due Calculation (O(1) per cycle using pre-indexed payments map)
   const totalAmountDue = useMemo(() => {
     return filteredDueCycles.reduce((sum, item) => {
-      const existingRec = payments.find(p => p.id === item.existingPaymentRecordId);
+      const existingRec = item.existingPaymentRecordId ? paymentsById.get(item.existingPaymentRecordId) : undefined;
       const paid = existingRec ? (existingRec.amountPaid || 0) : 0;
       const discount = existingRec ? (existingRec.discountAmount || 0) : 0;
       return sum + Math.max(0, item.amountDue - paid - discount);
     }, 0);
-  }, [filteredDueCycles, payments]);
+  }, [filteredDueCycles, paymentsById]);
 
   // Total Overdue Calculation (cycles marked as 'not_yet' or overdue)
   const overdueTotal = useMemo(() => {
@@ -449,43 +505,43 @@ export const FinanceStudentPayments: React.FC = () => {
       .reduce((sum, item) => sum + item.amountDue, 0);
   }, [filteredDueCycles]);
 
-  // Unpaid Individual Lessons calculation
+  // Unpaid Individual Lessons calculation (O(N) pre-indexed)
   const unpaidSingleLessons = useMemo(() => {
     const paidLessonIds = new Set<string>();
-    const paidDateSignatures = new Set<string>();
+    const legacyPaidDateSignatures = new Set<string>();
 
     payments.forEach(p => {
       if (!p.deleted && (p.status === 'paid' || p.status === 'exempted' || p.paymentType === 'exemption')) {
+        const hadIds = Boolean(p.lessonId || (p.lessonIds && p.lessonIds.some(id => !id.startsWith('virtual_'))));
         if (p.lessonId) paidLessonIds.add(p.lessonId);
         if (p.lessonIds && Array.isArray(p.lessonIds)) {
           p.lessonIds.forEach(id => {
             if (!id.startsWith('virtual_')) paidLessonIds.add(id);
           });
         }
-        if (p.lessonDates && Array.isArray(p.lessonDates)) {
+        if (!hadIds && p.lessonDates && Array.isArray(p.lessonDates) && p.studentId) {
           p.lessonDates.forEach(dStr => {
             if (!dStr || typeof dStr !== 'string') return;
             const match = dStr.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
             if (match) {
               const dIso = normalizeDateToISO(match[1]);
-              if (p.studentId) paidDateSignatures.add(`${p.studentId}_${dIso}`);
+              legacyPaidDateSignatures.add(`${p.studentId}_${dIso}`);
             }
           });
         }
       }
     });
 
+    const sTerm = (searchTerm || '').toLowerCase();
+
     return lessons.filter(l => {
       if (l.deleted) return false;
       if (paidLessonIds.has(l.id)) return false;
       if (l.paymentStatus === 'exempted') return false;
-      // 1-on-1 private lesson that is paid
       if (!l.groupId && (l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid')) return false;
 
-      // Check if student is paid by date signature
-      if (l.studentId && paidDateSignatures.has(`${l.studentId}_${l.date}`)) return false;
+      if (l.studentId && legacyPaidDateSignatures.has(`${l.studentId}_${l.date}`)) return false;
 
-      // Check if student is explicitly marked as paid in lesson object or lesson report
       if (l.studentId) {
         const stPaymentObj = l.studentPayments?.[l.studentId];
         const repPaymentObj = l.report?.studentPayments?.[l.studentId] as any;
@@ -500,20 +556,19 @@ export const FinanceStudentPayments: React.FC = () => {
       const hasRemaining = (due - paid) > 0;
       if (!hasRemaining || (l.status !== 'completed' && !isUnpaid)) return false;
 
-      // If student has advance prepaid lessons remaining, this lesson is covered!
       if (l.studentId) {
-        const studentAdvance = getStudentAdvanceLessonCredits(l.studentId, payments, lessons, l.studentName);
-        if (studentAdvance.remainingAdvanceLessons > 0) return false;
+        const studentAdvance = advanceCreditsByStudent.get(l.studentId);
+        if (studentAdvance && studentAdvance.remainingAdvanceLessons > 0) return false;
       }
 
-      const matchesSearch = !searchTerm || 
-        (l.studentName || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
-        (l.groupName || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
-        (l.title || '').toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesSearch = !sTerm ||
+        (l.studentName || '').toLowerCase().includes(sTerm) ||
+        (l.groupName || '').toLowerCase().includes(sTerm) ||
+        (l.title || '').toLowerCase().includes(sTerm);
       const matchesGroup = selectedGroupId === 'all' || l.groupId === selectedGroupId;
       return matchesSearch && matchesGroup;
     }).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  }, [lessons, payments, searchTerm, selectedGroupId]);
+  }, [lessons, payments, searchTerm, selectedGroupId, advanceCreditsByStudent]);
 
   const filteredPaidHistory = useMemo(() => {
     return paidHistory.filter(p => {
@@ -693,8 +748,8 @@ export const FinanceStudentPayments: React.FC = () => {
       : (lang === 'ar' ? 'تواريخ الحصص المكتملة' : lang === 'en' ? 'Completed lesson dates' : 'Abgeschlossene Lektionstermine');
 
     const isSingle = item.cycleLength <= 1;
-    const stObj = students.find(s => s.id === item.studentId || (s.name && item.studentName && s.name.trim().toLowerCase() === item.studentName.trim().toLowerCase()));
-    const targetGrp = groups.find(g => g.id === item.groupId);
+    const stObj = item.studentId ? studentsById.get(item.studentId) : undefined;
+    const targetGrp = item.groupId ? groupsById.get(item.groupId) : undefined;
     const effRecurrence = stObj?.scheduleRecurrence || targetGrp?.scheduleRecurrence;
     const recTagEn = effRecurrence === 'biweekly_a' ? ' (Bi-weekly A)' : effRecurrence === 'biweekly_b' ? ' (Bi-weekly B)' : '';
     const recTagDe = effRecurrence === 'biweekly_a' ? ' (Alle 2 Wochen A)' : effRecurrence === 'biweekly_b' ? ' (Alle 2 Wochen B)' : '';
@@ -915,9 +970,9 @@ export const FinanceStudentPayments: React.FC = () => {
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5 sm:gap-3">
                 {paginatedDueCycles.map((item, idx) => {
-                const studentAdvanceInfo = getStudentAdvanceLessonCredits(item.studentId, payments, lessons);
+                const studentAdvanceInfo = (item.studentId ? advanceCreditsByStudent.get(item.studentId) : undefined) || { totalAdvanceLessons: 0, usedLessons: 0, remainingAdvanceLessons: 0 };
                 const targetAccountId = getCardAccountId(item.id, item.groupId);
-                const grp = groups.find(g => g.id === item.groupId);
+                const grp = item.groupId ? groupsById.get(item.groupId) : undefined;
                 const duration = grp?.duration || 60;
                 const rawDate = item.lessonDates[item.lessonDates.length - 1] || item.lessonDates[0] || todayStr;
                 const cleanDate = extractCleanDate(item.lessonDates.length > 0 ? item.lessonDates : rawDate);
@@ -950,8 +1005,8 @@ export const FinanceStudentPayments: React.FC = () => {
                           {item.studentName}
                         </button>
                         {(() => {
-                          const itemSt = students.find(s => s.id === item.studentId || (s.name && item.studentName && s.name.trim().toLowerCase() === item.studentName.trim().toLowerCase()));
-                          const itemRec = itemSt?.scheduleRecurrence || groups.find(g => g.id === item.groupId)?.scheduleRecurrence;
+                          const itemSt = item.studentId ? studentsById.get(item.studentId) : undefined;
+                          const itemRec = itemSt?.scheduleRecurrence || (item.groupId ? groupsById.get(item.groupId)?.scheduleRecurrence : undefined);
                           return (
                             <span 
                               onClick={() => openStudentGroup(item.studentId, item.groupId, item.groupName)}
@@ -1124,8 +1179,8 @@ export const FinanceStudentPayments: React.FC = () => {
                 const remaining = Math.max(0, due - paid);
                 const cardKey = `lesson_${lesson.id}`;
                 const targetAccountId = getCardAccountId(cardKey, lesson.groupId);
-                const student = students.find(s => s.id === lesson.studentId || s.name === lesson.studentName);
-                const studentAdvanceInfo = getStudentAdvanceLessonCredits(lesson.studentId || student?.id, payments, lessons);
+                const student = lesson.studentId ? studentsById.get(lesson.studentId) : undefined;
+                const studentAdvanceInfo = (lesson.studentId ? advanceCreditsByStudent.get(lesson.studentId) : undefined) || { totalAdvanceLessons: 0, usedLessons: 0, remainingAdvanceLessons: 0 };
                 const cleanDate = extractCleanDate(formatDateDisplay(lesson.date));
                 const duration = lesson.duration || 60;
                 const displayName = lesson.studentName || student?.name || lesson.groupName || lesson.title;
@@ -1315,8 +1370,8 @@ export const FinanceStudentPayments: React.FC = () => {
                           {item.studentName}
                         </button>
                         {(() => {
-                          const itemSt = students.find(s => s.id === item.studentId || (s.name && item.studentName && s.name.trim().toLowerCase() === item.studentName.trim().toLowerCase()));
-                          const itemRec = itemSt?.scheduleRecurrence || groups.find(g => g.id === item.groupId)?.scheduleRecurrence;
+                          const itemSt = item.studentId ? studentsById.get(item.studentId) : undefined;
+                          const itemRec = itemSt?.scheduleRecurrence || (item.groupId ? groupsById.get(item.groupId)?.scheduleRecurrence : undefined);
                           return (
                             <span 
                               onClick={() => openStudentGroup(item.studentId, item.groupId, item.groupName)}

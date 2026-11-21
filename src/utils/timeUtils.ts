@@ -33,11 +33,48 @@ export const getDayOfWeekIndex = (dateStr: string): number => {
   return d.getDay(); // 0 = Sun, 1 = Mon ... 6 = Sat
 };
 
+const DAYS_IN_MONTH = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+const isValidCalendarDate = (year: number, month: number, day: number): boolean => {
+  if (!Number.isInteger(year) || year < 1 || month < 1 || month > 12 || day < 1) return false;
+  let maxDay = DAYS_IN_MONTH[month];
+  if (month === 2 && ((year % 4 === 0 && year % 100 !== 0) || year % 400 === 0)) {
+    maxDay = 29;
+  }
+  return day <= maxDay;
+};
+
 /**
  * Normalizes any date string (DD/MM/YYYY, YYYY-MM-DD, ISO string) into canonical YYYY-MM-DD format.
  */
 export const normalizeDateToISO = (dateStr: string): string => {
   if (!dateStr || typeof dateStr !== 'string') return '';
+
+  // Fast path for canonical ASCII YYYY-MM-DD without allocating Date objects or running regexes
+  if (
+    dateStr.length === 10 &&
+    dateStr.charCodeAt(4) === 45 &&
+    dateStr.charCodeAt(7) === 45
+  ) {
+    const c0 = dateStr.charCodeAt(0) - 48;
+    const c1 = dateStr.charCodeAt(1) - 48;
+    const c2 = dateStr.charCodeAt(2) - 48;
+    const c3 = dateStr.charCodeAt(3) - 48;
+    const c5 = dateStr.charCodeAt(5) - 48;
+    const c6 = dateStr.charCodeAt(6) - 48;
+    const c8 = dateStr.charCodeAt(8) - 48;
+    const c9 = dateStr.charCodeAt(9) - 48;
+    if (
+      c0 >= 0 && c0 <= 9 && c1 >= 0 && c1 <= 9 && c2 >= 0 && c2 <= 9 && c3 >= 0 && c3 <= 9 &&
+      c5 >= 0 && c5 <= 9 && c6 >= 0 && c6 <= 9 && c8 >= 0 && c8 <= 9 && c9 >= 0 && c9 <= 9
+    ) {
+      const year = c0 * 1000 + c1 * 100 + c2 * 10 + c3;
+      const month = c5 * 10 + c6;
+      const day = c8 * 10 + c9;
+      return isValidCalendarDate(year, month, day) ? dateStr : '';
+    }
+  }
+
   const normalized = normalizeDigits(dateStr.trim());
   if (!normalized) return '';
 
@@ -51,10 +88,7 @@ export const normalizeDateToISO = (dateStr: string): string => {
 
   if (match) {
     const { year, month, day } = match;
-    const daysInMonth = month >= 1 && month <= 12
-      ? new Date(year, month, 0).getDate()
-      : 0;
-    if (!Number.isInteger(year) || year < 1 || month < 1 || month > 12 || day < 1 || day > daysInMonth) {
+    if (!isValidCalendarDate(year, month, day)) {
       return '';
     }
     return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -221,6 +255,45 @@ export const getFreePeriodsForDate = (
   
   return free;
 };
+
+export const parseTimeForSort = (time?: string): number => {
+  if (!time || typeof time !== 'string') return 0;
+  const normalized = normalizeDigits(time.trim());
+  const match = normalized.match(/^(\d{1,2}):(\d{1,2})/);
+  if (!match) return 0;
+  const h = Math.min(23, Math.max(0, parseInt(match[1], 10) || 0));
+  const m = Math.min(59, Math.max(0, parseInt(match[2], 10) || 0));
+  return h * 60 + m;
+};
+
+export const advanceDueDateByFrequency = (
+  baseDateStr: string,
+  frequency: 'daily' | 'weekly' | 'monthly' | 'yearly' | string
+): string => {
+  const baseDate = parseLocalDate(baseDateStr || formatLocalDate());
+  const nextDue = new Date(baseDate.getTime());
+
+  if (frequency === 'daily') {
+    nextDue.setDate(nextDue.getDate() + 1);
+  } else if (frequency === 'weekly') {
+    nextDue.setDate(nextDue.getDate() + 7);
+  } else if (frequency === 'yearly') {
+    const origMonth = nextDue.getMonth();
+    nextDue.setFullYear(nextDue.getFullYear() + 1);
+    if (nextDue.getMonth() !== origMonth) {
+      nextDue.setDate(0);
+    }
+  } else if (frequency === 'monthly') {
+    const dayOfMonth = nextDue.getDate();
+    nextDue.setMonth(nextDue.getMonth() + 1);
+    if (nextDue.getDate() !== dayOfMonth) {
+      nextDue.setDate(0);
+    }
+  }
+
+  return formatLocalDate(nextDue);
+};
+
 
 export const getBookableSlots = (freePeriods: TimeSlot[], slotDurationMinutes: number): TimeSlot[] => {
   const bookable: TimeSlot[] = [];

@@ -15,7 +15,7 @@ import { StudentProfileModal } from './StudentProfileModal';
 import { getGroupCycleInfo, isGroupPerLesson, resolveLessonCycleNumber, compareLessonsChronologically, computeStartingSessionNumberForTargetLesson } from '../utils/lessonUtils';
 import { buildWhatsAppUrl } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
-import { transliterateArabicNameToEnglish } from '../utils/nameUtils';
+import { transliterateArabicNameToEnglish, findDuplicateStudentByName } from '../utils/nameUtils';
 import { GroupWeeklySessionsPanel } from './GroupWeeklySessionsPanel';
 
 interface GroupProfileModalProps {
@@ -27,7 +27,7 @@ interface GroupProfileModalProps {
 export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onClose, initialTab = 'details' }) => {
   const { 
     updateGroup, updateLesson, deleteGroup, archiveGroup, generateGroupScheduleLessons, 
-    groups, students, addStudent, updateStudent, moveStudent, lessons, getFullLessonsSnapshot, setLessonSessionNumberAnchor, payments, language, t, _t 
+    groups, students, addStudent, updateStudent, moveStudent, lessons, getFullLessonsSnapshot, setLessonSessionNumberAnchor, payments, triggerToast, language, t, _t 
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'details' | 'recordings'>(initialTab);
@@ -200,9 +200,18 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
       return;
     }
 
+    const trimmedName = newStudentName.trim();
+    if (findDuplicateStudentByName(students, trimmedName)) {
+      triggerToast(_t(
+        `يوجد طالب آخر مسجل بنفس الاسم "${trimmedName}". يرجى اختيار اسم مميز.`,
+        `A student named "${trimmedName}" already exists. Please use a distinct name.`,
+        `Ein Schüler mit dem Namen "${trimmedName}" existiert bereits.`
+      ));
+      return;
+    }
+
     setIsSubmittingStudent(true);
     try {
-      const trimmedName = newStudentName.trim();
       const trimmedPhone = newStudentPhone.trim();
       const detectedGender = isLikelyFemaleStudent(trimmedName) ? 'female' : newStudentGender;
       const finalCertName = newStudentCertName.trim() || transliterateArabicNameToEnglish(trimmedName);
@@ -226,10 +235,10 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
       setNewStudentCertName('');
       setShowAddStudentSection(false);
       setStudentActionSuccess(_t(`تمت إضافة الطالب ${trimmedName} بنجاح إلى المجموعة وبيانات البرنامج!`, `Student ${trimmedName} added successfully!`, `Schüler ${trimmedName} erfolgreich hinzugefügt!`));
-      /* confetti removed */
       setTimeout(() => setStudentActionSuccess(null), 3500);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      triggerToast(err?.message || _t('تعذر إضافة الطالب.', 'Failed to add student.', 'Schüler konnte nicht hinzugefügt werden.'));
     } finally {
       setIsSubmittingStudent(false);
     }

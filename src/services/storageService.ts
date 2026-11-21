@@ -29,14 +29,20 @@ try {
   console.warn('localStorage is not available in this context (probably blocked in iframe).', e);
 }
 
-const HEAVY_EVICTABLE_LOCALSTORAGE_KEYS = [
+const NON_CRITICAL_CACHE_LOCALSTORAGE_KEYS = [
   'dl_auto_backup_history_snapshots',
   'dl_local_backup_data',
+  'dl_restore_point_snapshot',
   'dl_lernstudio_sets',
-  'dl_web_scheduled_notifications',
+  'dl_web_scheduled_notifications'
+];
+
+const CRITICAL_DATA_MIRROR_KEYS = new Set([
   'dl_lessons',
   'dl_payments'
-];
+]);
+
+const verifiedPrimaryDbMirrorKeys = new Set<string>();
 
 const LOCALFORAGE_ONLY_HEAVY_KEYS = new Set([
   'dl_auto_backup_history_snapshots',
@@ -90,6 +96,22 @@ export function __getSimulatedPrimaryDbValueForTests(key: string): any {
   return simulatedPrimaryDbStore.get(key);
 }
 
+export function __setPrimaryDbVerifiedKeyForTests(key: string, verified: boolean): void {
+  if (verified) {
+    verifiedPrimaryDbMirrorKeys.add(key);
+  } else {
+    verifiedPrimaryDbMirrorKeys.delete(key);
+  }
+}
+
+export function isPrimaryDbVerifiedForKey(key: string): boolean {
+  if (!key) return false;
+  if (simulatePrimaryDbForTests) {
+    return verifiedPrimaryDbMirrorKeys.has(key) && simulatedPrimaryDbStore.has(key);
+  }
+  return verifiedPrimaryDbMirrorKeys.has(key);
+}
+
 const hasLocalStorageRuntime = (): boolean => {
   if (isLocalStorageSupported) return true;
   try {
@@ -106,8 +128,8 @@ export const safeLocalStorageSetItem = (
 ): boolean => {
   if (!hasLocalStorageRuntime()) return false;
 
-  // Skip mirroring massive backup snapshots or pending queues into 5MB localStorage if already persisted in IndexedDB
-  if (savedInPrimaryDb && (isHeavyStorageKey(key) || valStr.length > MAX_LOCALSTORAGE_MIRROR_BYTES)) {
+  // Skip mirroring massive backup snapshots or pending queues into 5MB localStorage ONLY if already verified in IndexedDB
+  if (savedInPrimaryDb && isPrimaryDbVerifiedForKey(key) && (isHeavyStorageKey(key) || valStr.length > MAX_LOCALSTORAGE_MIRROR_BYTES)) {
     try {
       localStorage.removeItem(key);
     } catch {
@@ -121,24 +143,59 @@ export const safeLocalStorageSetItem = (
     return true;
   } catch (e) {
     if (isQuotaExceededError(e)) {
-      // Evict heavy/redundant keys from localStorage (they remain safe in IndexedDB / memoryStore)
-      for (const evictKey of HEAVY_EVICTABLE_LOCALSTORAGE_KEYS) {
+      const canRetryWrite = !savedInPrimaryDb || valStr.length <= MAX_LOCALSTORAGE_MIRROR_BYTES;
+
+      // Pass 1: Evict non-critical cache / redundant snapshot keys from localStorage one-by-one
+      for (const evictKey of NON_CRITICAL_CACHE_LOCALSTORAGE_KEYS) {
         if (evictKey === key) continue;
+        // Preserve dl_restore_point_snapshot unless primary DB has verified it or all other caches are cleared
+        if (evictKey === 'dl_restore_point_snapshot' && !isPrimaryDbVerifiedForKey(evictKey)) {
+          continue;
+        }
         try {
           localStorage.removeItem(evictKey);
         } catch {
           // ignore
         }
-      }
-      // Retry writing the target key if it fits
-      if (!savedInPrimaryDb || valStr.length <= MAX_LOCALSTORAGE_MIRROR_BYTES) {
-        try {
-          localStorage.setItem(key, valStr);
-          return true;
-        } catch (retryErr) {
-          console.warn('localStorage quota still exceeded after eviction for key:', key, retryErr);
-          return false;
+        if (canRetryWrite) {
+          try {
+            localStorage.setItem(key, valStr);
+            return true;
+          } catch (retryErr) {
+            if (!isQuotaExceededError(retryErr)) {
+              console.warn('localStorage write failed after cache eviction for key:', key, retryErr);
+              return false;
+            }
+          }
         }
+      }
+
+      // Pass 2: Evict redundant localStorage mirrors of dl_lessons / dl_payments ONLY when verified intact in primary IndexedDB
+      for (const criticalKey of CRITICAL_DATA_MIRROR_KEYS) {
+        if (criticalKey === key) continue;
+        if (!isPrimaryDbVerifiedForKey(criticalKey)) {
+          continue;
+        }
+        try {
+          localStorage.removeItem(criticalKey);
+        } catch {
+          // ignore
+        }
+        if (canRetryWrite) {
+          try {
+            localStorage.setItem(key, valStr);
+            return true;
+          } catch (retryErr) {
+            if (!isQuotaExceededError(retryErr)) {
+              console.warn('localStorage write failed after verified mirror eviction for key:', key, retryErr);
+              return false;
+            }
+          }
+        }
+      }
+
+      if (canRetryWrite) {
+        console.warn('localStorage quota exceeded with no safe eviction remaining for key:', key);
       }
       return false;
     }
@@ -240,10 +297,11 @@ export const storage = {
     try {
       if (simulatePrimaryDbForTests) {
         simulatedPrimaryDbStore.set(key, value);
-        savedInForage = true;
+        savedInForage = simulatedPrimaryDbStore.has(key);
       } else if (isLocalforageSupported) {
         await localforage.setItem(key, value);
-        savedInForage = true;
+        const readBack = await localforage.getItem(key);
+        savedInForage = readBack !== null && readBack !== undefined;
       }
     } catch (e: any) {
       if (typeof e?.message === 'string' && e.message.includes('No available storage method')) {
@@ -252,6 +310,13 @@ export const storage = {
         forageError = e;
         console.warn('Error writing to localforage:', key, e);
       }
+    }
+
+    if (savedInForage) {
+      verifiedPrimaryDbMirrorKeys.add(key);
+    } else {
+      // If primary DB failed on this write, do not allow stale primary DB status to authorize localStorage eviction
+      verifiedPrimaryDbMirrorKeys.delete(key);
     }
 
     let savedInLocalStorage = false;
@@ -483,6 +548,7 @@ export const storage = {
         : new Error(`Durable storage remove failed for key: ${key}`);
     }
 
+    verifiedPrimaryDbMirrorKeys.delete(key);
     delete memoryStore[key];
   },
 
@@ -491,6 +557,7 @@ export const storage = {
       clearTimeout(writeDebounceTimers[k]);
       delete writeDebounceTimers[k];
     }
+    verifiedPrimaryDbMirrorKeys.clear();
     // Clear memory store
     for (const key in memoryStore) {
       delete memoryStore[key];

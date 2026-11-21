@@ -55,8 +55,20 @@ export interface NotificationActionHandler {
 let activeNotification: any = null;
 let isChannelCreated = false;
 
+let lastNotificationSettings: NotificationSettings | undefined;
+const activeChannelByBase: Record<string, string> = {};
+const createdVersionedChannelIds = new Set<string>();
+
+export type BaseNotificationChannelId =
+  | 'lesson_alarm'
+  | 'lessons_reminders'
+  | 'lesson_start'
+  | 'payment_due'
+  | 'daily_summary'
+  | 'attendance_reminder';
+
 // Helper to convert priority level to Android Importance enum/value
-const getImportanceFromPriority = (priority: NotificationPriority): Importance => {
+export const getImportanceFromPriority = (priority?: NotificationPriority): Importance => {
   switch (priority) {
     case 'low': return 2 as Importance;
     case 'normal': return 3 as Importance;
@@ -66,82 +78,159 @@ const getImportanceFromPriority = (priority: NotificationPriority): Importance =
   }
 };
 
+export const getVersionedChannelId = (
+  baseChannelId: BaseNotificationChannelId,
+  importance: Importance
+): string => `${baseChannelId}_v${importance}`;
+
+export const resolveChannelForSettings = (
+  baseChannelId: BaseNotificationChannelId,
+  settings?: NotificationSettings
+): { channelId: string; importance: Importance } => {
+  const effectiveSettings = settings || lastNotificationSettings;
+  let priority: NotificationPriority | undefined;
+  switch (baseChannelId) {
+    case 'lesson_alarm':
+    case 'lessons_reminders':
+      priority = effectiveSettings?.lessonReminder?.priority || 'max';
+      break;
+    case 'lesson_start':
+      priority = effectiveSettings?.lessonStart?.priority || 'max';
+      break;
+    case 'payment_due':
+      priority = effectiveSettings?.paymentDue?.priority || 'normal';
+      break;
+    case 'daily_summary':
+      priority = effectiveSettings?.dailySummary?.priority || 'normal';
+      break;
+    case 'attendance_reminder':
+      priority = effectiveSettings?.attendanceReminder?.priority || 'normal';
+      break;
+  }
+  const importance = getImportanceFromPriority(priority);
+  return {
+    channelId: getVersionedChannelId(baseChannelId, importance),
+    importance
+  };
+};
+
+// Parse HH:MM strictly without falsy coercion of 00:xx midnight hours
+export const parseDailySummaryTime = (timeStr?: string): { hours: number; minutes: number } => {
+  const match = String(timeStr || '').trim().match(/^(\d{1,2}):(\d{1,2})$/);
+  if (match) {
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    if (
+      Number.isInteger(hours) &&
+      Number.isInteger(minutes) &&
+      hours >= 0 &&
+      hours <= 23 &&
+      minutes >= 0 &&
+      minutes <= 59
+    ) {
+      return { hours, minutes };
+    }
+  }
+  return { hours: 20, minutes: 0 };
+};
+
+export const countActiveTodayLessonsForSummary = (lessons: Lesson[], todayStr: string): number => {
+  const normalizedToday = normalizeDateToISO(todayStr);
+  return lessons.filter(
+    l => !l.deleted && l.status !== 'cancelled' && normalizeDateToISO(l.date) === normalizedToday
+  ).length;
+};
+
 // Helper to convert sound option to sound filename or default.
 // Returning undefined instructs Android to use the device's default system sound reliably.
 const getSoundFilename = (_sound: NotificationSound): string | undefined => {
   return undefined;
 };
 
-// Initialize Notification Channels for Android 8.0+
+// Initialize / upgrade versioned Notification Channels for Android 8.0+
 export const initNotificationChannels = async (settings?: NotificationSettings) => {
-  if (Capacitor.isNativePlatform() && !isChannelCreated) {
-    try {
-      // 0. High-Priority Pre-Lesson Alarm Channel (Heads-up banner outside app + Lock screen)
-      await LocalNotifications.createChannel({
-        id: 'lesson_alarm',
+  if (settings) {
+    lastNotificationSettings = settings;
+  }
+  if (!Capacitor.isNativePlatform()) return;
+
+  try {
+    const channelSpecs: Array<{
+      baseId: BaseNotificationChannelId;
+      name: string;
+      description: string;
+      lights?: boolean;
+      lightColor?: string;
+    }> = [
+      {
+        baseId: 'lesson_alarm',
         name: 'منبه مواعيد الحصص المسبقة (Lesson Alarms)',
         description: 'منبهات بارزة ورنين عالي لمواعيد الحصص القادمة تظهر فوق التطبيقات وعلى شاشة القفل',
-        importance: 5 as Importance, // IMPORTANCE_MAX -> Heads-up banner outside app!
-        visibility: 1 as any, // VISIBILITY_PUBLIC -> On lock screen
-        vibration: true,
         lights: true,
         lightColor: '#EF4444'
-      });
-
-      // 1. Lesson Reminders Channel
-      await LocalNotifications.createChannel({
-        id: 'lessons_reminders',
+      },
+      {
+        baseId: 'lessons_reminders',
         name: 'Lesson Reminders & Active Timers',
         description: 'Notifications for class reminders and running lesson timer',
-        importance: 5 as Importance, // Elevated to MAX for outside app visibility
-        visibility: 1 as any,
-        vibration: true,
         lights: true,
         lightColor: '#3B82F6'
-      });
-
-      // 2. Lesson Start Channel
-      await LocalNotifications.createChannel({
-        id: 'lesson_start',
+      },
+      {
+        baseId: 'lesson_start',
         name: 'Lesson Start Alerts',
         description: 'Notifications when a lesson time arrives',
-        importance: 5 as Importance,
-        visibility: 1 as any,
-        vibration: true,
         lights: true,
         lightColor: '#10B981'
-      });
-
-      // 3. Payment Due Channel
-      await LocalNotifications.createChannel({
-        id: 'payment_due',
+      },
+      {
+        baseId: 'payment_due',
         name: 'Payment Due Reminders',
-        description: 'Notifications for student pending payments and package renewals',
-        importance: settings ? getImportanceFromPriority(settings.paymentDue.priority) : 3,
-        visibility: 1 as any,
-        vibration: true
-      });
-
-      // 4. Daily Summary Channel
-      await LocalNotifications.createChannel({
-        id: 'daily_summary',
+        description: 'Notifications for student pending payments and package renewals'
+      },
+      {
+        baseId: 'daily_summary',
         name: 'Daily Summary Reports',
-        description: 'Notifications for daily teacher schedule and earnings summary',
-        importance: settings ? getImportanceFromPriority(settings.dailySummary.priority) : 3,
-        visibility: 1 as any,
-        vibration: true
-      });
-
-      // 5. Attendance Reminder Channel
-      await LocalNotifications.createChannel({
-        id: 'attendance_reminder',
+        description: 'Notifications for daily teacher schedule and earnings summary'
+      },
+      {
+        baseId: 'attendance_reminder',
         name: 'Attendance Reminders',
-        description: 'Reminders to log student attendance after class',
-        importance: settings ? getImportanceFromPriority(settings.attendanceReminder.priority) : 3,
-        visibility: 1 as any,
-        vibration: true
-      });
+        description: 'Reminders to log student attendance after class'
+      }
+    ];
 
+    let anyCreated = false;
+    for (const spec of channelSpecs) {
+      const { channelId, importance } = resolveChannelForSettings(spec.baseId, settings);
+      const prevChannelId = activeChannelByBase[spec.baseId];
+
+      if (createdVersionedChannelIds.has(channelId) && prevChannelId === channelId) {
+        continue;
+      }
+
+      if (prevChannelId && prevChannelId !== channelId && typeof (LocalNotifications as any).deleteChannel === 'function') {
+        try {
+          await (LocalNotifications as any).deleteChannel({ id: prevChannelId });
+          createdVersionedChannelIds.delete(prevChannelId);
+        } catch {}
+      }
+
+      await LocalNotifications.createChannel({
+        id: channelId,
+        name: spec.name,
+        description: spec.description,
+        importance,
+        visibility: 1 as any,
+        vibration: true,
+        ...(spec.lights ? { lights: true, lightColor: spec.lightColor } : {})
+      });
+      createdVersionedChannelIds.add(channelId);
+      activeChannelByBase[spec.baseId] = channelId;
+      anyCreated = true;
+    }
+
+    if (anyCreated) {
       // Register interactive action buttons for notifications appearing outside the app
       try {
         await LocalNotifications.registerActionTypes({
@@ -172,11 +261,11 @@ export const initNotificationChannels = async (settings?: NotificationSettings) 
       } catch (e) {
         console.warn('registerActionTypes notice:', e);
       }
-
-      isChannelCreated = true;
-    } catch (err) {
-      console.warn('Failed to create notification channels:', err);
     }
+
+    isChannelCreated = true;
+  } catch (err) {
+    console.warn('Failed to create notification channels:', err);
   }
 };
 
@@ -362,18 +451,19 @@ export const sendSystemNotification = async (
   tag: string = 'general',
   extra?: Record<string, any>,
   actionTypeId?: string
-) => {
+): Promise<boolean> => {
   const { notifId, uniqueTag } = computeSystemNotificationIdentity(tag, title, body, extra);
 
   if (Capacitor.isNativePlatform()) {
     try {
-      await initNotificationChannels();
+      await initNotificationChannels(lastNotificationSettings);
       
-      let channelId = 'lessons_reminders';
-      if (tag === 'payment') channelId = 'payment_due';
-      if (tag === 'lessonStart') channelId = 'lesson_start';
-      if (tag === 'attendance') channelId = 'attendance_reminder';
-      if (tag.startsWith('upcoming-') || tag === 'lesson_alarm') channelId = 'lesson_alarm';
+      let baseChannel: BaseNotificationChannelId = 'lessons_reminders';
+      if (tag === 'payment') baseChannel = 'payment_due';
+      if (tag === 'lessonStart') baseChannel = 'lesson_start';
+      if (tag === 'attendance') baseChannel = 'attendance_reminder';
+      if (tag.startsWith('upcoming-') || tag === 'lesson_alarm') baseChannel = 'lesson_alarm';
+      const channelId = resolveChannelForSettings(baseChannel, lastNotificationSettings).channelId;
       
       await LocalNotifications.schedule({
         notifications: [
@@ -393,17 +483,21 @@ export const sendSystemNotification = async (
           }
         ]
       });
+      return true;
     } catch (err) {
       console.warn('Native sendSystemNotification failed:', err);
+      return false;
     }
   } else {
     try {
       let perm = await getNotificationPermission();
       if (perm !== 'granted') {
         const granted = await requestNotificationPermission();
-        if (!granted) return;
+        if (!granted) return false;
         perm = 'granted';
       }
+
+      let delivered = false;
 
       // Check for ServiceWorker showNotification to present system-level OS banner outside browser tab
       if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
@@ -431,7 +525,8 @@ export const sendSystemNotification = async (
               ] : undefined
             };
             await reg.showNotification(title, swOptions);
-            return;
+            delivered = true;
+            return true;
           }
         } catch (swErr) {
           console.warn('ServiceWorker showNotification failed, trying fallback:', swErr);
@@ -454,18 +549,23 @@ export const sendSystemNotification = async (
               notif.close();
             } catch {}
           };
+          delivered = true;
         } catch (notifErr) {
           console.warn('Direct Notification constructor failed:', notifErr);
+          return false;
         }
       }
 
-      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      if (delivered && typeof navigator !== 'undefined' && 'vibrate' in navigator) {
         try {
           navigator.vibrate([500, 200, 500, 200, 500]);
         } catch {}
       }
+
+      return delivered;
     } catch (err) {
       console.warn('Browser notification error:', err);
+      return false;
     }
   }
 };
@@ -826,12 +926,17 @@ const rebuildAllNotificationSchedulesInternal = async (
           ? `Lektion ${lessonDisplayName} beginnt in ${minutesBefore} Minuten (${lesson.time} Uhr)`
           : `Lesson ${lessonDisplayName} starts in ${minutesBefore} mins (at ${lesson.time})`;
 
+        const reminderChannel = resolveChannelForSettings(
+          isAlarm ? 'lesson_alarm' : 'lessons_reminders',
+          settings
+        ).channelId;
+
         addNotification(
           generateDeterministicId(`rem_${lesson.id}`, 10000),
           title,
           body,
           new Date(reminderEpoch),
-          isAlarm ? 'lesson_alarm' : 'lessons_reminders',
+          reminderChannel,
           'lessonReminder',
           { lessonId: lesson.id, groupName: lessonDisplayName, isAlarm },
           'LESSON_ALARM_ACTIONS'
@@ -858,7 +963,7 @@ const rebuildAllNotificationSchedulesInternal = async (
           startTitle,
           startBody,
           new Date(lessonStartEpoch),
-          'lesson_start',
+          resolveChannelForSettings('lesson_start', settings).channelId,
           'lessonStart',
           { lessonId: lesson.id, groupName: lessonDisplayName },
           'LESSON_ALARM_ACTIONS'
@@ -887,7 +992,7 @@ const rebuildAllNotificationSchedulesInternal = async (
           attTitle,
           attBody,
           new Date(attendanceRemEpoch),
-          'attendance_reminder',
+          resolveChannelForSettings('attendance_reminder', settings).channelId,
           'attendanceReminder',
           { lessonId: lesson.id, groupName: lessonDisplayName }
         );
@@ -927,7 +1032,7 @@ const rebuildAllNotificationSchedulesInternal = async (
         payTitle,
         payBody,
         tomorrow10AM,
-        'payment_due',
+        resolveChannelForSettings('payment_due', settings).channelId,
         'paymentDue',
         { studentCount: pendingStudents.length }
       );
@@ -938,11 +1043,10 @@ const rebuildAllNotificationSchedulesInternal = async (
   // C. DAILY SUMMARY NOTIFICATION
   // -------------------------------------------------------------
   if (settings.dailySummary.enabled) {
-    const timeStr = settings.dailySummaryTime || '20:00';
-    const [hrs, mins] = timeStr.split(':').map(Number);
+    const { hours, minutes } = parseDailySummaryTime(settings.dailySummaryTime);
 
     const summaryDate = new Date();
-    summaryDate.setHours(hrs || 20, mins || 0, 0, 0);
+    summaryDate.setHours(hours, minutes, 0, 0);
 
     // If time has passed today, schedule for tomorrow
     if (summaryDate.getTime() <= now) {
@@ -950,16 +1054,16 @@ const rebuildAllNotificationSchedulesInternal = async (
     }
 
     const todayStr = formatLocalDate();
-    const todayLessons = lessons.filter(l => normalizeDateToISO(l.date) === normalizeDateToISO(todayStr));
+    const todayLessonsCount = countActiveTodayLessonsForSummary(lessons, todayStr);
 
     let summaryText = isAr ? 'ملخص اليوم: ' : isDe ? 'Tagesübersicht: ' : 'Daily Summary: ';
     const parts: string[] = [];
 
     if (settings.dailySummaryIncludeLessons) {
-      parts.push(isAr ? `${todayLessons.length} حصص اليوم` : isDe ? `${todayLessons.length} Lektionen heute` : `${todayLessons.length} lessons today`);
+      parts.push(isAr ? `${todayLessonsCount} حصص اليوم` : isDe ? `${todayLessonsCount} Lektionen heute` : `${todayLessonsCount} lessons today`);
     }
     if (settings.dailySummaryIncludePendingPayments) {
-      const pendingCount = students.filter(s => s.paymentStatus === 'pending').length;
+      const pendingCount = students.filter(s => s.status !== 'archived' && s.paymentStatus === 'pending').length;
       parts.push(isAr ? `${pendingCount} مدفوعات معلقة` : isDe ? `${pendingCount} offene Zahlungen` : `${pendingCount} pending payments`);
     }
 
@@ -972,7 +1076,7 @@ const rebuildAllNotificationSchedulesInternal = async (
       sumTitle,
       summaryText,
       summaryDate,
-      'daily_summary',
+      resolveChannelForSettings('daily_summary', settings).channelId,
       'dailySummary'
     );
   }
@@ -1019,7 +1123,7 @@ const rebuildAllNotificationSchedulesInternal = async (
               displayTitle,
               displayBody,
               reminderDate,
-              'lessons_reminders',
+              resolveChannelForSettings('lessons_reminders', settings).channelId,
               'schoolLessonReminder',
               { className: labelClass, subjectName: labelSubject }
             );
@@ -1097,7 +1201,7 @@ export const setupNotificationActionListener = (
       const recSub = LocalNotifications.addListener('localNotificationReceived', (notification) => {
         const extra = notification.extra || {};
         // If an alarm notification is received
-        if (extra.isAlarm || notification.channelId === 'lesson_alarm') {
+        if (extra.isAlarm || notification.channelId?.startsWith('lesson_alarm')) {
           onAction({ actionId: 'ALARM_RECEIVED', lessonId: extra.lessonId, extra });
         }
       });

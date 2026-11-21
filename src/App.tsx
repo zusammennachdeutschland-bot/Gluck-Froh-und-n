@@ -777,7 +777,7 @@ function MainApp() {
 
 import { migrateFromLocalStorageToIndexedDB } from './services/migrationService';
 import { storage } from './services/storageService';
-import { sanitizeInitialData, clearAllLocalDataAndReset } from './services/dataSanitizer';
+import { sanitizeInitialData, clearAllLocalDataAndReset, ZOOM_STORAGE_KEYS } from './services/dataSanitizer';
 import { mergeHodVisitMigration } from './utils/hodVisitMigration';
 import { HomeworkPlayerPage } from './pages/HomeworkPlayerPage';
 
@@ -844,7 +844,8 @@ export default function App() {
         'dl_school_notes', 'dl_finance_accounts', 'dl_finance_categories', 'dl_finance_transactions',
         'dl_finance_recurring', 'dl_finance_installments', 'dl_finance_notifications',
         'gluck_gold_holdings', 'gluck_gold_settings', 'dl_lernstudio_sets',
-        'dl_settings', 'dl_sync_state'
+        'dl_settings', 'dl_sync_state',
+        ...ZOOM_STORAGE_KEYS
       ];
       
       const values = await Promise.all(keys.map(async (k) => {

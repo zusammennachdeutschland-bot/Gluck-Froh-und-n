@@ -7,6 +7,14 @@ export interface LessonPipelineTraceDetails {
   previousLessons?: Lesson[];
 }
 
+export const isLessonPipelineTraceEnabled = (): boolean => {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem('gluck_debug_lesson_pipeline') === '1';
+  } catch {
+    return false;
+  }
+};
+
 /**
  * Enable with localStorage.setItem('gluck_debug_lesson_pipeline', '1').
  * Every trace includes the identifying fields needed to follow one lesson across
@@ -18,7 +26,7 @@ export const traceLessonPipeline = (
   details: LessonPipelineTraceDetails = {}
 ): void => {
   try {
-    if (typeof localStorage === 'undefined' || localStorage.getItem('gluck_debug_lesson_pipeline') !== '1') return;
+    if (!isLessonPipelineTraceEnabled()) return;
     const rows = (Array.isArray(lessons) ? lessons : []).map(lesson => ({
       id: lesson?.id || '',
       group: lesson?.groupName || lesson?.groupId || '',
