@@ -1,10 +1,10 @@
-import { isPendingStatus, isGroupPerLesson, calculateSequentialSessionNumber, resolveLessonCycleNumber, pickAuthoritativeLesson, normalizeTime } from "../utils/lessonUtils";
+import { isPendingStatus, calculateSequentialSessionNumber, pickAuthoritativeLesson, normalizeTime } from "../utils/lessonUtils";
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { Lesson, Group, Student, LessonReport, AttendanceStatus, PaymentStatus } from '../types';
+import { Lesson, Group, Student, LessonReport } from '../types';
 import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
 import { getLessonsForDate } from '../utils/dailyLessonUtils';
-import { getGroupScheduleSlots, getDayNumber, isStudentMatchingLessonWeek, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
+import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
 import { storage } from '../services/storageService';
 import { 
   CheckCircle2, Clock, PlayCircle, ChevronRight, ChevronDown, ChevronUp, AlertCircle, XCircle, X, Video, MapPin, Users, Check, MessageCircle, Phone
@@ -14,7 +14,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { GroupProfileModal } from './GroupProfileModal';
 import { SelectParentCallModal } from './SelectParentCallModal';
 import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
-import { traceLessonPipeline } from '../utils/lessonPipelineDiagnostics';
 import { handleHomeQuickLessonCompletion } from '../utils/homeLessonCompletion';
 
 const getLessonEndTime = (timeStr: string, durationMinutes: number = 60): string => {
