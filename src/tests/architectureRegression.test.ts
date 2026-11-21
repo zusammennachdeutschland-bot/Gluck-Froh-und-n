@@ -101,7 +101,7 @@ function runArchitectureRegressionTests() {
     zoomJoinUrl: 'https://zoom.us/j/66666666666',
     syncState: 'superseded',
     updatedAt: 100
-  } as GroupWeeklySession;
+  } as unknown as GroupWeeklySession;
   assert.equal(
     resolveActiveZoomLinkForLesson({
       groupId: group.id,
