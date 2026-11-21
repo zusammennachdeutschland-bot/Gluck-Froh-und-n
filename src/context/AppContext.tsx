@@ -2886,7 +2886,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const registerFinanceActivity = useCallback(() => {
     setProfile(prev => {
       const today = formatLocalDate();
-      if (prev.financeLastActivityDate === today) return prev; // Already registered today
+      if (normalizeDateToISO(prev.financeLastActivityDate || '') === normalizeDateToISO(today)) return prev; // Already registered today
       
       let newStreak = (prev.financeStreak || 0) + 1;
       if (prev.financeLastActivityDate) {
@@ -7871,7 +7871,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     if (!isInitializedRef.current || !lessons || lessons.length === 0) return;
     const todayStr = formatLocalDateStr(new Date());
     const lastCleanDate = localStorage.getItem(LAST_CLEANUP_DATE_KEY);
-    if (lastCleanDate !== todayStr) {
+    if (normalizeDateToISO(lastCleanDate || '') !== normalizeDateToISO(todayStr)) {
       const timer = setTimeout(() => {
         executeSmartLessonCleanup(false).catch(err => console.warn('Daily auto-cleanup error:', err));
       }, 5000);
