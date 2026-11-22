@@ -493,46 +493,111 @@ export const resequenceScheduledLessonsAfterChange = (
     wrapMutation?: <T>(item: T) => T;
   }
 ): Lesson[] => {
-  if (!changedLesson || !Array.isArray(allLessons)) return allLessons;
+  if (!changedLesson || !Array.isArray(allLessons) || allLessons.length === 0) return allLessons;
 
   const grp = options?.group;
   const st = options?.student;
   const wrap = options?.wrapMutation || (<T>(item: T) => item);
 
-  const result = [...allLessons];
   const scopeIndices: number[] = [];
 
-  result.forEach((l, idx) => {
-    if (!l || l.deleted || l.status === 'cancelled') return;
+  for (let idx = 0; idx < allLessons.length; idx++) {
+    const l = allLessons[idx];
+    if (!l || l.deleted || l.status === 'cancelled') continue;
     if (doesLessonMatchScope(l, changedLesson, { group: grp, student: st, students: options?.students })) {
       scopeIndices.push(idx);
     }
-  });
+  }
 
-  scopeIndices.sort((idxA, idxB) => compareLessonsChronologically(result[idxA], result[idxB]));
+  if (scopeIndices.length === 0) return allLessons;
 
-  for (const idx of scopeIndices) {
-    const l = result[idx];
-    const resolution = resolveLessonCycleNumber(l, result, {
-      group: grp,
-      student: st,
-      students: options?.students,
-      forceRecalculate: true,
-    });
+  scopeIndices.sort((idxA, idxB) => compareLessonsChronologically(allLessons[idxA], allLessons[idxB]));
+
+  const sampleLesson = allLessons[scopeIndices[0]] || changedLesson;
+  const isPerLesson = Boolean(
+    isGroupPerLesson(grp) ||
+    (!grp && st && (st.paymentPlan === 'per_lesson' || st.bundleSize === 1)) ||
+    (!grp && !st && sampleLesson?.totalSessionsInPackage === 1)
+  );
+
+  const totalCycleSessions = isPerLesson
+    ? 1
+    : (grp?.sessionCount && grp.sessionCount > 1)
+      ? grp.sessionCount
+      : (st?.bundleSize && st.bundleSize > 1)
+        ? st.bundleSize
+        : (sampleLesson?.totalSessionsInPackage && sampleLesson.totalSessionsInPackage > 1)
+          ? sampleLesson.totalSessionsInPackage
+          : 4;
+
+  const startingSessionNumber = Math.min(
+    totalCycleSessions,
+    Math.max(1, grp?.startingSessionNumber || 1)
+  );
+
+  const hasValidAnchor = Boolean(
+    !isPerLesson &&
+    grp?.cycleAnchorSessionNumber &&
+    grp.cycleAnchorSessionNumber >= 1 &&
+    (grp.cycleAnchorLessonId || grp.cycleAnchorDate)
+  );
+
+  let anchorIndex = -1;
+  let anchorSessionNum = 1;
+  if (hasValidAnchor && grp) {
+    anchorSessionNum = Math.min(
+      totalCycleSessions,
+      Math.max(1, Math.floor(grp.cycleAnchorSessionNumber!))
+    );
+    if (grp.cycleAnchorLessonId) {
+      anchorIndex = scopeIndices.findIndex(idx => allLessons[idx].id === grp.cycleAnchorLessonId);
+    }
+    if (anchorIndex === -1 && grp.cycleAnchorDate) {
+      const anchorProbe: Partial<Lesson> = {
+        id: grp.cycleAnchorLessonId || '',
+        date: grp.cycleAnchorDate,
+        time: normalizeTime(grp.cycleAnchorTime) || grp.cycleAnchorTime || '00:00'
+      };
+      const firstAtOrAfter = scopeIndices.findIndex(
+        idx => compareLessonsChronologically(allLessons[idx], anchorProbe) >= 0
+      );
+      anchorIndex = firstAtOrAfter === -1 ? scopeIndices.length : firstAtOrAfter;
+    }
+  }
+
+  let result: Lesson[] | null = null;
+
+  for (let sequenceIndex = 0; sequenceIndex < scopeIndices.length; sequenceIndex++) {
+    const idx = scopeIndices[sequenceIndex];
+    const l = allLessons[idx];
+    let sessionNumber = 1;
+
+    if (!isPerLesson) {
+      if (hasValidAnchor && anchorIndex !== -1) {
+        const delta = sequenceIndex - anchorIndex;
+        sessionNumber = ((((anchorSessionNum - 1 + delta) % totalCycleSessions) + totalCycleSessions) % totalCycleSessions) + 1;
+      } else {
+        const absoluteOffset = (startingSessionNumber - 1) + sequenceIndex;
+        sessionNumber = (absoluteOffset % totalCycleSessions) + 1;
+      }
+    }
 
     if (
-      l.sessionNumber !== resolution.sessionNumber ||
-      l.totalSessionsInPackage !== resolution.totalCycleSessions
+      l.sessionNumber !== sessionNumber ||
+      l.totalSessionsInPackage !== totalCycleSessions
     ) {
+      if (!result) {
+        result = [...allLessons];
+      }
       result[idx] = wrap({
         ...l,
-        sessionNumber: resolution.sessionNumber,
-        totalSessionsInPackage: resolution.totalCycleSessions,
+        sessionNumber,
+        totalSessionsInPackage: totalCycleSessions,
       });
     }
   }
 
-  return result;
+  return result || allLessons;
 };
 
 export const normalizeTime = (t?: string): string => {
@@ -600,48 +665,37 @@ export const checkOverlap = (l1: any, l2: any) => {
   return s1 < e2 && s2 < e1;
 };
 
-export const isSameLessonTarget = (l1: any, l2: any, students?: any[]): boolean => {
+export const isSameLessonTarget = (l1: any, l2: any, students?: any[], studentsById?: Map<string, any>): boolean => {
   if (!l1 || !l2) return false;
   // If both belong to the exact same group
   if (l1.groupId && l2.groupId && l1.groupId !== 'quick_group' && l1.groupId === l2.groupId) {
     return true;
   }
-  // If both belong to the exact same student ID
-  if (l1.studentId && l2.studentId && l1.studentId === l2.studentId) {
-    return true;
+  if (l1.groupId && l2.groupId && l1.groupId !== 'quick_group' && l2.groupId !== 'quick_group' && l1.groupId !== l2.groupId) {
+    return false;
   }
-  // If student names match
-  const n1 = normalizeName(l1.studentName || l1.quickStudentName);
-  const n2 = normalizeName(l2.studentName || l2.quickStudentName);
-  if (n1 && n2 && (n1 === n2 || n1.includes(n2) || n2.includes(n1))) {
-    return true;
+  // If both belong to the exact same student ID (never merge by student name!)
+  if (l1.studentId && l2.studentId) {
+    return l1.studentId === l2.studentId;
   }
   // Cross check if student belongs to the group
-  if (students && Array.isArray(students)) {
-    const stId = l1.studentId || l2.studentId;
-    const grpId = l1.groupId || l2.groupId;
-    if (stId && grpId && grpId !== 'quick_group') {
-      const st = students.find(s => s.id === stId);
-      if (st && st.groupId === grpId) {
-        return true;
-      }
+  const stId = l1.studentId || l2.studentId;
+  const grpId = l1.groupId || l2.groupId;
+  if (stId && grpId && grpId !== 'quick_group') {
+    const st = studentsById ? studentsById.get(stId) : (Array.isArray(students) ? students.find(s => s.id === stId) : undefined);
+    if (st && st.groupId === grpId) {
+      return true;
     }
-  }
-  // Title comparison for individual sessions (e.g., "Einzelunterricht - Asser_Samy")
-  const t1 = normalizeName(l1.title);
-  const t2 = normalizeName(l2.title);
-  if (t1 && t2 && t1 === t2 && t1.length > 5) {
-    return true;
   }
   return false;
 };
 
-export const areDuplicateLessons = (l1: any, l2: any, students?: any[]): boolean => {
+export const areDuplicateLessons = (l1: any, l2: any, students?: any[], studentsById?: Map<string, any>): boolean => {
   if (!l1 || !l2 || l1.id === l2.id) return false;
   if (l1.deleted || l2.deleted) return false;
   if (l1.date !== l2.date) return false;
   
-  if (!isSameLessonTarget(l1, l2, students)) return false;
+  if (!isSameLessonTarget(l1, l2, students, studentsById)) return false;
 
   const t1 = normalizeTime(l1.time);
   const t2 = normalizeTime(l2.time);
@@ -760,16 +814,51 @@ export const deduplicateLessonList = (
 
   const removedIds = new Set<string>();
   const idMap = new Map<string, string>();
-  const activeList = lessons.filter(l => l && l.id && !l.deleted);
-  const deletedList = lessons.filter(l => l && l.id && l.deleted);
+  const activeList: any[] = [];
+  const deletedList: any[] = [];
+  const seenExactIds = new Set<string>();
+
+  for (const l of lessons) {
+    if (!l || !l.id) continue;
+    if (seenExactIds.has(l.id)) {
+      removedIds.add(l.id);
+      continue;
+    }
+    seenExactIds.add(l.id);
+    if (l.deleted) {
+      deletedList.push(l);
+    } else {
+      activeList.push(l);
+    }
+  }
+
+  const studentsById = new Map<string, any>();
+  if (Array.isArray(students)) {
+    for (const st of students) {
+      if (st && st.id) studentsById.set(st.id, st);
+    }
+  }
 
   const survivors: any[] = [];
+  // Bucket survivor indices by lesson.date so duplicate checks are O(1) per date instead of O(N^2)
+  const survivorIndicesByDate = new Map<string, number[]>();
 
   for (const candidate of activeList) {
     if (removedIds.has(candidate.id)) continue;
 
-    // Check if candidate is duplicate with any already accepted survivor
-    const existingIndex = survivors.findIndex(s => areDuplicateLessons(s, candidate, students));
+    const dateKey = String(candidate.date || '');
+    const bucket = survivorIndicesByDate.get(dateKey);
+    let existingIndex = -1;
+
+    if (bucket) {
+      for (let bIdx = 0; bIdx < bucket.length; bIdx++) {
+        const sIdx = bucket[bIdx];
+        if (areDuplicateLessons(survivors[sIdx], candidate, students, studentsById)) {
+          existingIndex = sIdx;
+          break;
+        }
+      }
+    }
 
     if (existingIndex >= 0) {
       const existingSurvivor = survivors[existingIndex];
@@ -779,15 +868,46 @@ export const deduplicateLessonList = (
       removedIds.add(duplicate.id);
       idMap.set(duplicate.id, survivor.id);
     } else {
+      const newIdx = survivors.length;
       survivors.push(candidate);
+      if (bucket) {
+        bucket.push(newIdx);
+      } else {
+        survivorIndicesByDate.set(dateKey, [newIdx]);
+      }
     }
   }
 
   const hasChanges = removedIds.size > 0;
-  // Keep deleted list if needed or return only survivors
   const deduplicated = [...survivors, ...deletedList.filter(d => !removedIds.has(d.id))];
 
   return { deduplicated, removedIds, idMap, hasChanges };
+};
+
+const extractNonVirtualLessonIds = (payment: any): string[] => {
+  const ids: string[] = [];
+  if (Array.isArray(payment?.lessonIds)) {
+    for (const id of payment.lessonIds) {
+      if (typeof id === 'string' && id && !id.startsWith('virtual_')) {
+        ids.push(id);
+      }
+    }
+  }
+  if (typeof payment?.lessonId === 'string' && payment.lessonId && !payment.lessonId.startsWith('virtual_')) {
+    if (!ids.includes(payment.lessonId)) {
+      ids.push(payment.lessonId);
+    }
+  }
+  return Array.from(new Set(ids)).sort();
+};
+
+const buildInvoiceDedupeKey = (payment: any): string => {
+  const studentId = String(payment?.studentId || '');
+  const realIds = extractNonVirtualLessonIds(payment);
+  const lessonSetOrCycleKey = realIds.length > 0
+    ? `lessons:${realIds.join(',')}`
+    : `cycle:${payment?.cycleId || payment?.id || ''}`;
+  return `${studentId}|${payment?.dueDate || ''}|${payment?.bundleSize || ''}|${payment?.amountDue ?? ''}|${lessonSetOrCycleKey}`;
 };
 
 export const deduplicatePaymentsList = (
@@ -828,134 +948,109 @@ export const deduplicatePaymentsList = (
     }
   }
 
-  // Deduplicate paid payments among themselves (keeping the most detailed / highest amount)
+  // Deduplicate paid payments among themselves in O(N) using Map by ID, lesson-ID set, and full key (P1 & P4)
   const dedupedPaid: any[] = [];
+  const paidIndexById = new Map<string, number>();
+  const paidIndexByLessonSet = new Map<string, number>();
+  const paidIndexByFullKey = new Map<string, number>();
+
   for (const p of paidPayments) {
-    const existingIdx = dedupedPaid.findIndex(d => {
-      if (d.id === p.id) return true;
-      if (d.studentId !== p.studentId) return false;
-      // Check if both reference the exact same lesson IDs
-      if (Array.isArray(d.lessonIds) && Array.isArray(p.lessonIds) && d.lessonIds.length > 0 && p.lessonIds.length > 0) {
-        const hasSameIds = d.lessonIds.length === p.lessonIds.length && d.lessonIds.every((id: string) => p.lessonIds.includes(id));
-        if (hasSameIds) return true;
-      }
-      if (d.dueDate && p.dueDate && d.dueDate === p.dueDate && d.bundleSize === p.bundleSize && d.amountDue === p.amountDue) {
-        return true;
-      }
-      return false;
-    });
+    const realIds = extractNonVirtualLessonIds(p);
+    const lessonSetKey = realIds.length > 0 ? `${p.studentId || ''}::${realIds.join(',')}` : '';
+    const fullKey = buildInvoiceDedupeKey(p);
+
+    let existingIdx = paidIndexById.get(p.id) ?? -1;
+    if (existingIdx === -1 && lessonSetKey && paidIndexByLessonSet.has(lessonSetKey)) {
+      existingIdx = paidIndexByLessonSet.get(lessonSetKey)!;
+    }
+    if (existingIdx === -1 && paidIndexByFullKey.has(fullKey)) {
+      existingIdx = paidIndexByFullKey.get(fullKey)!;
+    }
 
     if (existingIdx >= 0) {
       const existing = dedupedPaid[existingIdx];
       const winner = (p.amountPaid || 0) >= (existing.amountPaid || 0) ? p : existing;
       const loser = winner === p ? existing : p;
       dedupedPaid[existingIdx] = winner;
-      removedIds.add(loser.id);
+      if (loser.id !== winner.id) {
+        removedIds.add(loser.id);
+      }
+      paidIndexById.set(winner.id, existingIdx);
+      if (lessonSetKey) paidIndexByLessonSet.set(lessonSetKey, existingIdx);
+      paidIndexByFullKey.set(fullKey, existingIdx);
       modified = true;
     } else {
+      const newIdx = dedupedPaid.length;
       dedupedPaid.push(p);
+      paidIndexById.set(p.id, newIdx);
+      if (lessonSetKey) paidIndexByLessonSet.set(lessonSetKey, newIdx);
+      paidIndexByFullKey.set(fullKey, newIdx);
     }
   }
 
-  // Helper sets from paid records - indexed strictly per student so one student's payment never affects other students
+  // Index paid lesson IDs strictly per student (P2: match invoices by lesson ID)
   const paidLessonIdsByStudent = new Map<string, Set<string>>();
-  const paidDateSignaturesByStudent = new Map<string, Set<string>>();
 
-  dedupedPaid.forEach(p => {
+  for (const p of dedupedPaid) {
     const stId = p.studentId;
-    if (!stId) return;
+    if (!stId) continue;
 
-    if (!paidLessonIdsByStudent.has(stId)) {
-      paidLessonIdsByStudent.set(stId, new Set<string>());
+    let stIdsSet = paidLessonIdsByStudent.get(stId);
+    if (!stIdsSet) {
+      stIdsSet = new Set<string>();
+      paidLessonIdsByStudent.set(stId, stIdsSet);
     }
-    const stIdsSet = paidLessonIdsByStudent.get(stId)!;
-    if (p.lessonId) stIdsSet.add(p.lessonId);
-    if (Array.isArray(p.lessonIds)) {
-      p.lessonIds.forEach((id: string) => {
-        if (!id.startsWith('virtual_')) stIdsSet.add(id);
-      });
+    for (const lid of extractNonVirtualLessonIds(p)) {
+      stIdsSet.add(lid);
     }
+  }
 
-    if (!paidDateSignaturesByStudent.has(stId)) {
-      paidDateSignaturesByStudent.set(stId, new Set<string>());
-    }
-    const stDatesSet = paidDateSignaturesByStudent.get(stId)!;
-    if (Array.isArray(p.lessonDates)) {
-      p.lessonDates.forEach((dStr: string) => {
-        const match = dStr?.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
-        if (match) {
-          const iso = normalizeDateToISO(match[1]);
-          stDatesSet.add(`${stId}_${iso}`);
-        }
-      });
-    }
-  });
-
-  // Filter and deduplicate pending payments against PAID records of the SAME STUDENT and against each other
+  // Filter and deduplicate pending payments against PAID records of the SAME STUDENT and against each other by lesson IDs (P2 & P4)
   const dedupedPending: any[] = [];
+  const pendingIndexById = new Map<string, number>();
+  const pendingIndexByLessonSet = new Map<string, number>();
+
   for (const p of pendingPayments) {
     const stId = p.studentId;
     const studentPaidLessonIds = stId ? paidLessonIdsByStudent.get(stId) : undefined;
-    const studentPaidDateSignatures = stId ? paidDateSignaturesByStudent.get(stId) : undefined;
+    const realLessonIds = extractNonVirtualLessonIds(p);
 
-    // Check if this pending payment is ALREADY COVERED by any paid record OF THE SAME STUDENT
-    const realLessonIds = (p.lessonIds || []).filter((id: string) => typeof id === 'string' && !id.startsWith('virtual_'));
+    // Check if this pending payment's lesson IDs are ALREADY COVERED by paid records of the same student
     const isIdsCoveredByPaid = Boolean(
-      studentPaidLessonIds && 
-      studentPaidLessonIds instanceof Set &&
+      studentPaidLessonIds &&
       studentPaidLessonIds.size > 0 &&
-      realLessonIds.length > 0 && 
-      realLessonIds.every((id: string) => Boolean(studentPaidLessonIds?.has(id)))
+      realLessonIds.length > 0 &&
+      realLessonIds.every((id: string) => studentPaidLessonIds.has(id))
     );
-    
-    // Check if dates are covered by paid records OF THE SAME STUDENT
-    let isDatesCoveredByPaid = false;
-    if (studentPaidDateSignatures && studentPaidDateSignatures instanceof Set && studentPaidDateSignatures.size > 0 && Array.isArray(p.lessonDates) && p.lessonDates.length > 0) {
-      const parsedDates: string[] = [];
-      p.lessonDates.forEach((dStr: string) => {
-        const match = dStr?.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
-        if (match) parsedDates.push(normalizeDateToISO(match[1]));
-      });
-      if (parsedDates.length > 0 && parsedDates.every(dIso => Boolean(studentPaidDateSignatures?.has(`${stId}_${dIso}`)))) {
-        isDatesCoveredByPaid = true;
-      }
-    }
 
-    // Direct overlap with a paid payment of the EXACT SAME student
-    const matchesPaidPayment = dedupedPaid.some(paid => {
-      if (paid.studentId !== p.studentId) return false;
-      if (realLessonIds.length > 0 && paid.lessonIds?.some((id: string) => realLessonIds.includes(id))) return true;
-      if (p.lessonId && (paid.lessonId === p.lessonId || paid.lessonIds?.includes(p.lessonId))) return true;
-      if (p.dueDate && paid.dueDate && p.dueDate === paid.dueDate && p.amountDue === paid.amountDue) return true;
-      return false;
-    });
-
-    if (isIdsCoveredByPaid || isDatesCoveredByPaid || matchesPaidPayment) {
-      // This pending payment is obsolete / already paid for THIS student!
+    if (isIdsCoveredByPaid) {
       removedIds.add(p.id);
       modified = true;
       continue;
     }
 
-    // Deduplicate pending payments against other pending payments
-    const existingPendingIdx = dedupedPending.findIndex(c => {
-      if (c.studentId !== p.studentId) return false;
-      if (c.dueDate === p.dueDate && c.amountDue === p.amountDue) return true;
-      if (Array.isArray(c.lessonIds) && Array.isArray(p.lessonIds) && c.lessonIds.length > 0 && p.lessonIds.length > 0) {
-        if (c.lessonIds.some((lid: string) => p.lessonIds.includes(lid))) return true;
-      }
-      return false;
-    });
+    const lessonSetKey = realLessonIds.length > 0 ? `${stId || ''}::${realLessonIds.join(',')}` : '';
+    let existingPendingIdx = pendingIndexById.get(p.id) ?? -1;
+    if (existingPendingIdx === -1 && lessonSetKey && pendingIndexByLessonSet.has(lessonSetKey)) {
+      existingPendingIdx = pendingIndexByLessonSet.get(lessonSetKey)!;
+    }
 
     if (existingPendingIdx >= 0) {
       const existing = dedupedPending[existingPendingIdx];
       const winner = (p.amountPaid || 0) > (existing.amountPaid || 0) ? p : existing;
       const loser = winner === p ? existing : p;
       dedupedPending[existingPendingIdx] = winner;
-      removedIds.add(loser.id);
+      if (loser.id !== winner.id) {
+        removedIds.add(loser.id);
+      }
+      pendingIndexById.set(winner.id, existingPendingIdx);
+      if (lessonSetKey) pendingIndexByLessonSet.set(lessonSetKey, existingPendingIdx);
       modified = true;
     } else {
+      const newIdx = dedupedPending.length;
       dedupedPending.push(p);
+      pendingIndexById.set(p.id, newIdx);
+      if (lessonSetKey) pendingIndexByLessonSet.set(lessonSetKey, newIdx);
     }
   }
 

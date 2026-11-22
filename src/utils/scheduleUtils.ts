@@ -1,6 +1,22 @@
 import { Group, GroupScheduleSlot, GroupWeeklySession, Lesson, ScheduleRecurrence } from '../types';
 import { parseLocalDate, formatLocalDate } from './timeUtils';
 
+const normalizeTime = (t?: string): string => {
+  if (!t || typeof t !== 'string') return '';
+  const clean = t.trim().toUpperCase();
+  const match = clean.match(/^(\d{1,2}):(\d{1,2})(?::\d{1,2})?\s*(AM|PM|ص|م)?$/i);
+  if (!match) return clean;
+  let hours = parseInt(match[1], 10);
+  const mins = parseInt(match[2], 10);
+  const ampm = match[3];
+  if (ampm === 'PM' || ampm === 'م') {
+    if (hours < 12) hours += 12;
+  } else if (ampm === 'AM' || ampm === 'ص') {
+    if (hours === 12) hours = 0;
+  }
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+};
+
 export const DAY_NAME_TO_NUM: Record<string, number> = {
   'so': 0, 'sonntag': 0, 'sun': 0, 'sunday': 0, 'الأحد': 0, 'الاحد': 0, '0': 0,
   'mo': 1, 'montag': 1, 'mon': 1, 'monday': 1, 'الإثنين': 1, 'الاثنين': 1, '1': 1,
@@ -142,8 +158,14 @@ export function getGroupScheduleSlots(group: Partial<Group>): GroupScheduleSlot[
   const slots: GroupScheduleSlot[] = [];
   const defaultTime = group.scheduleTime || '17:00';
 
-  if (group.schedules && group.schedules.length > 0) {
-    group.schedules.forEach((s) => {
+  const rawSchedules = (group.schedules && group.schedules.length > 0)
+    ? group.schedules
+    : (Array.isArray((group as any).scheduleSlots) && (group as any).scheduleSlots.length > 0)
+      ? ((group as any).scheduleSlots as GroupScheduleSlot[])
+      : null;
+
+  if (rawSchedules && rawSchedules.length > 0) {
+    rawSchedules.forEach((s) => {
       const shortKey = normalizeDayToShortKey(s.day);
       slots.push({
         day: shortKey,
@@ -294,7 +316,7 @@ export function getProjectedLessonsForRange(
 
   (explicitLessons || []).forEach(l => {
     if (l.groupId && l.date && l.time) {
-      const normTime = l.time.trim();
+      const normTime = normalizeTime(l.time) || l.time.trim();
       const key = `${l.groupId}_${l.date}_${normTime}`;
       if (l.deleted) {
         deletedKeys.add(key);
@@ -365,7 +387,8 @@ export function getProjectedLessonsForRange(
 
       for (const slot of matchingSlots) {
         const sessionTime = slot.time || group.scheduleTime || '17:00';
-        const key = `${group.id}_${dateStr}_${sessionTime}`;
+        const normSessionTime = normalizeTime(sessionTime) || sessionTime.trim();
+        const key = `${group.id}_${dateStr}_${normSessionTime}`;
 
         if (!explicitKeys.has(key) && !deletedKeys.has(key)) {
           const isPerLesson = group.paymentCycle === 'per_lesson' || group.paymentModel === 'per_session';
@@ -430,8 +453,44 @@ export function getProjectedLessonsForRange(
       const rec = (grp?.scheduleRecurrence && grp.scheduleRecurrence !== 'weekly')
         ? grp.scheduleRecurrence
         : (l.scheduleRecurrence || 'weekly');
+      let effectiveMeetingLink = l.meetingLink;
+      if (
+        (l.type === 'online' || grp?.type === 'online') &&
+        l.status !== 'completed' &&
+        l.status !== 'cancelled' &&
+        l.groupId
+      ) {
+        let sessionUrl = '';
+        if (Array.isArray(groupWeeklySessions) && groupWeeklySessions.length > 0 && l.date) {
+          const lessonWeekday = parseLocalDate(l.date).getDay();
+          const normLessonTime = normalizeTime(l.time) || (l.time || '').trim();
+          const activeSession = groupWeeklySessions
+            .filter(
+              (s) =>
+                s &&
+                !s.deleted &&
+                s.groupId === l.groupId &&
+                Boolean((s.zoomJoinUrl || '').trim())
+            )
+            .sort((a, b) => {
+              const normA = normalizeTime(a.startTime) || a.startTime;
+              const normB = normalizeTime(b.startTime) || b.startTime;
+              const exactA = a.weekday === lessonWeekday && normA === normLessonTime ? 2 : a.weekday === lessonWeekday ? 1 : 0;
+              const exactB = b.weekday === lessonWeekday && normB === normLessonTime ? 2 : b.weekday === lessonWeekday ? 1 : 0;
+              if (exactB !== exactA) return exactB - exactA;
+              const srcA = a.meetingSource === 'zoom_api' ? 1 : 0;
+              const srcB = b.meetingSource === 'zoom_api' ? 1 : 0;
+              return srcB - srcA;
+            })[0];
+          sessionUrl = (activeSession?.zoomJoinUrl || '').trim();
+        }
+        const groupZoomUrl = (grp?.zoomLink || grp?.meetLink || '').trim();
+        const lessonMeetingUrl = (l.meetingLink || '').trim();
+        effectiveMeetingLink = sessionUrl || groupZoomUrl || lessonMeetingUrl || defaultZoomLink || undefined;
+      }
       uniqueLessons.push({
         ...l,
+        ...(effectiveMeetingLink ? { meetingLink: effectiveMeetingLink } : {}),
         scheduleRecurrence: rec,
         biweeklyWeek: l.biweeklyWeek || (l.date ? getAlternatingWeek(l.date) : undefined)
       });

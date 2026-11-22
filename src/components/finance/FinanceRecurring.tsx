@@ -38,7 +38,9 @@ export const FinanceRecurring: React.FC = () => {
     const dayOfMonth = baseDate.getDate();
 
     let nextDue = new Date(baseDate);
-    if (rec.frequency === 'monthly') {
+    if (rec.frequency === 'daily') {
+      nextDue.setDate(nextDue.getDate() + 1);
+    } else if (rec.frequency === 'monthly') {
       nextDue.setMonth(nextDue.getMonth() + 1);
       // If month rolled over too far (e.g. Jan 31 -> Mar 2), clamp to last day of expected month
       if (nextDue.getDate() !== dayOfMonth) {

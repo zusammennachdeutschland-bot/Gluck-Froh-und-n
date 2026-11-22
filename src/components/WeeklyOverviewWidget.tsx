@@ -1,14 +1,16 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
-import { formatLocalDate } from '../utils/timeUtils';
+import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
+import { useLocalDateKey } from '../utils/dailyLessonUtils';
 import { CheckCircle2, XCircle, Clock, Wallet, CalendarDays, Target } from 'lucide-react';
 
 export const WeeklyOverviewWidget: React.FC = () => {
   const { lessons, groups, students, payments, profile, language, t, _t } = useApp();
+  const todayStr = useLocalDateKey(0);
 
   // Week calculation: Friday to Thursday
   const getWeekStats = () => {
-    const now = new Date();
+    const now = parseLocalDate(todayStr);
     const day = now.getDay(); // 0 = Sun, 1 = Mon, ..., 5 = Fri, 6 = Sat
     const daysSinceFriday = (day + 2) % 7;
 
@@ -23,7 +25,11 @@ export const WeeklyOverviewWidget: React.FC = () => {
     const friStr = formatLocalDate(friday);
     const thuStr = formatLocalDate(thursday);
 
-    const weekLessons = lessons.filter(l => l.date >= friStr && l.date <= thuStr && !l.deleted);
+    const weekLessons = lessons.filter(l => {
+      if (!l || l.deleted) return false;
+      const isoDate = normalizeDateToISO(l.date);
+      return Boolean(isoDate && isoDate >= friStr && isoDate <= thuStr);
+    });
 
     const completed = weekLessons.filter(l => l.status === 'completed').length;
     const cancelled = weekLessons.filter(l => l.status === 'cancelled').length;
@@ -34,8 +40,8 @@ export const WeeklyOverviewWidget: React.FC = () => {
     const weeklyPayments = paidOnly.filter(p => {
       const d = p.paidDate || p.dueDate;
       if (!d) return false;
-      const dateOnly = d.substring(0, 10);
-      return dateOnly >= friStr && dateOnly <= thuStr;
+      const dateOnly = normalizeDateToISO(d);
+      return Boolean(dateOnly && dateOnly >= friStr && dateOnly <= thuStr);
     });
     const revenue = weeklyPayments.reduce((sum, p) => sum + (p.amountPaid || p.amountDue || 0), 0);
 
@@ -43,8 +49,8 @@ export const WeeklyOverviewWidget: React.FC = () => {
     const weeklyPending = pendingOnly.filter(p => {
       const d = p.dueDate;
       if (!d) return false;
-      const dateOnly = d.substring(0, 10);
-      return dateOnly >= friStr && dateOnly <= thuStr;
+      const dateOnly = normalizeDateToISO(d);
+      return Boolean(dateOnly && dateOnly >= friStr && dateOnly <= thuStr);
     });
     const pendingRevenue = weeklyPending.reduce((sum, p) => sum + p.amountDue, 0);
 
@@ -112,7 +118,7 @@ export const WeeklyOverviewWidget: React.FC = () => {
         <div className="p-1.5 rounded-lg bg-surface-hover border border-surface-border">
           <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-text-muted">
             <Clock className="w-3 h-3 text-primary" />
-            <span>{t('stat_remaining')}</span>
+            <span>{_t('متبقي هذا الأسبوع', 'Remaining this week', 'Verbleibend diese Woche')}</span>
           </div>
           <span className="text-sm font-black text-text-main mt-0.5 block">
             {stats.remaining}

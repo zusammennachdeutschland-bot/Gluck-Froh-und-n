@@ -186,13 +186,47 @@ export function recordHomeworkLastRefreshTimestamp(
   return timestampMs;
 }
 
+export const HOMEWORK_AUTO_CLOSE_AFTER_DUE_DAYS = 14;
+export const HOMEWORK_AUTO_CLOSE_AFTER_DUE_MS = HOMEWORK_AUTO_CLOSE_AFTER_DUE_DAYS * 24 * 60 * 60 * 1000;
+
+/**
+ * Parses the due date (`deadline` or `dueDate`) of a homework assignment and returns true
+ * if the assignment is strictly more than 14 days past its due date (P23).
+ */
+export function isHomeworkAutoClosedAfterDueDate(
+  hw: Partial<HomeworkAssignment> | null | undefined,
+  nowMs: number = Date.now()
+): boolean {
+  if (!hw) return false;
+  const rawDue = String((hw as any).dueDate || hw.deadline || '').trim();
+  if (!rawDue) return false;
+
+  let dueMs = NaN;
+  const ymdMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(rawDue);
+  if (ymdMatch) {
+    const y = parseInt(ymdMatch[1], 10);
+    const m = parseInt(ymdMatch[2], 10);
+    const d = parseInt(ymdMatch[3], 10);
+    dueMs = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
+  } else {
+    dueMs = Date.parse(rawDue);
+  }
+
+  if (!Number.isFinite(dueMs)) return false;
+  return nowMs > dueMs + HOMEWORK_AUTO_CLOSE_AFTER_DUE_MS;
+}
+
+export const isHomeworkAutoClosedByDeadline = isHomeworkAutoClosedAfterDueDate;
+
 export function isHomeworkAssignmentOpenForStudents(
-  hw: Partial<HomeworkAssignment> | null | undefined
+  hw: Partial<HomeworkAssignment> | null | undefined,
+  nowMs: number = Date.now()
 ): boolean {
   if (!hw || !hw.id) return false;
   if ((hw as any).deleted) return false;
   if (hw.isActive === false) return false;
   if (hw.status === 'closed') return false;
+  if (isHomeworkAutoClosedAfterDueDate(hw, nowMs)) return false;
   return true;
 }
 
@@ -432,9 +466,16 @@ export function normalizeHomeworkAssignment(hw: HomeworkAssignment): HomeworkAss
       ? stripHeavyGrammarMediaForSync(hw.setSnapshot)
       : hw.setSnapshot;
 
+  const autoClosed = isHomeworkAutoClosedAfterDueDate(hw);
+  const autoCloseOverrides =
+    autoClosed && !(hw as any).deleted && hw.status !== 'deleted'
+      ? { isActive: false, status: 'closed' as const }
+      : {};
+
   if (mode === 'open') {
     const copy: HomeworkAssignment = {
       ...hw,
+      ...autoCloseOverrides,
       ...(normalizedSnapshot ? { setSnapshot: normalizedSnapshot } : {}),
       ...normalizedHideBranding,
       ...normalizedOriginalShortId,
@@ -455,6 +496,7 @@ export function normalizeHomeworkAssignment(hw: HomeworkAssignment): HomeworkAss
 
   return {
     ...hw,
+    ...autoCloseOverrides,
     ...(normalizedSnapshot ? { setSnapshot: normalizedSnapshot } : {}),
     ...normalizedHideBranding,
     ...normalizedOriginalShortId,
@@ -1039,12 +1081,15 @@ export function canAccountClaimLegacyHomework(
  * Ambiguous records are non-destructively isolated in `glueck_hw_quarantined_legacy_v3` and never exposed or uploaded to another account.
  */
 export function migrateLegacyHomeworkForAccount(options: LegacyHomeworkMigrationOptions): {
+  status?: 'ok' | 'failed';
+  error?: string;
+  retryable?: boolean;
   migratedAssignments: number;
   migratedSubmissions: number;
   quarantinedAssignments: number;
 } {
   if (typeof window === 'undefined' || !options?.uid?.trim()) {
-    return { migratedAssignments: 0, migratedSubmissions: 0, quarantinedAssignments: 0 };
+    return { status: 'ok', migratedAssignments: 0, migratedSubmissions: 0, quarantinedAssignments: 0 };
   }
   const targetUid = options.uid.trim();
   const targetEmail = (options.email || '').trim().toLowerCase();
@@ -1052,11 +1097,11 @@ export function migrateLegacyHomeworkForAccount(options: LegacyHomeworkMigration
   try {
     const rawLegacyHw = localStorage.getItem(LEGACY_ASSIGNMENTS_KEY);
     if (!rawLegacyHw) {
-      return { migratedAssignments: 0, migratedSubmissions: 0, quarantinedAssignments: 0 };
+      return { status: 'ok', migratedAssignments: 0, migratedSubmissions: 0, quarantinedAssignments: 0 };
     }
     const legacyAssignments: HomeworkAssignment[] = JSON.parse(rawLegacyHw);
     if (!Array.isArray(legacyAssignments) || legacyAssignments.length === 0) {
-      return { migratedAssignments: 0, migratedSubmissions: 0, quarantinedAssignments: 0 };
+      return { status: 'ok', migratedAssignments: 0, migratedSubmissions: 0, quarantinedAssignments: 0 };
     }
 
     const rawLegacySubs = localStorage.getItem(LEGACY_SUBMISSIONS_KEY);
@@ -1150,12 +1195,19 @@ export function migrateLegacyHomeworkForAccount(options: LegacyHomeworkMigration
     localStorage.setItem(LEGACY_ASSIGNMENTS_KEY, JSON.stringify(remainingLegacyHw));
     localStorage.setItem(
       QUARANTINED_LEGACY_HOMEWORK_KEY,
-      JSON.stringify(Array.from(quarantinedById.values()))
+      JSON.stringify(Array.from(quarantinedById.values()).slice(-500))
     );
 
-    return { migratedAssignments, migratedSubmissions, quarantinedAssignments };
-  } catch {
-    return { migratedAssignments: 0, migratedSubmissions: 0, quarantinedAssignments: 0 };
+    return { status: 'ok', migratedAssignments, migratedSubmissions, quarantinedAssignments };
+  } catch (err: any) {
+    return {
+      status: 'failed',
+      error: err?.message || 'Storage error during legacy homework migration',
+      retryable: true,
+      migratedAssignments: 0,
+      migratedSubmissions: 0,
+      quarantinedAssignments: 0
+    };
   }
 }
 
@@ -1554,7 +1606,11 @@ function isAssignmentProtectedFromRemotePrune(assignmentId: string): boolean {
   return false;
 }
 
-export function saveLocalAssignment(hw: HomeworkAssignment, syncCloud = true): boolean {
+export function saveLocalAssignment(
+  hw: HomeworkAssignment,
+  syncCloud = true,
+  _options?: { throwOnError?: boolean }
+): boolean {
   if (typeof window === 'undefined' || !hw || !hw.id) return false;
   const activeUid = getCurrentHomeworkOwnerUid();
   const scopeUid = getActiveHomeworkScopeUid();

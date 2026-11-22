@@ -29,13 +29,11 @@ try {
   console.warn('localStorage is not available in this context (probably blocked in iframe).', e);
 }
 
-const HEAVY_EVICTABLE_LOCALSTORAGE_KEYS = [
+export const HEAVY_EVICTABLE_LOCALSTORAGE_KEYS = [
   'dl_auto_backup_history_snapshots',
   'dl_local_backup_data',
   'dl_lernstudio_sets',
-  'dl_web_scheduled_notifications',
-  'dl_lessons',
-  'dl_payments'
+  'dl_web_scheduled_notifications'
 ];
 
 const LOCALFORAGE_ONLY_HEAVY_KEYS = new Set([

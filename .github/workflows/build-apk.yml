@@ -185,6 +185,7 @@ jobs:
         with:
           gradle-version: '8.13'
           validate-wrappers: false
+          cache-read-only: false
 
       - name: Ensure Valid Gradle Wrapper
         run: |
@@ -217,7 +218,7 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew clean assembleRelease --stacktrace
+          ./gradlew assembleRelease --build-cache --stacktrace
 
       - name: Verify APK Generated & Signed with Release Certificate
         run: |
@@ -248,10 +249,21 @@ jobs:
       - name: Publish GitHub Release APK
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest-apk
-          name: Latest Android APK
+          tag_name: apk-${{ github.run_number }}
+          name: Android APK Build #${{ github.run_number }}
           prerelease: true
           files: android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Clean Up Old APK Releases
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          OLD_TAGS="$(gh release list --limit 50 --json tagName --jq '.[].tagName' | grep '^apk-' | tail -n +6 || true)"
+          for tag in $OLD_TAGS; do
+            echo "Removing old APK release and tag: $tag"
+            gh release delete "$tag" --yes --cleanup-tag || true
+          done
 
       - name: Produce Build Summary
         run: |

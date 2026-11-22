@@ -617,7 +617,106 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
       }
       setHasRestorePoint(snapshotSaved);
 
+      const rollbackToSnapshot = async (rp: typeof currentSnapshot) => {
+        try {
+          if (rp.students) {
+            setStudents(rp.students);
+            await storage.setItem('dl_students', rp.students);
+          }
+          if (rp.groups) {
+            setGroups(rp.groups);
+            await storage.setItem('dl_groups', rp.groups);
+          }
+          if (rp.lessons) {
+            await updateFullLessonsStorage(() => rp.lessons);
+          }
+          if (rp.payments) {
+            await updateFullPaymentsStorage(() => rp.payments);
+          }
+          if (rp.profile) {
+            setProfile(rp.profile);
+            await storage.setItem('dl_profile', rp.profile);
+          }
+          if (rp.todos) {
+            setTodos(rp.todos);
+            await storage.setItem('dl_quick_todos', rp.todos);
+          }
+          if (rp.certificates) {
+            setCertificates(rp.certificates);
+            await storage.setItem('dl_certificates', rp.certificates);
+          }
+          if (rp.schoolNotes) {
+            setSchoolNotes(rp.schoolNotes);
+            await storage.setItem('dl_school_notes', rp.schoolNotes);
+          }
+          if (rp.notifications) {
+            setNotifications(rp.notifications);
+            await storage.setItem('dl_notifications', rp.notifications);
+          }
+          if (rp.notificationSettings) {
+            setNotificationSettings(rp.notificationSettings);
+            await storage.setItem('dl_notification_settings', rp.notificationSettings);
+          }
+          if (rp.inspirationSettings) {
+            setInspirationSettings(rp.inspirationSettings);
+            await storage.setItem('dl_inspiration_settings', rp.inspirationSettings);
+          }
+          if (rp.inspirationMessages) {
+            setInspirationMessages(rp.inspirationMessages);
+            await storage.setItem('dl_inspiration_messages', rp.inspirationMessages);
+          }
+          if (rp.hodStudents) {
+            setHodStudents(rp.hodStudents);
+            await storage.setItem('hod_german_students', rp.hodStudents);
+          }
+          if (rp.hodComplaints) {
+            setHodComplaints(rp.hodComplaints);
+            await storage.setItem('hod_complaints', rp.hodComplaints);
+          }
+          if (rp.hodActionPlans) {
+            setHodActionPlans(rp.hodActionPlans);
+            await storage.setItem('hod_student_action_plans', rp.hodActionPlans);
+          }
+          if (rp.hodVisits) {
+            setHodVisits(rp.hodVisits);
+            await storage.setItem('hod_visit_records', rp.hodVisits);
+          }
+          if (rp.financeAccounts) {
+            setFinanceAccounts(rp.financeAccounts);
+            await storage.setItem('dl_finance_accounts', rp.financeAccounts);
+          }
+          if (rp.financeCategories) {
+            setFinanceCategories(rp.financeCategories);
+            await storage.setItem('dl_finance_categories', rp.financeCategories);
+          }
+          if (rp.financeTransactions) {
+            setFinanceTransactions(rp.financeTransactions);
+            await storage.setItem('dl_finance_transactions', rp.financeTransactions);
+          }
+          if (rp.financeRecurring) {
+            setFinanceRecurring(rp.financeRecurring);
+            await storage.setItem('dl_finance_recurring', rp.financeRecurring);
+          }
+          if (rp.financeInstallments) {
+            setFinanceInstallments(rp.financeInstallments);
+            await storage.setItem('dl_finance_installments', rp.financeInstallments);
+          }
+          if (rp.lernstudioSets) {
+            setLernstudioSets(rp.lernstudioSets);
+            await storage.setItem('dl_lernstudio_sets', rp.lernstudioSets);
+          }
+          if (rp.goldHoldings) {
+            setGoldHoldings(rp.goldHoldings);
+            await storage.setItem('gluck_gold_holdings', rp.goldHoldings);
+          }
+          bumpExternalDataVersion();
+        } catch (rollbackErr) {
+          console.error('Atomic restore rollback error:', rollbackErr);
+        }
+      };
+
       setTimeout(async () => {
+        let startedCommit = false;
         try {
           let parsed = JSON.parse(content);
           
@@ -683,6 +782,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           if (hasBackupSection(parsed, 'financeInstallments') && data.financeInstallments) finalFinanceInstallments = data.financeInstallments;
 
           // ATOMIC STATE AND STORAGE COMMIT (only for sections present in the original backup file)
+          startedCommit = true;
           if (hasStudents && data.students) {
             setStudents(finalStudents);
             await storage.setItem('dl_students', finalStudents);
@@ -828,6 +928,9 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
 
         } catch (err: any) {
           console.error('Simple restore failed:', err);
+          if (startedCommit) {
+            await rollbackToSnapshot(currentSnapshot);
+          }
           setSimpleErrorMsg(t('auto_failed_to_restore_data_plea'));
         } finally {
           setIsSimpleRestoring(false);
@@ -1315,10 +1418,13 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         }
 
         // ATOMIC STATE AND STORAGE COMMIT
-        if (selectedRestoreCategories.includes('students') && data.students) {
-          setStudents(finalStudents);
-          await storage.setItem('dl_students', finalStudents);
-        }
+        let startedAdvancedCommit = false;
+        try {
+          startedAdvancedCommit = true;
+          if (selectedRestoreCategories.includes('students') && data.students) {
+            setStudents(finalStudents);
+            await storage.setItem('dl_students', finalStudents);
+          }
         if (selectedRestoreCategories.includes('groups') && data.groups) {
           setGroups(finalGroups);
           await storage.setItem('dl_groups', finalGroups);
@@ -1456,10 +1562,38 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           totalRecordsUpdated: analysis.impact.updateStudents + analysis.impact.updateGroups + analysis.impact.updateLessons + analysis.impact.updatePayments
         };
 
-        const updatedLogs = [newLog, ...historyLogs];
-        setHistoryLogs(updatedLogs);
-        localStorage.setItem('dl_restore_history', JSON.stringify(updatedLogs));
-
+          const updatedLogs = [newLog, ...historyLogs];
+          setHistoryLogs(updatedLogs);
+          localStorage.setItem('dl_restore_history', JSON.stringify(updatedLogs));
+        } catch (commitErr: any) {
+          if (startedAdvancedCommit) {
+            if (currentSnapshot.students) { setStudents(currentSnapshot.students); await storage.setItem('dl_students', currentSnapshot.students).catch(() => {}); }
+            if (currentSnapshot.groups) { setGroups(currentSnapshot.groups); await storage.setItem('dl_groups', currentSnapshot.groups).catch(() => {}); }
+            if (currentSnapshot.lessons) { await updateFullLessonsStorage(() => currentSnapshot.lessons).catch(() => {}); }
+            if (currentSnapshot.payments) { await updateFullPaymentsStorage(() => currentSnapshot.payments).catch(() => {}); }
+            if (currentSnapshot.profile) { setProfile(currentSnapshot.profile); await storage.setItem('dl_profile', currentSnapshot.profile).catch(() => {}); }
+            if (currentSnapshot.todos) { setTodos(currentSnapshot.todos); await storage.setItem('dl_quick_todos', currentSnapshot.todos).catch(() => {}); }
+            if (currentSnapshot.certificates) { setCertificates(currentSnapshot.certificates); await storage.setItem('dl_certificates', currentSnapshot.certificates).catch(() => {}); }
+            if (currentSnapshot.schoolNotes) { setSchoolNotes(currentSnapshot.schoolNotes); await storage.setItem('dl_school_notes', currentSnapshot.schoolNotes).catch(() => {}); }
+            if (currentSnapshot.notifications) { setNotifications(currentSnapshot.notifications); await storage.setItem('dl_notifications', currentSnapshot.notifications).catch(() => {}); }
+            if (currentSnapshot.notificationSettings) { setNotificationSettings(currentSnapshot.notificationSettings); await storage.setItem('dl_notification_settings', currentSnapshot.notificationSettings).catch(() => {}); }
+            if (currentSnapshot.inspirationSettings) { setInspirationSettings(currentSnapshot.inspirationSettings); await storage.setItem('dl_inspiration_settings', currentSnapshot.inspirationSettings).catch(() => {}); }
+            if (currentSnapshot.inspirationMessages) { setInspirationMessages(currentSnapshot.inspirationMessages); await storage.setItem('dl_inspiration_messages', currentSnapshot.inspirationMessages).catch(() => {}); }
+            if (currentSnapshot.hodStudents) { setHodStudents(currentSnapshot.hodStudents); await storage.setItem('hod_german_students', currentSnapshot.hodStudents).catch(() => {}); }
+            if (currentSnapshot.hodComplaints) { setHodComplaints(currentSnapshot.hodComplaints); await storage.setItem('hod_complaints', currentSnapshot.hodComplaints).catch(() => {}); }
+            if (currentSnapshot.hodActionPlans) { setHodActionPlans(currentSnapshot.hodActionPlans); await storage.setItem('hod_student_action_plans', currentSnapshot.hodActionPlans).catch(() => {}); }
+            if (currentSnapshot.hodVisits) { setHodVisits(currentSnapshot.hodVisits); await storage.setItem('hod_visit_records', currentSnapshot.hodVisits).catch(() => {}); }
+            if (currentSnapshot.financeAccounts) { setFinanceAccounts(currentSnapshot.financeAccounts); await storage.setItem('dl_finance_accounts', currentSnapshot.financeAccounts).catch(() => {}); }
+            if (currentSnapshot.financeCategories) { setFinanceCategories(currentSnapshot.financeCategories); await storage.setItem('dl_finance_categories', currentSnapshot.financeCategories).catch(() => {}); }
+            if (currentSnapshot.financeTransactions) { setFinanceTransactions(currentSnapshot.financeTransactions); await storage.setItem('dl_finance_transactions', currentSnapshot.financeTransactions).catch(() => {}); }
+            if (currentSnapshot.financeRecurring) { setFinanceRecurring(currentSnapshot.financeRecurring); await storage.setItem('dl_finance_recurring', currentSnapshot.financeRecurring).catch(() => {}); }
+            if (currentSnapshot.financeInstallments) { setFinanceInstallments(currentSnapshot.financeInstallments); await storage.setItem('dl_finance_installments', currentSnapshot.financeInstallments).catch(() => {}); }
+            if (currentSnapshot.lernstudioSets) { setLernstudioSets(currentSnapshot.lernstudioSets); await storage.setItem('dl_lernstudio_sets', currentSnapshot.lernstudioSets).catch(() => {}); }
+            if (currentSnapshot.goldHoldings) { setGoldHoldings(currentSnapshot.goldHoldings); await storage.setItem('gluck_gold_holdings', currentSnapshot.goldHoldings).catch(() => {}); }
+            bumpExternalDataVersion();
+          }
+          throw commitErr;
+        }
       } catch (err: any) {
         console.error('Restore error', err);
         setRestoreSuccessMsg(`❌ Restore failed: ${err.message}`);

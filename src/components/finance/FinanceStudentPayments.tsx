@@ -162,7 +162,7 @@ export const FinanceStudentPayments: React.FC = () => {
   };
 
   const handleSingleLessonWhatsApp = (lesson: Lesson) => {
-    const student = students.find(s => s.id === lesson.studentId || s.name === lesson.studentName);
+    const student = students.find(s => Boolean(lesson.studentId) && s.id === lesson.studentId);
     const phone = student?.parentPhone || student?.studentPhone || '';
     const due = Math.max(0, (lesson.amountDue || 200) - (lesson.amountPaid || 0));
     const dummyCycle: DuePaymentCycle = {
@@ -693,7 +693,7 @@ export const FinanceStudentPayments: React.FC = () => {
       : (lang === 'ar' ? 'تواريخ الحصص المكتملة' : lang === 'en' ? 'Completed lesson dates' : 'Abgeschlossene Lektionstermine');
 
     const isSingle = item.cycleLength <= 1;
-    const stObj = students.find(s => s.id === item.studentId || (s.name && item.studentName && s.name.trim().toLowerCase() === item.studentName.trim().toLowerCase()));
+    const stObj = students.find(s => Boolean(item.studentId) && s.id === item.studentId);
     const targetGrp = groups.find(g => g.id === item.groupId);
     const effRecurrence = stObj?.scheduleRecurrence || targetGrp?.scheduleRecurrence;
     const recTagEn = effRecurrence === 'biweekly_a' ? ' (Bi-weekly A)' : effRecurrence === 'biweekly_b' ? ' (Bi-weekly B)' : '';

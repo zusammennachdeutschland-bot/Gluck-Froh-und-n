@@ -7,6 +7,18 @@ import { storage } from './storageService';
 export const PRUNED_LESSON_IDS_KEY = 'gluck_pruned_lesson_ids';
 export const PRUNED_LESSONS_BACKUP_KEY = 'gluck_pruned_lessons_archive';
 export const LAST_CLEANUP_DATE_KEY = 'gluck_last_auto_cleanup_date';
+export const FUTURE_TOMBSTONE_REPAIR_FLAG_KEY = 'dl_future_tombstone_repair_v1';
+export const FUTURE_TOMBSTONE_REPAIR_REPORT_KEY = 'dl_future_tombstone_repair_report_v1';
+
+export interface PrunedTombstoneRepairReport {
+  repairedAt: string;
+  todayStr: string;
+  removedCount: number;
+  keptCount: number;
+  removedIds: string[];
+  keptFutureIds: string[];
+  keptHistoricalIdsCount: number;
+}
 
 export interface LessonCleanupAnalysis {
   totalLessons: number;
@@ -75,6 +87,138 @@ export function addPrunedLessonIds(ids: string[]): void {
   } catch {
     // Ignore storage quota
   }
+}
+
+export function setPrunedLessonIds(ids: Iterable<string>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const unique = Array.from(new Set(Array.from(ids).filter(Boolean)));
+    localStorage.setItem(PRUNED_LESSON_IDS_KEY, JSON.stringify(unique));
+  } catch {
+    // Ignore storage quota
+  }
+}
+
+/**
+ * Extracts YYYY-MM-DD date from an auto-generated lesson ID (`l_auto_<groupId>_<YYYY-MM-DD>_<HHMM>`).
+ */
+export function extractDateFromAutoLessonId(id: string): string | null {
+  if (!id || typeof id !== 'string' || !id.startsWith('l_auto_')) return null;
+  const match = id.match(/_(\d{4}-\d{2}-\d{2})_(\d{3,4})$/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Safe one-time repair for future `l_auto_` tombstones added by the 14-day cleanup.
+ * - Never un-tombstones any ID for dates before todayStr.
+ * - For each tombstoned ID starting with `l_auto_` and date >= todayStr:
+ *   removes the tombstone ONLY IF there is no stored lesson record (including soft-deleted/recentlyDeleted)
+ *   with that same ID that has `deleted === true` or `status === 'cancelled'`.
+ * - If such a record exists, keeps the tombstone and keeps the lesson deleted/cancelled.
+ */
+export function repairFutureAutoLessonTombstones(options: {
+  storedLessons: Lesson[];
+  recentlyDeletedLessons?: Array<{ item?: Lesson } | Lesson>;
+  todayStr?: string;
+  forceRun?: boolean;
+}): PrunedTombstoneRepairReport {
+  const todayStr = options.todayStr || formatLocalDateStr(new Date());
+  const currentTombstones = getPrunedLessonIds();
+
+  if (typeof window !== 'undefined' && !options.forceRun) {
+    try {
+      const alreadyDone = localStorage.getItem(FUTURE_TOMBSTONE_REPAIR_FLAG_KEY);
+      if (alreadyDone === 'true') {
+        const cachedReportRaw = localStorage.getItem(FUTURE_TOMBSTONE_REPAIR_REPORT_KEY);
+        if (cachedReportRaw) {
+          return JSON.parse(cachedReportRaw);
+        }
+      }
+    } catch {
+      // Proceed with repair
+    }
+  }
+
+  const intentionallyDeletedOrCancelledIds = new Set<string>();
+  const inspectLesson = (l?: Lesson | null) => {
+    if (!l || !l.id) return;
+    if (l.deleted === true || l.status === 'cancelled') {
+      intentionallyDeletedOrCancelledIds.add(l.id);
+    }
+  };
+
+  (options.storedLessons || []).forEach(inspectLesson);
+  (options.recentlyDeletedLessons || []).forEach((entry: any) => {
+    if (!entry) return;
+    if (entry.item && typeof entry.item === 'object') {
+      inspectLesson({ ...entry.item, deleted: true });
+    } else if (entry.id) {
+      inspectLesson({ ...entry, deleted: true });
+    }
+  });
+
+  const nextTombstones = new Set<string>();
+  const removedIds: string[] = [];
+  const keptFutureIds: string[] = [];
+  let keptHistoricalIdsCount = 0;
+
+  currentTombstones.forEach((id) => {
+    if (!id.startsWith('l_auto_')) {
+      nextTombstones.add(id);
+      keptHistoricalIdsCount++;
+      return;
+    }
+
+    const datePart = extractDateFromAutoLessonId(id);
+    if (!datePart) {
+      // Cannot parse date with certainty -> keep deleted and list it
+      nextTombstones.add(id);
+      keptFutureIds.push(id);
+      return;
+    }
+
+    if (datePart < todayStr) {
+      // Never un-tombstone anything for dates before today
+      nextTombstones.add(id);
+      keptHistoricalIdsCount++;
+      return;
+    }
+
+    // datePart >= todayStr
+    if (intentionallyDeletedOrCancelledIds.has(id)) {
+      nextTombstones.add(id);
+      keptFutureIds.push(id);
+    } else {
+      removedIds.push(id);
+    }
+  });
+
+  setPrunedLessonIds(nextTombstones);
+
+  const report: PrunedTombstoneRepairReport = {
+    repairedAt: new Date().toISOString(),
+    todayStr,
+    removedCount: removedIds.length,
+    keptCount: nextTombstones.size,
+    removedIds,
+    keptFutureIds,
+    keptHistoricalIdsCount
+  };
+
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(FUTURE_TOMBSTONE_REPAIR_FLAG_KEY, 'true');
+      localStorage.setItem(FUTURE_TOMBSTONE_REPAIR_REPORT_KEY, JSON.stringify(report));
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  console.info(
+    `[TombstoneRepair] Completed for >= ${todayStr}: removed=${report.removedCount}, kept=${report.keptCount} (keptFuture=${keptFutureIds.length}, keptHistorical=${keptHistoricalIdsCount})`
+  );
+
+  return report;
 }
 
 /**
@@ -220,9 +364,10 @@ export function analyzeLessonCleanup(
   groups: Group[],
   students: Student[],
   payments: PaymentRecord[],
-  financeTransactions: FinanceTransaction[] = []
+  financeTransactions: FinanceTransaction[] = [],
+  referenceDate: Date = new Date()
 ): LessonCleanupAnalysis {
-  const today = new Date();
+  const today = new Date(referenceDate);
 
   // Historical threshold: 30 days ago
   const thirtyDaysAgo = new Date(today);
@@ -404,7 +549,8 @@ export function exportPrunedLessonsBackupJson(prunedLessons: Lesson[]): void {
  */
 export async function executeLessonCleanup(
   currentLessons: Lesson[],
-  analysis: LessonCleanupAnalysis
+  analysis: LessonCleanupAnalysis,
+  onPersist?: (cleanedLessons: Lesson[]) => Promise<void>
 ): Promise<LessonCleanupResult> {
   if (!analysis.financialInvarianceVerified) {
     throw new Error('Cannot execute lesson cleanup: financial invariance verification failed.');
@@ -425,8 +571,8 @@ export async function executeLessonCleanup(
       const existingIds = new Set(existingArchive.map((l) => l.id));
       const newToArchive = prunedLessons.filter((l) => !existingIds.has(l.id));
       const combinedArchive = [...existingArchive, ...newToArchive];
-      // Keep at most 5000 archived items
-      const truncatedArchive = combinedArchive.slice(-5000);
+      // Keep at most 1000 archived items (P28)
+      const truncatedArchive = combinedArchive.slice(-1000);
       await storage.setItem(PRUNED_LESSONS_BACKUP_KEY, truncatedArchive);
     } catch (err: any) {
       throw new Error(
@@ -435,8 +581,15 @@ export async function executeLessonCleanup(
     }
   }
 
-  // 2. Record tombstone IDs so cloud sync will never resurrect them
-  addPrunedLessonIds(Array.from(prunableIds));
+  if (onPersist) {
+    await onPersist(cleanedLessons);
+  }
+
+  // 2. Record tombstone IDs ONLY for historicalEligibleToPrune so future auto lessons remain regenerable when entering the 14-day window (C36.A)
+  const historicalIdsToTombstone = analysis.historicalEligibleToPrune.map((l) => l.id);
+  if (historicalIdsToTombstone.length > 0) {
+    addPrunedLessonIds(historicalIdsToTombstone);
+  }
 
   // 3. Mark last cleanup date
   try {

@@ -147,9 +147,15 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
       ));
       return;
     }
-    const isDuplicate = students.some(s => (s.name || '').toLowerCase() === (name || '').toLowerCase() && s.groupId === groupId);
+    const normalizedName = (name || '').trim().toLowerCase();
+    const isDuplicate = students.some(s => !s.deleted && (s.name || '').trim().toLowerCase() === normalizedName);
     if (isDuplicate) {
-      if (!window.confirm(t('duplicate_student_warning') || 'طالب بنفس الاسم موجود بالفعل. هل تريد المتابعة؟ / A student with the same name already exists in this group. Do you want to continue?')) return;
+      alert(_t(
+        'يوجد طالب بنفس الاسم بالفعل! لا يمكن إضافة اسم مكرر.',
+        'A student with the same name already exists! Duplicate names are blocked.',
+        'Ein Schüler mit demselben Namen existiert bereits!'
+      ));
+      return;
     }
 
     const isParentUser = parentContactType === 'username' || isWhatsAppUsername(parentPhone);

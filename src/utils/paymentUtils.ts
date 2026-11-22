@@ -1,5 +1,5 @@
 import { Student, Group, Lesson, PaymentRecord, ScheduleRecurrence } from '../types';
-import { areDuplicateLessons, isGroupPerLesson } from './lessonUtils';
+import { areDuplicateLessons, compareLessonsChronologically, isGroupPerLesson } from './lessonUtils';
 import { resolveStudentWhatsAppContact } from './phoneUtils';
 import { normalizeDateToISO, formatLocalDate } from './timeUtils';
 import { isDateMatchingGroupRecurrence } from './scheduleUtils';
@@ -144,8 +144,8 @@ export const calculateDuePaymentCycles = (
         ids.push(p.lessonId);
       }
 
-      // Also map dates from lessonDates to matching active lessons
-      if (p.lessonDates && Array.isArray(p.lessonDates)) {
+      // Only fall back to lessonDates when the payment record has no explicit lessonIds
+      if (ids.length === 0 && p.lessonDates && Array.isArray(p.lessonDates)) {
         p.lessonDates.forEach(dStr => {
           if (!dStr || typeof dStr !== 'string') return;
           const match = dStr.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
@@ -239,19 +239,19 @@ export const calculateDuePaymentCycles = (
       return true;
     });
 
-    // Strictly deduplicate lessons: a student cannot take two lessons on the same day at the same time
+    // P9: Key completed lessons strictly by lesson ID so two lessons on the same day with the same sessionNumber are both counted
     const stCompletedLessons: Lesson[] = [];
+    const seenLessonIds = new Set<string>();
     rawCompletedLessons.forEach(l => {
-      const isDupe = stCompletedLessons.some(existing => 
-        areDuplicateLessons(existing, l) ||
-        (existing.date === l.date && (existing.time === l.time || (existing.sessionNumber && existing.sessionNumber === l.sessionNumber)))
-      );
-      if (!isDupe) {
+      if (!l.id) return;
+      if (!seenLessonIds.has(l.id)) {
+        seenLessonIds.add(l.id);
         stCompletedLessons.push(l);
       }
     });
 
-    stCompletedLessons.sort((a, b) => a.date.localeCompare(b.date));
+    // P10: Order completed lessons chronologically using date, normalized time, and ID tiebreakers
+    stCompletedLessons.sort(compareLessonsChronologically);
 
     // Handle advance prepaid lessons
     const advancePayments = activePayments.filter(p => 
@@ -350,31 +350,15 @@ export const calculateDuePaymentCycles = (
       p.paymentType !== 'exemption'
     );
 
-    // Verify unpaidRecCandidate is truly unpaid and not already covered by paid records or paid lessons
+    // P2: Verify unpaidRecCandidate is truly unpaid and not already covered by paid lesson IDs
     let isCandidateCovered = false;
     if (unpaidRecCandidate) {
-      const uLessonIds = (unpaidRecCandidate.lessonIds || []).filter(id => !id.startsWith('virtual_'));
+      const uLessonIds = [
+        ...(unpaidRecCandidate.lessonIds || []),
+        ...(unpaidRecCandidate.lessonId ? [unpaidRecCandidate.lessonId] : [])
+      ].filter(id => id && !id.startsWith('virtual_'));
       if (uLessonIds.length > 0 && uLessonIds.every(id => paidIds.has(id))) {
         isCandidateCovered = true;
-      }
-      if (!isCandidateCovered && Array.isArray(unpaidRecCandidate.lessonDates) && unpaidRecCandidate.lessonDates.length > 0) {
-        const uDates: string[] = [];
-        unpaidRecCandidate.lessonDates.forEach(dStr => {
-          const match = dStr?.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
-          if (match) uDates.push(normalizeDateToISO(match[1]));
-        });
-        if (uDates.length > 0 && uDates.every(dIso => {
-          return activePayments.some(paid =>
-            paid.studentId === st.id &&
-            (paid.status === 'paid' || paid.status === 'exempted' || paid.paymentType === 'exemption') &&
-            paid.lessonDates?.some(pd => {
-              const m = pd?.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{1,2}-\d{1,2})/);
-              return m && normalizeDateToISO(m[1]) === dIso;
-            })
-          );
-        })) {
-          isCandidateCovered = true;
-        }
       }
     }
     const unpaidRec = isCandidateCovered ? undefined : unpaidRecCandidate;
@@ -451,19 +435,29 @@ export const calculateDuePaymentCycles = (
   const addedPaymentRecordIds = new Set(list.map(item => item.existingPaymentRecordId).filter(Boolean));
   activePayments.forEach(p => {
     if (p.status !== 'paid' && p.status !== 'exempted' && p.paymentType !== 'exemption' && !addedPaymentRecordIds.has(p.id)) {
-      // Check if p is already covered by paid payment records or studentPaidLessons
-      const pLessonIds = (p.lessonIds || []).filter(id => !id.startsWith('virtual_'));
+      // P2: Check if p is already covered by paid payment records strictly by lessonIds
+      const pLessonIds = [
+        ...(p.lessonIds || []),
+        ...(p.lessonId ? [p.lessonId] : [])
+      ].filter(id => id && !id.startsWith('virtual_'));
       const isIdsCovered = pLessonIds.length > 0 && pLessonIds.every(id => {
         const paidSet = p.studentId ? studentPaidLessons.get(p.studentId) : null;
         return paidSet ? paidSet.has(id) : false;
       });
       if (isIdsCovered) return;
 
-      // Check if another paid payment covers this student's cycle/dates
+      // P2: Match pending and paid invoices strictly by non-virtual lessonIds
       const isCoveredByPaidPayment = activePayments.some(paid => {
         if (paid.studentId !== p.studentId || paid.status !== 'paid') return false;
-        if (pLessonIds.length > 0 && paid.lessonIds?.some(id => pLessonIds.includes(id))) return true;
-        if (p.dueDate && paid.dueDate && p.dueDate === paid.dueDate && p.amountDue === paid.amountDue) return true;
+        const paidLessonIds = new Set(
+          [
+            ...(paid.lessonIds || []),
+            ...(paid.lessonId ? [paid.lessonId] : [])
+          ].filter(id => id && !id.startsWith('virtual_'))
+        );
+        if (pLessonIds.length > 0 && paidLessonIds.size > 0) {
+          return pLessonIds.every(id => paidLessonIds.has(id));
+        }
         return false;
       });
       if (isCoveredByPaidPayment) return;
@@ -522,13 +516,14 @@ export const calculateDuePaymentCycles = (
     }
   });
 
-  // Deduplicate list by studentId and lessonDates / amount to prevent duplicate cards
+  // Deduplicate list by studentId and lessonIds (or lessonDates / amount fallback)
   const uniqueList: DuePaymentCycle[] = [];
   const seenCycleSignatures = new Set<string>();
 
   list.forEach(cycle => {
-    const datesSig = (cycle.lessonDates || []).sort().join('|');
-    const sig = `${cycle.studentId}_${datesSig || cycle.amountDue}`;
+    const idsSig = (cycle.lessonIds || []).filter(Boolean).slice().sort().join('|');
+    const datesSig = (cycle.lessonDates || []).slice().sort().join('|');
+    const sig = `${cycle.studentId}_${idsSig || datesSig || cycle.amountDue}_${cycle.existingPaymentRecordId || ''}`;
     if (!seenCycleSignatures.has(sig)) {
       seenCycleSignatures.add(sig);
       uniqueList.push(cycle);

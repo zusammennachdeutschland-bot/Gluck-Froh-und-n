@@ -2,16 +2,18 @@ import { isPendingStatus, isGroupPerLesson, calculateSequentialSessionNumber, re
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Lesson, Group, Student, LessonReport, AttendanceStatus, PaymentStatus } from '../types';
-import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
+import { formatLocalDate, parseLocalDate, normalizeDateToISO } from '../utils/timeUtils';
 import { getGroupScheduleSlots, getDayNumber, isStudentMatchingLessonWeek, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
+import { getLessonsForDate } from '../utils/dailyLessonUtils';
 import { storage } from '../services/storageService';
 import { 
-  CheckCircle2, Clock, PlayCircle, ChevronRight, ChevronDown, ChevronUp, AlertCircle, XCircle, X, Video, MapPin, Users, Check, MessageCircle, Phone
+  CheckCircle2, Clock, PlayCircle, ChevronRight, ChevronDown, ChevronUp, AlertCircle, XCircle, X, Video, MapPin, Users, Check, MessageCircle, Phone, User, Send
 } from 'lucide-react';
-import { buildWhatsAppUrl, resolveStudentWhatsAppContact, cleanPhoneNumberForTel } from '../utils/phoneUtils';
+import { buildWhatsAppUrl, resolveStudentWhatsAppContact, cleanPhoneNumberForTel, formatWhatsAppPhone } from '../utils/phoneUtils';
 import { motion, AnimatePresence } from 'motion/react';
 import { GroupProfileModal } from './GroupProfileModal';
 import { SelectParentCallModal } from './SelectParentCallModal';
+import { LessonReminderModal } from './LessonReminderModal';
 import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
 
 const getLessonEndTime = (timeStr: string, durationMinutes: number = 60): string => {
@@ -24,12 +26,67 @@ const getLessonEndTime = (timeStr: string, durationMinutes: number = 60): string
   return `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
 };
 
+export function resolveOfflineLessonDisplayLocation(
+  lesson: Partial<Lesson>,
+  group?: Partial<Group> | null,
+  fallbackText: string = 'Offline'
+): string {
+  const isGeneric = (val?: string) => {
+    if (!val) return true;
+    const t = val.trim().toLowerCase();
+    return t === '' || t === 'home' || t === 'center' || t === 'offline';
+  };
+  if (lesson.location && !isGeneric(lesson.location)) {
+    return lesson.location.trim();
+  }
+  if (lesson.locationAddress && !isGeneric(lesson.locationAddress)) {
+    return lesson.locationAddress.trim();
+  }
+  if (group?.address && !isGeneric(group.address)) {
+    return group.address.trim();
+  }
+  if (lesson.location && lesson.location.trim()) {
+    return lesson.location.trim();
+  }
+  return fallbackText;
+}
+
+export function getValidStudentContactsForLesson(
+  targetLesson: Partial<Lesson>,
+  groups: Group[],
+  students: Student[]
+): Student[] {
+  const targetGroup = targetLesson.groupId
+    ? (groups.find(g => g.id === targetLesson.groupId) || groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupId!.trim().toLowerCase()))
+    : (targetLesson.groupName ? groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupName!.trim().toLowerCase()) : undefined);
+
+  const groupSts = targetGroup
+    ? students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === targetGroup.id)
+    : [];
+
+  const targetStudent = students.find(s =>
+    !s.deleted && s.status !== 'archived' && (
+      (targetLesson.studentId && s.id === targetLesson.studentId) ||
+      (targetLesson.studentName && s.name.trim().toLowerCase() === targetLesson.studentName.trim().toLowerCase())
+    )
+  );
+
+  const effectiveStudents = groupSts.length > 0 ? groupSts : (targetStudent ? [targetStudent] : []);
+
+  return effectiveStudents.filter(st => {
+    const raw = (st.studentPhone || st.studentUsername || '').trim();
+    if (!raw || raw === '-' || raw === '—') return false;
+    return Boolean(formatWhatsAppPhone(raw));
+  });
+}
+
 export const TodaysProgressTimeline: React.FC = () => {
   const { lessons, getFullLessonsSnapshot, groups, students, groupWeeklySessions, profile, openLessonControl, saveLessonReport, cancelLesson, dismissedDashboardLessonIds, dismissLessonFromDashboard, t, _t, language } = useApp();
   const [now, setNow] = useState(new Date());
   const [isPastPendingExpanded, setIsPastPendingExpanded] = useState(false);
   const [showAllPastPending, setShowAllPastPending] = useState(false);
   const [selectedGroupForModal, setSelectedGroupForModal] = useState<Group | null>(null);
+  const [reminderModalLesson, setReminderModalLesson] = useState<Lesson | null>(null);
   const [expandedLessonIds, setExpandedLessonIds] = useState<string[]>([]);
   const [collapsedLessonIds, setCollapsedLessonIds] = useState<string[]>([]);
   const [touchStartPos, setTouchStartPos] = useState<{ x: number; y: number; id: string } | null>(null);
@@ -37,10 +94,12 @@ export const TodaysProgressTimeline: React.FC = () => {
     isOpen: boolean;
     title: string;
     students: Student[];
+    contactMode?: 'parent' | 'student';
   }>({
     isOpen: false,
     title: '',
     students: [],
+    contactMode: 'parent',
   });
 
   const isLessonExpanded = (lessonId: string, isLiveActive: boolean) => {
@@ -277,20 +336,61 @@ export const TodaysProgressTimeline: React.FC = () => {
           isOpen: true,
           title: targetGroup?.name || targetLesson.title || _t('اختيار ولي الأمر', 'Select Parent', 'Elternteil auswählen'),
           students: effectiveStudents,
+          contactMode: 'parent',
         });
       }
     } else if (effectiveStudents.length === 1) {
       const st = effectiveStudents[0];
-      const contact = resolveStudentWhatsAppContact(st);
-      const rawPhone = contact.cleanForUrl || st.parentPhone || st.studentPhone;
-      if (rawPhone) {
-        window.open(buildWhatsAppUrl(rawPhone), '_blank');
+      const contact = resolveStudentWhatsAppContact(st, { targetRecipient: 'parent' });
+      const rawPhone = contact.cleanForUrl || st.parentPhone || st.parentUsername || st.phone;
+      if (rawPhone && formatWhatsAppPhone(rawPhone)) {
+        const url = buildWhatsAppUrl(rawPhone);
+        if (url && url !== 'https://wa.me/') {
+          window.open(url, '_blank');
+        }
       } else {
-        window.open('https://wa.me/', '_blank');
+        setSelectParentModalData({
+          isOpen: true,
+          title: st.name,
+          students: effectiveStudents,
+          contactMode: 'parent',
+        });
       }
-    } else {
-      window.open('https://wa.me/', '_blank');
     }
+  };
+
+  const handleOpenStudentWhatsApp = (e: React.MouseEvent, targetLesson: Lesson) => {
+    e.stopPropagation();
+    const validStudents = getValidStudentContactsForLesson(targetLesson, groups, students);
+    if (validStudents.length === 0) return;
+
+    if (validStudents.length === 1) {
+      const st = validStudents[0];
+      const rawPhone = (st.studentPhone || st.studentUsername || '').trim();
+      if (rawPhone && formatWhatsAppPhone(rawPhone)) {
+        const url = buildWhatsAppUrl(rawPhone);
+        if (url && url !== 'https://wa.me/') {
+          window.open(url, '_blank');
+        }
+      }
+      return;
+    }
+
+    const targetGroup = targetLesson.groupId
+      ? (groups.find(g => g.id === targetLesson.groupId) || groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupId!.trim().toLowerCase()))
+      : (targetLesson.groupName ? groups.find(g => g.name && g.name.trim().toLowerCase() === targetLesson.groupName!.trim().toLowerCase()) : undefined);
+
+    setSelectParentModalData({
+      isOpen: true,
+      title: `${targetGroup?.name || targetLesson.title || ''} - ${_t('مراسلة الطالب', 'Message Student', 'Schüler schreiben')}`,
+      students: validStudents,
+      contactMode: 'student',
+    });
+  };
+
+  const handleOpenLessonReminder = (e: React.MouseEvent, targetLesson: Lesson) => {
+    e.stopPropagation();
+    setReminderModalLesson(targetLesson);
   };
 
   const handleOpenMaps = (e: React.MouseEvent, targetLesson: Lesson) => {
@@ -304,14 +404,14 @@ export const TodaysProgressTimeline: React.FC = () => {
       return;
     }
 
-    const rawAddress = (targetGroup?.address || targetLesson.location || '').trim();
-    if (rawAddress && rawAddress !== 'center' && rawAddress !== 'home') {
-      window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(rawAddress)}`, '_blank');
+    const resolvedLoc = resolveOfflineLessonDisplayLocation(targetLesson, targetGroup, '');
+    if (resolvedLoc && resolvedLoc !== 'center' && resolvedLoc !== 'home' && resolvedLoc !== 'Offline') {
+      window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(resolvedLoc)}`, '_blank');
       return;
     }
 
     const nameToSearch = targetGroup?.name || targetLesson.studentName || targetLesson.title || '';
-    const searchString = `${nameToSearch} ${rawAddress || ''}`.trim();
+    const searchString = `${nameToSearch} ${resolvedLoc || ''}`.trim();
     if (searchString) {
       window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(searchString)}`, '_blank');
     } else {
@@ -333,74 +433,40 @@ export const TodaysProgressTimeline: React.FC = () => {
   const pendingPastLessons = useMemo(() => {
     const resolvedSlotKeys = new Set<string>();
     lessons.forEach(l => {
-      if (!l.deleted && !isPendingStatus(l.status) && l.groupId && l.groupId !== 'quick_group' && l.date && l.time) {
-        resolvedSlotKeys.add(`${l.groupId}_${l.date}_${normalizeTime(l.time) || l.time}`);
+      const isoDate = normalizeDateToISO(l.date);
+      if (!l.deleted && !isPendingStatus(l.status) && l.groupId && l.groupId !== 'quick_group' && isoDate && l.time) {
+        resolvedSlotKeys.add(`${l.groupId}_${isoDate}_${normalizeTime(l.time) || l.time}`);
       }
     });
     return lessons
       .filter(l => {
-        if (l.deleted || l.date >= todayStr || !isPendingStatus(l.status) || dismissedDashboardLessonIds.includes(l.id)) {
+        const isoDate = normalizeDateToISO(l.date);
+        if (l.deleted || !isoDate || isoDate >= todayStr || !isPendingStatus(l.status) || dismissedDashboardLessonIds.includes(l.id)) {
           return false;
         }
-        if (l.groupId && l.groupId !== 'quick_group' && l.date && l.time) {
-          const slotKey = `${l.groupId}_${l.date}_${normalizeTime(l.time) || l.time}`;
+        if (l.groupId && l.groupId !== 'quick_group' && l.time) {
+          const slotKey = `${l.groupId}_${isoDate}_${normalizeTime(l.time) || l.time}`;
           if (resolvedSlotKeys.has(slotKey)) return false;
         }
         return true;
       })
-      .sort((a, b) => b.date.localeCompare(a.date) || a.time.localeCompare(b.time));
+      .sort((a, b) => normalizeDateToISO(b.date).localeCompare(normalizeDateToISO(a.date)) || a.time.localeCompare(b.time));
   }, [lessons, todayStr, dismissedDashboardLessonIds]);
 
-  // 2. TODAY'S LESSONS: Lessons scheduled for today, excluding deleted items & stale slots from changed group schedules
+  // 2. TODAY'S LESSONS: Resilient shared helper getLessonsForDate (projects recurring groups + normalizes dates/times)
   const todaysLessons = useMemo(() => {
-    const active = lessons
-      .filter(l => !l.deleted && l.date === todayStr && !dismissedDashboardLessonIds.includes(l.id))
-      .filter(l => {
-        // If it's a scheduled uncompleted lesson for a group, ensure it matches current schedule slots
-        if (
-          l.groupId && 
-          l.groupId !== 'quick_group' && 
-          l.status === 'scheduled' && 
-          (!l.report || (!l.report.attendanceStatus && !l.report.teacherNotes && !l.report.homeworkTitle && l.report.quizScore === undefined)) &&
-          (!l.studentPayments || Object.keys(l.studentPayments).length === 0) &&
-          (!l.amountPaid || l.amountPaid === 0)
-        ) {
-          const grp = groups.find(g => g.id === l.groupId && !g.deleted);
-          if (grp) {
-            // Filter out lessons if date doesn't match group alternating week recurrence
-            if (grp.scheduleRecurrence && grp.scheduleRecurrence !== 'weekly') {
-              if (!isDateMatchingGroupRecurrence(grp.scheduleRecurrence, l.date)) {
-                return false;
-              }
-            }
-            const activeSlots = getGroupScheduleSlots(grp);
-            if (activeSlots.length > 0) {
-              const lDate = parseLocalDate(l.date);
-              const lDayNum = lDate.getDay();
-              const matchesSlot = activeSlots.some(s => getDayNumber(s.day) === lDayNum && s.time === l.time);
-              if (!matchesSlot) return false;
-            }
-          }
-        }
-        return true;
-      });
-
-    // Deduplicate: If multiple entries exist for the same group slot on this date, always keep the authoritative one (completed/cancelled/in_progress > scheduled)
-    const slotMap = new Map<string, Lesson>();
-    active.forEach(l => {
-      const key = l.groupId && l.groupId !== 'quick_group'
-        ? `${l.groupId}_${l.date}_${normalizeTime(l.time) || l.time}`
-        : l.id;
-      const existing = slotMap.get(key);
-      if (!existing) {
-        slotMap.set(key, l);
-      } else {
-        slotMap.set(key, pickAuthoritativeLesson(existing, l).survivor);
+    return getLessonsForDate(
+      todayStr,
+      getFullLessonsSnapshot(),
+      groups,
+      groupWeeklySessions,
+      {
+        includeCancelled: true,
+        dismissedLessonIds: dismissedDashboardLessonIds,
+        defaultZoomLink: profile.defaultZoomLink,
       }
-    });
-
-    return Array.from(slotMap.values()).sort((a, b) => a.time.localeCompare(b.time));
-  }, [lessons, groups, todayStr, dismissedDashboardLessonIds]);
+    );
+  }, [lessons, getFullLessonsSnapshot, groups, groupWeeklySessions, todayStr, dismissedDashboardLessonIds, profile.defaultZoomLink]);
 
   const getLessonState = (lesson: Lesson): 'completed' | 'cancelled' | 'active' | 'upcoming' => {
     if (lesson.status === 'completed') return 'completed';
@@ -825,20 +891,12 @@ export const TodaysProgressTimeline: React.FC = () => {
               const isCompletedState = lesson.status === 'completed';
               const isCancelledState = lesson.status === 'cancelled';
               const endTime = getLessonEndTime(lesson.time, lesson.durationMinutes || 60);
-              const isRtl = language === 'ar';
-
-              // Build clean, unboxed metadata items separated by typographic middots (Zero-pill discipline)
-              const metaParts: string[] = [];
-              if (lesson.grade) metaParts.push(lesson.grade);
-              if (lesson.type === 'online') {
-                metaParts.push(t('next_action_online'));
-              } else {
-                metaParts.push(lesson.location && lesson.location !== 'center' && lesson.location !== 'home' ? lesson.location : t('next_action_offline'));
-              }
-              if (targetGroup && (scheduledStudents.length > 0 || groupStudents.length > 0)) {
-                const countToShow = scheduledStudents.length > 0 ? scheduledStudents.length : groupStudents.length;
-                metaParts.push(`${countToShow} ${_t('طلاب', 'students', 'Schüler')}`);
-              }
+              const isOnlineLesson = lesson.type === 'online' || (!lesson.type && targetGroup?.type === 'online');
+              const offlineLocationText = !isOnlineLesson
+                ? resolveOfflineLessonDisplayLocation(lesson, targetGroup, t('next_action_offline'))
+                : '';
+              const validStudentContacts = getValidStudentContactsForLesson(lesson, groups, students);
+              const hasValidStudentPhone = validStudentContacts.length > 0;
 
               const isLiveActive = state === 'active' && !isCompletedState && !isCancelledState;
               const isExpanded = isLessonExpanded(lesson.id, isLiveActive);
@@ -869,6 +927,24 @@ export const TodaysProgressTimeline: React.FC = () => {
                           <Clock className="w-3.5 h-3.5 text-primary stroke-[2.25]" />
                           <span>{lesson.time} – {endTime || `${lesson.durationMinutes || 60}m`}</span>
                         </div>
+
+                        {/* Clear Online vs Offline Badge */}
+                        <span
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] sm:text-[10.5px] font-bold bg-primary-soft text-primary border border-primary-border shrink-0"
+                          data-lesson-mode={isOnlineLesson ? 'online' : 'offline'}
+                        >
+                          {isOnlineLesson ? (
+                            <>
+                              <Video className="w-3 h-3 text-primary shrink-0 stroke-[2.25]" />
+                              <span>{t('next_action_online')}</span>
+                            </>
+                          ) : (
+                            <>
+                              <MapPin className="w-3 h-3 text-primary shrink-0 stroke-[2.25]" />
+                              <span>{t('next_action_offline')}</span>
+                            </>
+                          )}
+                        </span>
 
                         {isLiveActive ? (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] sm:text-[10.5px] font-black tracking-wide uppercase bg-primary/10 text-primary border border-primary/25 shadow-2xs shrink-0">
@@ -911,7 +987,7 @@ export const TodaysProgressTimeline: React.FC = () => {
                       {lesson.grade && <span className="opacity-40 select-none">·</span>}
                       
                       <span className="inline-flex items-center gap-1">
-                        {lesson.type === 'online' ? (
+                        {isOnlineLesson ? (
                           <>
                             <Video className="w-3 h-3 text-primary shrink-0 stroke-[2.25]" />
                             <span>{t('next_action_online')}</span>
@@ -919,7 +995,7 @@ export const TodaysProgressTimeline: React.FC = () => {
                         ) : (
                           <>
                             <MapPin className="w-3 h-3 text-primary shrink-0 stroke-[2.25]" />
-                            <span>{lesson.location && lesson.location !== 'center' && lesson.location !== 'home' ? lesson.location : t('next_action_offline')}</span>
+                            <span>{offlineLocationText}</span>
                           </>
                         )}
                       </span>
@@ -954,10 +1030,9 @@ export const TodaysProgressTimeline: React.FC = () => {
                     )}
 
                     {/* 6. Bottom Action Controls Bar */}
-                    <div className="pt-2 border-t border-primary-border/20 flex items-center justify-end gap-1.5 w-full">
+                    <div className="pt-2 border-t border-primary-border/20 flex items-center justify-end gap-1.5 w-full flex-wrap">
                       {/* Join Online Video Meeting OR Open Google Maps Location Button */}
                       {(() => {
-                        const isOfflineLesson = lesson.type === 'offline' || targetGroup?.type === 'offline';
                         const meetingUrl = resolveActiveZoomLinkForLesson({
                           group: targetGroup,
                           lesson,
@@ -965,7 +1040,7 @@ export const TodaysProgressTimeline: React.FC = () => {
                           defaultZoomLink: profile.defaultZoomLink
                         });
 
-                        if (!isOfflineLesson && meetingUrl) {
+                        if (isOnlineLesson && meetingUrl) {
                           return (
                             <a
                               href={meetingUrl}
@@ -981,18 +1056,35 @@ export const TodaysProgressTimeline: React.FC = () => {
                           );
                         }
 
-                        return (
-                          <button
-                            type="button"
-                            onClick={(e) => handleOpenMaps(e, lesson)}
-                            className="w-7 h-7 rounded-lg bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
-                            title={_t('فتح الخرائط لعنوان البيت / المكان', 'Open Google Maps for Home Address', 'In Google Maps öffnen')}
-                            aria-label="Open Location in Google Maps"
-                          >
-                            <MapPin className="w-3.5 h-3.5 stroke-[2]" />
-                          </button>
-                        );
+                        if (!isOnlineLesson) {
+                          return (
+                            <button
+                              type="button"
+                              onClick={(e) => handleOpenMaps(e, lesson)}
+                              className="w-7 h-7 rounded-lg bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
+                              title={_t('فتح الخرائط لعنوان البيت / المكان', 'Open Google Maps for Home Address', 'In Google Maps öffnen')}
+                              aria-label="Open Location in Google Maps"
+                            >
+                              <MapPin className="w-3.5 h-3.5 stroke-[2]" />
+                            </button>
+                          );
+                        }
+
+                        return null;
                       })()}
+
+                      {/* Online Lesson: Direct Send Lesson Reminder Button */}
+                      {isOnlineLesson && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleOpenLessonReminder(e, lesson)}
+                          className="w-7 h-7 rounded-lg bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
+                          title={_t('إرسال تذكرة بموعد الحصة', 'Send Lesson Reminder', 'Lektionserinnerung senden')}
+                          aria-label="Send Lesson Reminder"
+                        >
+                          <Send className="w-3.5 h-3.5 stroke-[2]" />
+                        </button>
+                      )}
 
                       {/* Call Parent Button */}
                       <button
@@ -1005,7 +1097,7 @@ export const TodaysProgressTimeline: React.FC = () => {
                         <Phone className="w-3.5 h-3.5 stroke-[2]" />
                       </button>
 
-                      {/* WhatsApp Button */}
+                      {/* WhatsApp Parent / Group Button */}
                       <button
                         type="button"
                         onClick={(e) => handleOpenWhatsApp(e, lesson)}
@@ -1019,6 +1111,19 @@ export const TodaysProgressTimeline: React.FC = () => {
                       >
                         <MessageCircle className="w-3.5 h-3.5 stroke-[2]" />
                       </button>
+
+                      {/* Message Student Button (only if student has a valid saved phone number) */}
+                      {hasValidStudentPhone && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleOpenStudentWhatsApp(e, lesson)}
+                          className="w-7 h-7 rounded-lg bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs"
+                          title={_t('إرسال رسالة للطالب', 'Send Message to Student', 'Nachricht an Schüler senden')}
+                          aria-label="Send Message to Student"
+                        >
+                          <User className="w-3.5 h-3.5 stroke-[2]" />
+                        </button>
+                      )}
 
                       {!isCompletedState && !isCancelledState && (
                         <>
@@ -1075,8 +1180,6 @@ export const TodaysProgressTimeline: React.FC = () => {
                       : 'bg-white dark:bg-slate-900/70 border-slate-200/70 dark:border-surface-border/70 hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-2xs'
                   }`}
                 >
-
-
                   {/* 1. Time Column */}
                   <div
                     className="flex flex-col justify-center shrink-0 min-w-[42px] sm:min-w-[46px] text-start tabular-nums select-none p-1 rounded-md"
@@ -1102,25 +1205,101 @@ export const TodaysProgressTimeline: React.FC = () => {
                   {/* Hairline Divider between time & details */}
                   <div className="w-px h-6 bg-slate-200/60 dark:bg-slate-800 shrink-0 self-center" />
 
-                  {/* 2. Simple Main Content (Name + Time only when collapsed) */}
+                  {/* 2. Compact Main Content (Name + Online/Offline & Location + Action buttons) */}
                   <div className="flex-1 min-w-0 py-0.5">
                     <div className="flex items-center justify-between gap-1.5 min-w-0">
-                      <div className="min-w-0 flex-1 truncate">
-                        <h4 className={`text-xs sm:text-[12.5px] font-bold truncate leading-tight ${
-                          isCompletedState
-                            ? 'line-through text-text-muted/80'
-                            : isCancelledState
-                            ? 'line-through text-rose-600/80 dark:text-rose-400/80'
-                            : state === 'active'
-                            ? 'text-slate-950 dark:text-white font-extrabold'
-                            : 'text-text-main'
-                        }`}>
-                          {targetGroup ? targetGroup.name : (lesson.studentName || lesson.groupName || lesson.title)}
-                        </h4>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <h4 className={`text-xs sm:text-[12.5px] font-bold truncate leading-tight ${
+                            isCompletedState
+                              ? 'line-through text-text-muted/80'
+                              : isCancelledState
+                              ? 'line-through text-rose-600/80 dark:text-rose-400/80'
+                              : state === 'active'
+                              ? 'text-slate-950 dark:text-white font-extrabold'
+                              : 'text-text-main'
+                          }`}>
+                            {targetGroup ? targetGroup.name : (lesson.studentName || lesson.groupName || lesson.title)}
+                          </h4>
+                          <span
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-primary-soft text-primary border border-primary-border shrink-0"
+                            data-lesson-mode={isOnlineLesson ? 'online' : 'offline'}
+                          >
+                            {isOnlineLesson ? (
+                              <>
+                                <Video className="w-2.5 h-2.5 shrink-0" />
+                                <span>{t('next_action_online')}</span>
+                              </>
+                            ) : (
+                              <>
+                                <MapPin className="w-2.5 h-2.5 shrink-0" />
+                                <span className="truncate max-w-[110px]">{offlineLocationText}</span>
+                              </>
+                            )}
+                          </span>
+                        </div>
                       </div>
 
-                      {/* Quiet Status Badge */}
-                      <div className="flex items-center gap-1 shrink-0">
+                      {/* Compact Action Buttons & Quiet Status Badge */}
+                      <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                        {!isOnlineLesson ? (
+                          <button
+                            type="button"
+                            onClick={(e) => handleOpenMaps(e, lesson)}
+                            className="w-6 h-6 rounded-md bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95"
+                            title={_t('فتح الخرائط لعنوان البيت / المكان', 'Open Google Maps for Home Address', 'In Google Maps öffnen')}
+                            aria-label="Open Location in Google Maps"
+                          >
+                            <MapPin className="w-3 h-3 stroke-[2]" />
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={(e) => handleOpenLessonReminder(e, lesson)}
+                            className="w-6 h-6 rounded-md bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95"
+                            title={_t('إرسال تذكرة بموعد الحصة', 'Send Lesson Reminder', 'Lektionserinnerung senden')}
+                            aria-label="Send Lesson Reminder"
+                          >
+                            <Send className="w-3 h-3 stroke-[2]" />
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={(e) => handleOpenCall(e, lesson)}
+                          className="w-6 h-6 rounded-md bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95"
+                          title={_t('اتصال بولي الأمر', 'Call Parent', 'Elternteil anrufen')}
+                          aria-label="Call Parent"
+                        >
+                          <Phone className="w-3 h-3 stroke-[2]" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => handleOpenWhatsApp(e, lesson)}
+                          className="w-6 h-6 rounded-md bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95"
+                          title={
+                            getIsMultiStudent(lesson)
+                              ? _t('فتح مجموعة الواتساب / اختيار ولي الأمر', 'Open WhatsApp Group / Select Parent', 'WhatsApp-Gruppe / Elternteil auswählen')
+                              : _t('إرسال واتساب لولي الأمر', 'Send WhatsApp to Parent', 'WhatsApp an Eltern senden')
+                          }
+                          aria-label="Open WhatsApp"
+                        >
+                          <MessageCircle className="w-3 h-3 stroke-[2]" />
+                        </button>
+
+                        {hasValidStudentPhone && (
+                          <button
+                            type="button"
+                            onClick={(e) => handleOpenStudentWhatsApp(e, lesson)}
+                            className="w-6 h-6 rounded-md bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border flex items-center justify-center transition-all cursor-pointer active:scale-95"
+                            title={_t('إرسال رسالة للطالب', 'Send Message to Student', 'Nachricht an Schüler senden')}
+                            aria-label="Send Message to Student"
+                          >
+                            <User className="w-3 h-3 stroke-[2]" />
+                          </button>
+                        )}
+
                         {state === 'active' && !isCompletedState && !isCancelledState && (
                           <span className="inline-flex items-center text-[9px] sm:text-[9.5px] font-bold text-primary dark:text-primary-hover bg-primary/10 dark:bg-primary/20 px-2 py-0.5 rounded-full shrink-0">
                             <span>{t('timeline_live_now')}</span>
@@ -1151,11 +1330,23 @@ export const TodaysProgressTimeline: React.FC = () => {
           onClose={() => setSelectedGroupForModal(null)}
         />
       )}
+      {reminderModalLesson && (
+        <LessonReminderModal
+          lesson={reminderModalLesson}
+          group={
+            reminderModalLesson.groupId
+              ? groups.find(g => g.id === reminderModalLesson.groupId) || null
+              : null
+          }
+          onClose={() => setReminderModalLesson(null)}
+        />
+      )}
       <SelectParentCallModal
         isOpen={selectParentModalData.isOpen}
-        onClose={() => setSelectParentModalData({ isOpen: false, title: '', students: [] })}
+        onClose={() => setSelectParentModalData({ isOpen: false, title: '', students: [], contactMode: 'parent' })}
         title={selectParentModalData.title}
         students={selectParentModalData.students}
+        contactMode={selectParentModalData.contactMode}
         _t={_t}
       />
     </div>

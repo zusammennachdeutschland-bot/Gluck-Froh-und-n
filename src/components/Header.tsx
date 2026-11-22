@@ -4,6 +4,7 @@ import { Lesson } from '../types';
 import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
 import { isPendingStatus, pickAuthoritativeLesson, normalizeTime } from '../utils/lessonUtils';
 import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
+import { getLessonsForDate, useLocalDateKey } from '../utils/dailyLessonUtils';
 import { Bell, CheckCircle2, Clock, Trash2, Award, History, BarChart2, Settings, Menu, Sparkles, BookOpen, Layers, X, Users, Gamepad2, Video, SlidersHorizontal } from 'lucide-react';
 import { NotificationsModal } from './NotificationsModal';
 import { motion, AnimatePresence } from 'motion/react';
@@ -21,7 +22,9 @@ export const Header: React.FC = () => {
     profile, 
     notifications, 
     lessons, 
+    getFullLessonsSnapshot,
     groups,
+    groupWeeklySessions,
     students,
     dismissedDashboardLessonIds = [],
     openLessonControl, 
@@ -261,57 +264,23 @@ export const Header: React.FC = () => {
     }
   }, [_t, teacherFirstName]);
 
-  // Today's Date String
-  const todayStr = useMemo(() => formatLocalDate(new Date()), []);
+  // Today's Date String (updates across midnight)
+  const todayStr = useLocalDateKey(0);
 
   // Today's lessons
   const todaysLessons = useMemo(() => {
-    const active = lessons
-      .filter(l => !l.deleted && l.date === todayStr && !dismissedDashboardLessonIds.includes(l.id))
-      .filter(l => {
-        if (
-          l.groupId && 
-          l.groupId !== 'quick_group' && 
-          l.status === 'scheduled' && 
-          (!l.report || (!l.report.attendanceStatus && !l.report.teacherNotes && !l.report.homeworkTitle && l.report.quizScore === undefined)) &&
-          (!l.studentPayments || Object.keys(l.studentPayments).length === 0) &&
-          (!l.amountPaid || l.amountPaid === 0)
-        ) {
-          const grp = groups.find(g => g.id === l.groupId && !g.deleted);
-          if (grp) {
-            if (grp.scheduleRecurrence && grp.scheduleRecurrence !== 'weekly') {
-              if (!isDateMatchingGroupRecurrence(grp.scheduleRecurrence, l.date)) {
-                return false;
-              }
-            }
-            const activeSlots = getGroupScheduleSlots(grp);
-            if (activeSlots.length > 0) {
-              const lDate = parseLocalDate(l.date);
-              const lDayNum = lDate.getDay();
-              const matchesSlot = activeSlots.some(s => getDayNumber(s.day) === lDayNum && s.time === l.time);
-              if (!matchesSlot) return false;
-            }
-          }
-        }
-        return true;
-      });
-
-    const slotMap = new Map<string, Lesson>();
-    active.forEach(l => {
-      const normTime = normalizeTime(l.time) || l.time;
-      const key = l.groupId && l.groupId !== 'quick_group'
-        ? `${l.groupId}_${l.date}_${normTime}`
-        : l.id;
-      const existing = slotMap.get(key);
-      if (!existing) {
-        slotMap.set(key, l);
-      } else {
-        slotMap.set(key, pickAuthoritativeLesson(existing, l).survivor);
+    return getLessonsForDate(
+      todayStr,
+      getFullLessonsSnapshot(),
+      groups,
+      groupWeeklySessions,
+      {
+        includeCancelled: true,
+        dismissedLessonIds: dismissedDashboardLessonIds,
+        defaultZoomLink: profile?.defaultZoomLink,
       }
-    });
-
-    return Array.from(slotMap.values());
-  }, [lessons, groups, dismissedDashboardLessonIds, todayStr]);
+    );
+  }, [lessons, getFullLessonsSnapshot, groups, groupWeeklySessions, dismissedDashboardLessonIds, todayStr, profile?.defaultZoomLink]);
 
   // Total lessons count
   const lessonsCount = todaysLessons.length;

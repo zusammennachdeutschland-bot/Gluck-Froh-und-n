@@ -62,11 +62,12 @@ export const SessionHistoryView: React.FC = () => {
   const filteredLessons = useMemo(() => {
     return lessons
       .filter((lesson) => {
+        if (!lesson || lesson.deleted) return false;
         // Status filter
         if (statusFilter !== 'all') {
           if (statusFilter === 'completed' && lesson.status !== 'completed') return false;
           if (statusFilter === 'cancelled' && lesson.status !== 'cancelled') return false;
-          if (statusFilter === 'pending' && (!isPendingStatus(lesson.status))) return false;
+          if (statusFilter === 'pending' && (lesson.status === 'cancelled' || !isPendingStatus(lesson.status))) return false;
           if (statusFilter === 'scheduled' && lesson.status !== 'scheduled') return false;
         }
 
@@ -124,11 +125,14 @@ export const SessionHistoryView: React.FC = () => {
 
   // Overall Statistics memoized to eliminate lag
   const { totalCount, completedCount, cancelledCount, pendingCount, totalHours } = useMemo(() => {
+    let total = 0;
     let completed = 0;
     let cancelled = 0;
     let pending = 0;
     let mins = 0;
     for (const l of lessons) {
+      if (!l || l.deleted) continue;
+      total++;
       if (l.status === 'completed') completed++;
       else if (l.status === 'cancelled') cancelled++;
       else if (isPendingStatus(l.status)) pending++;
@@ -137,7 +141,7 @@ export const SessionHistoryView: React.FC = () => {
       }
     }
     return {
-      totalCount: lessons.length,
+      totalCount: total,
       completedCount: completed,
       cancelledCount: cancelled,
       pendingCount: pending,

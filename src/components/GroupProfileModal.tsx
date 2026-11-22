@@ -200,9 +200,18 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
       return;
     }
 
+    const trimmedName = newStudentName.trim();
+    if (students.some(s => !s.deleted && (s.name || '').trim().toLowerCase() === trimmedName.toLowerCase())) {
+      alert(_t(
+        'يوجد طالب بنفس الاسم بالفعل! لا يمكن إضافة اسم مكرر.',
+        'A student with the same name already exists! Duplicate names are blocked.',
+        'Ein Schüler mit demselben Namen existiert bereits!'
+      ));
+      return;
+    }
+
     setIsSubmittingStudent(true);
     try {
-      const trimmedName = newStudentName.trim();
       const trimmedPhone = newStudentPhone.trim();
       const detectedGender = isLikelyFemaleStudent(trimmedName) ? 'female' : newStudentGender;
       const finalCertName = newStudentCertName.trim() || transliterateArabicNameToEnglish(trimmedName);

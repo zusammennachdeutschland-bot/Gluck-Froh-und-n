@@ -10,6 +10,7 @@ interface SelectParentCallModalProps {
   students: Student[];
   _t: (ar: string, en: string, de: string) => string;
   onStartWhatsAppQueue?: () => void;
+  contactMode?: 'parent' | 'student';
 }
 
 export const SelectParentCallModal: React.FC<SelectParentCallModalProps> = ({
@@ -18,7 +19,8 @@ export const SelectParentCallModal: React.FC<SelectParentCallModalProps> = ({
   title,
   students,
   _t,
-  onStartWhatsAppQueue
+  onStartWhatsAppQueue,
+  contactMode = 'parent'
 }) => {
   if (!isOpen) return null;
 
@@ -31,8 +33,11 @@ export const SelectParentCallModal: React.FC<SelectParentCallModalProps> = ({
   };
 
   const handleWhatsApp = (phone?: string) => {
+    if (!phone || !phone.trim()) return;
     const url = buildWhatsAppUrl(phone);
-    window.open(url, '_blank');
+    if (url && url !== 'https://wa.me/') {
+      window.open(url, '_blank');
+    }
   };
 
   return (
@@ -86,7 +91,9 @@ export const SelectParentCallModal: React.FC<SelectParentCallModalProps> = ({
             </p>
           ) : (
             students.map((st) => {
-              const primaryPhone = st.parentPhone || st.phone;
+              const primaryPhone = contactMode === 'student'
+                ? (st.studentPhone || st.studentUsername || '')
+                : (st.parentPhone || st.phone || st.parentUsername || '');
               const displayPhone = primaryPhone ? formatContactDisplay(primaryPhone) : '';
 
               return (
@@ -98,7 +105,7 @@ export const SelectParentCallModal: React.FC<SelectParentCallModalProps> = ({
                         {st.name}
                       </h4>
                     </div>
-                    {st.parentName && (
+                    {contactMode === 'parent' && st.parentName && (
                       <p className="text-[11px] text-text-muted truncate mt-0.5">
                         {_t(`ولي الأمر: ${st.parentName}`, `Parent: ${st.parentName}`, `Elternteil: ${st.parentName}`)}
                       </p>
@@ -121,15 +128,16 @@ export const SelectParentCallModal: React.FC<SelectParentCallModalProps> = ({
                       disabled={!primaryPhone}
                       onClick={() => handleCall(primaryPhone)}
                       className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-primary text-white hover:bg-primary-hover disabled:opacity-40 text-xs font-bold transition-all shadow-2xs cursor-pointer active:scale-95"
-                      title={_t('اتصال بولي الأمر', 'Call Parent', 'Anrufen')}
+                      title={contactMode === 'student' ? _t('اتصال بالطالب', 'Call Student', 'Schüler anrufen') : _t('اتصال بولي الأمر', 'Call Parent', 'Anrufen')}
                     >
                       <Phone className="w-3.5 h-3.5" />
                       <span>{_t('اتصال', 'Call', 'Anrufen')}</span>
                     </button>
                     <button
                       type="button"
+                      disabled={!primaryPhone}
                       onClick={() => handleWhatsApp(primaryPhone)}
-                      className="p-1.5 rounded-lg bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border transition-all cursor-pointer active:scale-95"
+                      className="p-1.5 rounded-lg bg-surface hover:bg-primary-soft text-text-muted hover:text-primary border border-surface-border hover:border-primary-border disabled:opacity-40 transition-all cursor-pointer active:scale-95"
                       title={_t('واتساب', 'WhatsApp', 'WhatsApp')}
                     >
                       <MessageCircle className="w-4 h-4" />

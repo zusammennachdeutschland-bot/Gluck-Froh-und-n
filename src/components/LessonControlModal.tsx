@@ -2584,11 +2584,16 @@ export const LessonControlModal: React.FC = () => {
                               onChange={(e) => {
                                 setSelectedReceivingAccountId(e.target.value);
                                 if (isLessonPaid) {
-                                  // Re-sync with new account
+                                  // Re-sync with new account without creating a duplicate payment or income transaction
                                   const studentId = targetStudent?.id || selectedLesson.studentId || selectedLesson.id || 'quick_student';
                                   const studentName = targetStudent?.name || selectedLesson.studentName || selectedLesson.title;
                                   const groupId = targetGroup?.id || selectedLesson.groupId || '';
                                   const groupName = targetGroup?.name || selectedLesson.groupName || 'Gruppe';
+                                  const existingPaymentRecord = payments.find(p =>
+                                    !p.deleted &&
+                                    (p.studentId === studentId || !p.studentId) &&
+                                    (p.lessonId === selectedLesson.id || (Array.isArray(p.lessonIds) && p.lessonIds.includes(selectedLesson.id)))
+                                  );
                                   markCyclePaymentPaid({
                                     studentId,
                                     studentName,
@@ -2598,6 +2603,7 @@ export const LessonControlModal: React.FC = () => {
                                     amountPaid: paymentAmountInput,
                                     lessonDates: [selectedLesson.date],
                                     lessonIds: [selectedLesson.id],
+                                    existingPaymentRecordId: existingPaymentRecord?.id,
                                     accountId: e.target.value,
                                     notes: `سداد حصة: ${studentName} (${selectedLesson.date})`
                                   });

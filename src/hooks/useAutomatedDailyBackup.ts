@@ -8,6 +8,42 @@ import { storage } from '../services/storageService';
  * Performs silent background backups to persistent local storage (IndexedDB/Storage)
  * keeping up to the configured retention count (e.g. 10 snapshots).
  */
+export function shouldRunAutomatedBackup(params: {
+  todayStr: string;
+  lastAutoBackupDate?: string | null;
+  isDailyEnabled: boolean;
+  isWeeklyEnabled: boolean;
+  isMonthlyEnabled: boolean;
+}): boolean {
+  const { todayStr, lastAutoBackupDate, isDailyEnabled, isWeeklyEnabled, isMonthlyEnabled } = params;
+  if (!isDailyEnabled && !isWeeklyEnabled && !isMonthlyEnabled) return false;
+  if (!lastAutoBackupDate) return true;
+  if (lastAutoBackupDate === todayStr) return false;
+
+  if (isDailyEnabled) {
+    return true;
+  }
+
+  const todayMs = Date.parse(`${todayStr}T00:00:00Z`);
+  const lastMs = Date.parse(`${lastAutoBackupDate}T00:00:00Z`);
+  const diffDays = Number.isFinite(todayMs) && Number.isFinite(lastMs)
+    ? Math.floor((todayMs - lastMs) / (24 * 60 * 60 * 1000))
+    : 999;
+
+  if (isWeeklyEnabled && diffDays >= 7) {
+    return true;
+  }
+
+  if (isMonthlyEnabled) {
+    const differentMonth = todayStr.slice(0, 7) !== lastAutoBackupDate.slice(0, 7);
+    if (diffDays >= 30 || differentMonth) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export const useAutomatedDailyBackup = () => {
   const { performBackup, profile } = useApp();
   const performBackupRef = useRef(performBackup);
@@ -19,14 +55,22 @@ export const useAutomatedDailyBackup = () => {
     const runAutomatedBackupCheck = async () => {
       try {
         const todayStr = formatLocalDate();
-        const lastAutoBackupDate = await storage.getItem('dl_last_auto_backup_date');
+        const lastAutoBackupDate = await storage.getItem<string>('dl_last_auto_backup_date');
 
         const isDailyEnabled = localStorage.getItem('dl_auto_backup_daily') !== 'false'; // Default enabled
         const isWeeklyEnabled = localStorage.getItem('dl_auto_backup_weekly') !== 'false';
+        const isMonthlyEnabled = localStorage.getItem('dl_auto_backup_monthly') === 'true';
 
-        // Check if daily backup hasn't run today
-        if (isDailyEnabled && lastAutoBackupDate !== todayStr) {
-          console.log('[Auto Daily Backup] Executing scheduled in-storage daily data backup...');
+        if (
+          shouldRunAutomatedBackup({
+            todayStr,
+            lastAutoBackupDate,
+            isDailyEnabled,
+            isWeeklyEnabled,
+            isMonthlyEnabled
+          })
+        ) {
+          console.log('[Auto Daily Backup] Executing scheduled in-storage data backup...');
           
           // 1. Perform latest state snapshot and await JSON string
           const snapshotJson = await performBackupRef.current();

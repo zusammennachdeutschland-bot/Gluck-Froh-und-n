@@ -263,6 +263,18 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
 
   const handleSaveStudent = (e: React.FormEvent) => {
     e.preventDefault();
+    const normalizedEditName = editName.trim().toLowerCase();
+    if (
+      normalizedEditName &&
+      students.some(s => s.id !== currentStudent.id && !s.deleted && (s.name || '').trim().toLowerCase() === normalizedEditName)
+    ) {
+      alert(_t(
+        'يوجد طالب آخر بنفس الاسم بالفعل! لا يمكن تكرار اسم الطالب.',
+        'Another student with the same name already exists! Duplicate names are blocked.',
+        'Ein anderer Schüler mit demselben Namen existiert bereits!'
+      ));
+      return;
+    }
     const isParentUser = editParentContactType === 'username' || isWhatsAppUsername(editParentPhone);
     const cleanParentUser = cleanWhatsAppUsername(editParentPhone);
     const finalParentPhone = isParentUser 

@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
-import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
+import { getLessonsForDate, useLocalDateKey } from '../utils/dailyLessonUtils';
 import { Calendar, Video, MapPin, Home, User, Clock, ChevronRight, Link2, Copy, Check, ExternalLink, AlertCircle } from 'lucide-react';
 import { useSyncedHomeworkData } from '../hooks/useSyncedHomeworkData';
 import {
@@ -10,59 +9,24 @@ import {
 } from '../utils/lessonHomeworkLinkUtils';
 
 export const TomorrowsLessonsWidget: React.FC = () => {
-  const { lessons, groups, openLessonControl, _t, t } = useApp();
+  const { lessons, getFullLessonsSnapshot, groups, groupWeeklySessions, profile, openLessonControl, _t, t } = useApp();
   const { assignments: syncedAssignments, currentOwnerUid } = useSyncedHomeworkData();
   const [copiedLessonId, setCopiedLessonId] = useState<string | null>(null);
 
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = formatLocalDate(tomorrow);
+  const tomorrowStr = useLocalDateKey(1);
 
   const tomorrowsLessons = useMemo(() => {
-    const active = lessons
-      .filter(l => !l.deleted && l.date === tomorrowStr && l.status !== 'cancelled')
-      .filter(l => {
-        if (
-          l.groupId && 
-          l.groupId !== 'quick_group' && 
-          l.status === 'scheduled' && 
-          (!l.report || (!l.report.attendanceStatus && !l.report.teacherNotes && !l.report.homeworkTitle && l.report.quizScore === undefined)) &&
-          (!l.studentPayments || Object.keys(l.studentPayments).length === 0) &&
-          (!l.amountPaid || l.amountPaid === 0)
-        ) {
-          const grp = groups.find(g => g.id === l.groupId && !g.deleted);
-          if (grp) {
-            if (grp.scheduleRecurrence && grp.scheduleRecurrence !== 'weekly') {
-              if (!isDateMatchingGroupRecurrence(grp.scheduleRecurrence, l.date)) {
-                return false;
-              }
-            }
-            const activeSlots = getGroupScheduleSlots(grp);
-            if (activeSlots.length > 0) {
-              const lDate = parseLocalDate(l.date);
-              const lDayNum = lDate.getDay();
-              const matchesSlot = activeSlots.some(s => getDayNumber(s.day) === lDayNum && s.time === l.time);
-              if (!matchesSlot) return false;
-            }
-          }
-        }
-        return true;
-      });
-
-    const seen = new Set<string>();
-    const deduplicated: typeof lessons = [];
-    active.forEach(l => {
-      const key = l.groupId && l.groupId !== 'quick_group'
-        ? `${l.groupId}_${l.date}_${l.time}`
-        : l.id;
-      if (!seen.has(key)) {
-        seen.add(key);
-        deduplicated.push(l);
+    return getLessonsForDate(
+      tomorrowStr,
+      getFullLessonsSnapshot(),
+      groups,
+      groupWeeklySessions,
+      {
+        includeCancelled: false,
+        defaultZoomLink: profile.defaultZoomLink,
       }
-    });
-
-    return deduplicated.sort((a, b) => a.time.localeCompare(b.time));
-  }, [lessons, groups, tomorrowStr]);
+    );
+  }, [lessons, getFullLessonsSnapshot, groups, groupWeeklySessions, tomorrowStr, profile.defaultZoomLink]);
 
   const getTypeBadge = (type?: string, location?: string) => {
     let label = '';

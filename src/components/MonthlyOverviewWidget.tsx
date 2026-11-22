@@ -1,32 +1,45 @@
 import React, { useMemo } from 'react';
 import { useApp } from '../context/AppContext';
+import { useLocalDateKey } from '../hooks/useLocalDateKey';
+import { normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
+import {
+  computeDashboardPeriodStats,
+  getDashboardLessonsForRange,
+  getMonthDateRange,
+} from '../utils/dashboardStatsUtils';
 import { TrendingUp, CheckCircle2, XCircle, Clock, Wallet, Target } from 'lucide-react';
 
 export const MonthlyOverviewWidget: React.FC = () => {
-  const { lessons, students, groups, payments, profile, language, t, _t } = useApp();
-
-  const now = new Date();
-  const currentMonthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const { lessons, getFullLessonsSnapshot, groups, groupWeeklySessions, payments, profile, language, t, _t } = useApp();
+  const todayStr = useLocalDateKey();
 
   const monthStats = useMemo(() => {
-    const monthLessons = lessons.filter(l => l.date && l.date.startsWith(currentMonthPrefix) && !l.deleted);
+    const refDate = parseLocalDate(todayStr);
+    const { startDateStr, endDateStr, monthPrefix, startDate } = getMonthDateRange(refDate);
 
-    const completed = monthLessons.filter(l => l.status === 'completed').length;
-    const cancelled = monthLessons.filter(l => l.status === 'cancelled').length;
-    const remaining = monthLessons.filter(l => l.status === 'scheduled' || l.status === 'in_progress').length;
+    const monthLessons = getDashboardLessonsForRange({
+      startDateStr,
+      endDateStr,
+      todayStr,
+      lessons: getFullLessonsSnapshot(),
+      groups,
+      groupWeeklySessions,
+    });
+
+    const { completed, cancelled, remaining } = computeDashboardPeriodStats(monthLessons);
 
     // Use actual payment records for accurate revenue tracking (matching Payments View)
     const paidOnly = payments.filter(p => p.status === 'paid' && !p.deleted);
     const monthlyPayments = paidOnly.filter(p => {
       const d = p.paidDate || p.dueDate;
-      return d && d.startsWith(currentMonthPrefix);
+      return d && normalizeDateToISO(d).startsWith(monthPrefix);
     });
     const collected = monthlyPayments.reduce((sum, p) => sum + (p.amountPaid || p.amountDue || 0), 0);
 
     const pendingOnly = payments.filter(p => p.status !== 'paid' && !p.deleted);
     const monthlyPending = pendingOnly.filter(p => {
       const d = p.dueDate;
-      return d && d.startsWith(currentMonthPrefix);
+      return d && normalizeDateToISO(d).startsWith(monthPrefix);
     });
     const uncollected = monthlyPending.reduce((sum, p) => sum + p.amountDue, 0);
     const totalExpected = collected + uncollected;
@@ -38,9 +51,9 @@ export const MonthlyOverviewWidget: React.FC = () => {
       collected,
       uncollected,
       totalExpected,
-      monthName: now.toLocaleDateString(language === 'ar' ? 'ar-EG' : language === 'de' ? 'de-DE' : 'en-US', { month: 'long', year: 'numeric' })
+      monthName: startDate.toLocaleDateString(language === 'ar' ? 'ar-EG' : language === 'de' ? 'de-DE' : 'en-US', { month: 'long', year: 'numeric' })
     };
-  }, [lessons, payments, currentMonthPrefix, language]);
+  }, [todayStr, lessons, getFullLessonsSnapshot, groups, groupWeeklySessions, payments, language]);
 
   const targetGoal = profile.monthlyIncomeGoal || 0;
   const goalPercent = targetGoal > 0 ? Math.min(100, Math.round((monthStats.collected / targetGoal) * 100)) : 0;

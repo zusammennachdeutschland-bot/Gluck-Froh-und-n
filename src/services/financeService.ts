@@ -154,21 +154,24 @@ export const calculateTodaysIncome = (transactions: FinanceTransaction[]) => {
  */
 export const shouldSettlePendingCycleRecord = (
   record: PaymentRecord,
-  paidCycle: { studentId: string; lessonIds?: string[]; lessonDates?: string[] }
+  paidCycle: { studentId: string; groupId?: string; lessonIds?: string[]; lessonDates?: string[] }
 ): boolean => {
   if (record.studentId !== paidCycle.studentId) return false;
   const st = String(record.status || '');
   if (st !== 'not_yet' && st !== 'pending' && st !== 'unpaid') return false;
 
-  const targetIds = new Set((paidCycle.lessonIds || []).filter(id => !id.startsWith('virtual_')));
-  const overlapsIds = Boolean(record.lessonIds && record.lessonIds.some(id => targetIds.has(id)));
-  const overlapsDates = Boolean(
-    record.lessonDates &&
-    paidCycle.lessonDates &&
-    record.lessonDates.some(d => paidCycle.lessonDates!.includes(d))
+  const targetIds = new Set(
+    (paidCycle.lessonIds || []).filter(id => typeof id === 'string' && !id.startsWith('virtual_'))
   );
+  if (targetIds.size === 0) return false;
 
-  return overlapsIds || overlapsDates;
+  const recordRealIds = [
+    ...((record.lessonIds || []).filter(id => typeof id === 'string' && !id.startsWith('virtual_'))),
+    ...(record.lessonId && !record.lessonId.startsWith('virtual_') ? [record.lessonId] : [])
+  ];
+  if (recordRealIds.length === 0) return false;
+
+  return recordRealIds.every(id => targetIds.has(id));
 };
 
 /**
