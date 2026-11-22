@@ -432,15 +432,12 @@ export const FinanceStudentPayments: React.FC = () => {
       .sort((a, b) => (b.paidDate || b.dueDate || '').localeCompare(a.paidDate || a.dueDate || ''));
   }, [payments, searchTerm, selectedGroupId]);
 
-  // Total Due Calculation
+  // Total Due Calculation (item.amountDue from calculateDuePaymentCycles already reflects net remaining due after paid & discount)
   const totalAmountDue = useMemo(() => {
     return filteredDueCycles.reduce((sum, item) => {
-      const existingRec = payments.find(p => p.id === item.existingPaymentRecordId);
-      const paid = existingRec ? (existingRec.amountPaid || 0) : 0;
-      const discount = existingRec ? (existingRec.discountAmount || 0) : 0;
-      return sum + Math.max(0, item.amountDue - paid - discount);
+      return sum + Math.max(0, Number(item.amountDue) || 0);
     }, 0);
-  }, [filteredDueCycles, payments]);
+  }, [filteredDueCycles]);
 
   // Total Overdue Calculation (cycles marked as 'not_yet' or overdue)
   const overdueTotal = useMemo(() => {
