@@ -1514,9 +1514,15 @@ async function runTests() {
       'APK CI parallelization: publish-release passes --repo explicitly without checkout'
     );
     assert.equal(
-      workflowYaml.includes('META-INF/MANIFEST.MF') && workflowYaml.includes('Main-Class'),
+      workflowYaml.includes('org/gradle/wrapper/GradleWrapperMain.class'),
       true,
-      'APK CI parallelization: build-apk.yml validates gradle-wrapper.jar Main-Class and regenerates if corrupt'
+      'APK CI parallelization: build-apk.yml validates GradleWrapperMain.class inside gradle-wrapper.jar'
+    );
+    const gradlewSrc = fs.readFileSync(path.resolve(process.cwd(), 'android/gradlew'), 'utf8');
+    assert.equal(
+      gradlewSrc.includes('org.gradle.wrapper.GradleWrapperMain') && !gradlewSrc.includes('-jar "$APP_HOME/gradle/wrapper/gradle-wrapper.jar"'),
+      true,
+      'APK CI parallelization: android/gradlew invokes GradleWrapperMain via -classpath instead of -jar'
     );
     const shardRunnerPath = path.resolve(process.cwd(), 'scripts/run_test_shard.cjs');
     const shardRunnerSrc = fs.readFileSync(shardRunnerPath, 'utf8');
