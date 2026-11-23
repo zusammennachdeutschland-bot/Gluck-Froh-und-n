@@ -271,12 +271,31 @@ jobs:
 
       - name: Ensure Valid Gradle Wrapper
         run: |
+          set -euo pipefail
           cd android
           mkdir -p gradle/wrapper
 
-          if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ] && command -v gradle >/dev/null 2>&1; then
-            echo "Generating clean Gradle wrapper via system Gradle..."
-            gradle wrapper --gradle-version 8.13 --distribution-type bin
+          WRAPPER_VALID=0
+          if [ -s "gradle/wrapper/gradle-wrapper.jar" ] && unzip -p gradle/wrapper/gradle-wrapper.jar META-INF/MANIFEST.MF 2>/dev/null | grep -qi "Main-Class"; then
+            WRAPPER_VALID=1
+          fi
+
+          if [ "$WRAPPER_VALID" -ne 1 ]; then
+            echo "Gradle wrapper JAR is missing or invalid (missing Main-Class manifest attribute). Regenerating clean Gradle 8.13 wrapper..."
+            rm -f gradle/wrapper/gradle-wrapper.jar
+            if ! command -v gradle >/dev/null 2>&1; then
+              echo "ERROR: system gradle not found on PATH to regenerate wrapper!"
+              exit 1
+            fi
+            TMP_WRAPPER_DIR="$(mktemp -d)"
+            trap 'rm -rf "$TMP_WRAPPER_DIR"' EXIT
+            (cd "$TMP_WRAPPER_DIR" && gradle wrapper --gradle-version 8.13 --distribution-type bin)
+            cp "$TMP_WRAPPER_DIR/gradle/wrapper/gradle-wrapper.jar" gradle/wrapper/gradle-wrapper.jar
+          fi
+
+          if ! unzip -p gradle/wrapper/gradle-wrapper.jar META-INF/MANIFEST.MF 2>/dev/null | grep -qi "Main-Class"; then
+            echo "ERROR: gradle-wrapper.jar is still missing Main-Class after regeneration!"
+            exit 1
           fi
 
           cat << 'EOF' > gradle/wrapper/gradle-wrapper.properties

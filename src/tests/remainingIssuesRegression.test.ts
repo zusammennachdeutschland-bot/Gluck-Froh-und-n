@@ -1513,6 +1513,26 @@ async function runTests() {
       true,
       'APK CI parallelization: publish-release passes --repo explicitly without checkout'
     );
+    assert.equal(
+      workflowYaml.includes('META-INF/MANIFEST.MF') && workflowYaml.includes('Main-Class'),
+      true,
+      'APK CI parallelization: build-apk.yml validates gradle-wrapper.jar Main-Class and regenerates if corrupt'
+    );
+    const shardRunnerPath = path.resolve(process.cwd(), 'scripts/run_test_shard.cjs');
+    const shardRunnerSrc = fs.readFileSync(shardRunnerPath, 'utf8');
+    assert.equal(
+      shardRunnerSrc.includes("'node_modules', '.bin'") && shardRunnerSrc.includes('path.delimiter'),
+      true,
+      'APK CI parallelization: run_test_shard.cjs prepends node_modules/.bin to PATH so tsx resolves on CI runners'
+    );
+    const timelinePath = path.resolve(process.cwd(), 'src/components/TodaysProgressTimeline.tsx');
+    const timelineSrc = fs.readFileSync(timelinePath, 'utf8');
+    const offlineRenderMatches = timelineSrc.match(/\{offlineLocationText\}/g) || [];
+    assert.equal(
+      offlineRenderMatches.length,
+      1,
+      'Today timeline UI: offlineLocationText is rendered only once (in the expanded card) and hidden in the collapsed row'
+    );
     const gradlePropsPath = path.resolve(process.cwd(), 'android/gradle.properties');
     const gradleProps = fs.readFileSync(gradlePropsPath, 'utf8');
     assert.equal(
@@ -1520,7 +1540,7 @@ async function runTests() {
       true,
       'APK CI parallelization: android/gradle.properties enables parallel execution and build cache'
     );
-    console.log('✓ C41, C43, C44, C45 & parallel APK CI checks passed');
+    console.log('✓ C41, C43, C44, C45, collapsed address & parallel APK CI checks passed');
   }
 
   console.log('=== ALL REMAINING ISSUES REGRESSION TESTS PASSED ===');

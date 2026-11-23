@@ -1169,6 +1169,7 @@ export const TodaysProgressTimeline: React.FC = () => {
               return (
                 <div 
                   key={lesson.id}
+                  data-lesson-mode={isOnlineLesson ? 'online' : 'offline'}
                   onClick={() => openLessonControl(lesson)}
                   onTouchStart={(e) => handleCardTouchStart(e, lesson.id)}
                   onTouchEnd={(e) => handleCardTouchEnd(e, lesson.id)}
@@ -1205,7 +1206,7 @@ export const TodaysProgressTimeline: React.FC = () => {
                   {/* Hairline Divider between time & details */}
                   <div className="w-px h-6 bg-slate-200/60 dark:bg-slate-800 shrink-0 self-center" />
 
-                  {/* 2. Compact Main Content (Name + Online/Offline & Location + Action buttons) */}
+                  {/* 2. Compact Main Content (Name + Online badge if online; offline address shows only when expanded) */}
                   <div className="flex-1 min-w-0 py-0.5">
                     <div className="flex items-center justify-between gap-1.5 min-w-0">
                       <div className="min-w-0 flex-1">
@@ -1221,22 +1222,15 @@ export const TodaysProgressTimeline: React.FC = () => {
                           }`}>
                             {targetGroup ? targetGroup.name : (lesson.studentName || lesson.groupName || lesson.title)}
                           </h4>
-                          <span
-                            className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-primary-soft text-primary border border-primary-border shrink-0"
-                            data-lesson-mode={isOnlineLesson ? 'online' : 'offline'}
-                          >
-                            {isOnlineLesson ? (
-                              <>
-                                <Video className="w-2.5 h-2.5 shrink-0" />
-                                <span>{t('next_action_online')}</span>
-                              </>
-                            ) : (
-                              <>
-                                <MapPin className="w-2.5 h-2.5 shrink-0" />
-                                <span className="truncate max-w-[110px]">{offlineLocationText}</span>
-                              </>
-                            )}
-                          </span>
+                          {isOnlineLesson && (
+                            <span
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-primary-soft text-primary border border-primary-border shrink-0"
+                              data-lesson-mode="online"
+                            >
+                              <Video className="w-2.5 h-2.5 shrink-0" />
+                              <span>{t('next_action_online')}</span>
+                            </span>
+                          )}
                         </div>
                       </div>
 

@@ -31,14 +31,21 @@ const allCommands = testScript
 
 const shardCommands = allCommands.filter((_, idx) => idx % totalShards === shardIndex - 1);
 
+const repoRoot = path.resolve(__dirname, '..');
+const localBinDir = path.join(repoRoot, 'node_modules', '.bin');
+const shardEnv = {
+  ...process.env,
+  PATH: process.env.PATH ? `${localBinDir}${path.delimiter}${process.env.PATH}` : localBinDir,
+};
+
 console.log(`[TestShard ${shardIndex}/${totalShards}] Running ${shardCommands.length} of ${allCommands.length} test suites...`);
 
 for (const cmd of shardCommands) {
   console.log(`\n[TestShard ${shardIndex}/${totalShards}] >>> ${cmd}`);
   execSync(cmd, {
-    cwd: path.resolve(__dirname, '..'),
+    cwd: repoRoot,
     stdio: 'inherit',
-    env: process.env
+    env: shardEnv
   });
 }
 
