@@ -546,7 +546,9 @@ async function runZoomReminderSyncRegressionTests() {
     const ambSession: GroupWeeklySession = {
       ...ambRec.sessions[0],
       syncState: 'pending',
-      meetingSource: 'none'
+      meetingSource: 'zoom_api',
+      zoomMeetingId: undefined,
+      zoomJoinUrl: undefined
     };
 
     // Case 1: Single meeting with matching topic ONLY, but non-recurring type=2 (name alone is NOT enough!)
@@ -706,7 +708,7 @@ async function runZoomReminderSyncRegressionTests() {
     const deviceBNewerPending: GroupWeeklySession = {
       ...devBRec.sessions[0],
       syncState: 'pending',
-      meetingSource: 'none',
+      meetingSource: 'zoom_api',
       zoomMeetingId: undefined,
       zoomJoinUrl: undefined,
       updatedAt: 9000,
@@ -731,7 +733,7 @@ async function runZoomReminderSyncRegressionTests() {
       ...devBRec.sessions[0],
       id: 'gws_random_device_b',
       syncState: 'pending',
-      meetingSource: 'none',
+      meetingSource: 'zoom_api',
       zoomMeetingId: undefined,
       zoomJoinUrl: undefined,
       updatedAt: 8000
@@ -818,12 +820,21 @@ async function runZoomReminderSyncRegressionTests() {
     const thuStatus = resolveCanonicalZoomLinkStatus({
       group: multiSlotGroup,
       lesson: thuLesson,
-      groupWeeklySessions: mixedSlotSessions,
-      defaultZoomLink: 'https://zoom.us/j/99999999999?pwd=DEFAULT'
+      groupWeeklySessions: mixedSlotSessions
     });
     assert.equal(thuStatus.status, 'needs_update');
     assert.equal(thuStatus.shouldWarn, true);
     assert.equal(thuStatus.url, '', 'Blocked Thursday slot must NOT fall back to Monday URL or legacy group/lesson/default URL');
+    assert.equal(
+      resolveActiveZoomLinkForLesson({
+        group: multiSlotGroup,
+        lesson: thuLesson,
+        groupWeeklySessions: mixedSlotSessions,
+        defaultZoomLink: 'https://zoom.us/j/99999999999?pwd=DEFAULT'
+      }),
+      '',
+      'resolveActiveZoomLinkForLesson must also refuse defaultZoomLink fallback on blocked Thursday slot'
+    );
     assert.equal(shouldShowZoomSyncWarning({ isOnline: true, resolvedZoomLink: thuStatus.url }), true);
 
     // Schedule projection (both explicit scheduled lesson and projected lesson) must match canonical status

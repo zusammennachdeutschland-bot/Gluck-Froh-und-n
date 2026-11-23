@@ -889,6 +889,7 @@ export function mergeEntities<T extends SyncableRecord>(
           (entityTypeName || '').toLowerCase() === 'groupweeklysession';
         if (isWeeklySessionCollection && !localItem.deleted && !incomingItem.deleted) {
           const loc = localItem as any;
+          const rawInc = incomingItem as any;
           const inc = entityMap.get(incomingItem.id) as any;
           const localHasVerifiedApi =
             loc.meetingSource === 'zoom_api' &&
@@ -896,10 +897,9 @@ export function mergeEntities<T extends SyncableRecord>(
             Boolean((loc.zoomJoinUrl || '').trim()) &&
             (loc.syncState === 'synced' || loc.syncState === 'needs_update');
           const incomingIsUnverifiedPending =
-            inc &&
-            inc.syncState === 'pending' &&
-            !(inc.meetingSource === 'zoom_api' && inc.zoomMeetingId && (inc.zoomJoinUrl || '').trim() && inc.lastSyncedAt);
-          if (localHasVerifiedApi && incomingIsUnverifiedPending) {
+            rawInc &&
+            rawInc.syncState === 'pending';
+          if (localHasVerifiedApi && incomingIsUnverifiedPending && inc) {
             const scheduleChanged =
               loc.weekday !== inc.weekday ||
               normalizeSlotTime(loc.startTime) !== normalizeSlotTime(inc.startTime) ||
@@ -940,6 +940,7 @@ export function mergeEntities<T extends SyncableRecord>(
             (entityTypeName || '').toLowerCase() === 'groupweeklysessions' ||
             (entityTypeName || '').toLowerCase() === 'groupweeklysession';
           if (isWeeklySessionCollection) {
+            const rawLoc = localItem as any;
             const loc = mergedLocalWin as any;
             const inc = incomingItem as any;
             const incomingHasVerifiedApi =
@@ -948,8 +949,8 @@ export function mergeEntities<T extends SyncableRecord>(
               Boolean((inc.zoomJoinUrl || '').trim()) &&
               (inc.syncState === 'synced' || inc.syncState === 'needs_update');
             const localIsUnverifiedPending =
-              loc.syncState === 'pending' &&
-              !(loc.meetingSource === 'zoom_api' && loc.zoomMeetingId && (loc.zoomJoinUrl || '').trim() && loc.lastSyncedAt);
+              rawLoc &&
+              rawLoc.syncState === 'pending';
             if (incomingHasVerifiedApi && localIsUnverifiedPending) {
               const scheduleChanged =
                 loc.weekday !== inc.weekday ||
