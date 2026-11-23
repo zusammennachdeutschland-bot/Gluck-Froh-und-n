@@ -1,14 +1,15 @@
-import { Lesson, Group, Student, PaymentRecord, FinanceTransaction } from '../types';
+import { Lesson, Group, Student, PaymentRecord, FinanceTransaction, PurgedRecordTombstone } from '../types';
 import { calculateDuePaymentCycles } from '../utils/paymentUtils';
-import { isGroupPerLesson } from '../utils/lessonUtils';
+import { isGroupPerLesson, normalizeTime } from '../utils/lessonUtils';
+import { normalizeDateToISO } from '../utils/timeUtils';
 import { calculateStudentDueBannerTotals } from './financeService';
 import { storage } from './storageService';
 
 export const PRUNED_LESSON_IDS_KEY = 'gluck_pruned_lesson_ids';
 export const PRUNED_LESSONS_BACKUP_KEY = 'gluck_pruned_lessons_archive';
 export const LAST_CLEANUP_DATE_KEY = 'gluck_last_auto_cleanup_date';
-export const FUTURE_TOMBSTONE_REPAIR_FLAG_KEY = 'dl_future_tombstone_repair_v1';
-export const FUTURE_TOMBSTONE_REPAIR_REPORT_KEY = 'dl_future_tombstone_repair_report_v1';
+export const FUTURE_TOMBSTONE_REPAIR_FLAG_KEY = 'dl_future_tombstone_repair_v2';
+export const FUTURE_TOMBSTONE_REPAIR_REPORT_KEY = 'dl_future_tombstone_repair_report_v2';
 
 export interface PrunedTombstoneRepairReport {
   repairedAt: string;
@@ -17,6 +18,8 @@ export interface PrunedTombstoneRepairReport {
   keptCount: number;
   removedIds: string[];
   keptFutureIds: string[];
+  keptDeletedOrCancelledIds: string[];
+  uncertainReviewIds: string[];
   keptHistoricalIdsCount: number;
 }
 
@@ -100,28 +103,51 @@ export function setPrunedLessonIds(ids: Iterable<string>): void {
 }
 
 /**
- * Extracts YYYY-MM-DD date from an auto-generated lesson ID (`l_auto_<groupId>_<YYYY-MM-DD>_<HHMM>`).
+ * Extracts `{ groupId, date, time }` from an auto-generated lesson ID (`l_auto_<groupId>_<YYYY-MM-DD>_<HHMM>`).
  */
-export function extractDateFromAutoLessonId(id: string): string | null {
+export function extractAutoLessonMetaFromId(id: string): { groupId: string; date: string; time: string } | null {
   if (!id || typeof id !== 'string' || !id.startsWith('l_auto_')) return null;
-  const match = id.match(/_(\d{4}-\d{2}-\d{2})_(\d{3,4})$/);
-  return match ? match[1] : null;
+  const match = id.match(/^l_auto_(.+)_(\d{4}-\d{2}-\d{2})_(\d{3,4})$/);
+  if (!match) return null;
+  const rawTime = match[3].padStart(4, '0');
+  const normTime = `${rawTime.slice(0, 2)}:${rawTime.slice(2, 4)}`;
+  return {
+    groupId: match[1],
+    date: match[2],
+    time: normTime
+  };
 }
 
 /**
- * Safe one-time repair for future `l_auto_` tombstones added by the 14-day cleanup.
- * - Never un-tombstones any ID for dates before todayStr.
- * - For each tombstoned ID starting with `l_auto_` and date >= todayStr:
- *   removes the tombstone ONLY IF there is no stored lesson record (including soft-deleted/recentlyDeleted)
- *   with that same ID that has `deleted === true` or `status === 'cancelled'`.
- * - If such a record exists, keeps the tombstone and keeps the lesson deleted/cancelled.
+ * Extracts YYYY-MM-DD date from an auto-generated lesson ID (`l_auto_<groupId>_<YYYY-MM-DD>_<HHMM>`).
  */
-export function repairFutureAutoLessonTombstones(options: {
+export function extractDateFromAutoLessonId(id: string): string | null {
+  return extractAutoLessonMetaFromId(id)?.date || null;
+}
+
+export interface TombstoneRepairOptions {
   storedLessons: Lesson[];
   recentlyDeletedLessons?: Array<{ item?: Lesson } | Lesson>;
+  purgedRecords?: Array<Partial<PurgedRecordTombstone>>;
+  prunedArchiveLessons?: Lesson[];
+  dismissedLessonIds?: string[];
   todayStr?: string;
   forceRun?: boolean;
-}): PrunedTombstoneRepairReport {
+}
+
+/**
+ * Safe repair for future `l_auto_` tombstones added by the 14-day cleanup.
+ * Relies on ALL authoritative deletion/cancellation stores (`storedLessons`, `recentlyDeletedLessons`,
+ * `purgedRecords`, `dismissedLessonIds`) AND positive cleanup provenance (`prunedArchiveLessons`):
+ * - Never un-tombstones any ID for dates before `todayStr`.
+ * - Keeps the tombstone if the ID OR its normalized `(groupId, date, time)` slot is deleted, cancelled,
+ *   dismissed, or purged in ANY authoritative store.
+ * - Removes a future `l_auto_` tombstone ONLY when NOT deleted/cancelled/purged AND positive provenance
+ *   confirms in `prunedArchiveLessons` that it was pruned as an unmodified future `scheduled` auto-lesson.
+ * - If provenance is uncertain (not proven to be cleanup bloat), KEEPS the tombstone and lists it in
+ *   `uncertainReviewIds` for explicit review rather than risking resurrecting a user-deleted lesson.
+ */
+export function repairFutureAutoLessonTombstones(options: TombstoneRepairOptions): PrunedTombstoneRepairReport {
   const todayStr = options.todayStr || formatLocalDateStr(new Date());
   const currentTombstones = getPrunedLessonIds();
 
@@ -140,26 +166,66 @@ export function repairFutureAutoLessonTombstones(options: {
   }
 
   const intentionallyDeletedOrCancelledIds = new Set<string>();
-  const inspectLesson = (l?: Lesson | null) => {
-    if (!l || !l.id) return;
-    if (l.deleted === true || l.status === 'cancelled') {
+  const intentionallyDeletedOrCancelledSlots = new Set<string>();
+  const purgedGroupIds = new Set<string>();
+
+  const registerBlockedLesson = (l?: Partial<Lesson> | null, forceDeleted: boolean = false) => {
+    if (!l) return;
+    const isBlocked = forceDeleted || l.deleted === true || l.status === 'cancelled';
+    if (!isBlocked) return;
+    if (l.id) {
       intentionallyDeletedOrCancelledIds.add(l.id);
+    }
+    if (l.groupId && l.date && l.time) {
+      const isoDate = normalizeDateToISO(l.date) || l.date.trim();
+      const normTime = normalizeTime(l.time) || l.time.trim();
+      if (isoDate && normTime) {
+        intentionallyDeletedOrCancelledSlots.add(`${l.groupId}_${isoDate}_${normTime}`);
+      }
     }
   };
 
-  (options.storedLessons || []).forEach(inspectLesson);
+  (options.storedLessons || []).forEach((l) => registerBlockedLesson(l, false));
   (options.recentlyDeletedLessons || []).forEach((entry: any) => {
     if (!entry) return;
     if (entry.item && typeof entry.item === 'object') {
-      inspectLesson({ ...entry.item, deleted: true });
-    } else if (entry.id) {
-      inspectLesson({ ...entry, deleted: true });
+      registerBlockedLesson(entry.item, true);
+    } else if (entry.id || (entry.groupId && entry.date)) {
+      registerBlockedLesson(entry, true);
+    }
+  });
+  (options.purgedRecords || []).forEach((p) => {
+    if (!p || !p.id) return;
+    intentionallyDeletedOrCancelledIds.add(p.id);
+    if (p.type === 'group') {
+      purgedGroupIds.add(p.id);
+    }
+  });
+  (options.dismissedLessonIds || []).forEach((id) => {
+    if (id && typeof id === 'string') {
+      intentionallyDeletedOrCancelledIds.add(id);
+    }
+  });
+
+  // Positive provenance: IDs confirmed archived by cleanup as unmodified future `scheduled` auto-lessons
+  const verifiedCleanupBloatIds = new Set<string>();
+  (options.prunedArchiveLessons || []).forEach((archived) => {
+    if (!archived || !archived.id || !archived.id.startsWith('l_auto_')) return;
+    const isUnmodifiedScheduled =
+      !archived.deleted &&
+      archived.status === 'scheduled' &&
+      (!archived.report || Object.keys(archived.report).length === 0) &&
+      (!archived.studentPayments || Object.keys(archived.studentPayments).length === 0);
+    if (isUnmodifiedScheduled) {
+      verifiedCleanupBloatIds.add(archived.id);
     }
   });
 
   const nextTombstones = new Set<string>();
   const removedIds: string[] = [];
   const keptFutureIds: string[] = [];
+  const keptDeletedOrCancelledIds: string[] = [];
+  const uncertainReviewIds: string[] = [];
   let keptHistoricalIdsCount = 0;
 
   currentTombstones.forEach((id) => {
@@ -169,27 +235,44 @@ export function repairFutureAutoLessonTombstones(options: {
       return;
     }
 
-    const datePart = extractDateFromAutoLessonId(id);
-    if (!datePart) {
-      // Cannot parse date with certainty -> keep deleted and list it
+    const meta = extractAutoLessonMetaFromId(id);
+    if (!meta) {
+      // Cannot parse date/slot with certainty -> keep deleted and list for review
       nextTombstones.add(id);
       keptFutureIds.push(id);
+      uncertainReviewIds.push(id);
       return;
     }
 
-    if (datePart < todayStr) {
+    if (meta.date < todayStr) {
       // Never un-tombstone anything for dates before today
       nextTombstones.add(id);
       keptHistoricalIdsCount++;
       return;
     }
 
-    // datePart >= todayStr
-    if (intentionallyDeletedOrCancelledIds.has(id)) {
+    // meta.date >= todayStr
+    const slotKey = `${meta.groupId}_${meta.date}_${meta.time}`;
+    const isConfirmedBlocked =
+      intentionallyDeletedOrCancelledIds.has(id) ||
+      purgedGroupIds.has(meta.groupId) ||
+      intentionallyDeletedOrCancelledSlots.has(slotKey);
+
+    if (isConfirmedBlocked) {
       nextTombstones.add(id);
       keptFutureIds.push(id);
-    } else {
+      keptDeletedOrCancelledIds.push(id);
+      return;
+    }
+
+    if (verifiedCleanupBloatIds.has(id)) {
+      // Positively confirmed as future cleanup bloat and NOT deleted/cancelled/purged anywhere
       removedIds.push(id);
+    } else {
+      // Provenance is uncertain -> keep tombstone and expose for explicit review
+      nextTombstones.add(id);
+      keptFutureIds.push(id);
+      uncertainReviewIds.push(id);
     }
   });
 
@@ -202,6 +285,8 @@ export function repairFutureAutoLessonTombstones(options: {
     keptCount: nextTombstones.size,
     removedIds,
     keptFutureIds,
+    keptDeletedOrCancelledIds,
+    uncertainReviewIds,
     keptHistoricalIdsCount
   };
 
@@ -215,10 +300,57 @@ export function repairFutureAutoLessonTombstones(options: {
   }
 
   console.info(
-    `[TombstoneRepair] Completed for >= ${todayStr}: removed=${report.removedCount}, kept=${report.keptCount} (keptFuture=${keptFutureIds.length}, keptHistorical=${keptHistoricalIdsCount})`
+    `[TombstoneRepair] Completed for >= ${todayStr}: removed=${report.removedCount}, kept=${report.keptCount} (confirmedBlocked=${keptDeletedOrCancelledIds.length}, uncertainReview=${uncertainReviewIds.length}, keptHistorical=${keptHistoricalIdsCount})`
   );
 
   return report;
+}
+
+/**
+ * Loads all authoritative stores (`dl_lessons`, `dl_recently_deleted`, `gluck_pruned_lessons_archive`,
+ * `dl_dismissed_dashboard_lessons`) from storage and merges them with any in-memory/incoming records
+ * before running `repairFutureAutoLessonTombstones`.
+ */
+export async function repairFutureAutoLessonTombstonesFromStorage(
+  options?: Partial<TombstoneRepairOptions>
+): Promise<PrunedTombstoneRepairReport> {
+  const [storedLessonsFromDb, storedRecentlyDeleted, storedPrunedArchive, storedDismissed] = await Promise.all([
+    storage.getItem<Lesson[]>('dl_lessons').catch(() => null),
+    storage.getItem<{ lessons?: any[]; purgedRecords?: PurgedRecordTombstone[] }>('dl_recently_deleted').catch(() => null),
+    storage.getItem<Lesson[]>(PRUNED_LESSONS_BACKUP_KEY).catch(() => null),
+    storage.getItem<string[]>('dl_dismissed_dashboard_lessons').catch(() => null)
+  ]);
+
+  const combinedStoredLessons: Lesson[] = [
+    ...(Array.isArray(storedLessonsFromDb) ? storedLessonsFromDb : []),
+    ...(Array.isArray(options?.storedLessons) ? options!.storedLessons : [])
+  ];
+  const combinedRecentlyDeleted = [
+    ...(Array.isArray(storedRecentlyDeleted?.lessons) ? storedRecentlyDeleted!.lessons : []),
+    ...(Array.isArray(options?.recentlyDeletedLessons) ? options!.recentlyDeletedLessons : [])
+  ];
+  const combinedPurgedRecords = [
+    ...(Array.isArray(storedRecentlyDeleted?.purgedRecords) ? storedRecentlyDeleted!.purgedRecords : []),
+    ...(Array.isArray(options?.purgedRecords) ? options!.purgedRecords : [])
+  ];
+  const combinedPrunedArchive: Lesson[] = [
+    ...(Array.isArray(storedPrunedArchive) ? storedPrunedArchive : []),
+    ...(Array.isArray(options?.prunedArchiveLessons) ? options!.prunedArchiveLessons : [])
+  ];
+  const combinedDismissed: string[] = [
+    ...(Array.isArray(storedDismissed) ? storedDismissed : []),
+    ...(Array.isArray(options?.dismissedLessonIds) ? options!.dismissedLessonIds : [])
+  ];
+
+  return repairFutureAutoLessonTombstones({
+    storedLessons: combinedStoredLessons,
+    recentlyDeletedLessons: combinedRecentlyDeleted,
+    purgedRecords: combinedPurgedRecords,
+    prunedArchiveLessons: combinedPrunedArchive,
+    dismissedLessonIds: combinedDismissed,
+    todayStr: options?.todayStr,
+    forceRun: options?.forceRun
+  });
 }
 
 /**

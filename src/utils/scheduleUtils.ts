@@ -1,5 +1,5 @@
 import { Group, GroupScheduleSlot, GroupWeeklySession, Lesson, ScheduleRecurrence } from '../types';
-import { parseLocalDate, formatLocalDate } from './timeUtils';
+import { parseLocalDate, formatLocalDate, normalizeDateToISO } from './timeUtils';
 
 const normalizeTime = (t?: string): string => {
   if (!t || typeof t !== 'string') return '';
@@ -303,7 +303,7 @@ export function getProjectedLessonsForRange(
           (l.amountPaid && l.amountPaid > 0) ||
           (l.studentPayments && Object.keys(l.studentPayments).length > 0)
         );
-        if (!hasEngagement && !isDateMatchingGroupRecurrence(effectiveRecurrence, l.date)) {
+        if (!hasEngagement && !isDateMatchingGroupRecurrence(effectiveRecurrence, normalizeDateToISO(l.date) || l.date)) {
           return false; // Skip unstarted scheduled lesson on the wrong alternating week!
         }
       }
@@ -313,13 +313,18 @@ export function getProjectedLessonsForRange(
   });
   const explicitKeys = new Set<string>();
   const deletedKeys = new Set<string>();
+  const cancelledKeys = new Set<string>();
 
   (explicitLessons || []).forEach(l => {
     if (l.groupId && l.date && l.time) {
+      const normDate = normalizeDateToISO(l.date) || l.date.trim();
       const normTime = normalizeTime(l.time) || l.time.trim();
-      const key = `${l.groupId}_${l.date}_${normTime}`;
+      const key = `${l.groupId}_${normDate}_${normTime}`;
       if (l.deleted) {
         deletedKeys.add(key);
+      } else if (l.status === 'cancelled') {
+        cancelledKeys.add(key);
+        explicitKeys.add(key);
       } else {
         const grp = groupsById.get(l.groupId);
         const effectiveRecurrence = (grp?.scheduleRecurrence && grp.scheduleRecurrence !== 'weekly')
@@ -335,19 +340,20 @@ export function getProjectedLessonsForRange(
           effectiveRecurrence === 'weekly' ||
           l.status !== 'scheduled' ||
           hasEngagement ||
-          isDateMatchingGroupRecurrence(effectiveRecurrence, l.date)
+          isDateMatchingGroupRecurrence(effectiveRecurrence, normDate)
         ) {
           explicitKeys.add(key);
         }
       }
     }
   });
-  // Map non-deleted explicit lessons by group and date to prevent projecting duplicate sessions
-  // when a group has already completed its scheduled session(s) on a given date.
+  // Map non-deleted explicit lessons by group and normalized date to prevent projecting duplicate sessions
+  // when a group has already completed or cancelled its scheduled session(s) on a given date.
   const explicitGroupDateMap = new Map<string, Lesson[]>();
   explicit.forEach(l => {
     if (l.groupId && l.date) {
-      const gDateKey = `${l.groupId}_${l.date}`;
+      const normDate = normalizeDateToISO(l.date) || l.date.trim();
+      const gDateKey = `${l.groupId}_${normDate}`;
       if (!explicitGroupDateMap.has(gDateKey)) explicitGroupDateMap.set(gDateKey, []);
       explicitGroupDateMap.get(gDateKey)!.push(l);
     }
@@ -376,10 +382,10 @@ export function getProjectedLessonsForRange(
       const matchingSlots = slots.filter(s => getDayNumber(s.day) === dayNum);
       const existingForGroupOnDate = explicitGroupDateMap.get(`${group.id}_${dateStr}`) || [];
       const hasCompletedOnDate = existingForGroupOnDate.some(
-        l => l.status === 'completed' || (l.report && l.report.attendanceStatus)
+        l => l.status === 'completed' || l.status === 'cancelled' || (l.report && l.report.attendanceStatus)
       );
 
-      // If group already held / completed its session on this date, do not project redundant unstarted sessions on the same date!
+      // If group already held / completed / cancelled its session on this date, do not project redundant unstarted sessions on the same date!
       if (hasCompletedOnDate && existingForGroupOnDate.length >= matchingSlots.length) {
         cursor.setDate(cursor.getDate() + 1);
         continue;
@@ -390,7 +396,7 @@ export function getProjectedLessonsForRange(
         const normSessionTime = normalizeTime(sessionTime) || sessionTime.trim();
         const key = `${group.id}_${dateStr}_${normSessionTime}`;
 
-        if (!explicitKeys.has(key) && !deletedKeys.has(key)) {
+        if (!explicitKeys.has(key) && !deletedKeys.has(key) && !cancelledKeys.has(key)) {
           const isPerLesson = group.paymentCycle === 'per_lesson' || group.paymentModel === 'per_session';
           const perSessionPrice = isPerLesson && group.pricePerSession
             ? group.pricePerSession

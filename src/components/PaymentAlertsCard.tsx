@@ -14,14 +14,8 @@ export const PaymentAlertsCard: React.FC = () => {
   }, [students, groups, lessons, payments]);
 
   const totalPendingAmount = useMemo(() => {
-    return dueCycles.reduce((sum, item) => {
-      const existingRec = payments.find(p => p.id === item.existingPaymentRecordId);
-      const paid = existingRec ? (existingRec.amountPaid || 0) : 0;
-      const discount = existingRec ? (existingRec.discountAmount || 0) : 0;
-      const remaining = Math.max(0, item.amountDue - paid - discount);
-      return sum + remaining;
-    }, 0);
-  }, [dueCycles, payments]);
+    return dueCycles.reduce((sum, item) => sum + Math.max(0, item.amountDue || 0), 0);
+  }, [dueCycles]);
 
   if (dueCycles.length === 0) {
     return null;

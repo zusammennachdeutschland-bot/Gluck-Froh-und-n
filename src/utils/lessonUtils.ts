@@ -1188,13 +1188,38 @@ export const shouldRetainLessonInActiveWindow = (
  * O(1) slot key builder for 365-day lesson generation loops (#27)
  */
 export const makeLessonSlotKey = (groupId: string, date: string, time: string): string =>
-  `${groupId}_${date}_${normalizeTime(time) || time}`;
+  `${groupId}_${normalizeDateToISO(date) || date}_${normalizeTime(time) || time}`;
 
 export const buildLessonSlotSet = (lessons: Lesson[]): Set<string> => {
   const slotSet = new Set<string>();
   for (const l of lessons) {
     if (!l || l.deleted || !l.groupId || !l.date || !l.time) continue;
     slotSet.add(makeLessonSlotKey(l.groupId, l.date, l.time));
+  }
+  return slotSet;
+};
+
+/**
+ * Builds a format-normalized slot set of ALL occupied, cancelled, or deleted slots
+ * across stored lessons and recently-deleted records so auto-generation never resurrects
+ * a deleted or cancelled lesson even when date/time formatting differs.
+ */
+export const buildBlockedLessonSlotSet = (
+  lessons: Lesson[],
+  recentlyDeletedLessons?: Array<{ item?: Lesson } | Lesson>
+): Set<string> => {
+  const slotSet = new Set<string>();
+  const addLesson = (l?: Lesson | null) => {
+    if (!l || !l.groupId || !l.date || !l.time) return;
+    slotSet.add(makeLessonSlotKey(l.groupId, l.date, l.time));
+  };
+  for (const l of lessons || []) {
+    addLesson(l);
+  }
+  for (const entry of recentlyDeletedLessons || []) {
+    if (!entry) continue;
+    const item = (entry as any).item && typeof (entry as any).item === 'object' ? (entry as any).item : entry;
+    addLesson(item as Lesson);
   }
   return slotSet;
 };

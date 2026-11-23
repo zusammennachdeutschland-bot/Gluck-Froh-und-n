@@ -150,11 +150,7 @@ export const syncPaymentsDueToWidget = async (
     const overdueCount = new Set(dueCycles.map(c => c.studentId).filter(Boolean)).size || dueCycles.length;
 
     const totalOutstanding = dueCycles.reduce((sum, item) => {
-      const existingRec = payments.find(p => p.id === item.existingPaymentRecordId);
-      const paid = existingRec ? (existingRec.amountPaid || 0) : 0;
-      const discount = existingRec ? (existingRec.discountAmount || 0) : 0;
-      const remaining = Math.max(0, item.amountDue - paid - discount);
-      return sum + remaining;
+      return sum + Math.max(0, item.amountDue || 0);
     }, 0);
 
     await Preferences.set({
@@ -411,11 +407,7 @@ export const syncFinanceTrackerToWidget = async (
     const dueCycles = calculateDuePaymentCycles(students, groups, lessons, payments);
     const dueStudentsCount = new Set(dueCycles.map(c => c.studentId).filter(Boolean)).size || dueCycles.length;
     const dueStudentsTotal = dueCycles.reduce((sum, item) => {
-      const existingRec = payments.find(p => p.id === item.existingPaymentRecordId);
-      const paid = existingRec ? (existingRec.amountPaid || 0) : 0;
-      const discount = existingRec ? (existingRec.discountAmount || 0) : 0;
-      const remaining = Math.max(0, item.amountDue - paid - discount);
-      return sum + remaining;
+      return sum + Math.max(0, item.amountDue || 0);
     }, 0);
 
     await Preferences.set({

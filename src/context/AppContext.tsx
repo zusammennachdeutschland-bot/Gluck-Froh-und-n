@@ -22,11 +22,11 @@ import {
 } from '../services/notificationService';
 import { App as CapacitorApp } from '@capacitor/app';
 import { storage } from '../services/storageService';
-import { getStudentCyclePricing, calculateEstimatedPastDate, sanitizePaymentLessonDates } from '../utils/paymentUtils';
+import { getStudentCyclePricing, calculateEstimatedPastDate, sanitizePaymentLessonDates, allocateAdvancePaymentFifo, buildMovedStudentRecord, recalculatePendingPaymentsForGroupPriceChange } from '../utils/paymentUtils';
 import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence, getAlternatingWeek } from '../utils/scheduleUtils';
 import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
-import { getPrunedLessonIds, addPrunedLessonIds, executeLessonCleanup, analyzeLessonCleanup, formatLocalDateStr, LAST_CLEANUP_DATE_KEY, repairFutureAutoLessonTombstones } from '../services/lessonCleanupService';
-import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo, calculateSequentialSessionNumber, resolveLessonCycleNumber, buildGroupCycleAnchorFields, compareLessonsChronologically, resequenceScheduledLessonsAfterChange, isGroupPerLesson, shouldRetainLessonInActiveWindow, findInvalidBiweeklyAutoLessons, buildLessonSlotSet, makeLessonSlotKey, normalizeTime } from '../utils/lessonUtils';
+import { getPrunedLessonIds, addPrunedLessonIds, executeLessonCleanup, analyzeLessonCleanup, formatLocalDateStr, LAST_CLEANUP_DATE_KEY, PRUNED_LESSONS_BACKUP_KEY, repairFutureAutoLessonTombstones, repairFutureAutoLessonTombstonesFromStorage } from '../services/lessonCleanupService';
+import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo, calculateSequentialSessionNumber, resolveLessonCycleNumber, buildGroupCycleAnchorFields, compareLessonsChronologically, resequenceScheduledLessonsAfterChange, isGroupPerLesson, shouldRetainLessonInActiveWindow, findInvalidBiweeklyAutoLessons, buildLessonSlotSet, buildBlockedLessonSlotSet, makeLessonSlotKey, normalizeTime } from '../utils/lessonUtils';
 import { translations, TranslationKey } from '../i18n/translations';
 import { syncTodayLessonsToWidget } from '../services/widgetService';
 import { runSyncMigration } from '../services/sync/syncMigration';
@@ -1037,10 +1037,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const saved = initialData['dl_lessons'];
     const raw: Lesson[] = Array.isArray(saved) ? saved : [];
     const savedRecentlyDeleted = initialData['dl_recently_deleted'];
-    repairFutureAutoLessonTombstones({
-      storedLessons: raw,
-      recentlyDeletedLessons: Array.isArray(savedRecentlyDeleted?.lessons) ? savedRecentlyDeleted.lessons : []
-    });
+    const savedArchive = initialData[PRUNED_LESSONS_BACKUP_KEY];
+    const savedDismissed = initialData['dl_dismissed_dashboard_lessons'];
+    // Only run synchronous startup tombstone repair if the authoritative pruned archive is already preloaded;
+    // otherwise the async mount effect loads all authoritative stores from storage first.
+    if (Array.isArray(savedArchive)) {
+      repairFutureAutoLessonTombstones({
+        storedLessons: raw,
+        recentlyDeletedLessons: Array.isArray(savedRecentlyDeleted?.lessons) ? savedRecentlyDeleted.lessons : [],
+        purgedRecords: Array.isArray(savedRecentlyDeleted?.purgedRecords) ? savedRecentlyDeleted.purgedRecords : [],
+        prunedArchiveLessons: savedArchive,
+        dismissedLessonIds: Array.isArray(savedDismissed) ? savedDismissed : []
+      });
+    }
     const prunedIds = getPrunedLessonIds();
     const filteredRaw = raw.filter(l => l && l.id && !prunedIds.has(l.id));
     return deduplicateLessonList(filteredRaw, students);
@@ -1057,6 +1066,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   });
 
   const fullLessonsRef = useRef<Lesson[]>(initialLessonDeduplication.deduplicated);
+
+  // Authoritative async startup repair for future l_auto_ tombstones across full storage (dl_lessons, dl_recently_deleted, pruned archive)
+  useEffect(() => {
+    repairFutureAutoLessonTombstonesFromStorage({
+      storedLessons: fullLessonsRef.current || [],
+      recentlyDeletedLessons: recentlyDeletedRef.current?.lessons || [],
+      purgedRecords: recentlyDeletedRef.current?.purgedRecords || []
+    }).catch(() => {});
+  }, []);
 
   // Memory Optimization: Sanitize and keep active non-deleted payments for global RAM state
   const filterActivePayments = (raw: PaymentRecord[]): PaymentRecord[] => {
@@ -2908,7 +2926,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       : lessons;
     const newAutoLessons: Lesson[] = [];
     const today = new Date();
-    const existingSlotSet = buildLessonSlotSet(sourceLessons);
+    const recDeletedLessons = recentlyDeletedRef.current?.lessons || [];
+    const purgedLessonIds = new Set<string>(
+      (recentlyDeletedRef.current?.purgedRecords || [])
+        .filter(p => p && p.id && p.type === 'lesson')
+        .map(p => p.id)
+    );
+    const existingSlotSet = buildBlockedLessonSlotSet(sourceLessons, recDeletedLessons);
     const groupLessonCounts = new Map<string, number>();
     for (const l of sourceLessons) {
       if (!l.deleted && l.status !== 'cancelled' && l.groupId) {
@@ -2945,12 +2969,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           const slotKey = makeLessonSlotKey(group.id, dateStr, sessionTime);
           const autoLessonId = `l_auto_${group.id}_${dateStr}_${sessionTime.replace(':', '')}`;
 
-          // If this slot was explicitly pruned or already exists with a non-deleted record, do not auto-generate
-          if (prunedIds.has(autoLessonId)) continue;
+          // If this slot was explicitly pruned, purged, deleted, cancelled, or already exists, do not auto-generate
+          if (prunedIds.has(autoLessonId) || purgedLessonIds.has(autoLessonId)) continue;
           if (sourceLessons.some(l => l && l.id === autoLessonId)) continue;
 
           // If group already has a completed, cancelled, or in-progress session on this date, do not auto-generate another scheduled session
-          const existingForGroupOnDate = sourceLessons.filter(l => l.groupId === group.id && l.date === dateStr && !l.deleted);
+          const existingForGroupOnDate = sourceLessons.filter(l => l.groupId === group.id && normalizeDateToISO(l.date) === dateStr && !l.deleted);
           const hasHandledOnDate = existingForGroupOnDate.some(
             l => l.status === 'completed' || l.status === 'cancelled' || l.status === 'in_progress' || (l.report && l.report.attendanceStatus)
           );
@@ -3002,7 +3026,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
     if (newAutoLessons.length > 0) {
       updateFullLessonsStorage(prev => {
-        const prevSlotSet = buildLessonSlotSet(prev);
+        const prevSlotSet = buildBlockedLessonSlotSet(prev, recentlyDeletedRef.current?.lessons);
         const prevIdSet = new Set(prev.map(l => l?.id).filter(Boolean));
         const deduplicated = newAutoLessons.filter(
           nl => !prevIdSet.has(nl.id) && !prevSlotSet.has(makeLessonSlotKey(nl.groupId || '', nl.date, nl.time))
@@ -3725,32 +3749,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return prev;
     });
 
-    // 4. Synchronize pending/unpaid payment records for this group & its non-custom students
+    // 4. Synchronize pending/unpaid payment records for this group & its non-custom students (preserving discounts)
     setPayments(prev => {
-      let paymentsChanged = false;
       const targetBundle = isPerLesson ? 1 : mergedSessionCount;
-      const updatedPayments = prev.map(p => {
-        if (p.status === 'paid' || p.status === 'exempted') return p;
-        const matchesGroup = p.groupId === id && (!p.studentId || groupStudentIds.has(p.studentId));
-        const studentBelongsToGroup = Boolean(p.studentId && groupStudentIds.has(p.studentId));
-        if (!matchesGroup && !studentBelongsToGroup) return p;
+      const { updatedPayments, changed } = recalculatePendingPaymentsForGroupPriceChange(
+        prev,
+        id,
+        groupStudentIds,
+        effectivePrice,
+        targetBundle,
+        wrapMutation
+      );
 
-        paymentsChanged = true;
-        const updatedDates = (p.lessonDates || []).map(d => {
-          return d.replace(/Session (\d+)\/(\d+)/g, `Session $1/${targetBundle}`);
-        });
-        const newRemainingBalance = Math.max(0, effectivePrice - (p.amountPaid || 0) - (p.discountAmount || 0));
-
-        return wrapMutation({
-          ...p,
-          bundleSize: targetBundle,
-          amountDue: effectivePrice,
-          remainingBalance: newRemainingBalance,
-          lessonDates: updatedDates
-        } as PaymentRecord);
-      });
-
-      if (paymentsChanged) {
+      if (changed) {
         storage.setItem('dl_payments', updatedPayments);
         return updatedPayments;
       }
@@ -4135,16 +4146,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const moveStudent = (studentId: string, newGroupId: string) => {
     const targetGroup = groups.find(g => g.id === newGroupId);
-    const newGrade = targetGroup?.grade;
+    const todayStr = formatLocalDate();
     setStudents(prev => {
       const next = prev.map(s => {
         if (s.id === studentId) {
-          return wrapMutation({
-            ...s,
-            groupId: newGroupId,
-            grade: newGrade || s.grade,
-            updatedAt: Date.now()
-          } as Student);
+          const oldGroup = groups.find(g => g.id === s.groupId);
+          return wrapMutation(buildMovedStudentRecord(s, oldGroup, targetGroup, todayStr));
         }
         return s;
       });
@@ -4156,17 +4163,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   const moveStudentsBulk = (studentIds: string[], newGroupId: string) => {
     const targetGroup = groups.find(g => g.id === newGroupId);
-    const newGrade = targetGroup?.grade;
+    const todayStr = formatLocalDate();
     const idSet = new Set(studentIds);
     setStudents(prev => {
       const next = prev.map(s => {
         if (idSet.has(s.id)) {
-          return wrapMutation({
-            ...s,
-            groupId: newGroupId,
-            grade: newGrade || s.grade,
-            updatedAt: Date.now()
-          } as Student);
+          const oldGroup = groups.find(g => g.id === s.groupId);
+          return wrapMutation(buildMovedStudentRecord(s, oldGroup, targetGroup, todayStr));
         }
         return s;
       });
@@ -6490,11 +6493,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         if (resolvedExistingId && p.id === resolvedExistingId) {
           updatedExisting = true;
           finalPaymentId = p.id;
+          const prevPaid = p.status === 'partial' ? (p.amountPaid || 0) : 0;
+          const discount = Number(p.discountAmount || 0);
+          const totalPaid = Math.round((prevPaid + data.amountPaid) * 100) / 100;
+          const nextRemaining = Math.max(0, Math.round((p.amountDue - discount - totalPaid) * 100) / 100);
           return wrapMutation({
             ...p,
-            amountPaid: data.amountPaid,
-            remainingBalance: Math.max(0, p.amountDue - data.amountPaid),
-            status: 'paid',
+            amountPaid: totalPaid,
+            remainingBalance: nextRemaining,
+            status: nextRemaining === 0 ? 'paid' : 'partial',
             paidDate: today,
             lessonDates: data.lessonDates,
             lessonIds: data.lessonIds,
@@ -6621,7 +6628,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const existingTx = financeTransactions.find(
         tx => !tx.deleted && tx.type === 'income' && tx.relatedPaymentId === finalPaymentId
       );
-      if (existingTx) {
+      if (existingTx && matchedExistingRecord?.status !== 'partial') {
         updateFinanceTransaction(existingTx.id, {
           amount: data.amountPaid,
           accountId: targetAccountId,
@@ -6692,73 +6699,103 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const today = formatLocalDate();
     const targetAccountId = data.accountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';
     const finalPaymentId = `pay_adv_${data.studentId}_${Date.now()}`;
+    const currentPaymentsSource = (fullPaymentsRef.current && fullPaymentsRef.current.length > 0)
+      ? fullPaymentsRef.current
+      : payments;
+    const currentLessonsSource = (fullLessonsRef.current && fullLessonsRef.current.length > 0)
+      ? fullLessonsRef.current
+      : lessons;
 
-    const newRecord: PaymentRecord = wrapMutation({
-      id: finalPaymentId,
-      studentId: data.studentId,
-      studentName: data.studentName,
-      groupId: data.groupId,
-      groupName: data.groupName,
-      amountDue: data.amount,
-      amountPaid: data.amount,
-      remainingBalance: 0,
-      dueDate: today,
-      paidDate: today,
-      status: 'paid',
-      paymentType: 'advance_payment',
-      bundleSize: data.numberOfLessons,
-      financeAccountId: targetAccountId,
-      notes: data.notes || `سداد حصص مقدماً (عدد ${data.numberOfLessons} حصص)`,
-      lessonDates: [`سداد مقدم (${data.numberOfLessons} حصص)`],
-      lessonIds: [],
-      createdAt: new Date().toISOString()
-    } as PaymentRecord);
+    // P6: FIFO allocation — apply paid amount to oldest due debts first, preserve unpaid remainders,
+    // and convert ONLY the excess cash into advance lesson credit (never double-counting money or income).
+    const allocation = allocateAdvancePaymentFifo(
+      {
+        studentId: data.studentId,
+        studentName: data.studentName,
+        groupId: data.groupId,
+        groupName: data.groupName,
+        numberOfLessons: data.numberOfLessons,
+        amount: data.amount,
+        accountId: targetAccountId,
+        notes: data.notes,
+        todayStr: today,
+        paymentId: finalPaymentId
+      },
+      currentPaymentsSource,
+      students,
+      groups,
+      currentLessonsSource,
+      wrapMutation
+    );
 
-    updateFullPaymentsStorage(prev => {
-      // Safe minimum for P6: never settle more than the advance amount paid, and do not guess an allocation order across multiple debts
-      const studentPendingRecords = prev.filter(
-        p => !p.deleted && p.studentId === data.studentId && ((p.status as string) === 'not_yet' || p.status === 'pending' || (p.status as string) === 'unpaid')
-      );
-      const totalPendingDebt = studentPendingRecords.reduce(
-        (sum, p) => sum + Math.max(0, (p.remainingBalance !== undefined ? p.remainingBalance : ((p.amountDue || 0) - (p.amountPaid || 0) - (p.discountAmount || 0)))),
-        0
-      );
-      const canSettleAllPendingWithoutAllocationGuess =
-        studentPendingRecords.length > 0 && totalPendingDebt > 0 && totalPendingDebt <= data.amount;
+    updateFullPaymentsStorage(() => allocation.updatedPayments);
 
-      const cleanedPrev = canSettleAllPendingWithoutAllocationGuess
-        ? prev.map(p => {
-            if (!p.deleted && p.studentId === data.studentId && ((p.status as string) === 'not_yet' || p.status === 'pending' || (p.status as string) === 'unpaid')) {
-              return wrapMutation({
-                ...p,
-                status: 'paid',
-                amountPaid: p.amountDue,
-                remainingBalance: 0,
-                paidDate: today,
-                notes: `${p.notes || ''} (تمت التسوية بسداد مقدم)`.trim()
-              } as PaymentRecord);
+    // Mark lessons covered by any debt record that became fully settled via FIFO
+    if (allocation.fullySettledLessonIds.length > 0) {
+      const settledSet = new Set(allocation.fullySettledLessonIds);
+      updateFullLessonsStorage(allLessons =>
+        allLessons.map(l => {
+          if (!l || !settledSet.has(l.id)) return l;
+          const existingSp = l.studentPayments?.[data.studentId];
+          const updatedStudentPayments = {
+            ...(l.studentPayments || {}),
+            [data.studentId]: {
+              studentId: data.studentId,
+              studentName: data.studentName,
+              paymentStatus: 'paid' as const,
+              amountPaid: existingSp?.amountDue || l.amountDue || 0,
+              amountDue: existingSp?.amountDue || l.amountDue || 0
             }
-            return p;
-          })
-        : prev;
-      return [newRecord, ...cleanedPrev];
-    });
+          };
+          const isGroupLesson = Boolean(l.groupId);
+          let allGroupStudentsPaid = false;
+          if (isGroupLesson) {
+            const groupSts = students.filter(s => s.groupId === l.groupId && !s.deleted && s.status !== 'archived');
+            allGroupStudentsPaid = groupSts.length > 0 && groupSts.every(gst => {
+              const sp = updatedStudentPayments[gst.id];
+              return sp?.paymentStatus === 'paid' || (sp as any)?.status === 'paid';
+            });
+          }
+          const overallStatus = isGroupLesson ? (allGroupStudentsPaid ? 'paid' : 'partial') : 'paid';
+          return wrapMutation({
+            ...l,
+            paymentStatus: overallStatus,
+            studentPayments: updatedStudentPayments,
+            report: l.report ? {
+              ...l.report,
+              paymentStatus: overallStatus,
+              studentPayments: updatedStudentPayments
+            } : undefined
+          } as any);
+        })
+      );
+    }
 
+    // Strictly ONE treasury income transaction for the cash actually received (`data.amount`)
     if (data.amount > 0) {
+      const txNote = allocation.allocatedToDebtAmount > 0 && allocation.excessAdvanceAmount > 0
+        ? `سداد FIFO (${allocation.allocatedToDebtAmount} للديون + ${allocation.excessAdvanceAmount} رصيد مقدم لعدد ${allocation.excessAdvanceLessons} حصص): ${data.studentName} (${data.groupName})`
+        : allocation.allocatedToDebtAmount > 0
+          ? `سداد ديون مستحقة FIFO: ${data.studentName} (${data.groupName})`
+          : `سداد حصص مقدم: ${data.studentName} (${allocation.excessAdvanceLessons} حصص - ${data.groupName})` + (data.notes ? ` - ${data.notes}` : '');
+
       addFinanceTransaction({
         type: 'income',
         amount: data.amount,
         accountId: targetAccountId,
         categoryId: 'cat_student_fees',
         date: today,
-        note: `سداد حصص مقدم: ${data.studentName} (${data.numberOfLessons} حصص - ${data.groupName})` + (data.notes ? ` - ${data.notes}` : ''),
+        note: txNote,
         relatedStudentId: data.studentId,
-        relatedPaymentId: finalPaymentId
+        relatedPaymentId: allocation.primaryPaymentRecordId
       });
     }
 
-    setStudents(prev => prev.map(s => s.id === data.studentId ? wrapMutation({ ...s, paymentStatus: 'paid' } as Student) : s));
-    autoSyncEngine.notifyMutation('payments', finalPaymentId);
+    const hasRemainingUnpaidDebt = allocation.updatedPayments.some(
+      p => !p.deleted && p.studentId === data.studentId && p.status !== 'paid' && p.status !== 'exempted' && (p.remainingBalance ?? (p.amountDue - (p.amountPaid || 0) - (p.discountAmount || 0))) > 0
+    );
+    setStudents(prev => prev.map(s => s.id === data.studentId ? wrapMutation({ ...s, paymentStatus: hasRemainingUnpaidDebt ? 'partial' : 'paid' } as Student) : s));
+    autoSyncEngine.notifyMutation('payments', allocation.primaryPaymentRecordId);
     /* confetti removed */
   };
 
@@ -7521,7 +7558,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         : [];
       if (incomingPrunedIds.length > 0) {
         addPrunedLessonIds(incomingPrunedIds.filter((id: any) => typeof id === 'string'));
-        repairFutureAutoLessonTombstones({
+        await repairFutureAutoLessonTombstonesFromStorage({
           storedLessons: [
             ...(fullLessonsRef.current || []),
             ...(Array.isArray(data?.lessons) ? data.lessons : [])
@@ -7529,6 +7566,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           recentlyDeletedLessons: [
             ...(recentlyDeletedRef.current?.lessons || []),
             ...(Array.isArray(data?.recentlyDeleted?.lessons) ? data.recentlyDeleted.lessons : [])
+          ],
+          purgedRecords: [
+            ...(recentlyDeletedRef.current?.purgedRecords || []),
+            ...(Array.isArray(data?.recentlyDeleted?.purgedRecords) ? data.recentlyDeleted.purgedRecords : [])
+          ],
+          dismissedLessonIds: [
+            ...(dismissedDashboardLessonIds || []),
+            ...(Array.isArray(data?.dismissedDashboardLessons) ? data.dismissedDashboardLessons : [])
           ],
           forceRun: true
         });
@@ -7883,9 +7928,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         const incomingIds = (parsed as any).prunedLessonIds as string[];
         if (incomingIds.length > 0) {
           addPrunedLessonIds(incomingIds);
-          repairFutureAutoLessonTombstones({
+          await repairFutureAutoLessonTombstonesFromStorage({
             storedLessons: fullLessonsRef.current || [],
             recentlyDeletedLessons: recentlyDeletedRef.current?.lessons || [],
+            purgedRecords: recentlyDeletedRef.current?.purgedRecords || [],
+            dismissedLessonIds: dismissedDashboardLessonIds || [],
             forceRun: true
           });
           await writeAndTrack('dl_pruned_lesson_ids', Array.from(getPrunedLessonIds()));
@@ -9117,17 +9164,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
                 }
               }
             }
-            if (Array.isArray(incoming?.prunedLessonIds) && incoming.prunedLessonIds.length > 0) {
-              addPrunedLessonIds(incoming.prunedLessonIds);
-              repairFutureAutoLessonTombstones({
-                storedLessons: fullLessonsRef.current || lessons || [],
-                recentlyDeletedLessons: [
-                  ...(recentlyDeletedRef.current?.lessons || []),
-                  ...(Array.isArray(incoming?.recentlyDeleted?.lessons) ? incoming.recentlyDeleted.lessons : [])
-                ],
-                forceRun: true
-              });
-            }
             if (incoming?.goldPriceSettings) {
               const nextGoldSettings = { ...DEFAULT_GOLD_PRICE_SETTINGS, ...incoming.goldPriceSettings };
               await storage.setItem('gluck_gold_settings', nextGoldSettings);
@@ -9143,6 +9179,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               if (incomingPurged.length > 0) {
                 applyCascadePurgeTombstonesToAppState(incomingPurged);
               }
+            }
+            if (Array.isArray(incoming?.prunedLessonIds) && incoming.prunedLessonIds.length > 0) {
+              addPrunedLessonIds(incoming.prunedLessonIds);
+              await repairFutureAutoLessonTombstonesFromStorage({
+                storedLessons: fullLessonsRef.current || lessons || [],
+                recentlyDeletedLessons: recentlyDeletedRef.current?.lessons || [],
+                purgedRecords: recentlyDeletedRef.current?.purgedRecords || [],
+                dismissedLessonIds: dismissedDashboardLessonIds || [],
+                forceRun: true
+              });
             }
             if (incoming?.dismissedDashboardLessons) {
               await storage.setItem('dl_dismissed_dashboard_lessons', incoming.dismissedDashboardLessons);

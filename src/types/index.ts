@@ -930,7 +930,15 @@ export interface Student extends SyncableRecord {
   gender?: 'male' | 'female';
   groupId: string;
   archivedGroupId?: string;
-  groupHistory?: Array<{ groupId: string; leftDate?: string }>;
+  groupHistory?: Array<{
+    groupId: string;
+    groupName?: string;
+    joinedDate?: string;
+    leftDate?: string;
+    pricePerSession?: number;
+    bundleSize?: number;
+    amountDue?: number;
+  }>;
   previousGroupIds?: string[];
   grade: GradeLevel;
   parentName: string;

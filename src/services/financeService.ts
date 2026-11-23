@@ -202,10 +202,7 @@ export const calculateStudentDueBannerTotals = (
     const due = Number(legacyRec.amountDue ?? legacyRec.amount ?? 0) || 0;
     const paid = Number(legacyRec.amountPaid ?? legacyRec.paidAmount ?? 0) || 0;
     const discount = Number(legacyRec.discountAmount ?? 0) || 0;
-    const computed = Math.max(0, due - paid - discount);
-    if (typeof legacyRec.remainingBalance === 'number' && legacyRec.remainingBalance >= 0 && (paid > 0 || discount > 0)) {
-      return sum + Math.min(due, legacyRec.remainingBalance);
-    }
+    const computed = Math.max(0, Math.round((due - paid - discount) * 100) / 100);
     return sum + computed;
   }, 0);
 

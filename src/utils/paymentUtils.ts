@@ -156,23 +156,101 @@ export const doesLessonIncludeMovedStudent = (lesson: Lesson, student: Student):
   if (lesson.attendance && Object.prototype.hasOwnProperty.call(lesson.attendance, student.id)) return true;
 
   if (lesson.groupId) {
+    const lessonIso = normalizeDateToISO(lesson.date);
+    // Prefer groupHistory when present so post-move lessons in the old group (after leftDate) are never billed to the moved student
+    if (Array.isArray(student.groupHistory)) {
+      const histEntries = student.groupHistory.filter(h => h && h.groupId === lesson.groupId);
+      if (histEntries.length > 0) {
+        return histEntries.some(histEntry => {
+          const leftIso = histEntry.leftDate ? normalizeDateToISO(histEntry.leftDate) : '';
+          const joinedIso = histEntry.joinedDate ? normalizeDateToISO(histEntry.joinedDate) : '';
+          if (leftIso && lessonIso && lessonIso > leftIso) return false;
+          if (joinedIso && lessonIso && lessonIso < joinedIso) return false;
+          return true;
+        });
+      }
+    }
     if (Array.isArray(student.previousGroupIds) && student.previousGroupIds.includes(lesson.groupId)) {
       return true;
     }
     if (student.archivedGroupId && student.archivedGroupId === lesson.groupId) {
       return true;
     }
-    if (Array.isArray(student.groupHistory)) {
-      const histEntry = student.groupHistory.find(h => h && h.groupId === lesson.groupId);
-      if (histEntry) {
-        const lessonIso = normalizeDateToISO(lesson.date);
-        if (!histEntry.leftDate || !lessonIso || lessonIso <= normalizeDateToISO(histEntry.leftDate)) {
-          return true;
-        }
-      }
-    }
   }
   return false;
+};
+
+/**
+ * P19: Pure helper used by both single (`moveStudent`) and bulk (`moveStudentsBulk`) moves.
+ * Preserves the student's previous group ID and historical pricing snapshot in `groupHistory`
+ * and `previousGroupIds` without altering payment plan fields (P18 stays untouched pending user decision).
+ */
+export const buildMovedStudentRecord = (
+  student: Student,
+  oldGroup: Group | undefined,
+  newGroup: Group | undefined,
+  moveDateStr?: string
+): Student => {
+  const newGroupId = newGroup?.id ?? '';
+  const oldGroupId = (student.groupId || '').trim();
+  const moveDate = normalizeDateToISO(moveDateStr || formatLocalDate()) || formatLocalDate();
+
+  let nextGroupHistory = Array.isArray(student.groupHistory) ? [...student.groupHistory] : [];
+  let nextPreviousGroupIds = Array.isArray(student.previousGroupIds) ? [...student.previousGroupIds] : [];
+
+  if (oldGroupId && oldGroupId !== newGroupId) {
+    if (!nextPreviousGroupIds.includes(oldGroupId)) {
+      nextPreviousGroupIds.push(oldGroupId);
+    }
+
+    // Capture historical recorded pricing ONLY if oldGroup or explicit student pricing actually exists (never guess!)
+    let pricePerSession: number | undefined;
+    let bundleSize: number | undefined;
+    let amountDue: number | undefined;
+
+    const hasExplicitOldGroupPricing = Boolean(
+      oldGroup && (
+        (typeof oldGroup.monthlyPackagePrice === 'number' && oldGroup.monthlyPackagePrice > 0) ||
+        (typeof oldGroup.pricePerSession === 'number' && oldGroup.pricePerSession > 0)
+      )
+    );
+    const hasExplicitStudentPricing = Boolean(
+      (student.paymentPlan === 'custom_bundle' && typeof student.customBundlePrice === 'number' && student.customBundlePrice > 0) ||
+      (typeof student.pricePerLesson === 'number' && student.pricePerLesson > 0)
+    );
+
+    if (hasExplicitOldGroupPricing || hasExplicitStudentPricing) {
+      const pricing = getStudentCyclePricing(student, oldGroup);
+      bundleSize = pricing.cycleLength;
+      amountDue = pricing.amountDue;
+      pricePerSession = bundleSize > 0 ? (amountDue / bundleSize) : pricing.pricePerSession;
+    }
+
+    const existingIdx = nextGroupHistory.findIndex(h => h && h.groupId === oldGroupId && (!h.leftDate || h.leftDate === moveDate));
+    const entry = {
+      groupId: oldGroupId,
+      groupName: oldGroup?.name,
+      joinedDate: student.joinedDate ? normalizeDateToISO(student.joinedDate) : undefined,
+      leftDate: moveDate,
+      ...(typeof pricePerSession === 'number' && pricePerSession > 0 ? { pricePerSession } : {}),
+      ...(typeof bundleSize === 'number' && bundleSize > 0 ? { bundleSize } : {}),
+      ...(typeof amountDue === 'number' && amountDue > 0 ? { amountDue } : {})
+    };
+    if (existingIdx >= 0) {
+      nextGroupHistory[existingIdx] = { ...nextGroupHistory[existingIdx], ...entry };
+    } else {
+      nextGroupHistory.push(entry);
+    }
+  }
+
+  return {
+    ...student,
+    groupId: newGroupId || student.groupId,
+    grade: newGroup?.grade || student.grade,
+    groupHistory: nextGroupHistory,
+    previousGroupIds: nextPreviousGroupIds,
+    updatedAt: Date.now()
+  };
 };
 
 export const resolveHistoricalLessonFeeForStudent = (
@@ -191,11 +269,16 @@ export const resolveHistoricalLessonFeeForStudent = (
     return { fee: Math.max(0, repSp.amountDue - paidOnRep) };
   }
 
-  // Check if student groupHistory recorded the historical price per session or package for this group
+  // Check if student groupHistory recorded the historical package or per-session price for this old group
   if (lesson.groupId && Array.isArray(student.groupHistory)) {
     const hist = student.groupHistory.find((h: any) => h && h.groupId === lesson.groupId);
-    if (hist && typeof (hist as any).pricePerSession === 'number' && (hist as any).pricePerSession > 0) {
-      return { fee: (hist as any).pricePerSession };
+    if (hist) {
+      if (typeof hist.amountDue === 'number' && hist.amountDue > 0 && typeof hist.bundleSize === 'number' && hist.bundleSize > 0) {
+        return { fee: hist.amountDue / hist.bundleSize };
+      }
+      if (typeof hist.pricePerSession === 'number' && hist.pricePerSession > 0) {
+        return { fee: hist.pricePerSession };
+      }
     }
   }
 
@@ -210,7 +293,7 @@ export const resolveHistoricalLessonFeeForStudent = (
     }
     if (typeof lessonGroup.monthlyPackagePrice === 'number' && lessonGroup.monthlyPackagePrice > 0) {
       const count = Math.max(1, lessonGroup.sessionCount || lesson.totalSessionsInPackage || 4);
-      return { fee: Math.round(lessonGroup.monthlyPackagePrice / count) };
+      return { fee: lessonGroup.monthlyPackagePrice / count };
     }
     if (typeof lessonGroup.pricePerSession === 'number' && lessonGroup.pricePerSession > 0) {
       return { fee: lessonGroup.pricePerSession };
@@ -320,11 +403,7 @@ export const calculateDuePaymentCycles = (
     const gross = typeof p.amountDue === 'number' && p.amountDue > 0 ? p.amountDue : (fallbackDue ?? 0);
     const paid = Number(p.amountPaid || 0);
     const discount = Number(p.discountAmount || 0);
-    const computed = Math.max(0, gross - paid - discount);
-    if (typeof p.remainingBalance === 'number' && p.remainingBalance >= 0 && (paid > 0 || discount > 0)) {
-      return Math.min(gross, p.remainingBalance);
-    }
-    return computed;
+    return Math.max(0, Math.round((gross - paid - discount) * 100) / 100);
   };
 
   activeStudents.forEach(st => {
@@ -470,11 +549,9 @@ export const calculateDuePaymentCycles = (
     // P10: Order completed lessons chronologically using date, normalized time, and ID tiebreakers
     stCompletedLessons.sort(compareLessonsChronologically);
 
-    // Handle advance prepaid lessons (only remaining advance lessons not already consumed by debt settlement)
-    const advancePayments = activePayments.filter(p => 
-      p.studentId === st.id && 
-      p.status === 'paid' && 
-      (p.paymentType === 'advance_payment' || (p.bundleSize && p.bundleSize > 0 && p.notes?.includes('مقدم')))
+    // Handle advance prepaid lessons (strictly advance credit records, NEVER settled debt records)
+    const advancePayments = activePayments.filter(p =>
+      p.studentId === st.id && isAdvanceCreditPaymentRecord(p)
     );
     const totalAdvanceLessonsCount = advancePayments.reduce((sum, p) => sum + Math.max(0, Number(p.bundleSize) || 0), 0);
     const explicitlyLinkedCount = advancePayments.reduce((sum, p) => sum + (p.lessonIds ? p.lessonIds.filter(id => !id.startsWith('virtual_')).length : 0), 0);
@@ -559,27 +636,24 @@ export const calculateDuePaymentCycles = (
       });
     }
 
-    // Unpaid record in payments for the student's current group (excluding exempted or paid)
-    const unpaidRecCandidate = activePayments.find(p => 
-      p.studentId === st.id && 
-      (!p.groupId || !currentGroupId || p.groupId === currentGroupId) &&
-      p.status !== 'paid' && 
-      p.status !== 'exempted' && 
-      p.paymentType !== 'exemption'
-    );
-
-    // P2: Verify unpaidRecCandidate is truly unpaid and not already covered by paid lesson IDs
-    let isCandidateCovered = false;
-    if (unpaidRecCandidate) {
+    // Collect ALL open/unpaid/partial payment records for this student in their current group (excluding exempted or paid or fully covered)
+    const openUnpaidRecsForStudent = activePayments.filter(p => {
+      if (p.studentId !== st.id) return false;
+      if (p.groupId && currentGroupId && p.groupId !== currentGroupId) return false;
+      if (p.status === 'paid' || p.status === 'exempted' || p.paymentType === 'exemption' || p.paymentType === 'advance_payment') {
+        return false;
+      }
       const uLessonIds = [
-        ...(unpaidRecCandidate.lessonIds || []),
-        ...(unpaidRecCandidate.lessonId ? [unpaidRecCandidate.lessonId] : [])
+        ...(p.lessonIds || []),
+        ...(p.lessonId ? [p.lessonId] : [])
       ].filter(id => id && !id.startsWith('virtual_'));
       if (uLessonIds.length > 0 && uLessonIds.every(id => paidIds.has(id))) {
-        isCandidateCovered = true;
+        return false;
       }
-    }
-    const unpaidRec = isCandidateCovered ? undefined : unpaidRecCandidate;
+      return true;
+    });
+    const matchedOpenRecIds = new Set<string>();
+    const unpaidRec = openUnpaidRecsForStudent[0];
 
     if (processedLessons.length >= cycleLength) {
       let remaining = [...processedLessons];
@@ -590,14 +664,37 @@ export const calculateDuePaymentCycles = (
         const lessonDates = currentChunk.map(cl => cl.dateLabel);
         const lessonIds = currentChunk.filter(cl => !cl.isVirtual).map(cl => cl.id);
 
-        // Only create a cycle if there is at least one actual lesson in it, OR if we need to align with unpaidRec
+        // Match an open PaymentRecord strictly by overlapping/matching lesson IDs first; fallback to unlinked record only on chunk 0
+        const chunkLessonIdSet = new Set(lessonIds);
+        let linkedRec = openUnpaidRecsForStudent.find(p => {
+          if (matchedOpenRecIds.has(p.id)) return false;
+          const recIds = [
+            ...(p.lessonIds || []),
+            ...(p.lessonId ? [p.lessonId] : [])
+          ].filter(id => id && !id.startsWith('virtual_'));
+          return recIds.length > 0 && recIds.some(id => chunkLessonIdSet.has(id));
+        });
+        if (!linkedRec && chunkIndex === 0) {
+          linkedRec = openUnpaidRecsForStudent.find(p => {
+            if (matchedOpenRecIds.has(p.id)) return false;
+            const recIds = [
+              ...(p.lessonIds || []),
+              ...(p.lessonId ? [p.lessonId] : [])
+            ].filter(id => id && !id.startsWith('virtual_'));
+            return recIds.length === 0;
+          });
+        }
+        if (linkedRec) {
+          matchedOpenRecIds.add(linkedRec.id);
+        }
+
+        // Only create a cycle if there is at least one actual lesson in it, OR if we need to align with linkedRec
         const actualCount = currentChunk.filter(cl => !cl.isVirtual).length;
-        if (actualCount > 0 || (chunkIndex === 0 && unpaidRec)) {
+        if (actualCount > 0 || (chunkIndex === 0 && linkedRec)) {
           const pricePerSession = amountDue / cycleLength;
           const grossAmountDue = (chunkIndex === 0 && virtualOffset > 0)
             ? Math.round(pricePerSession * actualCount)
             : amountDue;
-          const linkedRec = chunkIndex === 0 ? unpaidRec : undefined;
           const netAmountDue = linkedRec
             ? getNetPaymentRecordBalance(linkedRec, grossAmountDue)
             : grossAmountDue;
@@ -663,6 +760,15 @@ export const calculateDuePaymentCycles = (
 
   // Also include standalone unpaid payment records from payments table (including old-group pending/partial invoices)
   const addedPaymentRecordIds = new Set(list.map(item => item.existingPaymentRecordId).filter(Boolean));
+  const coveredLessonIdsByStudent = new Map<string, Set<string>>();
+  list.forEach(item => {
+    if (!item.studentId) return;
+    if (!coveredLessonIdsByStudent.has(item.studentId)) coveredLessonIdsByStudent.set(item.studentId, new Set<string>());
+    (item.lessonIds || []).forEach(id => {
+      if (id && !id.startsWith('virtual_')) coveredLessonIdsByStudent.get(item.studentId)!.add(id);
+    });
+  });
+
   activePayments.forEach(p => {
     if (p.status !== 'paid' && p.status !== 'exempted' && p.paymentType !== 'exemption' && !addedPaymentRecordIds.has(p.id)) {
       const pLessonIds = [
@@ -674,6 +780,11 @@ export const calculateDuePaymentCycles = (
         return paidSet ? paidSet.has(id) : false;
       });
       if (isIdsCovered) return;
+
+      const studentCoveredSet = p.studentId ? coveredLessonIdsByStudent.get(p.studentId) : null;
+      if (pLessonIds.length > 0 && studentCoveredSet && pLessonIds.every(id => studentCoveredSet.has(id))) {
+        return;
+      }
 
       const isCoveredByPaidPayment = activePayments.some(paid => {
         if (paid.studentId !== p.studentId || paid.status !== 'paid') return false;
@@ -867,6 +978,23 @@ export const getStudentCyclePricing = (
   return { cycleLength, amountDue, pricePerSession, isCustomOverride: false };
 };
 
+const isAdvanceCreditPaymentRecord = (p: PaymentRecord): boolean => {
+  if (!p || p.deleted || p.status !== 'paid') return false;
+  if (p.paymentType === 'advance_payment') return true;
+  const hasRealLessonIds = Boolean(
+    (p.lessonId && !p.lessonId.startsWith('virtual_')) ||
+    (Array.isArray(p.lessonIds) && p.lessonIds.some(id => id && !id.startsWith('virtual_')))
+  );
+  if (p.paymentType || hasRealLessonIds) return false;
+  return Boolean(
+    p.bundleSize &&
+    p.bundleSize > 0 &&
+    p.notes?.includes('مقدم') &&
+    !p.notes?.includes('تسوية') &&
+    !p.notes?.includes('التسوية')
+  );
+};
+
 /**
  * Calculates prepaid/advance lesson credits for a student.
  */
@@ -881,9 +1009,7 @@ export const getStudentAdvanceLessonCredits = (
     (p.studentId === studentId || (!!studentName && p.studentName === studentName)) && 
     p.status === 'paid'
   );
-  const advancePayments = activePayments.filter(p => 
-    p.paymentType === 'advance_payment' || (p.bundleSize && p.bundleSize > 0 && p.notes?.includes('مقدم'))
-  );
+  const advancePayments = activePayments.filter(isAdvanceCreditPaymentRecord);
   
   const totalAdvanceLessons = advancePayments.reduce((sum, p) => sum + Math.max(0, Number(p.bundleSize) || 0), 0);
   if (totalAdvanceLessons <= 0) {
@@ -897,16 +1023,38 @@ export const getStudentAdvanceLessonCredits = (
     return earliest;
   }, '');
 
-  // Count attended completed lessons strictly for THIS student on or after the advance payment date
+  // Exclude lessons that are already paid by regular (non-advance) paid invoices or direct lesson payment
+  const regularPaidLessonIds = new Set<string>();
+  activePayments.forEach(p => {
+    if (p.paymentType === 'advance_payment') return;
+    if (p.lessonId && !p.lessonId.startsWith('virtual_')) regularPaidLessonIds.add(p.lessonId);
+    (p.lessonIds || []).forEach(id => {
+      if (id && !id.startsWith('virtual_')) regularPaidLessonIds.add(id);
+    });
+  });
+
+  // Count attended completed UNPAID lessons strictly for THIS student on or after the advance payment date
   const completedLessons = lessons.filter(l => {
     if (l.deleted) return false;
     if (l.status !== 'completed') return false;
     if (l.paymentStatus === 'exempted') return false;
+    if (regularPaidLessonIds.has(l.id)) return false;
+    const sp = l.studentPayments?.[studentId];
+    const repSp = l.report?.studentPayments?.[studentId] as any;
+    if (
+      sp?.paymentStatus === 'paid' ||
+      (sp as any)?.status === 'paid' ||
+      repSp?.paymentStatus === 'paid' ||
+      repSp?.status === 'paid' ||
+      (!l.groupId && (l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid'))
+    ) {
+      return false;
+    }
     const matchesStudent = l.studentId === studentId || (!!studentName && l.studentName === studentName);
     if (!matchesStudent) return false;
     const att = l.report?.studentAttendance?.[studentId] || l.report?.attendanceStatus || 'present';
     if (att === 'absent') return false;
-    if (earliestAdvancePayment && l.date && l.date < earliestAdvancePayment.substring(0, 10)) {
+    if (earliestAdvancePayment && l.date && normalizeDateToISO(l.date) < earliestAdvancePayment.substring(0, 10)) {
       return false;
     }
     return true;
@@ -1090,15 +1238,21 @@ export const allocateAdvancePaymentFifo = (
       paidDate: isNowFullyPaid ? today : (p.paidDate || today),
       financeAccountId: input.accountId || p.financeAccountId,
       notes: isNowFullyPaid
-        ? `${p.notes || ''} (تمت التسوية بسداد مقدم)`.trim()
-        : `${p.notes || ''} (سداد جزئي من دفعة مقدمة: ${applyAmount})`.trim()
+        ? `${p.notes || ''} (تمت التسوية بنظام FIFO)`.trim()
+        : `${p.notes || ''} (سداد جزئي بنظام FIFO: ${applyAmount})`.trim()
     } as PaymentRecord);
   }
 
   const excessAdvanceAmount = Math.max(0, Math.round((safeTotalAmount - allocatedToDebtAmount) * 100) / 100);
-  const excessAdvanceLessons = excessAdvanceAmount > 0 && unitPrice > 0
-    ? Math.max(0, Math.floor((excessAdvanceAmount + 0.0001) / unitPrice))
-    : 0;
+  const effectiveAdvanceUnitPrice = fallbackUnitPrice > 0 ? fallbackUnitPrice : unitPrice;
+  const excessAdvanceLessons =
+    excessAdvanceAmount <= 0
+      ? 0
+      : allocatedToDebtAmount === 0 && requestedLessons > 0
+        ? requestedLessons
+        : effectiveAdvanceUnitPrice > 0
+          ? Math.max(0, Math.floor((excessAdvanceAmount + 0.0001) / effectiveAdvanceUnitPrice))
+          : 0;
 
   const finalPaymentId = input.paymentId || `pay_adv_${input.studentId}_${Date.now()}`;
   let advancePaymentRecord: PaymentRecord | null = null;
@@ -1140,5 +1294,54 @@ export const allocateAdvancePaymentFifo = (
     advancePaymentRecord,
     primaryPaymentRecordId: advancePaymentRecord?.id || firstTouchedPaymentId || finalPaymentId
   };
+};
+
+/**
+ * Recalculates pending/partial payment records when a group's package price changes,
+ * preserving existing discounts (`discountAmount`) without dropping or double-subtracting them.
+ */
+export const recalculatePendingPaymentsForGroupPriceChange = (
+  payments: PaymentRecord[],
+  groupId: string,
+  groupStudentIds: Set<string>,
+  effectivePrice: number,
+  targetBundle: number,
+  wrapMutationFn: <T>(item: T) => T = (x) => x
+): { updatedPayments: PaymentRecord[]; changed: boolean } => {
+  let changed = false;
+  const updatedPayments = payments.map(p => {
+    if (p.deleted || p.status === 'paid' || p.status === 'exempted' || p.paymentType === 'exemption' || p.paymentType === 'advance_payment') {
+      return p;
+    }
+    const matchesGroup = p.groupId === groupId && (!p.studentId || groupStudentIds.has(p.studentId));
+    const studentBelongsToGroup = Boolean(p.studentId && groupStudentIds.has(p.studentId) && (!p.groupId || p.groupId === groupId));
+    if (!matchesGroup && !studentBelongsToGroup) return p;
+
+    changed = true;
+    const updatedDates = (p.lessonDates || []).map(d =>
+      d.replace(/Session (\d+)\/(\d+)/g, `Session $1/${targetBundle}`)
+    );
+    const paid = Number(p.amountPaid || 0);
+    const discount = Number(p.discountAmount || 0);
+    const newRemainingBalance = Math.max(0, Math.round((effectivePrice - paid - discount) * 100) / 100);
+    const nextStatus: PaymentRecord['status'] =
+      newRemainingBalance === 0 && (paid > 0 || discount > 0)
+        ? 'paid'
+        : paid > 0
+          ? 'partial'
+          : p.status;
+
+    return wrapMutationFn({
+      ...p,
+      bundleSize: targetBundle,
+      amountDue: effectivePrice,
+      discountAmount: discount > 0 ? discount : p.discountAmount,
+      remainingBalance: newRemainingBalance,
+      status: nextStatus,
+      lessonDates: updatedDates
+    } as PaymentRecord);
+  });
+
+  return { updatedPayments, changed };
 };
 

@@ -5,22 +5,30 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  # =========================================================================
+  # STAGE 1 — ALL JOBS START IN PARALLEL AT t=0 (6 CONCURRENT RUNNERS):
+  #   1A. verify-config      - Android config & release keystore validation
+  #   1B. lint-and-typecheck - TypeScript typecheck (tsc --noEmit)
+  #   1C. unit-tests (x3)    - All regression suites sharded across 3 runners
+  #   1D. build-apk          - Vite web bundle + Capacitor sync + Gradle APK
+  # =========================================================================
 
+  verify-config:
+    name: 1A. Verify Android Config & Keystore
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: Checkout Code (Shallow)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-          lfs: true
-
-      - name: Diagnostic LFS/CRLF Check
-        run: ls -la public/logo.png && file public/logo.png && head -c 50 public/logo.png | xxd
+          fetch-depth: 1
 
       - name: Verify Android Configuration
         run: |
@@ -29,7 +37,7 @@ jobs:
 
           echo "Verifying compileSdkVersion is 36..."
           grep -q "compileSdkVersion = 36" android/variables.gradle || (echo "ERROR: compileSdkVersion must be 36 in android/variables.gradle" && exit 1)
-          
+
           echo "Verifying Version Code Auto-Increment..."
           grep -q "GITHUB_RUN_NUMBER" android/app/build.gradle || (echo "ERROR: Missing GITHUB_RUN_NUMBER for versionCode" && exit 1)
 
@@ -39,57 +47,9 @@ jobs:
             echo "ERROR: Debug signing fallback detected in release buildType!"
             exit 1
           fi
-          echo "All verifications passed."
+          echo "All Android config verifications passed."
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: 'npm'
-
-      - name: Setup Java JDK
-        uses: actions/setup-java@v5
-        with:
-          distribution: 'zulu'
-          java-version: '21'
-          cache: 'gradle'
-
-      - name: Setup Android SDK Environment
-        run: |
-          set -euo pipefail
-          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
-          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
-          if [ -d "$SDK_ROOT/cmdline-tools/latest/bin" ]; then
-            echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          fi
-          if [ -d "$SDK_ROOT/platform-tools" ]; then
-            echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
-          fi
-          echo "Configured Android SDK environment at $SDK_ROOT"
-
-      - name: Install Android SDK Platform 36 & Build-Tools
-        run: |
-          set -euo pipefail
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-          SDKMANAGER=""
-          if [ -n "$SDK_ROOT" ] && [ -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
-            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          elif command -v sdkmanager >/dev/null 2>&1; then
-            SDKMANAGER="$(command -v sdkmanager)"
-          else
-            echo "ERROR: sdkmanager not found in ANDROID_HOME or PATH"
-            exit 1
-          fi
-          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-          "$SDKMANAGER" --install "platforms;android-36" "build-tools;36.0.0"
-          if [ -n "$SDK_ROOT" ] && [ ! -d "$SDK_ROOT/platforms/android-36" ]; then
-            echo "ERROR: Android SDK Platform 36 was not installed at $SDK_ROOT/platforms/android-36"
-            exit 1
-          fi
-          echo "Android SDK Platform 36 verified."
-
-      - name: Restore & Verify Release Keystore from Secrets
+      - name: Verify Release Keystore Secrets
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
@@ -113,7 +73,6 @@ jobs:
             exit 1
           fi
 
-          echo "Verifying keystore integrity, store password, and alias '${ANDROID_KEY_ALIAS}'..."
           keytool -list \
             -keystore android/app/release.keystore \
             -alias "$ANDROID_KEY_ALIAS" \
@@ -122,9 +81,8 @@ jobs:
               exit 1
             }
 
-          echo "Verifying private key password for alias '${ANDROID_KEY_ALIAS}'..."
           tmp_verify_ks="$(mktemp -u).p12"
-          trap 'rm -f "$tmp_verify_ks"' EXIT
+          trap 'rm -f "$tmp_verify_ks" android/app/release.keystore' EXIT
           keytool -importkeystore \
             -srckeystore android/app/release.keystore \
             -srcstorepass:env ANDROID_STORE_PASSWORD \
@@ -136,43 +94,167 @@ jobs:
             -destkeypass:env ANDROID_KEY_PASSWORD \
             -noprompt >/dev/null 2>&1 || {
               echo "ERROR: Private key verification failed! Check ANDROID_KEY_PASSWORD for alias '${ANDROID_KEY_ALIAS}'."
-              rm -f "$tmp_verify_ks"
               exit 1
             }
-          rm -f "$tmp_verify_ks"
           echo "Release keystore, alias, store password, and key password verified successfully."
 
-      - name: Force Clean Stale Build Artifacts
-        run: |
-          echo "Removing stale dist/ and android web assets..."
-          rm -rf dist android/app/src/main/assets/public
+  lint-and-typecheck:
+    name: 1B. Typecheck & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code (Shallow)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
 
       - name: Install Dependencies
-        run: npm install --legacy-peer-deps
+        run: npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund || npm install --legacy-peer-deps --prefer-offline --no-audit --no-fund
 
-      - name: Restore Pristine Binaries (Failsafe)
-        run: node scripts/restore_binaries.cjs
+      - name: TypeScript Lint
+        run: npm run lint
 
-      - name: Typecheck & Build Web Application
-        run: npm run lint && CI=true npm run build
+  unit-tests:
+    name: 1C. Tests (Shard ${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - name: Checkout Code (Shallow)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
-      - name: Run Automated Regression Tests
-        run: npm test
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
 
-      - name: Verify Web Build Output
+      - name: Install Dependencies
+        run: npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund || npm install --legacy-peer-deps --prefer-offline --no-audit --no-fund
+
+      - name: Run Automated Regression Test Shard ${{ matrix.shard }}/3
+        run: node scripts/run_test_shard.cjs --shard=${{ matrix.shard }} --total=3
+
+  build-apk:
+    name: 1D. Build Web & Sign Release APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code (Shallow + LFS)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          lfs: true
+
+      - name: Fail-Fast Signing Secrets Check & Restore Keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
+          missing_secrets=0
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then echo "ERROR: Missing secret ANDROID_KEYSTORE_BASE64"; missing_secrets=1; fi
+          if [ -z "${ANDROID_STORE_PASSWORD:-}" ]; then echo "ERROR: Missing secret ANDROID_STORE_PASSWORD"; missing_secrets=1; fi
+          if [ -z "${ANDROID_KEY_ALIAS:-}" ]; then echo "ERROR: Missing secret ANDROID_KEY_ALIAS"; missing_secrets=1; fi
+          if [ -z "${ANDROID_KEY_PASSWORD:-}" ]; then echo "ERROR: Missing secret ANDROID_KEY_PASSWORD"; missing_secrets=1; fi
+          if [ "$missing_secrets" -ne 0 ]; then
+            echo "ERROR: All four Android release signing secrets must be configured in GitHub Actions Secrets."
+            exit 1
+          fi
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d ' \n\r\t' | base64 -d > android/app/release.keystore
+          if [ ! -s "android/app/release.keystore" ]; then
+            echo "ERROR: Release keystore is missing or empty after Base64 decoding!"
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Setup Java JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: Setup Android SDK Environment
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          if [ -d "$SDK_ROOT/cmdline-tools/latest/bin" ]; then
+            echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          fi
+          if [ -d "$SDK_ROOT/platform-tools" ]; then
+            echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          fi
+          echo "Configured Android SDK environment at $SDK_ROOT"
+
+      - name: Cache Android SDK Platform 36 & Build-Tools
+        id: cache-android-sdk
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ANDROID_HOME }}/platforms/android-36
+            ${{ env.ANDROID_HOME }}/build-tools/36.0.0
+          key: android-sdk-36-bt-36.0.0-v1
+
+      - name: Install Android SDK Platform 36 & Build-Tools (On Cache Miss)
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -d "$SDK_ROOT/platforms/android-36" ] && [ -d "$SDK_ROOT/build-tools/36.0.0" ]; then
+            echo "Android SDK Platform 36 and Build-Tools 36.0.0 restored from cache."
+            exit 0
+          fi
+          SDKMANAGER=""
+          if [ -n "$SDK_ROOT" ] && [ -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          elif command -v sdkmanager >/dev/null 2>&1; then
+            SDKMANAGER="$(command -v sdkmanager)"
+          else
+            echo "ERROR: sdkmanager not found in ANDROID_HOME or PATH"
+            exit 1
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" --install "platforms;android-36" "build-tools;36.0.0"
+          if [ -n "$SDK_ROOT" ] && [ ! -d "$SDK_ROOT/platforms/android-36" ]; then
+            echo "ERROR: Android SDK Platform 36 was not installed at $SDK_ROOT/platforms/android-36"
+            exit 1
+          fi
+          echo "Android SDK Platform 36 verified."
+
+      - name: Install Dependencies
+        run: npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund || npm install --legacy-peer-deps --prefer-offline --no-audit --no-fund
+
+      - name: Restore Pristine Binaries & Build Web Bundle (Vite)
+        run: |
+          node scripts/restore_binaries.cjs
+          rm -rf dist
+          CI=true npx vite build
           if [ ! -f "dist/index.html" ]; then
             echo "ERROR: Web build failed - dist/index.html missing!"
             exit 1
           fi
           node scripts/verify_no_aistudio_attachments.cjs --build
-          echo "Web build successfully verified in dist/."
 
-      - name: Sync Capacitor Android
-        run: npx cap sync android
-
-      - name: Verify Android Asset Sync
+      - name: Sync Capacitor Android & Verify Assets
         run: |
+          rm -rf android/app/src/main/assets/public
+          npx cap sync android
           if [ ! -f "android/app/src/main/assets/public/index.html" ]; then
             echo "ERROR: Capacitor sync failed - android assets missing!"
             exit 1
@@ -191,13 +273,12 @@ jobs:
         run: |
           cd android
           mkdir -p gradle/wrapper
-          
-          if command -v gradle >/dev/null 2>&1; then
+
+          if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ] && command -v gradle >/dev/null 2>&1; then
             echo "Generating clean Gradle wrapper via system Gradle..."
             gradle wrapper --gradle-version 8.13 --distribution-type bin
           fi
 
-          echo "Ensuring gradle-wrapper.properties..."
           cat << 'EOF' > gradle/wrapper/gradle-wrapper.properties
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
@@ -246,6 +327,21 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
+  # =========================================================================
+  # STAGE 2 — GATED RELEASE (ONLY PUBLISHES IF ALL STAGE 1 JOBS SUCCEED):
+  # =========================================================================
+
+  publish-release:
+    name: 2. Publish GitHub Release APK
+    runs-on: ubuntu-latest
+    needs: [verify-config, lint-and-typecheck, unit-tests, build-apk]
+    steps:
+      - name: Download Release APK Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Glueck-Release-APK
+          path: android/app/build/outputs/apk/release
+
       - name: Publish GitHub Release APK
         uses: softprops/action-gh-release@v2
         with:
@@ -259,10 +355,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          OLD_TAGS="$(gh release list --limit 50 --json tagName --jq '.[].tagName' | grep '^apk-' | tail -n +6 || true)"
+          OLD_TAGS="$(gh release list --repo "${{ github.repository }}" --limit 50 --json tagName --jq '.[].tagName' | grep '^apk-' | tail -n +6 || true)"
           for tag in $OLD_TAGS; do
             echo "Removing old APK release and tag: $tag"
-            gh release delete "$tag" --yes --cleanup-tag || true
+            gh release delete "$tag" --repo "${{ github.repository }}" --yes --cleanup-tag || true
           done
 
       - name: Produce Build Summary
