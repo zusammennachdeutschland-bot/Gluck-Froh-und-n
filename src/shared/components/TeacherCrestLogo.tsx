@@ -5,6 +5,8 @@ const BASE_URL =
   ((import.meta as any)?.env?.BASE_URL as string | undefined) || '/';
 
 export const HERR_ABDULRAHMAN_LOGO_SRC =
+  `${BASE_URL}assets/brand/teacher-crest-logo.webp`;
+export const HERR_ABDULRAHMAN_LOGO_FALLBACK_SRC =
   `${BASE_URL}assets/brand/teacher-crest-logo.png`;
 
 type CrestSize = 'xs' | 'sm' | 'card' | 'md' | 'lg';
@@ -58,8 +60,17 @@ export const TeacherCrestLogo: React.FC<TeacherCrestLogoProps> = ({
   className = '',
   showFrameRing = true
 }) => {
+  const [imgSrc, setImgSrc] = useState(HERR_ABDULRAHMAN_LOGO_SRC);
   const [imgFailed, setImgFailed] = useState(false);
   const dims = SIZE_CLASSES[size];
+
+  const handleImgError = () => {
+    if (imgSrc !== HERR_ABDULRAHMAN_LOGO_FALLBACK_SRC) {
+      setImgSrc(HERR_ABDULRAHMAN_LOGO_FALLBACK_SRC);
+    } else {
+      setImgFailed(true);
+    }
+  };
 
   return (
     <div
@@ -79,10 +90,10 @@ export const TeacherCrestLogo: React.FC<TeacherCrestLogoProps> = ({
       <div className={`relative w-full h-full rounded-full flex items-center justify-center overflow-hidden ${dims.inner}`}>
         {!imgFailed ? (
           <img
-            src={HERR_ABDULRAHMAN_LOGO_SRC}
+            src={imgSrc}
             alt="Herr Abdul-rahman Deutschunterricht"
             referrerPolicy="no-referrer"
-            onError={() => setImgFailed(true)}
+            onError={handleImgError}
             className="w-full h-full object-contain drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)]"
             draggable={false}
           />

@@ -43,10 +43,16 @@ const BLOCKED_OUTPUT_DIRS = {
   ],
 };
 
-const REQUIRED_BRAND_FILES = [
+const REQUIRED_WEB_BRAND_FILES = [
   'assets/brand/teacher-crest-logo.png',
+  'assets/brand/teacher-crest-logo.webp',
   'logo.png',
   'icon.png',
+  'favicon.png',
+];
+
+const REQUIRED_ANDROID_BRAND_FILES = [
+  'assets/brand/teacher-crest-logo.webp',
   'favicon.png',
 ];
 
@@ -141,14 +147,14 @@ function walkFiles(dirPath, skipDirs = new Set()) {
   return results;
 }
 
-function verifyRuntimeAssetsInDir(baseDir, label) {
+function verifyRuntimeAssetsInDir(baseDir, label, requiredBrandFiles = REQUIRED_WEB_BRAND_FILES) {
   let ok = true;
   if (!fs.existsSync(baseDir)) {
     console.error(`ERROR: Missing ${label} directory: ${path.relative(rootDir, baseDir)}`);
     return false;
   }
 
-  for (const rel of REQUIRED_BRAND_FILES) {
+  for (const rel of requiredBrandFiles) {
     const full = path.join(baseDir, rel);
     if (!fs.existsSync(full) || fs.statSync(full).size === 0) {
       console.error(`ERROR: Missing or empty required brand asset in ${label}: ${rel}`);
@@ -242,7 +248,12 @@ if (checkAndroid) {
       failed = true;
     }
   }
-  if (!verifyRuntimeAssetsInDir(path.join(rootDir, 'android', 'app', 'src', 'main', 'assets', 'public'), 'android/app/src/main/assets/public/')) {
+  const androidPublicDir = path.join(rootDir, 'android', 'app', 'src', 'main', 'assets', 'public');
+  if (fs.existsSync(path.join(androidPublicDir, 'server.cjs'))) {
+    console.error('ERROR: Node server bundle (server.cjs) must not be packaged inside Android assets.');
+    failed = true;
+  }
+  if (!verifyRuntimeAssetsInDir(androidPublicDir, 'android/app/src/main/assets/public/', REQUIRED_ANDROID_BRAND_FILES)) {
     failed = true;
   }
 }

@@ -255,6 +255,7 @@ jobs:
         run: |
           rm -rf android/app/src/main/assets/public
           npx cap sync android
+          node scripts/prune_android_web_assets.cjs
           if [ ! -f "android/app/src/main/assets/public/index.html" ]; then
             echo "ERROR: Capacitor sync failed - android assets missing!"
             exit 1

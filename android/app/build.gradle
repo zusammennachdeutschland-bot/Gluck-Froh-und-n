@@ -66,7 +66,7 @@ android {
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
-            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~:!aistudio:!chat-attachments:!conversation-attachments'
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~:!aistudio:!chat-attachments:!conversation-attachments:!server.cjs:!server.cjs.map:!logo.svg:!logo.png:!icon.png:!icon.ico:!fg.png:!bg.png:!apple-touch-icon.png:!pwa-512x512.png:!pwa-maskable-512x512.png:!teacher-crest-logo.png:!icons'
         }
     }
     signingConfigs {

@@ -6,6 +6,11 @@ const SOURCE_LOGO_PATH = path.join(
   __dirname,
   '../public/assets/brand/teacher-crest-logo.png'
 );
+const SOURCE_LOGO_WEBP_PATH = path.join(
+  __dirname,
+  '../public/assets/brand/teacher-crest-logo.webp'
+);
+const { pruneAndroidWebAssets } = require('./prune_android_web_assets.cjs');
 
 // Notification small icon / Web notification monochrome white silhouette (24x24 viewport)
 const notificationBadgeSvg = `
@@ -180,6 +185,11 @@ async function main() {
   const sourceBuf = fs.readFileSync(SOURCE_LOGO_PATH);
   const sourceBase64 = sourceBuf.toString('base64');
 
+  // Generate lossless-quality WebP crest alongside the master PNG for fast runtime loading & smaller APK
+  await sharp(sourceBuf)
+    .webp({ quality: 92, alphaQuality: 100, effort: 6 })
+    .toFile(SOURCE_LOGO_WEBP_PATH);
+
   // Create a crisp standalone SVG wrapper embedding the raster crest in a dark obsidian medallion
   const masterBrandSvg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 512 512" width="512" height="512">
   <defs>
@@ -347,76 +357,91 @@ async function main() {
     }
     console.log('✅ Android launcher & notification drawables updated.');
 
-    // Android Splash Screens in drawables
-    const splashConfigs = [
-      { folder: 'drawable', w: 480, h: 800, dark: false },
-      { folder: 'drawable-night', w: 480, h: 800, dark: true },
-      { folder: 'drawable-port-ldpi', w: 240, h: 320, dark: false },
-      { folder: 'drawable-port-mdpi', w: 320, h: 480, dark: false },
-      { folder: 'drawable-port-hdpi', w: 480, h: 800, dark: false },
-      { folder: 'drawable-port-xhdpi', w: 720, h: 1280, dark: false },
-      { folder: 'drawable-port-xxhdpi', w: 960, h: 1600, dark: false },
-      { folder: 'drawable-port-xxxhdpi', w: 1280, h: 1920, dark: false },
-      { folder: 'drawable-port-night-ldpi', w: 240, h: 320, dark: true },
-      { folder: 'drawable-port-night-mdpi', w: 320, h: 480, dark: true },
-      { folder: 'drawable-port-night-hdpi', w: 480, h: 800, dark: true },
-      { folder: 'drawable-port-night-xhdpi', w: 720, h: 1280, dark: true },
-      { folder: 'drawable-port-night-xxhdpi', w: 960, h: 1600, dark: true },
-      { folder: 'drawable-port-night-xxxhdpi', w: 1280, h: 1920, dark: true },
-      { folder: 'drawable-land-ldpi', w: 320, h: 240, dark: false },
-      { folder: 'drawable-land-mdpi', w: 480, h: 320, dark: false },
-      { folder: 'drawable-land-hdpi', w: 800, h: 480, dark: false },
-      { folder: 'drawable-land-xhdpi', w: 1280, h: 720, dark: false },
-      { folder: 'drawable-land-xxhdpi', w: 1600, h: 960, dark: false },
-      { folder: 'drawable-land-xxxhdpi', w: 1920, h: 1280, dark: false },
-      { folder: 'drawable-land-night-ldpi', w: 320, h: 240, dark: true },
-      { folder: 'drawable-land-night-mdpi', w: 480, h: 320, dark: true },
-      { folder: 'drawable-land-night-hdpi', w: 800, h: 480, dark: true },
-      { folder: 'drawable-land-night-xhdpi', w: 1280, h: 720, dark: true },
-      { folder: 'drawable-land-night-xxhdpi', w: 1600, h: 960, dark: true },
-      { folder: 'drawable-land-night-xxxhdpi', w: 1920, h: 1280, dark: true }
+    // Android Splash Screens: single crisp WebP crest + lightweight XML layer-list (light & night)
+    // Removes ~3.1 MB of redundant per-density/orientation full-screen splash PNGs with identical visuals.
+    const legacySplashFolders = [
+      'drawable',
+      'drawable-night',
+      'drawable-port-ldpi',
+      'drawable-port-mdpi',
+      'drawable-port-hdpi',
+      'drawable-port-xhdpi',
+      'drawable-port-xxhdpi',
+      'drawable-port-xxxhdpi',
+      'drawable-port-night-ldpi',
+      'drawable-port-night-mdpi',
+      'drawable-port-night-hdpi',
+      'drawable-port-night-xhdpi',
+      'drawable-port-night-xxhdpi',
+      'drawable-port-night-xxxhdpi',
+      'drawable-land-ldpi',
+      'drawable-land-mdpi',
+      'drawable-land-hdpi',
+      'drawable-land-xhdpi',
+      'drawable-land-xxhdpi',
+      'drawable-land-xxxhdpi',
+      'drawable-land-night-ldpi',
+      'drawable-land-night-mdpi',
+      'drawable-land-night-hdpi',
+      'drawable-land-night-xhdpi',
+      'drawable-land-night-xxhdpi',
+      'drawable-land-night-xxxhdpi'
     ];
 
-    for (const sc of splashConfigs) {
-      const dFolder = path.join(resDir, sc.folder);
-      if (fs.existsSync(dFolder)) {
-        const bg = sc.dark ? '#0c111c' : '#f8fafc';
-        const crestSize = Math.round(Math.min(sc.w, sc.h) * 0.44);
-        const crestRendered = await sharp(roundMasterBuf)
-          .resize(crestSize, crestSize, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
-          .png()
-          .toBuffer();
-
-        await sharp({
-          create: {
-            width: sc.w,
-            height: sc.h,
-            channels: 4,
-            background: bg
-          }
-        })
-          .composite([{ input: crestRendered, gravity: 'center' }])
-          .png()
-          .toFile(path.join(dFolder, 'splash.png'));
+    for (const folder of legacySplashFolders) {
+      const dFolder = path.join(resDir, folder);
+      const legacyPng = path.join(dFolder, 'splash.png');
+      if (fs.existsSync(legacyPng)) {
+        fs.unlinkSync(legacyPng);
+      }
+      // Remove now-empty portrait/landscape density splash folders
+      if (
+        (folder.startsWith('drawable-port-') || folder.startsWith('drawable-land-')) &&
+        fs.existsSync(dFolder) &&
+        fs.readdirSync(dFolder).length === 0
+      ) {
+        fs.rmdirSync(dFolder);
       }
     }
-    console.log('✅ Android Splash screens updated.');
+
+    const nodpiDir = path.join(resDir, 'drawable-nodpi');
+    if (!fs.existsSync(nodpiDir)) fs.mkdirSync(nodpiDir, { recursive: true });
+    await sharp(roundMasterBuf)
+      .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      .webp({ quality: 92, alphaQuality: 100, effort: 6 })
+      .toFile(path.join(nodpiDir, 'splash_logo.webp'));
+
+    const buildSplashXml = (bgHex) => `<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="${bgHex}" />
+        </shape>
+    </item>
+    <item
+        android:width="180dp"
+        android:height="180dp"
+        android:gravity="center"
+        android:drawable="@drawable/splash_logo" />
+</layer-list>
+`;
+
+    const lightDrawableDir = path.join(resDir, 'drawable');
+    const nightDrawableDir = path.join(resDir, 'drawable-night');
+    if (!fs.existsSync(lightDrawableDir)) fs.mkdirSync(lightDrawableDir, { recursive: true });
+    if (!fs.existsSync(nightDrawableDir)) fs.mkdirSync(nightDrawableDir, { recursive: true });
+    fs.writeFileSync(path.join(lightDrawableDir, 'splash.xml'), buildSplashXml('#f8fafc'), 'utf8');
+    fs.writeFileSync(path.join(nightDrawableDir, 'splash.xml'), buildSplashXml('#0c111c'), 'utf8');
+    console.log('✅ Android lightweight XML + WebP splash screen updated.');
   }
 
-  // 5. Synchronize android/app/src/main/assets/public/
+  // 5. Synchronize minimal runtime assets into android/app/src/main/assets/public/
   const androidPublicAssets = path.join(__dirname, '../android/app/src/main/assets/public');
   if (fs.existsSync(androidPublicAssets)) {
     const syncFiles = [
-      'logo.svg',
-      'logo.png',
-      'icon.png',
       'favicon.png',
-      'apple-touch-icon.png',
       'pwa-192x192.png',
-      'pwa-512x512.png',
-      'pwa-maskable-512x512.png',
-      'notification-badge.png',
-      'icon.ico'
+      'notification-badge.png'
     ];
     for (const f of syncFiles) {
       const srcPath = path.join(publicDir, f);
@@ -425,13 +450,14 @@ async function main() {
       }
     }
 
-    const androidIconsDir = path.join(androidPublicAssets, 'icons');
-    if (!fs.existsSync(androidIconsDir)) fs.mkdirSync(androidIconsDir, { recursive: true });
-    for (const size of iconSizes) {
-      fs.copyFileSync(path.join(pwaIconsDir, `icon-${size}.png`), path.join(androidIconsDir, `icon-${size}.png`));
-      fs.copyFileSync(path.join(pwaIconsDir, `icon-${size}.webp`), path.join(androidIconsDir, `icon-${size}.webp`));
+    const androidBrandDir = path.join(androidPublicAssets, 'assets', 'brand');
+    if (!fs.existsSync(androidBrandDir)) fs.mkdirSync(androidBrandDir, { recursive: true });
+    if (fs.existsSync(SOURCE_LOGO_WEBP_PATH)) {
+      fs.copyFileSync(SOURCE_LOGO_WEBP_PATH, path.join(androidBrandDir, 'teacher-crest-logo.webp'));
     }
-    console.log('✅ Android assets/public synchronized.');
+
+    pruneAndroidWebAssets(androidPublicAssets);
+    console.log('✅ Android assets/public synchronized & pruned.');
   }
 
   console.log('🎉 All brand, notification, PWA, Electron, and Android icons updated!');
