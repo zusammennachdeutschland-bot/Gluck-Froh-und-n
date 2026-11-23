@@ -289,6 +289,7 @@ jobs:
             fi
             TMP_WRAPPER_DIR="$(mktemp -d)"
             trap 'rm -rf "$TMP_WRAPPER_DIR"' EXIT
+            touch "$TMP_WRAPPER_DIR/settings.gradle"
             (cd "$TMP_WRAPPER_DIR" && gradle wrapper --gradle-version 8.13 --distribution-type bin)
             cp "$TMP_WRAPPER_DIR/gradle/wrapper/gradle-wrapper.jar" gradle/wrapper/gradle-wrapper.jar
           fi
