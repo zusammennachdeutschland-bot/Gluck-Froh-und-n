@@ -1155,6 +1155,9 @@ public class ZoomSecureBridgePlugin extends Plugin {
                 okOut.put("httpStatus", 200);
                 okOut.put("exists", true);
                 okOut.put("zoomMeetingId", m.has("id") ? String.valueOf(m.get("id")) : meetingId);
+                if (m.has("type") && !m.isNull("type")) {
+                    okOut.put("type", m.optInt("type", 2));
+                }
                 okOut.put("topic", m.optString("topic", ""));
                 okOut.put("joinUrl", m.optString("join_url", ""));
                 if (m.has("start_url") && !m.isNull("start_url")) {
@@ -1163,8 +1166,45 @@ public class ZoomSecureBridgePlugin extends Plugin {
                 if (m.has("password") && !m.isNull("password")) {
                     okOut.put("meetingPasscode", m.optString("password", ""));
                 }
+                if (m.has("start_time") && !m.isNull("start_time")) {
+                    okOut.put("startTime", m.optString("start_time", ""));
+                }
+                if (m.has("duration") && !m.isNull("duration")) {
+                    okOut.put("duration", m.optInt("duration", 0));
+                }
                 if (m.has("timezone") && !m.isNull("timezone")) {
                     okOut.put("timezone", m.optString("timezone", ""));
+                }
+                if (m.has("recurrence") && !m.isNull("recurrence")) {
+                    JSONObject rec = m.optJSONObject("recurrence");
+                    if (rec != null) {
+                        JSObject recOut = new JSObject();
+                        if (rec.has("type")) recOut.put("type", rec.optInt("type", 2));
+                        if (rec.has("repeat_interval")) recOut.put("repeatInterval", rec.optInt("repeat_interval", 1));
+                        if (rec.has("weekly_days") && !rec.isNull("weekly_days")) {
+                            recOut.put("weeklyDays", String.valueOf(rec.get("weekly_days")));
+                        }
+                        okOut.put("recurrence", recOut);
+                    }
+                }
+                if (m.has("occurrences") && !m.isNull("occurrences")) {
+                    org.json.JSONArray occArr = m.optJSONArray("occurrences");
+                    if (occArr != null) {
+                        com.getcapacitor.JSArray occOut = new com.getcapacitor.JSArray();
+                        int maxOcc = Math.min(3, occArr.length());
+                        for (int i = 0; i < maxOcc; i++) {
+                            JSONObject occ = occArr.optJSONObject(i);
+                            if (occ != null) {
+                                JSObject o = new JSObject();
+                                if (occ.has("occurrence_id")) o.put("occurrenceId", String.valueOf(occ.get("occurrence_id")));
+                                if (occ.has("start_time")) o.put("startTime", occ.optString("start_time", ""));
+                                if (occ.has("duration")) o.put("duration", occ.optInt("duration", 0));
+                                if (occ.has("status")) o.put("status", occ.optString("status", ""));
+                                occOut.put(o);
+                            }
+                        }
+                        okOut.put("occurrences", occOut);
+                    }
                 }
                 okOut.put("status", m.optString("status", "waiting"));
                 call.resolve(okOut);

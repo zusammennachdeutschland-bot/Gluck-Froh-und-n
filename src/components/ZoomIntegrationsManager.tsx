@@ -26,14 +26,16 @@ import {
   ListChecks,
   Wrench
 } from 'lucide-react';
-import { GroupWeeklySession } from '../types';
+import { GroupWeeklySession, ZoomMeetingRecord, ZoomMeetingHistory } from '../types';
 import { useApp } from '../context/AppContext';
-import { DEFAULT_ZOOM_TIMEZONE } from '../services/zoomSessionStandardizer';
+import { DEFAULT_ZOOM_TIMEZONE, isApprovedSyncedZoomSession } from '../services/zoomSessionStandardizer';
 import {
   ZoomUiMetaState,
   ZoomMigrationPreviewSummary,
   ZoomBulkMigrationProgress,
   ZoomBulkMigrationResult,
+  ZoomAmbiguousMatchItem,
+  ZoomVerifiedMeetingCandidate,
   loadZoomUiMeta,
   getZoomConnectionStatus,
   connectZoomAccount,
@@ -42,8 +44,8 @@ import {
   disconnectZoomAccount,
   fetchHostStartUrlForSession,
   setManualZoomLinkForSession,
-  createOrReplaceZoomMeetingForSession,
-  updateZoomMeetingForSession,
+  syncOrRecoverZoomSession,
+  linkVerifiedZoomMeetingToSession,
   buildZoomMigrationPreview,
   executeBulkZoomMigration,
   disableWaitingRoomForExistingZoomMeetings
@@ -121,6 +123,15 @@ export const ZoomIntegrationsManager: React.FC = () => {
   const abortMigrationRef = useRef(false);
   const [isDisablingWaitingRoom, setIsDisablingWaitingRoom] = useState(false);
   const [waitingRoomProgress, setWaitingRoomProgress] = useState<{ completed: number; total: number } | null>(null);
+  const [pendingPersistRetry, setPendingPersistRetry] = useState<{
+    sessions?: GroupWeeklySession[];
+    records?: ZoomMeetingRecord[];
+    history?: ZoomMeetingHistory[];
+    error: string;
+  } | null>(null);
+  const [isRetryingPersist, setIsRetryingPersist] = useState(false);
+  const [ambiguousMatches, setAmbiguousMatches] = useState<ZoomAmbiguousMatchItem[]>([]);
+  const [linkingCandidateKey, setLinkingCandidateKey] = useState<string | null>(null);
 
   // Calendar sync confirmation modal state (null = all sessions, or 1 specific session)
   const [calendarConfirmOpen, setCalendarConfirmOpen] = useState(false);
@@ -254,7 +265,7 @@ export const ZoomIntegrationsManager: React.FC = () => {
 
   const metrics = useMemo(() => {
     const total = activeSessions.length;
-    const zoomSynced = activeSessions.filter((s) => s.syncState === 'synced').length;
+    const zoomSynced = activeSessions.filter((s) => isApprovedSyncedZoomSession(s)).length;
     const calSynced = activeSessions.filter((s) => s.googleCalendarEventId && s.calendarSyncStatus === 'synced').length;
     const needsAttention = activeSessions.filter(
       (s) =>
@@ -347,23 +358,122 @@ export const ZoomIntegrationsManager: React.FC = () => {
     }
   };
 
-  const openMigrationPreview = (mode: 'standardize_all' | 'create_missing_only') => {
+  const openMigrationPreview = async (mode: 'standardize_all' | 'create_missing_only') => {
     const summary = buildZoomMigrationPreview({
       groups,
       existingSessions: groupWeeklySessions,
       targetTimezone: timezoneInput || DEFAULT_ZOOM_TIMEZONE
     });
-    applyZoomWorkspaceSnapshot({
+    const persistRes = await applyZoomWorkspaceSnapshot({
       sessions: summary.reconciledSessions,
       history:
         summary.reconciledHistory.length > 0
           ? [...summary.reconciledHistory, ...zoomMeetingHistory]
           : undefined
     });
+    if (!persistRes.ok || !persistRes.verified) {
+      setPendingPersistRetry({
+        sessions: summary.reconciledSessions,
+        history:
+          summary.reconciledHistory.length > 0
+            ? [...summary.reconciledHistory, ...zoomMeetingHistory]
+            : undefined,
+        error: persistRes.error || _t('فشل حفظ بيانات الجلسات محلياً', 'Failed to persist session state locally')
+      });
+    }
     setPreviewData(summary);
     setPreviewMode(mode);
     setMigrationResult(null);
     setResumeSkipIds([]);
+    setAmbiguousMatches([]);
+  };
+
+  const handleRetryPersistSnapshot = async () => {
+    if (!pendingPersistRetry || isRetryingPersist) return;
+    setIsRetryingPersist(true);
+    try {
+      const retryRes = await applyZoomWorkspaceSnapshot({
+        sessions: pendingPersistRetry.sessions,
+        records: pendingPersistRetry.records,
+        history: pendingPersistRetry.history
+      });
+      if (!retryRes.ok || !retryRes.verified) {
+        const errMsg = retryRes.error || _t('تعذر التحقق من الحفظ المحلي بعد إعادة المحاولة', 'Local persistence verification failed on retry');
+        setPendingPersistRetry((prev) => (prev ? { ...prev, error: errMsg } : null));
+        triggerToast(errMsg);
+        return;
+      }
+      setPendingPersistRetry(null);
+      setMigrationResult((prev) =>
+        prev
+          ? {
+              ...prev,
+              persistenceVerified: true,
+              persistenceError: undefined,
+              completed: !prev.noOp && !prev.rateLimited && !prev.aborted && prev.failedCount === 0 && prev.ambiguousCount === 0
+            }
+          : prev
+      );
+      triggerToast(
+        _t('تم حفظ وتأكيد ربط Zoom محلياً بنجاح', 'Zoom bindings durably saved and verified')
+      );
+    } finally {
+      setIsRetryingPersist(false);
+    }
+  };
+
+  const handleSelectAmbiguousCandidate = async (
+    item: ZoomAmbiguousMatchItem,
+    candidate: ZoomVerifiedMeetingCandidate
+  ) => {
+    const targetSession =
+      (pendingPersistRetry?.sessions || groupWeeklySessions).find((s) => s.id === item.sessionId) ||
+      livePreviewSummary.reconciledSessions.find((s) => s.id === item.sessionId);
+    if (!targetSession) return;
+    const key = `${item.sessionId}_${candidate.zoomMeetingId}`;
+    setLinkingCandidateKey(key);
+    try {
+      const linked = linkVerifiedZoomMeetingToSession({
+        session: targetSession,
+        meeting: {
+          zoomMeetingId: candidate.zoomMeetingId,
+          joinUrl: candidate.joinUrl,
+          meetingPasscode: candidate.meetingPasscode,
+          topic: candidate.topic,
+          timezone: candidate.timezone
+        },
+        sessions: pendingPersistRetry?.sessions || groupWeeklySessions,
+        records: pendingPersistRetry?.records || zoomMeetingRecords,
+        history: pendingPersistRetry?.history || zoomMeetingHistory,
+        reason: 'Teacher selected existing Zoom meeting from ambiguous candidates'
+      });
+      const persistRes = await applyZoomWorkspaceSnapshot({
+        sessions: linked.sessions,
+        records: linked.records,
+        history: linked.history
+      });
+      if (!persistRes.ok || !persistRes.verified) {
+        const errMsg = persistRes.error || _t('فشل حفظ الربط المختار محلياً', 'Failed to persist selected Zoom link');
+        setPendingPersistRetry({
+          sessions: linked.sessions,
+          records: linked.records,
+          history: linked.history,
+          error: errMsg
+        });
+        triggerToast(errMsg);
+        return;
+      }
+      setPendingPersistRetry(null);
+      setAmbiguousMatches((prev) => prev.filter((x) => x.sessionId !== item.sessionId));
+      triggerToast(
+        _t(
+          `تم ربط الجلسة بالاجتماع الموجود (${candidate.zoomMeetingId}) وحفظها بنجاح`,
+          `Linked session to existing Zoom meeting (${candidate.zoomMeetingId}) and verified save`
+        )
+      );
+    } finally {
+      setLinkingCandidateKey(null);
+    }
   };
 
   const runMigration = async (isResume = false) => {
@@ -377,6 +487,7 @@ export const ZoomIntegrationsManager: React.FC = () => {
     abortMigrationRef.current = false;
     setIsMigrating(true);
     setMigrationResult(null);
+    setPendingPersistRetry(null);
 
     const skipSet = isResume ? new Set(resumeSkipIds) : new Set<string>();
     const workingProcessed = isResume ? [...resumeSkipIds] : [];
@@ -391,19 +502,26 @@ export const ZoomIntegrationsManager: React.FC = () => {
         skipSessionIds: skipSet,
         shouldAbort: () => abortMigrationRef.current,
         onProgress: (prog) => setMigrationProgress(prog),
-        onCheckpoint: (ckpt) => {
-          setResumeSkipIds([...workingProcessed, ...ckpt.processedSessionIds]);
-          applyZoomWorkspaceSnapshot({
+        onCheckpoint: async (ckpt) => {
+          const ckptPersist = await applyZoomWorkspaceSnapshot({
             sessions: ckpt.sessions,
             records: ckpt.records,
             history: ckpt.history
           });
+          if (ckptPersist.ok && ckptPersist.verified) {
+            setResumeSkipIds([...workingProcessed, ...ckpt.processedSessionIds]);
+          }
         }
       });
 
       logZoomReminderPipeline('Zoom Manager bulk-sync completed before applyZoomWorkspaceSnapshot', {
         completed: result.completed,
+        noOp: result.noOp,
         succeededCount: result.succeededCount,
+        linkedExistingCount: result.linkedExistingCount,
+        createdCount: result.createdCount,
+        updatedCount: result.updatedCount,
+        ambiguousCount: result.ambiguousCount,
         failedCount: result.failedCount,
         skippedCount: result.skippedCount,
         processedSessionIds: result.processedSessionIds,
@@ -419,21 +537,68 @@ export const ZoomIntegrationsManager: React.FC = () => {
           startTime: session.startTime
         }))
       });
-      applyZoomWorkspaceSnapshot({
+
+      const persistRes = await applyZoomWorkspaceSnapshot({
         sessions: result.sessions,
         records: result.records,
         history: result.history
       });
       setMeta(loadZoomUiMeta());
-      setMigrationResult(result);
-      setResumeSkipIds([...workingProcessed, ...result.processedSessionIds]);
 
-      if (result.completed) {
+      if (!persistRes.ok || !persistRes.verified) {
+        const errMsg = persistRes.error || _t('تعذر تأكيد حفظ ربط Zoom محلياً — اضغط إعادة المحاولة للحفظ بدون تكرار الاجتماعات', 'Failed to verify durable Zoom save — click Retry Save without duplicating meetings');
+        setPendingPersistRetry({
+          sessions: result.sessions,
+          records: result.records,
+          history: result.history,
+          error: errMsg
+        });
+        setMigrationResult({
+          ...result,
+          completed: false,
+          persistenceVerified: false,
+          persistenceError: errMsg
+        });
+        triggerToast(errMsg);
+        return;
+      }
+
+      setPendingPersistRetry(null);
+      setMigrationResult({
+        ...result,
+        persistenceVerified: true,
+        persistenceError: undefined
+      });
+      setResumeSkipIds([...workingProcessed, ...result.processedSessionIds]);
+      if (result.ambiguousItems.length > 0) {
+        setAmbiguousMatches(result.ambiguousItems);
+      }
+
+      if (result.noOp) {
         triggerToast(
           _t(
-            `اكتمل توحيد Zoom: ${result.succeededCount} نجاح${result.archivedPreviousCount > 0 ? ` (${result.archivedPreviousCount} رابط مؤرشف)` : ''}`,
-            `Zoom migration finished: ${result.succeededCount} succeeded`,
-            `Zoom-Migration abgeschlossen: ${result.succeededCount} erfolgreich`
+            'لم تتم معالجة أي جلسة — لا توجد جلسات ناقصة أو تحتاج تحقق حالياً',
+            'No sessions were processed — nothing missing or pending to sync'
+          )
+        );
+      } else if (result.ambiguousCount > 0 && result.succeededCount === 0) {
+        triggerToast(
+          _t(
+            `توجد ${result.ambiguousCount} جلسة تحتاج اختيار الاجتماع الصحيح يدوياً لمنع التكرار`,
+            `${result.ambiguousCount} session(s) need manual meeting selection to avoid duplicates`
+          )
+        );
+      } else if (result.completed && result.succeededCount > 0) {
+        const details = result.linkedExistingCount > 0
+          ? _t(
+              ` (${result.linkedExistingCount} ربط موجود · ${result.createdCount} جديد)`,
+              ` (${result.linkedExistingCount} linked existing · ${result.createdCount} created)`
+            )
+          : '';
+        triggerToast(
+          _t(
+            `اكتمل توحيد Zoom وحفظه: ${result.succeededCount} نجاح${details}`,
+            `Zoom sync verified & saved: ${result.succeededCount} succeeded${details}`
           )
         );
       } else if (result.rateLimited) {
@@ -442,6 +607,13 @@ export const ZoomIntegrationsManager: React.FC = () => {
             'تم التوقف مؤقتاً بسبب حد معدل طلبات Zoom API — يمكنك الاستكمال بأمان',
             'Paused due to Zoom API rate limit — resume safely anytime',
             'Pausiert wegen Zoom-API-Limit — jederzeit fortsetzen'
+          )
+        );
+      } else if (result.failedCount > 0 || result.ambiguousCount > 0) {
+        triggerToast(
+          _t(
+            `النتيجة: ${result.succeededCount} نجاح · ${result.ambiguousCount} يحتاج اختيار · ${result.failedCount} فشل`,
+            `Result: ${result.succeededCount} succeeded · ${result.ambiguousCount} need selection · ${result.failedCount} failed`
           )
         );
       }
@@ -463,11 +635,22 @@ export const ZoomIntegrationsManager: React.FC = () => {
         onProgress: (prog) => setWaitingRoomProgress({ completed: prog.completed, total: prog.total })
       });
 
-      applyZoomWorkspaceSnapshot({
+      const persistRes = await applyZoomWorkspaceSnapshot({
         sessions: res.sessions,
         records: res.records,
         history: res.history
       });
+      if (!persistRes.ok || !persistRes.verified) {
+        const errMsg = persistRes.error || _t('فشل حفظ التحديث محلياً', 'Failed to persist update locally');
+        setPendingPersistRetry({
+          sessions: res.sessions,
+          records: res.records,
+          history: res.history,
+          error: errMsg
+        });
+        triggerToast(errMsg);
+        return;
+      }
 
       if (res.failedCount === 0) {
         triggerToast(
@@ -605,7 +788,7 @@ export const ZoomIntegrationsManager: React.FC = () => {
         }
       }
 
-      applyZoomWorkspaceSnapshot({
+      await applyZoomWorkspaceSnapshot({
         sessions: syncRes.sessions,
         history:
           livePreviewSummary.reconciledHistory.length > 0
@@ -649,33 +832,52 @@ export const ZoomIntegrationsManager: React.FC = () => {
     setBusySessionId(session.id);
     try {
       const reconciledBaseSessions = livePreviewSummary.reconciledSessions;
-      const res =
-        session.meetingSource === 'zoom_api' && session.zoomMeetingId
-          ? await updateZoomMeetingForSession({
-              session,
-              sessions: reconciledBaseSessions,
-              records: zoomMeetingRecords,
-              history: zoomMeetingHistory,
-              timezone: timezoneInput || DEFAULT_ZOOM_TIMEZONE
-            })
-          : await createOrReplaceZoomMeetingForSession({
-              session,
-              sessions: reconciledBaseSessions,
-              records: zoomMeetingRecords,
-              history: zoomMeetingHistory,
-              timezone: timezoneInput || DEFAULT_ZOOM_TIMEZONE
-            });
+      const res = await syncOrRecoverZoomSession({
+        session,
+        sessions: reconciledBaseSessions,
+        records: zoomMeetingRecords,
+        history: zoomMeetingHistory,
+        timezone: timezoneInput || DEFAULT_ZOOM_TIMEZONE
+      });
 
-      applyZoomWorkspaceSnapshot({
+      if (res.outcome === 'ambiguous' && res.ambiguousItem) {
+        setAmbiguousMatches((prev) => [
+          ...prev.filter((x) => x.sessionId !== session.id),
+          res.ambiguousItem!
+        ]);
+        triggerToast(
+          _t(
+            'توجد أكثر من نتيجة أو تطابق غير مؤكد — يرجى اختيار الاجتماع الصحيح للربط بدون تكرار',
+            'Ambiguous Zoom meeting match — please select the right meeting to link without duplicating'
+          )
+        );
+        return;
+      }
+
+      const persistRes = await applyZoomWorkspaceSnapshot({
         sessions: res.sessions,
         records: res.records,
         history: res.history
       });
       setMeta(loadZoomUiMeta());
+      if (!persistRes.ok || !persistRes.verified) {
+        const errMsg = persistRes.error || _t('تعذر حفظ ربط Zoom محلياً — اضغط إعادة المحاولة', 'Failed to verify Zoom save locally — click retry');
+        setPendingPersistRetry({
+          sessions: res.sessions,
+          records: res.records,
+          history: res.history,
+          error: errMsg
+        });
+        triggerToast(errMsg);
+        return;
+      }
+      setPendingPersistRetry(null);
       const syncedTitle = res.updatedSession?.standardizedTitle || session.standardizedTitle;
       triggerToast(
         res.ok
-          ? _t(`تمت المزامنة: ${syncedTitle}`, `Synced: ${syncedTitle}`)
+          ? res.outcome === 'linked_existing'
+            ? _t(`تم التحقق وربط الاجتماع الموجود: ${syncedTitle}`, `Verified & linked existing meeting: ${syncedTitle}`)
+            : _t(`تمت المزامنة وحفظ الربط: ${syncedTitle}`, `Synced & verified save: ${syncedTitle}`)
           : res.error || _t('فشل المزامنة', 'Sync failed')
       );
     } finally {
@@ -725,7 +927,7 @@ export const ZoomIntegrationsManager: React.FC = () => {
     }
   };
 
-  const handleSaveManualOverride = (e: React.FormEvent) => {
+  const handleSaveManualOverride = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualModalSession) return;
     const res = setManualZoomLinkForSession({
@@ -739,11 +941,15 @@ export const ZoomIntegrationsManager: React.FC = () => {
       setManualUrlError(res.error || 'Invalid Zoom URL');
       return;
     }
-    applyZoomWorkspaceSnapshot({
+    const persistRes = await applyZoomWorkspaceSnapshot({
       sessions: res.sessions,
       records: res.records,
       history: res.history
     });
+    if (!persistRes.ok || !persistRes.verified) {
+      setManualUrlError(persistRes.error || _t('فشل حفظ الرابط محلياً', 'Failed to persist link locally'));
+      return;
+    }
     setManualModalSession(null);
     setManualUrlInput('');
     setManualUrlError(null);
@@ -891,6 +1097,84 @@ export const ZoomIntegrationsManager: React.FC = () => {
           <span className="truncate">{_t('التنظيف', 'Cleanup', 'Bereinigen')}</span>
         </button>
       </div>
+
+      {/* Durable Persistence Retry Alert (if local save failed after Zoom sync) */}
+      {pendingPersistRetry && !previewMode && (
+        <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 flex flex-wrap items-center justify-between gap-2 text-xs text-rose-700 dark:text-rose-300">
+          <div className="flex items-start gap-2 min-w-0">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <div className="font-bold">
+                {_t('لم يتم تأكيد حفظ ربط Zoom محلياً بعد', 'Zoom link save not yet verified locally')}
+              </div>
+              <div className="text-[11px] opacity-90">{pendingPersistRetry.error}</div>
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={isRetryingPersist}
+            onClick={handleRetryPersistSnapshot}
+            className="min-h-[34px] px-3 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer disabled:opacity-50 shrink-0"
+          >
+            {isRetryingPersist ? _t('جاري الحفظ...', 'Retrying...') : _t('إعادة محاولة الحفظ', 'Retry Save')}
+          </button>
+        </div>
+      )}
+
+      {/* Ambiguous Existing Zoom Meeting Selector (never deletes/modifies remote meetings) */}
+      {ambiguousMatches.length > 0 && !previewMode && (
+        <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-2.5 text-xs">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-200">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>
+                {_t(
+                  `اختر الاجتماع المطابق لربطه بدون إنشاء نسخة مكررة (${ambiguousMatches.length})`,
+                  `Select existing Zoom meeting to link without duplicates (${ambiguousMatches.length})`
+                )}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAmbiguousMatches([])}
+              className="text-text-muted hover:text-text-main p-1 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="space-y-2">
+            {ambiguousMatches.map((item) => (
+              <div key={item.sessionId} className="p-2.5 rounded-xl bg-surface border border-surface-border space-y-1.5">
+                <div className="font-bold text-text-main truncate" dir="ltr">{item.standardizedTitle}</div>
+                <div className="text-[11px] text-amber-700 dark:text-amber-300">{item.reason}</div>
+                <div className="space-y-1">
+                  {item.candidates.map((cand) => {
+                    const key = `${item.sessionId}_${cand.zoomMeetingId}`;
+                    return (
+                      <div key={key} className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-surface-hover">
+                        <div className="min-w-0 text-[11px]" dir="ltr">
+                          <div className="font-semibold text-text-main truncate">{cand.topic || cand.zoomMeetingId}</div>
+                          <div className="font-mono text-text-muted">
+                            ID {cand.zoomMeetingId}{cand.startTime ? ` · ${cand.startTime}` : ''}{cand.duration ? ` · ${cand.duration}m` : ''}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={linkingCandidateKey !== null}
+                          onClick={() => handleSelectAmbiguousCandidate(item, cand)}
+                          className="min-h-[30px] px-2.5 rounded-lg bg-primary text-primary-fg text-[11px] font-bold shrink-0 cursor-pointer disabled:opacity-50"
+                        >
+                          {linkingCandidateKey === key ? _t('جاري الربط...', 'Linking...') : _t('ربط هذا الاجتماع', 'Link Meeting')}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* =====================================================================
           TAB 1: OVERVIEW & SYNC HUB
@@ -1633,10 +1917,10 @@ export const ZoomIntegrationsManager: React.FC = () => {
               <div>
                 <div className="text-base font-bold text-amber-600 dark:text-amber-400 tabular-nums">
                   {previewMode === 'standardize_all'
-                    ? previewData.counts.replaceManual + previewData.counts.updateStandardized
-                    : previewData.counts.updateStandardized}
+                    ? previewData.counts.replaceManual + previewData.counts.updateStandardized + previewData.counts.verifyExistingPending
+                    : previewData.counts.updateStandardized + previewData.counts.verifyExistingPending}
                 </div>
-                <div className="text-[11px] text-text-muted">{_t('تحديث / استبدال', 'Update')}</div>
+                <div className="text-[11px] text-text-muted">{_t('تحقق / تحديث', 'Verify / Update')}</div>
               </div>
               <div>
                 <div className="text-base font-bold text-text-main tabular-nums">
@@ -1682,23 +1966,85 @@ export const ZoomIntegrationsManager: React.FC = () => {
               </div>
             )}
 
+            {pendingPersistRetry && !isMigrating && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 flex flex-wrap items-center justify-between gap-2 text-xs text-rose-700 dark:text-rose-300">
+                <div className="min-w-0">
+                  <div className="font-bold">
+                    {_t('فشل تأكيد الحفظ المحلي — لم يتم تعليم الجلسات كـ Synced', 'Local save verification failed — sessions not marked Synced')}
+                  </div>
+                  <div className="text-[11px] opacity-90">{pendingPersistRetry.error}</div>
+                </div>
+                <button
+                  type="button"
+                  disabled={isRetryingPersist}
+                  onClick={handleRetryPersistSnapshot}
+                  className="min-h-[34px] px-3 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer disabled:opacity-50 shrink-0"
+                >
+                  {isRetryingPersist ? _t('جاري الحفظ...', 'Retrying...') : _t('إعادة محاولة الحفظ', 'Retry Save')}
+                </button>
+              </div>
+            )}
+
             {migrationResult && !isMigrating && (
               <div
                 className={`p-3 rounded-xl border text-xs space-y-1 ${
-                  migrationResult.failedCount === 0
-                    ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-700 dark:text-emerald-300'
-                    : 'bg-amber-500/10 border-amber-500/25 text-amber-800 dark:text-amber-300'
+                  migrationResult.persistenceVerified === false
+                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
+                    : migrationResult.noOp ||
+                      migrationResult.succeededCount === 0 ||
+                      migrationResult.failedCount > 0 ||
+                      migrationResult.ambiguousCount > 0
+                    ? 'bg-amber-500/10 border-amber-500/25 text-amber-800 dark:text-amber-300'
+                    : 'bg-emerald-500/10 border-emerald-500/25 text-emerald-700 dark:text-emerald-300'
                 }`}
               >
                 <div className="font-bold tabular-nums">
-                  {_t(
-                    `النتيجة: ${migrationResult.succeededCount} نجاح · ${migrationResult.failedCount} فشل · ${migrationResult.archivedPreviousCount} رابط مؤرشف`,
-                    `Result: ${migrationResult.succeededCount} succeeded · ${migrationResult.failedCount} failed · ${migrationResult.archivedPreviousCount} archived`
-                  )}
+                  {migrationResult.noOp
+                    ? _t(
+                        'لم تتم معالجة أي جلسة — لا توجد جلسات ناقصة أو تحتاج تحقق',
+                        '0 sessions processed — no missing or pending sessions required action'
+                      )
+                    : _t(
+                        `النتيجة: ${migrationResult.succeededCount} نجاح (${migrationResult.linkedExistingCount} ربط موجود · ${migrationResult.createdCount} جديد) · ${migrationResult.ambiguousCount} يحتاج اختيار · ${migrationResult.failedCount} فشل`,
+                        `Result: ${migrationResult.succeededCount} succeeded (${migrationResult.linkedExistingCount} linked · ${migrationResult.createdCount} created) · ${migrationResult.ambiguousCount} need selection · ${migrationResult.failedCount} failed`
+                      )}
                 </div>
                 {migrationResult.errors.slice(0, 3).map((e) => (
                   <div key={e.sessionId} className="text-[11px] opacity-90">
                     {e.title}: {e.error}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {ambiguousMatches.length > 0 && !isMigrating && (
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-2 text-xs max-h-48 overflow-y-auto">
+                <div className="font-bold text-amber-800 dark:text-amber-200">
+                  {_t('اختر الاجتماع الموجود للربط (بدون حذف أو تعديل اجتماعات Zoom):', 'Select existing Zoom meeting to link (read-only recovery, no deletions):')}
+                </div>
+                {ambiguousMatches.map((item) => (
+                  <div key={item.sessionId} className="p-2 rounded-lg bg-surface border border-surface-border space-y-1.5">
+                    <div className="font-bold text-text-main truncate" dir="ltr">{item.standardizedTitle}</div>
+                    <div className="text-[11px] text-amber-700 dark:text-amber-300">{item.reason}</div>
+                    {item.candidates.map((cand) => {
+                      const key = `${item.sessionId}_${cand.zoomMeetingId}`;
+                      return (
+                        <div key={key} className="flex items-center justify-between gap-2 px-2 py-1 rounded bg-surface-hover">
+                          <div className="min-w-0 text-[11px]" dir="ltr">
+                            <span className="font-semibold text-text-main">{cand.topic || cand.zoomMeetingId}</span>
+                            <span className="font-mono text-text-muted ml-1.5">ID {cand.zoomMeetingId}</span>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={linkingCandidateKey !== null}
+                            onClick={() => handleSelectAmbiguousCandidate(item, cand)}
+                            className="min-h-[28px] px-2.5 rounded-lg bg-primary text-primary-fg text-[11px] font-bold shrink-0 cursor-pointer disabled:opacity-50"
+                          >
+                            {linkingCandidateKey === key ? _t('جاري الربط...', 'Linking...') : _t('ربط', 'Link')}
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 ))}
               </div>
@@ -1720,6 +2066,8 @@ export const ZoomIntegrationsManager: React.FC = () => {
                     className={`text-xs font-semibold shrink-0 ${
                       item.action === 'create_new'
                         ? 'text-emerald-600 dark:text-emerald-400'
+                        : item.action === 'verify_existing_pending'
+                        ? 'text-sky-600 dark:text-sky-400'
                         : item.action === 'replace_manual_with_standardized' || item.action === 'update_standardized'
                         ? 'text-amber-600 dark:text-amber-400'
                         : 'text-text-muted'
@@ -1727,6 +2075,8 @@ export const ZoomIntegrationsManager: React.FC = () => {
                   >
                     {item.action === 'create_new'
                       ? _t('إنشاء', 'Create')
+                      : item.action === 'verify_existing_pending'
+                      ? _t('تحقق وربط', 'Verify & Link')
                       : item.action === 'replace_manual_with_standardized'
                       ? _t('استبدال وأرشفة', 'Replace')
                       : item.action === 'update_standardized'
@@ -1747,7 +2097,7 @@ export const ZoomIntegrationsManager: React.FC = () => {
                 {_t('إغلاق', 'Close')}
               </button>
 
-              {migrationResult && !migrationResult.completed && !isMigrating && (
+              {migrationResult && !migrationResult.completed && !migrationResult.noOp && !pendingPersistRetry && !isMigrating && (
                 <button
                   type="button"
                   onClick={() => runMigration(true)}

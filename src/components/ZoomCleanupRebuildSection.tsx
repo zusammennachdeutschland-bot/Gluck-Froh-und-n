@@ -188,7 +188,7 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
           return authRes.ok && authRes.accessToken ? authRes.accessToken : null;
         },
         onWorkspaceUpdate: (snapshot) => {
-          applyZoomWorkspaceSnapshot({
+          void applyZoomWorkspaceSnapshot({
             sessions: snapshot.sessions,
             records: snapshot.records,
             history: snapshot.history
@@ -207,11 +207,18 @@ export const ZoomCleanupRebuildSection: React.FC<ZoomCleanupRebuildSectionProps>
       }
 
       setOperation(result.operation);
-      applyZoomWorkspaceSnapshot({
+      const persistRes = await applyZoomWorkspaceSnapshot({
         sessions: result.sessions,
         records: result.records,
         history: result.history
       });
+      if (!persistRes.ok || !persistRes.verified) {
+        triggerToast(
+          persistRes.error ||
+            _t('تعذر حفظ تحديثات Zoom محلياً — يرجى إعادة المحاولة', 'Failed to persist Zoom updates locally — please retry')
+        );
+        return;
+      }
 
       if (result.operation.state === 'completed') {
         if (result.operation.cleanupOnly) {

@@ -914,7 +914,7 @@ export function registerZoomServerRoutes(
         if (typeof errObj.code === 'number') zoomCode = errObj.code;
       } catch {}
       const outStatus =
-        apiRes.status === 401 || apiRes.status === 403 || apiRes.status === 429 || apiRes.status === 400
+        apiRes.status === 401 || apiRes.status === 403 || apiRes.status === 404 || apiRes.status === 429 || apiRes.status === 400
           ? apiRes.status
           : apiRes.status >= 500
           ? apiRes.status
@@ -1106,6 +1106,32 @@ export function registerZoomServerRoutes(
 
     try {
       const m = parseZoomJsonSafeIds(apiRes.bodyText);
+      const rawRecurrence = m.recurrence && typeof m.recurrence === 'object' ? m.recurrence : undefined;
+      const recurrence = rawRecurrence
+        ? {
+            type: typeof rawRecurrence.type === 'number' ? rawRecurrence.type : undefined,
+            repeatInterval:
+              typeof rawRecurrence.repeat_interval === 'number'
+                ? rawRecurrence.repeat_interval
+                : typeof rawRecurrence.repeatInterval === 'number'
+                ? rawRecurrence.repeatInterval
+                : undefined,
+            weeklyDays:
+              rawRecurrence.weekly_days !== undefined && rawRecurrence.weekly_days !== null
+                ? String(rawRecurrence.weekly_days)
+                : rawRecurrence.weeklyDays !== undefined && rawRecurrence.weeklyDays !== null
+                ? String(rawRecurrence.weeklyDays)
+                : undefined
+          }
+        : undefined;
+      const occurrences = Array.isArray(m.occurrences)
+        ? m.occurrences.slice(0, 3).map((occ: any) => ({
+            occurrenceId: occ?.occurrence_id !== undefined ? String(occ.occurrence_id) : undefined,
+            startTime: typeof occ?.start_time === 'string' ? occ.start_time : undefined,
+            duration: typeof occ?.duration === 'number' ? occ.duration : undefined,
+            status: typeof occ?.status === 'string' ? occ.status : undefined
+          }))
+        : undefined;
       return res.status(200).json({
         exists: true,
         zoomMeetingId: String(m.id || meetingId),
@@ -1115,7 +1141,11 @@ export function registerZoomServerRoutes(
         joinUrl: String(m.join_url || ''),
         startUrl: typeof m.start_url === 'string' ? m.start_url : undefined,
         meetingPasscode: typeof m.password === 'string' ? m.password : undefined,
+        startTime: typeof m.start_time === 'string' ? m.start_time : undefined,
+        duration: typeof m.duration === 'number' ? m.duration : undefined,
         timezone: typeof m.timezone === 'string' ? m.timezone : undefined,
+        recurrence,
+        occurrences,
         status: typeof m.status === 'string' ? m.status : 'waiting'
       });
     } catch {

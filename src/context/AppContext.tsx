@@ -93,7 +93,7 @@ import { validateAndSanitizeBackupPayload, hasBackupSection, MAX_BACKUP_FILE_SIZ
 import { syncAllWidgetsToNative } from '../services/widgetService';
 import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesService';
 import { loadGrainGroupLearningRecords, saveGrainGroupLearningRecords, sanitizeGrainGroupLearningRecord } from '../services/grainService';
-import { loadZoomUiMeta, sanitizeZoomRecordForStorage } from '../services/zoomService';
+import { loadZoomUiMeta, sanitizeZoomRecordForStorage, persistZoomWorkspaceDurably, ZoomPersistenceVerificationResult } from '../services/zoomService';
 import { DEFAULT_ZOOM_TIMEZONE, reconcileGroupWeeklySessions, resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
 
 export const DEFAULT_BOTTOM_NAV_ORDER = [
@@ -492,7 +492,7 @@ interface AppContextType {
     records?: ZoomMeetingRecord[];
     history?: ZoomMeetingHistory[];
     matches?: GrainRecordingMatch[];
-  }) => void;
+  }) => Promise<ZoomPersistenceVerificationResult>;
   reconcileGroupSessionsState: (group: Group) => {
     sessions: GroupWeeklySession[];
     historyEntries: ZoomMeetingHistory[];
@@ -1892,7 +1892,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   useEffect(() => {
     groupWeeklySessionsRef.current = groupWeeklySessions;
     if (!isInitializedRef.current) return;
-    storage.setItem('glueck_group_weekly_sessions_v1', groupWeeklySessions.map((x) => sanitizeZoomRecordForStorage(x)));
+    storage.setItem('glueck_group_weekly_sessions_v1', groupWeeklySessions.map((x) => sanitizeZoomRecordForStorage(x))).catch(() => {});
   }, [groupWeeklySessions]);
 
   const [zoomMeetingRecords, setZoomMeetingRecords] = useState<ZoomMeetingRecord[]>(() => {
@@ -1903,7 +1903,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   useEffect(() => {
     zoomMeetingRecordsRef.current = zoomMeetingRecords;
     if (!isInitializedRef.current) return;
-    storage.setItem('glueck_zoom_meeting_records_v1', zoomMeetingRecords.map((x) => sanitizeZoomRecordForStorage(x)));
+    storage.setItem('glueck_zoom_meeting_records_v1', zoomMeetingRecords.map((x) => sanitizeZoomRecordForStorage(x))).catch(() => {});
   }, [zoomMeetingRecords]);
 
   const [zoomMeetingHistory, setZoomMeetingHistory] = useState<ZoomMeetingHistory[]>(() => {
@@ -1914,7 +1914,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   useEffect(() => {
     zoomMeetingHistoryRef.current = zoomMeetingHistory;
     if (!isInitializedRef.current) return;
-    storage.setItem('glueck_zoom_meeting_history_v1', zoomMeetingHistory.map((x) => sanitizeZoomRecordForStorage(x)));
+    storage.setItem('glueck_zoom_meeting_history_v1', zoomMeetingHistory.map((x) => sanitizeZoomRecordForStorage(x))).catch(() => {});
   }, [zoomMeetingHistory]);
 
   const [grainRecordingMatches, setGrainRecordingMatches] = useState<GrainRecordingMatch[]>(() => {
@@ -1923,24 +1923,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   });
   useEffect(() => {
     if (!isInitializedRef.current) return;
-    storage.setItem('glueck_grain_recording_matches_v1', grainRecordingMatches.map((x) => sanitizeZoomRecordForStorage(x)));
+    storage.setItem('glueck_grain_recording_matches_v1', grainRecordingMatches.map((x) => sanitizeZoomRecordForStorage(x))).catch(() => {});
   }, [grainRecordingMatches]);
 
-  const applyZoomWorkspaceSnapshot = useCallback((snapshot: {
+  const applyZoomWorkspaceSnapshot = useCallback(async (snapshot: {
     sessions?: GroupWeeklySession[];
     records?: ZoomMeetingRecord[];
     history?: ZoomMeetingHistory[];
     matches?: GrainRecordingMatch[];
-  }) => {
-    if (snapshot.sessions) {
-      const cleaned = snapshot.sessions.map((x) => sanitizeZoomRecordForStorage(x));
-      groupWeeklySessionsRef.current = cleaned;
-      setGroupWeeklySessions(cleaned);
-      storage.setItem('glueck_group_weekly_sessions_v1', cleaned);
+  }): Promise<ZoomPersistenceVerificationResult> => {
+    const cleanedSessions = snapshot.sessions
+      ? snapshot.sessions.map((x) => sanitizeZoomRecordForStorage(x))
+      : undefined;
+    const cleanedRecords = snapshot.records
+      ? snapshot.records.map((x) => sanitizeZoomRecordForStorage(x))
+      : undefined;
+    const cleanedHistory = snapshot.history
+      ? snapshot.history.map((x) => sanitizeZoomRecordForStorage(x))
+      : undefined;
+    const cleanedMatches = snapshot.matches
+      ? snapshot.matches.map((x) => sanitizeZoomRecordForStorage(x))
+      : undefined;
+
+    // Await durable storage write AND verified read-back BEFORE updating UI state to Synced.
+    const persistRes = await persistZoomWorkspaceDurably({
+      sessions: cleanedSessions,
+      records: cleanedRecords,
+      history: cleanedHistory,
+      matches: cleanedMatches
+    });
+
+    if (!persistRes.ok || !persistRes.verified) {
+      return persistRes;
+    }
+
+    if (cleanedSessions) {
+      groupWeeklySessionsRef.current = cleanedSessions;
+      setGroupWeeklySessions(cleanedSessions);
       autoSyncEngine.notifyMutation('groupWeeklySessions', 'bulk_zoom_update');
 
       // Automatically refresh meetingLink on upcoming/in-progress online lessons so every
-      // reminder, schedule card, and open-Zoom button immediately reflects rebuilt links
+      // reminder, schedule card, and open-Zoom button immediately reflects canonical approved links
       // without touching completed/cancelled historical lessons.
       const refreshLessonMeetingLink = (l: Lesson): Lesson => {
         if (l.deleted || l.type !== 'online' || !l.groupId) return l;
@@ -1948,12 +1971,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         const resolved = resolveActiveZoomLinkForLesson({
           groupId: l.groupId,
           lesson: l,
-          groupWeeklySessions: cleaned
+          groupWeeklySessions: cleanedSessions
         });
-        if (!resolved || resolved === l.meetingLink) return l;
+        const nextLink = resolved || undefined;
+        if ((l.meetingLink || undefined) === nextLink) return l;
         return wrapMutation({
           ...l,
-          meetingLink: resolved
+          meetingLink: nextLink
         } as Lesson);
       };
 
@@ -1966,7 +1990,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         });
         return changed ? next : prev;
       });
-      void updateFullLessonsStorage((all) => {
+      await updateFullLessonsStorage((all) => {
         let changed = false;
         const next = all.map((l) => {
           const updated = refreshLessonMeetingLink(l);
@@ -1976,27 +2000,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         return changed ? next : all;
       });
     }
-    if (snapshot.records) {
-      const cleaned = snapshot.records.map((x) => sanitizeZoomRecordForStorage(x));
-      zoomMeetingRecordsRef.current = cleaned;
-      setZoomMeetingRecords(cleaned);
-      storage.setItem('glueck_zoom_meeting_records_v1', cleaned);
+    if (cleanedRecords) {
+      zoomMeetingRecordsRef.current = cleanedRecords;
+      setZoomMeetingRecords(cleanedRecords);
       autoSyncEngine.notifyMutation('zoomMeetingRecords', 'bulk_zoom_update');
     }
-    if (snapshot.history) {
-      const cleaned = snapshot.history.map((x) => sanitizeZoomRecordForStorage(x));
-      zoomMeetingHistoryRef.current = cleaned;
-      setZoomMeetingHistory(cleaned);
-      storage.setItem('glueck_zoom_meeting_history_v1', cleaned);
+    if (cleanedHistory) {
+      zoomMeetingHistoryRef.current = cleanedHistory;
+      setZoomMeetingHistory(cleanedHistory);
       autoSyncEngine.notifyMutation('zoomMeetingHistory', 'bulk_zoom_update');
     }
-    if (snapshot.matches) {
-      const cleaned = snapshot.matches.map((x) => sanitizeZoomRecordForStorage(x));
-      setGrainRecordingMatches(cleaned);
-      storage.setItem('glueck_grain_recording_matches_v1', cleaned);
+    if (cleanedMatches) {
+      setGrainRecordingMatches(cleanedMatches);
       autoSyncEngine.notifyMutation('grainRecordingMatches', 'bulk_zoom_update');
     }
     bumpSyncRevision();
+    return persistRes;
   }, [updateFullLessonsStorage]);
 
   const reconcileGroupSessionsState = useCallback((group: Group) => {

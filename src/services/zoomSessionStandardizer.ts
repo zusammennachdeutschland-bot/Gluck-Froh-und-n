@@ -623,7 +623,16 @@ export function reconcileGroupWeeklySessions(options: {
 
       nextGroupSessions.push(updated);
     } else {
-      const id = `gws_${group.id}_${slot.weekday}_${slot.startTime.replace(':', '')}_${Math.random().toString(36).slice(2, 6)}`;
+      const usedSessionIds = new Set<string>([
+        ...(existingSessions || []).map((s) => s?.id).filter((x): x is string => Boolean(x)),
+        ...nextGroupSessions.map((s) => s.id)
+      ]);
+      const baseId = `gws_${group.id}_${slot.weekday}_${slot.startTime.replace(':', '')}`;
+      let id = baseId;
+      let suffix = 2;
+      while (usedSessionIds.has(id)) {
+        id = `${baseId}_${suffix++}`;
+      }
       const sessionCode = generateReadableSessionCode(
         group.name,
         slot.weekday,
@@ -740,11 +749,25 @@ export function parseIsoDateWeekday(dateStr?: string | null): number {
   return d.getDay();
 }
 
+export function isApprovedSyncedZoomSession(session?: GroupWeeklySession | null): session is GroupWeeklySession {
+  return Boolean(
+    session &&
+      !session.deleted &&
+      session.meetingSource === 'zoom_api' &&
+      session.syncState === 'synced' &&
+      Boolean((session.zoomJoinUrl || '').trim())
+  );
+}
+
 /**
  * Resolves only a current, successfully synced Zoom API session for the group,
  * preferring the exact weekday + start-time slot, then same weekday, then the
- * group's active canonical synced API-managed session.
- * Archived, non-synced, manual, and legacy URL candidates are strictly ignored.
+ * group's active canonical synced API-managed session (for shifted ad-hoc lessons).
+ *
+ * CRITICAL: If an active (non-deleted) session exists for the exact requested slot
+ * (or same weekday when exact slot is absent) and is blocked (`needs_update`, `error`,
+ * `pending`, `manual`, `legacy_migrated`, or missing URL), this returns `null` rather
+ * than silently substituting another slot's link or an outdated legacy link.
  */
 export function resolveActiveWeeklySessionForLesson(params: {
   group?: Partial<Group> | null;
@@ -762,43 +785,186 @@ export function resolveActiveWeeklySessionForLesson(params: {
     weekdayFromDate >= 0 ? weekdayFromDate : normalizeWeekdayIndex(params.targetDay);
   const targetTimeHm = normalize24HourTime(params.lesson?.time || params.targetTime, '');
 
-  const canonicalGroupSessions = params.groupWeeklySessions.filter((session) =>
-    Boolean(session) &&
-    !session.deleted &&
-    session.groupId === groupId &&
-    session.meetingSource === 'zoom_api' &&
-    session.syncState === 'synced' &&
-    Boolean((session.zoomJoinUrl || '').trim())
+  const allActiveGroupSessions = params.groupWeeklySessions.filter(
+    (session) => Boolean(session) && !session.deleted && session.groupId === groupId
   );
-  if (canonicalGroupSessions.length === 0) return null;
+  if (allActiveGroupSessions.length === 0) return null;
 
   if (targetWeekday >= 0 && targetTimeHm) {
-    const exactMatches = canonicalGroupSessions.filter((session) =>
-      session.weekday === targetWeekday &&
-      normalize24HourTime(session.startTime, '') === targetTimeHm
+    const exactSlotAll = allActiveGroupSessions.filter(
+      (session) =>
+        session.weekday === targetWeekday &&
+        normalize24HourTime(session.startTime, '') === targetTimeHm
     );
-    exactMatches.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-    if (exactMatches[0]) return exactMatches[0];
+    if (exactSlotAll.length > 0) {
+      const exactApproved = exactSlotAll
+        .filter((session) => isApprovedSyncedZoomSession(session))
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      return exactApproved[0] || null;
+    }
   }
 
   if (targetWeekday >= 0) {
-    const sameWeekdayMatches = canonicalGroupSessions.filter((session) => session.weekday === targetWeekday);
-    sameWeekdayMatches.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-    if (sameWeekdayMatches[0]) return sameWeekdayMatches[0];
+    const sameWeekdayAll = allActiveGroupSessions.filter(
+      (session) => session.weekday === targetWeekday
+    );
+    if (sameWeekdayAll.length > 0) {
+      const sameWeekdayApproved = sameWeekdayAll
+        .filter((session) => isApprovedSyncedZoomSession(session))
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      return sameWeekdayApproved[0] || null;
+    }
   }
 
-  // If the lesson has no slot-specific active URL (including shifted date/time or missing schedule),
-  // use the group's current canonical API-managed synced link.
-  canonicalGroupSessions.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  // Shifted date/time (no active weekly slot on this weekday): use the group's canonical synced API link if available.
+  const canonicalGroupSessions = allActiveGroupSessions
+    .filter((session) => isApprovedSyncedZoomSession(session))
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   return canonicalGroupSessions[0] || null;
 }
 
+export interface CanonicalZoomLinkStatus {
+  url: string;
+  session: GroupWeeklySession | null;
+  slotSession: GroupWeeklySession | null;
+  status: 'approved' | 'needs_update' | 'error' | 'pending' | 'manual_unverified' | 'missing' | 'offline';
+  shouldWarn: boolean;
+  warningKey: 'none' | 'needs_update' | 'error' | 'pending' | 'missing';
+}
+
 /**
- * C41: Resolves the Zoom / meeting join URL for a lesson or group reminder with strict priority:
- * 1. Active weekly session link (from groupWeeklySessions)
- * 2. group.zoomLink (or group.meetLink)
- * 3. lesson.meetingLink
- * 4. defaultZoomLink
+ * Single authoritative Zoom link + status resolver shared by Group page, Lesson screen,
+ * Lesson Reminder modal, Schedule, and Calendar exports.
+ * Never silently falls back to stale/legacy `group.zoomLink`, `lesson.meetingLink`, or `defaultZoomLink`.
+ */
+export function resolveCanonicalZoomLinkStatus(params: {
+  isOnline?: boolean;
+  group?: Partial<Group> | null;
+  groupId?: string | null;
+  lesson?: Partial<Lesson> | null;
+  groupWeeklySessions?: GroupWeeklySession[] | null;
+  targetDay?: string | number | null;
+  targetTime?: string | null;
+}): CanonicalZoomLinkStatus {
+  const isOnline =
+    typeof params.isOnline === 'boolean'
+      ? params.isOnline
+      : params.lesson?.type === 'online' || params.group?.type === 'online';
+
+  if (!isOnline) {
+    return {
+      url: '',
+      session: null,
+      slotSession: null,
+      status: 'offline',
+      shouldWarn: false,
+      warningKey: 'none'
+    };
+  }
+
+  const approvedSession = resolveActiveWeeklySessionForLesson(params);
+  if (approvedSession && (approvedSession.zoomJoinUrl || '').trim()) {
+    return {
+      url: (approvedSession.zoomJoinUrl || '').trim(),
+      session: approvedSession,
+      slotSession: approvedSession,
+      status: 'approved',
+      shouldWarn: false,
+      warningKey: 'none'
+    };
+  }
+
+  // Locate the relevant non-deleted slot session so UI surfaces the exact warning reason
+  const groupId = params.group?.id || params.groupId || params.lesson?.groupId;
+  const allActive =
+    groupId && Array.isArray(params.groupWeeklySessions)
+      ? params.groupWeeklySessions.filter(
+          (s) => Boolean(s) && !s.deleted && s.groupId === groupId
+        )
+      : [];
+
+  const weekdayFromDate = parseIsoDateWeekday(params.lesson?.date);
+  const targetWeekday =
+    weekdayFromDate >= 0 ? weekdayFromDate : normalizeWeekdayIndex(params.targetDay);
+  const targetTimeHm = normalize24HourTime(params.lesson?.time || params.targetTime, '');
+
+  const slotSession =
+    (targetWeekday >= 0 && targetTimeHm
+      ? allActive
+          .filter(
+            (s) =>
+              s.weekday === targetWeekday &&
+              normalize24HourTime(s.startTime, '') === targetTimeHm
+          )
+          .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0]
+      : undefined) ||
+    (targetWeekday >= 0
+      ? allActive
+          .filter((s) => s.weekday === targetWeekday)
+          .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0]
+      : undefined) ||
+    allActive.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0] ||
+    null;
+
+  if (!slotSession) {
+    return {
+      url: '',
+      session: null,
+      slotSession: null,
+      status: 'missing',
+      shouldWarn: true,
+      warningKey: 'missing'
+    };
+  }
+
+  if (slotSession.syncState === 'needs_update') {
+    return {
+      url: '',
+      session: null,
+      slotSession,
+      status: 'needs_update',
+      shouldWarn: true,
+      warningKey: 'needs_update'
+    };
+  }
+
+  if (slotSession.syncState === 'error') {
+    return {
+      url: '',
+      session: null,
+      slotSession,
+      status: 'error',
+      shouldWarn: true,
+      warningKey: 'error'
+    };
+  }
+
+  if (slotSession.meetingSource !== 'zoom_api') {
+    return {
+      url: '',
+      session: null,
+      slotSession,
+      status: 'manual_unverified',
+      shouldWarn: true,
+      warningKey: 'pending'
+    };
+  }
+
+  return {
+    url: '',
+    session: null,
+    slotSession,
+    status: 'pending',
+    shouldWarn: true,
+    warningKey: 'pending'
+  };
+}
+
+/**
+ * Resolves the canonical approved Zoom join URL for a lesson or group reminder.
+ * Strictly returns ONLY an active, synced Zoom API weekly session link for the matching slot.
+ * Never silently falls back to stale/legacy `group.zoomLink`, `lesson.meetingLink`, or `defaultZoomLink`
+ * so UI components display an explicit sync/update warning instead.
  */
 export function resolveActiveZoomLinkForLesson(params: {
   group?: Partial<Group> | null;
@@ -809,14 +975,5 @@ export function resolveActiveZoomLinkForLesson(params: {
   targetTime?: string | null;
   defaultZoomLink?: string | null;
 }): string {
-  const activeSessionUrl = (resolveActiveWeeklySessionForLesson(params)?.zoomJoinUrl || '').trim();
-  if (activeSessionUrl) return activeSessionUrl;
-
-  const groupUrl = (params.group?.zoomLink || params.group?.meetLink || '').trim();
-  if (groupUrl) return groupUrl;
-
-  const lessonUrl = (params.lesson?.meetingLink || '').trim();
-  if (lessonUrl) return lessonUrl;
-
-  return (params.defaultZoomLink || '').trim();
+  return (resolveActiveWeeklySessionForLesson(params)?.zoomJoinUrl || '').trim();
 }

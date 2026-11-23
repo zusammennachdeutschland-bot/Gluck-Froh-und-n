@@ -883,6 +883,44 @@ export function mergeEntities<T extends SyncableRecord>(
           updatedCount++;
         }
 
+        // Protect verified Zoom API bindings from being downgraded by a newer unverified pending placeholder
+        const isWeeklySessionCollection =
+          (entityTypeName || '').toLowerCase() === 'groupweeklysessions' ||
+          (entityTypeName || '').toLowerCase() === 'groupweeklysession';
+        if (isWeeklySessionCollection && !localItem.deleted && !incomingItem.deleted) {
+          const loc = localItem as any;
+          const inc = entityMap.get(incomingItem.id) as any;
+          const localHasVerifiedApi =
+            loc.meetingSource === 'zoom_api' &&
+            Boolean(loc.zoomMeetingId) &&
+            Boolean((loc.zoomJoinUrl || '').trim()) &&
+            (loc.syncState === 'synced' || loc.syncState === 'needs_update');
+          const incomingIsUnverifiedPending =
+            inc &&
+            inc.syncState === 'pending' &&
+            !(inc.meetingSource === 'zoom_api' && inc.zoomMeetingId && (inc.zoomJoinUrl || '').trim() && inc.lastSyncedAt);
+          if (localHasVerifiedApi && incomingIsUnverifiedPending) {
+            const scheduleChanged =
+              loc.weekday !== inc.weekday ||
+              normalizeSlotTime(loc.startTime) !== normalizeSlotTime(inc.startTime) ||
+              (loc.standardizedTitle || '') !== (inc.standardizedTitle || '');
+            entityMap.set(incomingItem.id, {
+              ...inc,
+              zoomMeetingId: loc.zoomMeetingId,
+              zoomJoinUrl: loc.zoomJoinUrl,
+              zoomPasscode: loc.zoomPasscode ?? inc.zoomPasscode,
+              zoomHostEmail: loc.zoomHostEmail ?? inc.zoomHostEmail,
+              meetingSource: 'zoom_api',
+              syncState: scheduleChanged ? 'needs_update' : loc.syncState,
+              lastSyncedAt: loc.lastSyncedAt ?? inc.lastSyncedAt,
+              lastError: undefined,
+              googleCalendarEventId: inc.googleCalendarEventId || loc.googleCalendarEventId,
+              googleCalendarIcalUid: inc.googleCalendarIcalUid || loc.googleCalendarIcalUid,
+              calendarSyncStatus: inc.calendarSyncStatus || loc.calendarSyncStatus
+            } as T);
+          }
+        }
+
         conflicts.push({
           entityType: entityTypeName,
           entityId: incomingItem.id,
@@ -896,7 +934,45 @@ export function mergeEntities<T extends SyncableRecord>(
         // Local won primary envelope; apply non-conflicting field merge if neither record is deleted
         if (!localItem.deleted && !incomingItem.deleted) {
           const fieldMergeRes = mergeConcurrentEntityFields(localItem, incomingItem, 'local', baseItem);
-          entityMap.set(localItem.id, fieldMergeRes.merged);
+          let mergedLocalWin = fieldMergeRes.merged;
+
+          const isWeeklySessionCollection =
+            (entityTypeName || '').toLowerCase() === 'groupweeklysessions' ||
+            (entityTypeName || '').toLowerCase() === 'groupweeklysession';
+          if (isWeeklySessionCollection) {
+            const loc = mergedLocalWin as any;
+            const inc = incomingItem as any;
+            const incomingHasVerifiedApi =
+              inc.meetingSource === 'zoom_api' &&
+              Boolean(inc.zoomMeetingId) &&
+              Boolean((inc.zoomJoinUrl || '').trim()) &&
+              (inc.syncState === 'synced' || inc.syncState === 'needs_update');
+            const localIsUnverifiedPending =
+              loc.syncState === 'pending' &&
+              !(loc.meetingSource === 'zoom_api' && loc.zoomMeetingId && (loc.zoomJoinUrl || '').trim() && loc.lastSyncedAt);
+            if (incomingHasVerifiedApi && localIsUnverifiedPending) {
+              const scheduleChanged =
+                loc.weekday !== inc.weekday ||
+                normalizeSlotTime(loc.startTime) !== normalizeSlotTime(inc.startTime) ||
+                (loc.standardizedTitle || '') !== (inc.standardizedTitle || '');
+              mergedLocalWin = {
+                ...loc,
+                zoomMeetingId: inc.zoomMeetingId,
+                zoomJoinUrl: inc.zoomJoinUrl,
+                zoomPasscode: inc.zoomPasscode ?? loc.zoomPasscode,
+                zoomHostEmail: inc.zoomHostEmail ?? loc.zoomHostEmail,
+                meetingSource: 'zoom_api',
+                syncState: scheduleChanged ? 'needs_update' : inc.syncState,
+                lastSyncedAt: inc.lastSyncedAt ?? loc.lastSyncedAt,
+                lastError: undefined,
+                googleCalendarEventId: loc.googleCalendarEventId || inc.googleCalendarEventId,
+                googleCalendarIcalUid: loc.googleCalendarIcalUid || inc.googleCalendarIcalUid,
+                calendarSyncStatus: loc.calendarSyncStatus || inc.calendarSyncStatus
+              } as T;
+            }
+          }
+
+          entityMap.set(localItem.id, mergedLocalWin);
           if (fieldMergeRes.usedFieldMerge) {
             resolutionStrategy = 'FIELD_MERGE';
             updatedCount++;
@@ -1000,6 +1076,84 @@ export function mergeEntities<T extends SyncableRecord>(
         updatedAt: Math.max(existingTime, candidateTime, parseTimestampMs(fieldMerged.updatedAt)),
         version: Math.max(Number(existing.version) || 0, Number(l.version) || 0, 1),
         originRevision: Math.max(Number(existing.originRevision) || 0, Number(l.originRevision) || 0, 1)
+      } as T;
+
+      entityMap.set(winner.id, reconciled);
+      duplicateIdsToRemove.add(loser.id);
+      slotWinnerByKey.set(slotKey, reconciled);
+    }
+
+    for (const dupId of duplicateIdsToRemove) {
+      entityMap.delete(dupId);
+    }
+  }
+
+  // Reconcile cross-device duplicate GroupWeeklySession records for the same (groupId, weekday, startTime) slot
+  // so two devices never retain a duplicate pending placeholder alongside a verified synced Zoom API binding.
+  if (normType === 'groupweeklysessions' || normType === 'groupweeklysession') {
+    const scoreSessionAuthority = (s: any): number => {
+      let score = 0;
+      const hasIdAndUrl = Boolean(s.zoomMeetingId) && Boolean((s.zoomJoinUrl || '').trim());
+      if (s.meetingSource === 'zoom_api' && s.syncState === 'synced' && hasIdAndUrl) score += 1000;
+      else if (s.meetingSource === 'zoom_api' && hasIdAndUrl && s.syncState === 'needs_update') score += 700;
+      else if (s.meetingSource === 'zoom_api' && hasIdAndUrl) score += 500;
+      else if (s.syncState === 'synced') score += 300;
+      else if (hasIdAndUrl) score += 150;
+      if (s.lastSyncedAt) score += 100;
+      if (s.googleCalendarEventId) score += 50;
+      return score;
+    };
+
+    const slotWinnerByKey = new Map<string, T>();
+    const duplicateIdsToRemove = new Set<string>();
+
+    for (const item of entityMap.values()) {
+      const s = item as any;
+      if (!s || s.deleted || !s.groupId || typeof s.weekday !== 'number' || !s.startTime) {
+        continue;
+      }
+      const slotKey = `${String(s.groupId).trim()}_${s.weekday}_${normalizeSlotTime(s.startTime)}`;
+      const existing = slotWinnerByKey.get(slotKey) as any;
+      if (!existing) {
+        slotWinnerByKey.set(slotKey, item);
+        continue;
+      }
+
+      const existingScore = scoreSessionAuthority(existing);
+      const candidateScore = scoreSessionAuthority(s);
+      const existingSyncMs = parseTimestampMs(existing.lastSyncedAt);
+      const candidateSyncMs = parseTimestampMs(s.lastSyncedAt);
+      const existingTime = parseTimestampMs(existing.updatedAt);
+      const candidateTime = parseTimestampMs(s.updatedAt);
+
+      const candidateWins =
+        candidateScore > existingScore ||
+        (candidateScore === existingScore && candidateSyncMs > existingSyncMs) ||
+        (candidateScore === existingScore && candidateSyncMs === existingSyncMs && candidateTime > existingTime) ||
+        (candidateScore === existingScore &&
+          candidateSyncMs === existingSyncMs &&
+          candidateTime === existingTime &&
+          String(s.id) < String(existing.id));
+
+      const winner = candidateWins ? s : existing;
+      const loser = candidateWins ? existing : s;
+
+      const reconciled = {
+        ...loser,
+        ...winner,
+        id: winner.id,
+        sessionCode: winner.sessionCode || loser.sessionCode,
+        calendarEventUid: winner.calendarEventUid || loser.calendarEventUid,
+        googleCalendarEventId: winner.googleCalendarEventId || loser.googleCalendarEventId,
+        googleCalendarIcalUid: winner.googleCalendarIcalUid || loser.googleCalendarIcalUid,
+        calendarSyncStatus: winner.googleCalendarEventId
+          ? winner.calendarSyncStatus
+          : loser.googleCalendarEventId
+          ? loser.calendarSyncStatus
+          : winner.calendarSyncStatus,
+        updatedAt: Math.max(existingTime, candidateTime),
+        version: Math.max(Number(existing.version) || 0, Number(s.version) || 0, 1),
+        originRevision: Math.max(Number(existing.originRevision) || 0, Number(s.originRevision) || 0, 1)
       } as T;
 
       entityMap.set(winner.id, reconciled);

@@ -24,7 +24,7 @@ import { getTeacherArabicName, getTeacherEnglishName } from '../utils/teacherUti
 import { calculateSequentialSessionNumber, resolveLessonCycleNumber, computeStartingSessionNumberForTargetLesson, isGroupPerLesson, shouldShowLessonPaymentCollection } from '../utils/lessonUtils';
 import { getStudentCyclePricing } from '../utils/paymentUtils';
 import { isStudentMatchingLessonWeek } from '../utils/scheduleUtils';
-import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
+import { resolveCanonicalZoomLinkStatus } from '../services/zoomSessionStandardizer';
 
 export const LessonControlModal: React.FC = () => {
   const { 
@@ -49,6 +49,7 @@ export const LessonControlModal: React.FC = () => {
     endActiveLessonTimer,
     t,
     _t,
+    triggerToast,
     financeAccounts,
     markCyclePaymentPaid,
     updateLessonPaymentStatus,
@@ -1267,23 +1268,56 @@ export const LessonControlModal: React.FC = () => {
                   <span className="truncate">{t('auto_send_lesson_reminder')}</span>
                 </button>
 
-                {selectedLesson.type === 'online' ? (
-                  <a
-                    href={resolveActiveZoomLinkForLesson({
-                      group: targetGroup,
-                      lesson: selectedLesson,
-                      groupWeeklySessions,
-                      defaultZoomLink: profile.defaultZoomLink
-                    })}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="bg-primary hover:bg-primary-hover text-white font-bold text-xs py-2 px-2.5 rounded-lg transition-all flex items-center justify-center gap-1 shadow-2xs active:scale-95 min-w-0"
-                  >
-                    <Video className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate">{t('auto_open_zoom_link')}</span>
-                    <ExternalLink className="w-3 h-3 shrink-0 opacity-80" />
-                  </a>
-                ) : (
+                {selectedLesson.type === 'online' ? (() => {
+                  const zoomStatus = resolveCanonicalZoomLinkStatus({
+                    group: targetGroup,
+                    lesson: selectedLesson,
+                    groupWeeklySessions
+                  });
+                  if (zoomStatus.url) {
+                    return (
+                      <a
+                        href={zoomStatus.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="bg-primary hover:bg-primary-hover text-white font-bold text-xs py-2 px-2.5 rounded-lg transition-all flex items-center justify-center gap-1 shadow-2xs active:scale-95 min-w-0"
+                      >
+                        <Video className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">{t('auto_open_zoom_link')}</span>
+                        <ExternalLink className="w-3 h-3 shrink-0 opacity-80" />
+                      </a>
+                    );
+                  }
+                  const warningMsg =
+                    zoomStatus.status === 'needs_update'
+                      ? _t('اجتماع Zoom لهذه الحصة يحتاج تحديث أولاً من إدارة Zoom أو صفحة المجموعة', 'This slot’s Zoom meeting needs an update in Zoom Manager or Group profile first')
+                      : zoomStatus.status === 'error'
+                      ? _t('فشلت مزامنة Zoom لهذه الحصة — أعد المزامنة لاعتماد الرابط', 'Zoom sync failed for this slot — resync to approve its link')
+                      : zoomStatus.status === 'pending'
+                      ? _t('رابط Zoom لهذه الحصة بانتظار التحقق والمزامنة أولاً', 'This slot’s Zoom link is pending verification and sync')
+                      : _t('لا يوجد رابط Zoom معتمد لهذا الموعد — زامن الجلسة من إدارة Zoom أولاً', 'No approved Zoom link for this slot — sync the session in Zoom Manager first');
+                  const buttonLabel =
+                    zoomStatus.status === 'needs_update'
+                      ? _t('Zoom يحتاج تحديث', 'Zoom needs update')
+                      : zoomStatus.status === 'error'
+                      ? _t('خطأ في Zoom', 'Zoom sync error')
+                      : _t('Zoom غير متزامن', 'Zoom not synced');
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => triggerToast(warningMsg)}
+                      className={`font-bold text-xs py-2 px-2.5 rounded-lg transition-all flex items-center justify-center gap-1 shadow-2xs active:scale-95 min-w-0 cursor-pointer border ${
+                        zoomStatus.status === 'error'
+                          ? 'bg-rose-500/15 border-rose-500/35 text-rose-700 dark:text-rose-300'
+                          : 'bg-amber-500/15 border-amber-500/35 text-amber-800 dark:text-amber-300'
+                      }`}
+                      title={warningMsg}
+                    >
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">{buttonLabel}</span>
+                    </button>
+                  );
+                })() : (
                   <button
                     type="button"
                     onClick={handleSendOfflineLessonStartMessage}

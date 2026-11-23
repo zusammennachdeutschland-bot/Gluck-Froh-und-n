@@ -22,7 +22,7 @@ import { DAY_KEY_TO_RRULE_BYDAY, getUpcomingDateForDayKey, formatIcsEventBlock, 
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
-import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
+import { resolveActiveZoomLinkForLesson, resolveCanonicalZoomLinkStatus } from '../services/zoomSessionStandardizer';
 
 export const ScheduleView: React.FC = () => {
   const { lessons, getFullLessonsSnapshot, groups, students, groupWeeklySessions, profile, openLessonControl, setIsAddLessonModalOpen, setIsAddQuickLessonModalOpen, updateLesson, deleteLesson, refreshCalendarAndDashboard, t, language, _t } = useApp();
@@ -444,12 +444,11 @@ export const ScheduleView: React.FC = () => {
         ? resolveActiveZoomLinkForLesson({
             group: targetGroup,
             lesson: l,
-            groupWeeklySessions,
-            defaultZoomLink: profile.defaultZoomLink
+            groupWeeklySessions
           })
         : '';
       const location = isOnlineLesson
-        ? (resolvedOnlineLink || l.meetingLink || targetGroup?.zoomLink || '')
+        ? resolvedOnlineLink
         : (l.locationAddress || targetGroup?.address || '');
 
       icsContent.push('BEGIN:VEVENT');
@@ -1216,12 +1215,43 @@ export const ScheduleView: React.FC = () => {
                           )}
 
                           {/* Location Badge */}
-                          {lesson.type === 'online' ? (
-                            <span className="text-[9.5px] sm:text-[10px] font-bold text-primary bg-primary-soft dark:bg-primary-soft/80 border border-primary-border/60 px-2 py-0.5 rounded-md flex items-center gap-1 shrink-0">
-                              <Video className="w-3 h-3" />
-                              <span>{t('next_action_online')}</span>
-                            </span>
-                          ) : (
+                          {lesson.type === 'online' ? (() => {
+                            const lessonGroup = lesson.groupId ? groups.find(g => g.id === lesson.groupId) : null;
+                            const zoomStatus = resolveCanonicalZoomLinkStatus({
+                              group: lessonGroup,
+                              lesson,
+                              groupWeeklySessions
+                            });
+                            const showSlotWarn =
+                              zoomStatus.status === 'needs_update' || zoomStatus.status === 'error';
+                            return (
+                              <span
+                                className={`text-[9.5px] sm:text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 shrink-0 border ${
+                                  zoomStatus.status === 'error'
+                                    ? 'text-rose-700 dark:text-rose-300 bg-rose-500/10 border-rose-500/30'
+                                    : zoomStatus.status === 'needs_update'
+                                    ? 'text-amber-700 dark:text-amber-300 bg-amber-500/10 border-amber-500/30'
+                                    : 'text-primary bg-primary-soft dark:bg-primary-soft/80 border-primary-border/60'
+                                }`}
+                                title={
+                                  zoomStatus.status === 'error'
+                                    ? _t('خطأ في مزامنة Zoom لهذه الحصة', 'Zoom sync error for this slot')
+                                    : zoomStatus.status === 'needs_update'
+                                    ? _t('اجتماع Zoom لهذه الحصة يحتاج تحديث', 'Zoom meeting needs update for this slot')
+                                    : undefined
+                                }
+                              >
+                                {showSlotWarn ? <AlertTriangle className="w-3 h-3" /> : <Video className="w-3 h-3" />}
+                                <span>
+                                  {zoomStatus.status === 'error'
+                                    ? _t('خطأ Zoom', 'Zoom Error')
+                                    : zoomStatus.status === 'needs_update'
+                                    ? _t('تحديث Zoom', 'Update Zoom')
+                                    : t('next_action_online')}
+                                </span>
+                              </span>
+                            );
+                          })() : (
                             <span className="text-[9.5px] sm:text-[10px] font-bold text-primary bg-primary-soft dark:bg-primary-soft/80 border border-primary-border/60 px-2 py-0.5 rounded-md flex items-center gap-1 shrink-0">
                               <MapPin className="w-3 h-3" />
                               <span>{t('next_action_offline')}</span>

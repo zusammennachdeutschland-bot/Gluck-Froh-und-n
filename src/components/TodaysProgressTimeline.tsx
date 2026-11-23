@@ -14,7 +14,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { GroupProfileModal } from './GroupProfileModal';
 import { SelectParentCallModal } from './SelectParentCallModal';
 import { LessonReminderModal } from './LessonReminderModal';
-import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
+import { resolveCanonicalZoomLinkStatus } from '../services/zoomSessionStandardizer';
 
 const getLessonEndTime = (timeStr: string, durationMinutes: number = 60): string => {
   if (!timeStr) return '';
@@ -81,7 +81,7 @@ export function getValidStudentContactsForLesson(
 }
 
 export const TodaysProgressTimeline: React.FC = () => {
-  const { lessons, getFullLessonsSnapshot, groups, students, groupWeeklySessions, profile, openLessonControl, saveLessonReport, cancelLesson, dismissedDashboardLessonIds, dismissLessonFromDashboard, t, _t, language } = useApp();
+  const { lessons, getFullLessonsSnapshot, groups, students, groupWeeklySessions, profile, openLessonControl, saveLessonReport, cancelLesson, dismissedDashboardLessonIds, dismissLessonFromDashboard, t, _t, language, triggerToast } = useApp();
   const [now, setNow] = useState(new Date());
   const [isPastPendingExpanded, setIsPastPendingExpanded] = useState(false);
   const [showAllPastPending, setShowAllPastPending] = useState(false);
@@ -1033,17 +1033,18 @@ export const TodaysProgressTimeline: React.FC = () => {
                     <div className="pt-2 border-t border-primary-border/20 flex items-center justify-end gap-1.5 w-full flex-wrap">
                       {/* Join Online Video Meeting OR Open Google Maps Location Button */}
                       {(() => {
-                        const meetingUrl = resolveActiveZoomLinkForLesson({
-                          group: targetGroup,
-                          lesson,
-                          groupWeeklySessions,
-                          defaultZoomLink: profile.defaultZoomLink
-                        });
+                        const zoomStatus = isOnlineLesson
+                          ? resolveCanonicalZoomLinkStatus({
+                              group: targetGroup,
+                              lesson,
+                              groupWeeklySessions
+                            })
+                          : null;
 
-                        if (isOnlineLesson && meetingUrl) {
+                        if (isOnlineLesson && zoomStatus?.url) {
                           return (
                             <a
-                              href={meetingUrl}
+                              href={zoomStatus.url}
                               target="_blank"
                               rel="noopener noreferrer"
                               onClick={(e) => e.stopPropagation()}
@@ -1053,6 +1054,33 @@ export const TodaysProgressTimeline: React.FC = () => {
                             >
                               <Video className="w-3.5 h-3.5 stroke-[2]" />
                             </a>
+                          );
+                        }
+
+                        if (isOnlineLesson && zoomStatus?.shouldWarn) {
+                          const warnText =
+                            zoomStatus.status === 'needs_update'
+                              ? _t('رابط Zoom لهذا الموعد يحتاج تحديث من إدارة Zoom', 'This slot’s Zoom link needs an update in Zoom Manager')
+                              : zoomStatus.status === 'error'
+                              ? _t('فشلت مزامنة Zoom لهذا الموعد — أعد المزامنة أولاً', 'Zoom sync failed for this slot — resync first')
+                              : _t('رابط Zoom غير متزامن لهذا الموعد — زامن من إدارة Zoom', 'Zoom link not synced for this slot — sync in Zoom Manager');
+                          return (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                triggerToast(warnText);
+                              }}
+                              className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-2xs border ${
+                                zoomStatus.status === 'error'
+                                  ? 'bg-rose-500/10 border-rose-500/35 text-rose-600 dark:text-rose-400'
+                                  : 'bg-amber-500/10 border-amber-500/35 text-amber-600 dark:text-amber-400'
+                              }`}
+                              title={warnText}
+                              aria-label={warnText}
+                            >
+                              <AlertCircle className="w-3.5 h-3.5 stroke-[2]" />
+                            </button>
                           );
                         }
 

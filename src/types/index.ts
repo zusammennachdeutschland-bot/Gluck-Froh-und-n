@@ -1956,6 +1956,7 @@ export type ZoomMeetingStatus = 'active' | 'outdated' | 'replaced' | 'superseded
 export type ZoomHistoryAction =
   | 'created'
   | 'created_by_zoom'
+  | 'verified_existing'
   | 'migrated_replace'
   | 'replaced_by_migration'
   | 'manual_override'

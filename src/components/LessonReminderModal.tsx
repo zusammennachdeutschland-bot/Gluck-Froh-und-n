@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { ReportLanguageToggle } from './ReportLanguageToggle';
 import { getTimeBasedGreeting } from '../utils/greetingUtils';
-import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
+import { resolveCanonicalZoomLinkStatus } from '../services/zoomSessionStandardizer';
 import { diagnoseZoomReminderResolution, logZoomReminderPipeline, resolveReminderGroupIdentity, shouldShowZoomSyncWarning } from '../utils/zoomReminderDiagnostics';
 
 interface LessonReminderModalProps {
@@ -104,9 +104,11 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     resolverGroupId: effectiveGroupId,
     identityReasonCode: reminderGroupIdentity.identityReasonCode
   }), [targetGroup, lesson, effectiveTargetLesson, groupWeeklySessions, upcomingSchedule?.day, upcomingSchedule?.time, effectiveGroupId, reminderGroupIdentity.identityReasonCode]);
-  const resolvedZoomLink = React.useMemo(() => {
-    if (!isOnline) return '';
-    return resolveActiveZoomLinkForLesson({
+  const canonicalZoomStatus = React.useMemo(() => {
+    if (!isOnline) {
+      return { url: '', session: null, slotSession: null, status: 'missing' as const, shouldWarn: false, warningKey: null };
+    }
+    return resolveCanonicalZoomLinkStatus({
       group: targetGroup?.id === effectiveGroupId ? targetGroup : null,
       groupId: effectiveGroupId,
       lesson: effectiveTargetLesson,
@@ -123,6 +125,7 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     upcomingSchedule?.day,
     upcomingSchedule?.time
   ]);
+  const resolvedZoomLink = canonicalZoomStatus.url;
 
   React.useEffect(() => {
     logZoomReminderPipeline('LessonReminderModal resolver input/output', {
@@ -890,14 +893,34 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
             </div>
           )}
 
-          {/* Conditional: Online missing Zoom link */}
+          {/* Conditional: Online missing / needs_update / error / pending Zoom link */}
           {shouldShowZoomSyncWarning({ isOnline, resolvedZoomLink }) && (
-            <div className="bg-amber-500/10 border border-amber-500/25 p-2 rounded-xl flex items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-300 font-bold min-w-0 truncate">
+            <div className={`p-2 rounded-xl flex items-center justify-between gap-2 text-xs border ${
+              canonicalZoomStatus.status === 'error'
+                ? 'bg-rose-500/10 border-rose-500/25'
+                : 'bg-amber-500/10 border-amber-500/25'
+            }`}>
+              <div className={`flex items-center gap-1.5 font-bold min-w-0 truncate ${
+                canonicalZoomStatus.status === 'error'
+                  ? 'text-rose-700 dark:text-rose-300'
+                  : 'text-amber-700 dark:text-amber-300'
+              }`}>
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">{_t('رابط الزووم غير مسجل', 'Zoom Link Not Set', 'Zoom-Link fehlt')}</span>
+                <span className="truncate">
+                  {canonicalZoomStatus.status === 'needs_update'
+                    ? _t('اجتماع Zoom يحتاج تحديث لهذا الموعد', 'Zoom meeting needs update for this slot')
+                    : canonicalZoomStatus.status === 'error'
+                    ? _t('خطأ في مزامنة Zoom لهذا الموعد', 'Zoom sync error for this slot')
+                    : canonicalZoomStatus.status === 'pending'
+                    ? _t('جلسة Zoom بانتظار التحقق والربط', 'Zoom session pending verification')
+                    : _t('رابط الزووم غير مسجل', 'Zoom Link Not Set', 'Zoom-Link fehlt')}
+                </span>
               </div>
-              <span className="text-[10px] text-amber-700 dark:text-amber-300 font-medium shrink-0">
+              <span className={`text-[10px] font-medium shrink-0 ${
+                canonicalZoomStatus.status === 'error'
+                  ? 'text-rose-700 dark:text-rose-300'
+                  : 'text-amber-700 dark:text-amber-300'
+              }`}>
                 {_t('زامن جلسة Zoom من إدارة Zoom أولاً', 'Sync the Zoom session from Zoom Manager first', 'Synchronisieren Sie die Zoom-Sitzung zuerst im Zoom-Manager')}
               </span>
             </div>

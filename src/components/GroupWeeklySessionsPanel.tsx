@@ -13,12 +13,16 @@ import {
   PlusCircle,
   X
 } from 'lucide-react';
-import { Group, GroupWeeklySession } from '../types';
+import { Group, GroupWeeklySession, ZoomMeetingRecord, ZoomMeetingHistory } from '../types';
 import { useApp } from '../context/AppContext';
+import { isApprovedSyncedZoomSession } from '../services/zoomSessionStandardizer';
 import {
   loadZoomUiMeta,
   ZoomUiMetaState,
-  createOrReplaceZoomMeetingForSession,
+  ZoomAmbiguousMatchItem,
+  ZoomVerifiedMeetingCandidate,
+  syncOrRecoverZoomSession,
+  linkVerifiedZoomMeetingToSession,
   updateZoomMeetingForSession,
   fetchHostStartUrlForSession,
   setManualZoomLinkForSession
@@ -56,6 +60,14 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
   const [manualError, setManualError] = useState<string | null>(null);
   const [confirmReplaceSession, setConfirmReplaceSession] = useState<GroupWeeklySession | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [ambiguousMatch, setAmbiguousMatch] = useState<ZoomAmbiguousMatchItem | null>(null);
+  const [pendingPersistRetry, setPendingPersistRetry] = useState<{
+    sessions?: GroupWeeklySession[];
+    records?: ZoomMeetingRecord[];
+    history?: ZoomMeetingHistory[];
+    error: string;
+  } | null>(null);
+  const [isRetryingPersist, setIsRetryingPersist] = useState(false);
 
   // Calendar confirmation preview state (null = all group sessions, or 1 specific session)
   const [calendarConfirmOpen, setCalendarConfirmOpen] = useState(false);
@@ -153,12 +165,81 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
     }
   };
 
+  const handleRetryPersist = async () => {
+    if (!pendingPersistRetry || isRetryingPersist) return;
+    setIsRetryingPersist(true);
+    try {
+      const res = await applyZoomWorkspaceSnapshot({
+        sessions: pendingPersistRetry.sessions,
+        records: pendingPersistRetry.records,
+        history: pendingPersistRetry.history
+      });
+      if (!res.ok || !res.verified) {
+        const msg = res.error || _t('تعذر تأكيد الحفظ المحلي', 'Failed to verify local save');
+        setPendingPersistRetry((prev) => (prev ? { ...prev, error: msg } : null));
+        triggerToast(msg);
+        return;
+      }
+      setPendingPersistRetry(null);
+      triggerToast(_t('تم حفظ ربط Zoom وتأكيده بنجاح', 'Zoom binding saved and verified'));
+    } finally {
+      setIsRetryingPersist(false);
+    }
+  };
+
+  const handleSelectAmbiguousCandidate = async (candidate: ZoomVerifiedMeetingCandidate) => {
+    if (!ambiguousMatch) return;
+    const targetSession = groupSessions.find((s) => s.id === ambiguousMatch.sessionId);
+    if (!targetSession) return;
+    setBusySessionId(targetSession.id);
+    try {
+      const linked = linkVerifiedZoomMeetingToSession({
+        session: targetSession,
+        meeting: {
+          zoomMeetingId: candidate.zoomMeetingId,
+          joinUrl: candidate.joinUrl,
+          meetingPasscode: candidate.meetingPasscode,
+          topic: candidate.topic,
+          timezone: candidate.timezone
+        },
+        sessions: groupWeeklySessions,
+        records: zoomMeetingRecords,
+        history: zoomMeetingHistory,
+        reason: 'Teacher selected existing Zoom meeting from group panel'
+      });
+      const persistRes = await applyZoomWorkspaceSnapshot({
+        sessions: linked.sessions,
+        records: linked.records,
+        history: linked.history
+      });
+      if (!persistRes.ok || !persistRes.verified) {
+        const msg = persistRes.error || _t('تعذر حفظ الربط محلياً', 'Failed to persist link locally');
+        setPendingPersistRetry({
+          sessions: linked.sessions,
+          records: linked.records,
+          history: linked.history,
+          error: msg
+        });
+        triggerToast(msg);
+        return;
+      }
+      setPendingPersistRetry(null);
+      setAmbiguousMatch(null);
+      triggerToast(
+        _t(`تم ربط الاجتماع الموجود (${candidate.zoomMeetingId}) بنجاح`, `Linked existing meeting (${candidate.zoomMeetingId})`)
+      );
+    } finally {
+      setBusySessionId(null);
+    }
+  };
+
   const handleCreateOrSyncZoom = async (session: GroupWeeklySession, forceConfirmManual = false) => {
-    const hasManual =
-      (session.meetingSource === 'manual' || session.meetingSource === 'legacy_migrated') &&
+    const hasExplicitManual =
+      session.meetingSource === 'manual' &&
+      session.syncState !== 'pending' &&
       Boolean(session.zoomJoinUrl);
 
-    if (hasManual && !forceConfirmManual) {
+    if (hasExplicitManual && !forceConfirmManual) {
       setConfirmReplaceSession(session);
       return;
     }
@@ -166,37 +247,57 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
     setConfirmReplaceSession(null);
     setBusySessionId(session.id);
     try {
-      const result =
-        session.meetingSource === 'zoom_api' && session.zoomMeetingId
-          ? await updateZoomMeetingForSession({
-              session,
-              sessions: groupWeeklySessions,
-              records: zoomMeetingRecords,
-              history: zoomMeetingHistory,
-              timezone: zoomMeta.defaultTimezone
-            })
-          : await createOrReplaceZoomMeetingForSession({
-              session,
-              sessions: groupWeeklySessions,
-              records: zoomMeetingRecords,
-              history: zoomMeetingHistory,
-              timezone: zoomMeta.defaultTimezone
-            });
+      const result = await syncOrRecoverZoomSession({
+        session,
+        sessions: groupWeeklySessions,
+        records: zoomMeetingRecords,
+        history: zoomMeetingHistory,
+        timezone: zoomMeta.defaultTimezone
+      });
 
-      applyZoomWorkspaceSnapshot({
+      if (result.outcome === 'ambiguous' && result.ambiguousItem) {
+        setAmbiguousMatch(result.ambiguousItem);
+        triggerToast(
+          _t(
+            'تطابق غير مؤكد — اختر الاجتماع الموجود للربط بدون تكرار',
+            'Ambiguous match — select the existing Zoom meeting to link without duplicates'
+          )
+        );
+        return;
+      }
+
+      const persistRes = await applyZoomWorkspaceSnapshot({
         sessions: result.sessions,
         records: result.records,
         history: result.history
       });
       setZoomMeta(loadZoomUiMeta());
 
+      if (!persistRes.ok || !persistRes.verified) {
+        const msg = persistRes.error || _t('تعذر تأكيد الحفظ المحلي — أعد محاولة الحفظ بدون تكرار الاجتماعات', 'Failed to verify local save — retry save without duplicating meetings');
+        setPendingPersistRetry({
+          sessions: result.sessions,
+          records: result.records,
+          history: result.history,
+          error: msg
+        });
+        triggerToast(msg);
+        return;
+      }
+
+      setPendingPersistRetry(null);
       if (result.ok) {
         triggerToast(
-          _t(
-            `تمت مزامنة اجتماع Zoom: ${session.standardizedTitle}`,
-            `Zoom synced: ${session.standardizedTitle}`,
-            `Zoom synchronisiert: ${session.standardizedTitle}`
-          )
+          result.outcome === 'linked_existing'
+            ? _t(
+                `تم التحقق وربط الاجتماع الموجود: ${session.standardizedTitle}`,
+                `Verified & linked existing meeting: ${session.standardizedTitle}`
+              )
+            : _t(
+                `تمت مزامنة اجتماع Zoom وحفظه: ${session.standardizedTitle}`,
+                `Zoom synced & saved: ${session.standardizedTitle}`,
+                `Zoom synchronisiert: ${session.standardizedTitle}`
+              )
         );
       } else {
         triggerToast(result.error || _t('فشل مزامنة اجتماع Zoom', 'Zoom sync failed', 'Zoom-Synchronisierung fehlgeschlagen'));
@@ -228,17 +329,31 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
     }
 
     setBusySessionId(null);
-    applyZoomWorkspaceSnapshot({
+    const persistRes = await applyZoomWorkspaceSnapshot({
       sessions: workingSessions,
       records: workingRecords,
       history: workingHistory
     });
+    if (!persistRes.ok || !persistRes.verified) {
+      const msg = persistRes.error || _t('تعذر حفظ التحديث محلياً', 'Failed to verify local save');
+      setPendingPersistRetry({
+        sessions: workingSessions,
+        records: workingRecords,
+        history: workingHistory,
+        error: msg
+      });
+      triggerToast(msg);
+      return;
+    }
+    setPendingPersistRetry(null);
     triggerToast(
-      _t(
-        `تم تحديث ${updatedCount} اجتماع Zoom بنجاح`,
-        `Updated ${updatedCount} Zoom meeting(s)`,
-        `${updatedCount} Zoom-Meeting(s) aktualisiert`
-      )
+      updatedCount > 0
+        ? _t(
+            `تم تحديث وحفظ ${updatedCount} اجتماع Zoom بنجاح`,
+            `Updated & verified ${updatedCount} Zoom meeting(s)`,
+            `${updatedCount} Zoom-Meeting(s) aktualisiert`
+          )
+        : _t('لم يتم تحديث أي اجتماع Zoom', 'No Zoom meetings were updated')
     );
   };
 
@@ -271,7 +386,7 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
     }
   };
 
-  const handleSaveManualUrl = (e: React.FormEvent) => {
+  const handleSaveManualUrl = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualModalSession) return;
     const res = setManualZoomLinkForSession({
@@ -285,11 +400,15 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
       setManualError(res.error || 'Invalid Zoom URL');
       return;
     }
-    applyZoomWorkspaceSnapshot({
+    const persistRes = await applyZoomWorkspaceSnapshot({
       sessions: res.sessions,
       records: res.records,
       history: res.history
     });
+    if (!persistRes.ok || !persistRes.verified) {
+      setManualError(persistRes.error || _t('فشل حفظ الرابط محلياً', 'Failed to persist link locally'));
+      return;
+    }
     setManualModalSession(null);
     setManualUrlInput('');
     setManualError(null);
@@ -365,7 +484,7 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
         }
       }
 
-      applyZoomWorkspaceSnapshot({ sessions: syncRes.sessions });
+      await applyZoomWorkspaceSnapshot({ sessions: syncRes.sessions });
       setLastCalendarSyncResult(syncRes);
 
       if (syncRes.failedCount > 0) {
@@ -485,6 +604,57 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
           </button>
         </div>
       </div>
+
+      {/* Persistence Retry Banner */}
+      {pendingPersistRetry && (
+        <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 flex flex-wrap items-center justify-between gap-2 text-xs text-rose-700 dark:text-rose-300">
+          <div className="min-w-0">
+            <span className="font-bold block">{_t('لم يتم تأكيد حفظ ربط Zoom محلياً', 'Zoom link save not yet verified locally')}</span>
+            <span className="text-[11px] opacity-90">{pendingPersistRetry.error}</span>
+          </div>
+          <button
+            type="button"
+            disabled={isRetryingPersist}
+            onClick={handleRetryPersist}
+            className="min-h-[34px] px-3 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer disabled:opacity-50"
+          >
+            {isRetryingPersist ? _t('جاري الحفظ...', 'Retrying...') : _t('إعادة محاولة الحفظ', 'Retry Save')}
+          </button>
+        </div>
+      )}
+
+      {/* Ambiguous Existing Zoom Meeting Selector */}
+      {ambiguousMatch && (
+        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-2 text-xs">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-bold text-amber-800 dark:text-amber-200">
+              {_t('اختر الاجتماع الصحيح للربط بدون تكرار:', 'Select the matching existing Zoom meeting:')}
+            </span>
+            <button type="button" onClick={() => setAmbiguousMatch(null)} className="text-text-muted p-1 cursor-pointer">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="text-[11px] text-amber-700 dark:text-amber-300">{ambiguousMatch.reason}</div>
+          <div className="space-y-1">
+            {ambiguousMatch.candidates.map((cand) => (
+              <div key={cand.zoomMeetingId} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-surface border border-surface-border">
+                <div className="min-w-0 text-[11px]" dir="ltr">
+                  <div className="font-semibold text-text-main truncate">{cand.topic || cand.zoomMeetingId}</div>
+                  <div className="font-mono text-text-muted">ID {cand.zoomMeetingId}</div>
+                </div>
+                <button
+                  type="button"
+                  disabled={busySessionId !== null}
+                  onClick={() => handleSelectAmbiguousCandidate(cand)}
+                  className="min-h-[30px] px-2.5 rounded-lg bg-primary text-primary-fg text-[11px] font-bold shrink-0 cursor-pointer disabled:opacity-50"
+                >
+                  {_t('ربط', 'Link')}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Resync Prompt Banner when Name/Time/Weekday Changed */}
       {(needsZoomResyncSessions.length > 0 || needsCalendarResyncCount > 0) && (
@@ -683,7 +853,7 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
                   </div>
                 </div>
 
-                {joinUrl && (
+                {isApprovedSyncedZoomSession(session) && joinUrl ? (
                   <div className="flex items-center justify-between gap-2 bg-surface-hover/60 px-3 py-1.5 rounded-xl text-[11px]">
                     <span className="font-mono text-primary truncate select-all" dir="ltr">
                       {joinUrl}
@@ -700,6 +870,19 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
                       )}
                       <span>{_t('نسخ', 'Copy')}</span>
                     </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/25 px-3 py-1.5 rounded-xl text-[11px] text-amber-800 dark:text-amber-300 font-medium">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    <span>
+                      {session.syncState === 'needs_update'
+                        ? _t('هذه الجلسة تحتاج تحديث Zoom قبل اعتماد رابطها في التذاكر والجدول', 'This slot needs a Zoom update before its link is approved for reminders & schedule')
+                        : session.syncState === 'error'
+                        ? _t('فشلت مزامنة Zoom لهذه الجلسة — أعد المزامنة لاعتماد الرابط', 'Zoom sync failed for this slot — resync to approve its link')
+                        : session.syncState === 'pending' && joinUrl
+                        ? _t('الرابط بانتظار التحقق والربط مع Zoom قبل اعتماده', 'Link is pending Zoom verification before being approved')
+                        : _t('لم يتم اعتماد رابط Zoom لهذه الجلسة بعد — اضغط إنشاء/تحديث Zoom', 'No approved Zoom link for this slot yet — sync Zoom first')}
+                    </span>
                   </div>
                 )}
 

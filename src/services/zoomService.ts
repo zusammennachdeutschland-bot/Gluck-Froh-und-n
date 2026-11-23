@@ -27,6 +27,7 @@ import {
   buildZoomMeetingRecordFromSession,
   computeNextSessionStartWallTime,
   extractNumericZoomMeetingId,
+  normalize24HourTime,
   normalizeCanonicalZoomJoinUrl,
   reconcileGroupWeeklySessions,
   toZoomWeeklyDayNumber
@@ -50,6 +51,39 @@ export interface ZoomUiMetaState {
   lastError: string | null;
 }
 
+export interface ZoomVerifiedMeetingCandidate {
+  zoomMeetingId: string;
+  topic: string;
+  joinUrl: string;
+  meetingPasscode?: string;
+  type?: number;
+  startTime?: string;
+  duration?: number;
+  timezone?: string;
+  recurrenceWeeklyDays?: string;
+  recurrenceRepeatInterval?: number;
+  matchConfidence: 'verified_strong' | 'topic_only_ambiguous' | 'schedule_mismatch';
+  reasons: string[];
+}
+
+export interface ZoomAmbiguousMatchItem {
+  sessionId: string;
+  sessionCode: string;
+  standardizedTitle: string;
+  reason: string;
+  candidates: ZoomVerifiedMeetingCandidate[];
+}
+
+export interface ZoomPersistenceVerificationResult {
+  ok: boolean;
+  verified: boolean;
+  error?: string;
+  sessions?: GroupWeeklySession[];
+  records?: ZoomMeetingRecord[];
+  history?: ZoomMeetingHistory[];
+  matches?: GrainRecordingMatch[];
+}
+
 export interface ZoomMigrationPreviewItem {
   sessionId: string;
   sessionCode: string;
@@ -61,9 +95,12 @@ export interface ZoomMigrationPreviewItem {
   standardizedTitle: string;
   action:
     | 'create_new'
+    | 'verify_existing_pending'
     | 'replace_manual_with_standardized'
     | 'update_standardized'
     | 'already_standardized';
+  syncState?: GroupWeeklySession['syncState'];
+  meetingSource?: GroupWeeklySession['meetingSource'];
   previousZoomUrl?: string;
   previousZoomMeetingId?: string;
   willArchivePrevious: boolean;
@@ -76,6 +113,7 @@ export interface ZoomMigrationPreviewSummary {
   items: ZoomMigrationPreviewItem[];
   counts: {
     createNew: number;
+    verifyExistingPending: number;
     replaceManual: number;
     updateStandardized: number;
     alreadyStandardized: number;
@@ -92,6 +130,8 @@ export interface ZoomBulkMigrationProgress {
   currentSessionId?: string;
   currentTitle?: string;
   succeeded: number;
+  linkedExisting?: number;
+  ambiguous?: number;
   skipped: number;
   failed: number;
   rateLimited: boolean;
@@ -99,9 +139,15 @@ export interface ZoomBulkMigrationProgress {
 
 export interface ZoomBulkMigrationResult {
   completed: boolean;
+  noOp: boolean;
   aborted: boolean;
   rateLimited: boolean;
   succeededCount: number;
+  linkedExistingCount: number;
+  createdCount: number;
+  updatedCount: number;
+  ambiguousCount: number;
+  ambiguousItems: ZoomAmbiguousMatchItem[];
   skippedCount: number;
   failedCount: number;
   archivedPreviousCount: number;
@@ -110,6 +156,8 @@ export interface ZoomBulkMigrationResult {
   history: ZoomMeetingHistory[];
   errors: Array<{ sessionId: string; title: string; error: string }>;
   processedSessionIds: string[];
+  persistenceVerified?: boolean;
+  persistenceError?: string;
 }
 
 export const ZOOM_UI_META_STORAGE_KEY = 'glueck_zoom_ui_meta_v1';
@@ -311,7 +359,6 @@ export function sanitizeZoomRecordForStorage<T>(item: T): T {
 }
 
 export async function loadGroupWeeklySessions(): Promise<GroupWeeklySession[]> {
-  if (typeof window === 'undefined') return inMemorySessionsFallback;
   try {
     const raw = await storage.getItem(GROUP_WEEKLY_SESSIONS_STORAGE_KEY);
     if (Array.isArray(raw)) {
@@ -326,17 +373,12 @@ export async function loadGroupWeeklySessions(): Promise<GroupWeeklySession[]> {
 
 export async function saveGroupWeeklySessions(items: GroupWeeklySession[]): Promise<GroupWeeklySession[]> {
   const clean = (Array.isArray(items) ? items : []).map(sanitizeZoomRecordForStorage);
+  await storage.setItem(GROUP_WEEKLY_SESSIONS_STORAGE_KEY, clean);
   inMemorySessionsFallback = clean;
-  if (typeof window !== 'undefined') {
-    try {
-      await storage.setItem(GROUP_WEEKLY_SESSIONS_STORAGE_KEY, clean);
-    } catch {}
-  }
   return clean;
 }
 
 export async function loadZoomMeetingRecords(): Promise<ZoomMeetingRecord[]> {
-  if (typeof window === 'undefined') return inMemoryRecordsFallback;
   try {
     const raw = await storage.getItem(ZOOM_MEETING_RECORDS_STORAGE_KEY);
     if (Array.isArray(raw)) {
@@ -349,17 +391,12 @@ export async function loadZoomMeetingRecords(): Promise<ZoomMeetingRecord[]> {
 
 export async function saveZoomMeetingRecords(items: ZoomMeetingRecord[]): Promise<ZoomMeetingRecord[]> {
   const clean = (Array.isArray(items) ? items : []).map(sanitizeZoomRecordForStorage);
+  await storage.setItem(ZOOM_MEETING_RECORDS_STORAGE_KEY, clean);
   inMemoryRecordsFallback = clean;
-  if (typeof window !== 'undefined') {
-    try {
-      await storage.setItem(ZOOM_MEETING_RECORDS_STORAGE_KEY, clean);
-    } catch {}
-  }
   return clean;
 }
 
 export async function loadZoomMeetingHistory(): Promise<ZoomMeetingHistory[]> {
-  if (typeof window === 'undefined') return inMemoryHistoryFallback;
   try {
     const raw = await storage.getItem(ZOOM_MEETING_HISTORY_STORAGE_KEY);
     if (Array.isArray(raw)) {
@@ -372,17 +409,12 @@ export async function loadZoomMeetingHistory(): Promise<ZoomMeetingHistory[]> {
 
 export async function saveZoomMeetingHistory(items: ZoomMeetingHistory[]): Promise<ZoomMeetingHistory[]> {
   const clean = (Array.isArray(items) ? items : []).map(sanitizeZoomRecordForStorage);
+  await storage.setItem(ZOOM_MEETING_HISTORY_STORAGE_KEY, clean);
   inMemoryHistoryFallback = clean;
-  if (typeof window !== 'undefined') {
-    try {
-      await storage.setItem(ZOOM_MEETING_HISTORY_STORAGE_KEY, clean);
-    } catch {}
-  }
   return clean;
 }
 
 export async function loadGrainRecordingMatches(): Promise<GrainRecordingMatch[]> {
-  if (typeof window === 'undefined') return inMemoryMatchesFallback;
   try {
     const raw = await storage.getItem(GRAIN_RECORDING_MATCHES_STORAGE_KEY);
     if (Array.isArray(raw)) {
@@ -391,6 +423,111 @@ export async function loadGrainRecordingMatches(): Promise<GrainRecordingMatch[]
     }
   } catch {}
   return inMemoryMatchesFallback;
+}
+
+/**
+ * Durably persists Zoom workspace collections to storage and verifies read-back BEFORE
+ * callers may claim a session is Synced. Never swallows write/read-back failures.
+ */
+export async function persistZoomWorkspaceDurably(snapshot: {
+  sessions?: GroupWeeklySession[];
+  records?: ZoomMeetingRecord[];
+  history?: ZoomMeetingHistory[];
+  matches?: GrainRecordingMatch[];
+}): Promise<ZoomPersistenceVerificationResult> {
+  const cleanSessions = snapshot.sessions
+    ? snapshot.sessions.map((x) => sanitizeZoomRecordForStorage(x))
+    : undefined;
+  const cleanRecords = snapshot.records
+    ? snapshot.records.map((x) => sanitizeZoomRecordForStorage(x))
+    : undefined;
+  const cleanHistory = snapshot.history
+    ? snapshot.history.map((x) => sanitizeZoomRecordForStorage(x))
+    : undefined;
+  const cleanMatches = snapshot.matches
+    ? snapshot.matches.map((x) => sanitizeZoomRecordForStorage(x))
+    : undefined;
+
+  try {
+    if (cleanSessions !== undefined) {
+      await storage.setItem(GROUP_WEEKLY_SESSIONS_STORAGE_KEY, cleanSessions);
+      const readBackOk = await storage.verifyDurableReadBackValue<GroupWeeklySession[]>(
+        GROUP_WEEKLY_SESSIONS_STORAGE_KEY,
+        cleanSessions,
+        (expected, actual) => {
+          if (!Array.isArray(actual)) return false;
+          const actualById = new Map<string, GroupWeeklySession>();
+          for (const row of actual) {
+            if (row && row.id) actualById.set(row.id, row);
+          }
+          for (const exp of expected) {
+            if (!exp || exp.deleted) continue;
+            const persisted = actualById.get(exp.id);
+            if (!persisted || persisted.deleted) return false;
+            if (persisted.syncState !== exp.syncState) return false;
+            if (persisted.meetingSource !== exp.meetingSource) return false;
+            if ((persisted.zoomMeetingId || '') !== (exp.zoomMeetingId || '')) return false;
+            if ((persisted.zoomJoinUrl || '').trim() !== (exp.zoomJoinUrl || '').trim()) return false;
+          }
+          return true;
+        }
+      );
+      if (!readBackOk) {
+        return {
+          ok: false,
+          verified: false,
+          error: 'Durable read-back verification failed for Zoom weekly sessions.'
+        };
+      }
+      inMemorySessionsFallback = cleanSessions;
+    }
+
+    if (cleanRecords !== undefined) {
+      await storage.setItem(ZOOM_MEETING_RECORDS_STORAGE_KEY, cleanRecords);
+      const recordsOk = await storage.verifyDurableReadBack([ZOOM_MEETING_RECORDS_STORAGE_KEY]);
+      if (!recordsOk) {
+        return {
+          ok: false,
+          verified: false,
+          error: 'Durable read-back verification failed for Zoom meeting records.'
+        };
+      }
+      inMemoryRecordsFallback = cleanRecords;
+    }
+
+    if (cleanHistory !== undefined) {
+      await storage.setItem(ZOOM_MEETING_HISTORY_STORAGE_KEY, cleanHistory);
+      const historyOk = await storage.verifyDurableReadBack([ZOOM_MEETING_HISTORY_STORAGE_KEY]);
+      if (!historyOk) {
+        return {
+          ok: false,
+          verified: false,
+          error: 'Durable read-back verification failed for Zoom meeting history.'
+        };
+      }
+      inMemoryHistoryFallback = cleanHistory;
+    }
+
+    if (cleanMatches !== undefined) {
+      await storage.setItem(GRAIN_RECORDING_MATCHES_STORAGE_KEY, cleanMatches);
+      inMemoryMatchesFallback = cleanMatches;
+    }
+
+    return {
+      ok: true,
+      verified: true,
+      sessions: cleanSessions,
+      records: cleanRecords,
+      history: cleanHistory,
+      matches: cleanMatches
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      verified: false,
+      error: redactZoomSecrets(err?.message || 'Failed to persist Zoom sync bindings durably.')
+    };
+  }
 }
 
 export async function saveGrainRecordingMatches(items: GrainRecordingMatch[]): Promise<GrainRecordingMatch[]> {
@@ -992,6 +1129,7 @@ export async function createOrReplaceZoomMeetingForSession(params: {
   actionType?: ZoomHistoryAction;
   reason?: string;
   deletePreviousRemote?: boolean;
+  replaceWholeGroup?: boolean;
 }): Promise<{
   ok: boolean;
   rateLimited?: boolean;
@@ -1131,11 +1269,8 @@ export async function createOrReplaceZoomMeetingForSession(params: {
     nowMs
   });
 
-  // Clean & Rebuild and Bulk Migration create one dedicated recurring meeting per active weekly session slot
-  const replaceWholeGroup =
-    params.actionType !== 'cleanup_rebuilt' &&
-    params.actionType !== 'migrated_replace' &&
-    params.actionType !== 'created';
+  // Only replace other slots of the same group if explicitly requested; default is strictly per-slot isolation.
+  const replaceWholeGroup = params.replaceWholeGroup === true;
   const hasTargetSession = params.sessions.some((s) => s.id === updatedSession.id);
   const baseSessions = hasTargetSession ? params.sessions : [...params.sessions, updatedSession];
   const nextSessions = baseSessions.map((s) => {
@@ -1195,6 +1330,733 @@ export async function createOrReplaceZoomMeetingForSession(params: {
     history: groupHistory,
     archivedPrevious: hadPrevious,
     planWarning40Min
+  };
+}
+
+interface RemoteInspectedZoomMeeting {
+  zoomMeetingId: string;
+  topic: string;
+  joinUrl: string;
+  meetingPasscode?: string;
+  type?: number;
+  startTime?: string;
+  duration?: number;
+  timezone?: string;
+  recurrence?: {
+    type?: number;
+    repeatInterval?: number;
+    weeklyDays?: string;
+  };
+  occurrences?: Array<{
+    occurrenceId?: string;
+    startTime?: string;
+    duration?: number;
+    status?: string;
+  }>;
+}
+
+function normalizeZoomTopicForComparison(topic?: string | null): string {
+  return String(topic || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+const EN_SHORT_WEEKDAY_TO_INDEX: Record<string, number> = {
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6
+};
+
+function extractZonedWeekdayAndTime(
+  rawStartTime: string | undefined,
+  timeZone: string
+): { weekday: number; timeHm: string } | null {
+  const raw = String(rawStartTime || '').trim();
+  if (!raw) return null;
+
+  // Wall-clock local ISO without offset (e.g. "2026-11-16T19:00:00")
+  const wallMatch = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2})?$/.exec(raw);
+  if (wallMatch) {
+    const y = Number(wallMatch[1]);
+    const mo = Number(wallMatch[2]) - 1;
+    const da = Number(wallMatch[3]);
+    const dt = new Date(Date.UTC(y, mo, da, 12, 0, 0));
+    if (!Number.isNaN(dt.getTime())) {
+      return {
+        weekday: dt.getUTCDay(),
+        timeHm: `${wallMatch[4]}:${wallMatch[5]}`
+      };
+    }
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timeZone || DEFAULT_ZOOM_TIMEZONE,
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23'
+    });
+    const parts = formatter.formatToParts(parsed);
+    const wk = parts.find((p) => p.type === 'weekday')?.value || '';
+    const hr = parts.find((p) => p.type === 'hour')?.value || '';
+    const mi = parts.find((p) => p.type === 'minute')?.value || '';
+    const weekday = EN_SHORT_WEEKDAY_TO_INDEX[wk];
+    if (typeof weekday !== 'number' || !hr || !mi) return null;
+    const normHr = hr === '24' ? '00' : hr.padStart(2, '0');
+    return { weekday, timeHm: `${normHr}:${mi.padStart(2, '0')}` };
+  } catch {
+    return null;
+  }
+}
+
+function parseZoomWeeklyDays(raw?: string): number[] {
+  if (!raw) return [];
+  return String(raw)
+    .split(/[,\s]+/)
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n >= 1 && n <= 7);
+}
+
+/**
+ * Strictly evaluates whether an existing remote Zoom meeting matches a GroupWeeklySession.
+ * Name/topic match alone is NEVER sufficient for automatic linking — requires recurring type (8)
+ * plus verified weekday/time/duration agreement.
+ */
+export function evaluateRemoteZoomMeetingMatch(
+  session: GroupWeeklySession,
+  remote: RemoteInspectedZoomMeeting,
+  fallbackTimezone = DEFAULT_ZOOM_TIMEZONE
+): ZoomVerifiedMeetingCandidate {
+  const reasons: string[] = [];
+  const topicMatch =
+    Boolean((remote.topic || '').trim()) &&
+    normalizeZoomTopicForComparison(remote.topic) ===
+      normalizeZoomTopicForComparison(session.standardizedTitle);
+
+  const expectedZoomDay = toZoomWeeklyDayNumber(session.weekday);
+  const expectedTimeHm = normalize24HourTime(session.startTime, session.startTime);
+  const expectedRepeatInterval: 1 | 2 =
+    session.recurrence === 'biweekly_a' || session.recurrence === 'biweekly_b' ? 2 : 1;
+  const effectiveTz = remote.timezone || session.timezone || fallbackTimezone || DEFAULT_ZOOM_TIMEZONE;
+
+  const weeklyDays = parseZoomWeeklyDays(remote.recurrence?.weeklyDays);
+  const rawOccurrenceStart = remote.startTime || remote.occurrences?.[0]?.startTime;
+  const zonedStart = extractZonedWeekdayAndTime(rawOccurrenceStart, effectiveTz);
+  const remoteDuration =
+    typeof remote.duration === 'number' && remote.duration > 0
+      ? remote.duration
+      : typeof remote.occurrences?.[0]?.duration === 'number' && remote.occurrences[0].duration > 0
+      ? remote.occurrences[0].duration
+      : undefined;
+
+  const hasJoinUrl = Boolean((remote.joinUrl || '').trim());
+  const isRecurringType8 = remote.type === 8;
+  const typeMismatch = typeof remote.type === 'number' && remote.type !== 8;
+  if (typeMismatch) reasons.push(`Meeting type is ${remote.type} (expected recurring type 8)`);
+
+  let weekdayConfirmed = false;
+  let scheduleMismatch = false;
+
+  if (weeklyDays.length > 0) {
+    if (weeklyDays.includes(expectedZoomDay)) {
+      weekdayConfirmed = true;
+      reasons.push(`Recurrence weekday matches (${session.weekdayName})`);
+    } else {
+      scheduleMismatch = true;
+      reasons.push(`Recurrence weekday mismatch (remote weekly_days=${weeklyDays.join(',')})`);
+    }
+  } else if (zonedStart) {
+    if (zonedStart.weekday === session.weekday) {
+      weekdayConfirmed = true;
+      reasons.push(`Start weekday matches (${session.weekdayName})`);
+    } else {
+      scheduleMismatch = true;
+      reasons.push(`Start weekday mismatch`);
+    }
+  }
+
+  let timeConfirmed = false;
+  if (zonedStart) {
+    if (zonedStart.timeHm === expectedTimeHm) {
+      timeConfirmed = true;
+      reasons.push(`Start time matches (${expectedTimeHm} ${effectiveTz})`);
+    } else {
+      scheduleMismatch = true;
+      reasons.push(`Start time mismatch (remote ${zonedStart.timeHm}, expected ${expectedTimeHm})`);
+    }
+  }
+
+  if (remoteDuration !== undefined) {
+    if (remoteDuration !== session.durationMinutes) {
+      scheduleMismatch = true;
+      reasons.push(`Duration mismatch (remote ${remoteDuration}m, expected ${session.durationMinutes}m)`);
+    } else {
+      reasons.push(`Duration matches (${remoteDuration}m)`);
+    }
+  }
+
+  if (
+    typeof remote.recurrence?.repeatInterval === 'number' &&
+    remote.recurrence.repeatInterval !== expectedRepeatInterval
+  ) {
+    scheduleMismatch = true;
+    reasons.push(
+      `Repeat interval mismatch (remote ${remote.recurrence.repeatInterval}, expected ${expectedRepeatInterval})`
+    );
+  }
+
+  const sessionBoundId = extractNumericZoomMeetingId(session.zoomMeetingId || session.zoomJoinUrl);
+  const sameIdAsSession = Boolean(sessionBoundId && sessionBoundId === remote.zoomMeetingId);
+  if (sameIdAsSession) {
+    reasons.push('Meeting ID matches session record');
+  }
+
+  let matchConfidence: ZoomVerifiedMeetingCandidate['matchConfidence'] = 'schedule_mismatch';
+  if (topicMatch) {
+    const hasStrongScheduleProof =
+      isRecurringType8 &&
+      weekdayConfirmed &&
+      (timeConfirmed || (weeklyDays.length > 0 && sameIdAsSession)) &&
+      !scheduleMismatch &&
+      !typeMismatch &&
+      hasJoinUrl;
+
+    if (hasStrongScheduleProof) {
+      matchConfidence = 'verified_strong';
+    } else {
+      if (!isRecurringType8 && !typeMismatch) {
+        reasons.push('Recurring meeting type (8) not confirmed');
+      }
+      if (!weekdayConfirmed) {
+        reasons.push('Weekday schedule not confirmed');
+      }
+      if (!timeConfirmed) {
+        reasons.push('Start time not confirmed');
+      }
+      matchConfidence = 'topic_only_ambiguous';
+    }
+  }
+
+  return {
+    zoomMeetingId: remote.zoomMeetingId,
+    topic: remote.topic,
+    joinUrl: remote.joinUrl,
+    meetingPasscode: remote.meetingPasscode,
+    type: remote.type,
+    startTime: rawOccurrenceStart,
+    duration: remoteDuration,
+    timezone: remote.timezone,
+    recurrenceWeeklyDays: remote.recurrence?.weeklyDays,
+    recurrenceRepeatInterval: remote.recurrence?.repeatInterval,
+    matchConfidence,
+    reasons
+  };
+}
+
+/**
+ * Strictly read-only remote inspection via GET /api/zoom/meetings/:meetingId.
+ * NEVER creates, modifies, or deletes remote Zoom meetings.
+ */
+async function inspectZoomMeetingDetails(meetingId: string): Promise<{
+  ok: boolean;
+  exists: boolean;
+  status: number;
+  rateLimited?: boolean;
+  detail?: RemoteInspectedZoomMeeting;
+  error?: string;
+}> {
+  const cleanId = extractNumericZoomMeetingId(meetingId);
+  if (!cleanId) {
+    return { ok: false, exists: false, status: 400, error: 'Invalid numeric Zoom meeting ID.' };
+  }
+
+  const res = await callZoomProxyJson(`/api/zoom/meetings/${encodeURIComponent(cleanId)}`, {
+    method: 'GET'
+  });
+
+  if (res.status === 404 || res.data?.exists === false) {
+    return { ok: false, exists: false, status: 404, error: res.error || 'Zoom meeting not found.' };
+  }
+
+  if (!res.ok || !res.data) {
+    return {
+      ok: false,
+      exists: true,
+      status: res.status || 502,
+      rateLimited: res.status === 429 || res.code === 'RATE_LIMITED',
+      error: res.error || `Failed to inspect Zoom meeting ${cleanId}.`
+    };
+  }
+
+  const canonicalUrl =
+    normalizeCanonicalZoomJoinUrl(res.data.joinUrl || res.data.join_url || '').canonicalUrl ||
+    redactZoomSecrets(String(res.data.joinUrl || res.data.join_url || ''));
+
+  const rawRec = res.data.recurrence;
+  const recurrence =
+    rawRec && typeof rawRec === 'object'
+      ? {
+          type: typeof rawRec.type === 'number' ? rawRec.type : undefined,
+          repeatInterval:
+            typeof rawRec.repeatInterval === 'number'
+              ? rawRec.repeatInterval
+              : typeof rawRec.repeat_interval === 'number'
+              ? rawRec.repeat_interval
+              : undefined,
+          weeklyDays:
+            rawRec.weeklyDays !== undefined && rawRec.weeklyDays !== null
+              ? String(rawRec.weeklyDays)
+              : rawRec.weekly_days !== undefined && rawRec.weekly_days !== null
+              ? String(rawRec.weekly_days)
+              : undefined
+        }
+      : undefined;
+
+  const occurrences = Array.isArray(res.data.occurrences)
+    ? res.data.occurrences.map((o: any) => ({
+        occurrenceId: o?.occurrenceId || o?.occurrence_id,
+        startTime: o?.startTime || o?.start_time,
+        duration: typeof o?.duration === 'number' ? o.duration : undefined,
+        status: typeof o?.status === 'string' ? o.status : undefined
+      }))
+    : undefined;
+
+  return {
+    ok: true,
+    exists: true,
+    status: res.status || 200,
+    detail: {
+      zoomMeetingId: extractNumericZoomMeetingId(String(res.data.zoomMeetingId || res.data.id || cleanId)) || cleanId,
+      topic: String(res.data.topic || ''),
+      joinUrl: canonicalUrl,
+      meetingPasscode: typeof res.data.meetingPasscode === 'string' ? res.data.meetingPasscode : undefined,
+      type: typeof res.data.type === 'number' ? res.data.type : undefined,
+      startTime: typeof res.data.startTime === 'string' ? res.data.startTime : undefined,
+      duration: typeof res.data.duration === 'number' ? res.data.duration : undefined,
+      timezone: typeof res.data.timezone === 'string' ? res.data.timezone : undefined,
+      recurrence,
+      occurrences
+    }
+  };
+}
+
+/**
+ * Pure, non-destructive helper that binds an existing verified (or user-selected) Zoom meeting
+ * to a single weekly session slot without creating, patching, or deleting any remote Zoom meeting.
+ */
+export function linkVerifiedZoomMeetingToSession(params: {
+  session: GroupWeeklySession;
+  meeting: {
+    zoomMeetingId: string;
+    joinUrl: string;
+    meetingPasscode?: string;
+    topic?: string;
+    timezone?: string;
+    hostEmail?: string;
+  };
+  sessions: GroupWeeklySession[];
+  records: ZoomMeetingRecord[];
+  history: ZoomMeetingHistory[];
+  timezone?: string;
+  reason?: string;
+}): {
+  ok: boolean;
+  updatedSession: GroupWeeklySession;
+  linkedRecord: ZoomMeetingRecord;
+  sessions: GroupWeeklySession[];
+  records: ZoomMeetingRecord[];
+  history: ZoomMeetingHistory[];
+  planWarning40Min: boolean;
+} {
+  const nowMs = Date.now();
+  const uiMeta = loadZoomUiMeta();
+  const tz = params.timezone || params.meeting.timezone || params.session.timezone || uiMeta.defaultTimezone || DEFAULT_ZOOM_TIMEZONE;
+  const cleanMeetingId = extractNumericZoomMeetingId(params.meeting.zoomMeetingId) || params.meeting.zoomMeetingId;
+  const parsedUrl = normalizeCanonicalZoomJoinUrl(params.meeting.joinUrl);
+  const canonicalJoinUrl = parsedUrl.canonicalUrl || redactZoomSecrets(params.meeting.joinUrl);
+  const passcode = params.meeting.meetingPasscode || parsedUrl.passcode || params.session.zoomPasscode;
+  const planWarning40Min = Boolean(uiMeta.isBasicPlan && params.session.durationMinutes >= 41);
+
+  const zoomChangedForCalendar =
+    Boolean(params.session.googleCalendarEventId || params.session.calendarSyncStatus === 'synced') &&
+    (canonicalJoinUrl !== params.session.zoomJoinUrl || cleanMeetingId !== params.session.zoomMeetingId);
+
+  const updatedSession: GroupWeeklySession = {
+    ...params.session,
+    timezone: tz,
+    zoomMeetingId: cleanMeetingId,
+    zoomJoinUrl: canonicalJoinUrl,
+    zoomPasscode: passcode,
+    zoomHostEmail: params.meeting.hostEmail || uiMeta.hostEmail || params.session.zoomHostEmail,
+    meetingSource: 'zoom_api',
+    syncState: 'synced',
+    lastSyncedAt: new Date(nowMs).toISOString(),
+    ...(zoomChangedForCalendar ? { calendarSyncStatus: 'needs_update' as const } : {}),
+    lastError: undefined,
+    planWarning40Min,
+    updatedAt: nowMs,
+    version: (params.session.version || 1) + 1,
+    originRevision: (params.session.originRevision || 1) + 1
+  };
+
+  const linkedRecord = buildZoomMeetingRecordFromSession(updatedSession, {
+    zoomMeetingId: cleanMeetingId,
+    joinUrl: canonicalJoinUrl,
+    meetingPasscode: passcode,
+    hostEmail: updatedSession.zoomHostEmail,
+    isBasicPlan: uiMeta.isBasicPlan || planWarning40Min,
+    nowMs
+  });
+
+  const nextHistory = appendZoomHistoryEntry(params.history, {
+    session: params.session,
+    action: 'verified_existing',
+    previousZoomMeetingId: params.session.zoomMeetingId !== cleanMeetingId ? params.session.zoomMeetingId : undefined,
+    previousJoinUrl: params.session.zoomJoinUrl !== canonicalJoinUrl ? params.session.zoomJoinUrl : undefined,
+    previousTopic: params.session.standardizedTitle,
+    newZoomMeetingId: cleanMeetingId,
+    newJoinUrl: canonicalJoinUrl,
+    newTopic: params.meeting.topic || params.session.standardizedTitle,
+    reason: params.reason || 'Verified and linked existing standardized Zoom meeting without duplication',
+    nowMs
+  });
+
+  const hasTarget = params.sessions.some((s) => s.id === updatedSession.id);
+  const nextSessions = hasTarget
+    ? params.sessions.map((s) => (s.id === updatedSession.id ? updatedSession : s))
+    : [...params.sessions, updatedSession];
+
+  const nextRecords = [
+    ...params.records.map((r) =>
+      r.sessionId === updatedSession.id && r.status === 'active' && r.zoomMeetingId !== cleanMeetingId
+        ? { ...r, status: 'superseded' as const, supersededByMeetingId: cleanMeetingId, updatedAt: nowMs }
+        : r
+    ).filter((r) => !(r.sessionId === updatedSession.id && r.zoomMeetingId === cleanMeetingId && r.status === 'active')),
+    linkedRecord
+  ];
+
+  return {
+    ok: true,
+    updatedSession,
+    linkedRecord,
+    sessions: nextSessions,
+    records: nextRecords,
+    history: nextHistory,
+    planWarning40Min
+  };
+}
+
+/**
+ * Strictly READ-ONLY recovery/verification against Zoom.
+ * Checks existing session.zoomMeetingId first, then host scheduled meetings inventory.
+ * NEVER creates, patches, or deletes any remote Zoom meeting.
+ * Name/topic alone is NEVER auto-linked; ambiguous or name-only matches return `outcome: 'ambiguous'`.
+ */
+export async function verifyAndRecoverZoomMeetingForSession(params: {
+  session: GroupWeeklySession;
+  sessions: GroupWeeklySession[];
+  timezone?: string;
+  cachedInventory?: ZoomScheduledMeetingItem[] | null;
+  inventoryLoader?: () => Promise<{ ok: boolean; meetings: ZoomScheduledMeetingItem[]; unavailable?: boolean; rateLimited?: boolean; error?: string }>;
+}): Promise<{
+  outcome: 'verified_existing' | 'ambiguous' | 'not_found' | 'error';
+  candidate?: ZoomVerifiedMeetingCandidate;
+  ambiguousItem?: ZoomAmbiguousMatchItem;
+  rateLimited?: boolean;
+  error?: string;
+}> {
+  const tz = params.timezone || params.session.timezone || loadZoomUiMeta().defaultTimezone || DEFAULT_ZOOM_TIMEZONE;
+  const otherBoundMeetingIds = new Set<string>(
+    (params.sessions || [])
+      .filter((s) => s && !s.deleted && s.id !== params.session.id && s.meetingSource === 'zoom_api' && s.syncState === 'synced' && s.zoomMeetingId)
+      .map((s) => extractNumericZoomMeetingId(s.zoomMeetingId) || '')
+      .filter(Boolean)
+  );
+
+  // Step 1: If session already carries a Zoom meeting ID, inspect it directly (read-only GET)
+  const existingId = extractNumericZoomMeetingId(params.session.zoomMeetingId || params.session.zoomJoinUrl);
+  if (existingId) {
+    const inspected = await inspectZoomMeetingDetails(existingId);
+    if (inspected.rateLimited) {
+      return { outcome: 'error', rateLimited: true, error: inspected.error };
+    }
+    if (inspected.ok && inspected.detail) {
+      const evaluated = evaluateRemoteZoomMeetingMatch(params.session, inspected.detail, tz);
+      if (evaluated.matchConfidence === 'verified_strong') {
+        if (otherBoundMeetingIds.has(evaluated.zoomMeetingId)) {
+          return {
+            outcome: 'ambiguous',
+            ambiguousItem: {
+              sessionId: params.session.id,
+              sessionCode: params.session.sessionCode,
+              standardizedTitle: params.session.standardizedTitle,
+              reason: 'This Zoom meeting ID is already bound to another weekly session slot. Please select how to link it.',
+              candidates: [evaluated]
+            }
+          };
+        }
+        return { outcome: 'verified_existing', candidate: evaluated };
+      }
+      if (evaluated.matchConfidence === 'topic_only_ambiguous') {
+        return {
+          outcome: 'ambiguous',
+          ambiguousItem: {
+            sessionId: params.session.id,
+            sessionCode: params.session.sessionCode,
+            standardizedTitle: params.session.standardizedTitle,
+            reason: 'Zoom meeting topic matches, but recurring day/time/duration could not be confirmed automatically. Please choose.',
+            candidates: [evaluated]
+          }
+        };
+      }
+      // If schedule_mismatch (e.g., old unstandardized legacy personal link with different topic),
+      // fall through to Step 2 inventory check to see if a standardized meeting already exists on Zoom.
+    }
+  }
+
+  // Step 2: Check host scheduled Zoom meetings inventory (read-only GET /api/zoom/meetings)
+  let inventory: ZoomScheduledMeetingItem[] | null = params.cachedInventory ?? null;
+  if (inventory === null) {
+    if (params.inventoryLoader) {
+      const loaded = await params.inventoryLoader();
+      if (!loaded.ok) {
+        if (loaded.unavailable) return { outcome: 'not_found' };
+        return { outcome: 'error', rateLimited: loaded.rateLimited, error: loaded.error };
+      }
+      inventory = loaded.meetings;
+    } else {
+      const invRes = await listAllZoomScheduledMeetings({ includeLiveCheck: false, maxRetries: 1, retryDelayMs: 150 });
+      if (!invRes.ok) {
+        // 404 or 501 means list endpoint unavailable in minimal mock or older APK — treat as not_found cleanly
+        if (invRes.status === 404 || invRes.status === 501) {
+          return { outcome: 'not_found' };
+        }
+        return { outcome: 'error', rateLimited: invRes.rateLimited, error: invRes.error };
+      }
+      inventory = invRes.meetings;
+    }
+  }
+
+  const targetTopicNorm = normalizeZoomTopicForComparison(params.session.standardizedTitle);
+  const topicMatches = (inventory || []).filter(
+    (m) => normalizeZoomTopicForComparison(m.topic) === targetTopicNorm
+  );
+
+  if (topicMatches.length === 0) {
+    return { outcome: 'not_found' };
+  }
+
+  // Inspect up to 5 topic-matching meetings via read-only GET to obtain recurrence & exact schedule
+  const inspectedCandidates: ZoomVerifiedMeetingCandidate[] = [];
+  for (const m of topicMatches.slice(0, 5)) {
+    let remoteDetail: RemoteInspectedZoomMeeting = {
+      zoomMeetingId: m.id,
+      topic: m.topic,
+      joinUrl: m.joinUrl,
+      type: m.type,
+      startTime: m.startTime,
+      duration: m.duration,
+      timezone: m.timezone
+    };
+    const detailRes = await inspectZoomMeetingDetails(m.id);
+    if (detailRes.rateLimited) {
+      return { outcome: 'error', rateLimited: true, error: detailRes.error };
+    }
+    if (detailRes.ok && detailRes.detail) {
+      remoteDetail = {
+        ...remoteDetail,
+        ...detailRes.detail,
+        joinUrl: detailRes.detail.joinUrl || remoteDetail.joinUrl,
+        topic: detailRes.detail.topic || remoteDetail.topic
+      };
+    }
+    inspectedCandidates.push(evaluateRemoteZoomMeetingMatch(params.session, remoteDetail, tz));
+  }
+
+  const unsharedStrong = inspectedCandidates.filter(
+    (c) => c.matchConfidence === 'verified_strong' && !otherBoundMeetingIds.has(c.zoomMeetingId)
+  );
+
+  // Auto-link ONLY when there is exactly 1 matching remote meeting AND it is verified_strong
+  if (topicMatches.length === 1 && inspectedCandidates.length === 1 && unsharedStrong.length === 1) {
+    return {
+      outcome: 'verified_existing',
+      candidate: unsharedStrong[0]
+    };
+  }
+
+  return {
+    outcome: 'ambiguous',
+    ambiguousItem: {
+      sessionId: params.session.id,
+      sessionCode: params.session.sessionCode,
+      standardizedTitle: params.session.standardizedTitle,
+      reason:
+        topicMatches.length > 1
+          ? `Found ${topicMatches.length} Zoom meetings matching "${params.session.standardizedTitle}". Please choose which meeting to link.`
+          : `Found an existing Zoom meeting named "${params.session.standardizedTitle}", but its recurring schedule could not be strictly confirmed. Please choose.`,
+      candidates: inspectedCandidates
+    }
+  };
+}
+
+/**
+ * Unified single-session sync/recovery operation:
+ * - For `needs_update` API sessions with a meeting ID: updates via PATCH.
+ * - For `pending` / `error` / `legacy_migrated` / missing sessions: FIRST verifies existing Zoom
+ *   meetings non-destructively; links verified matches without duplication, surfaces ambiguous
+ *   candidates for user selection without touching remote meetings, and creates only when absent.
+ */
+export async function syncOrRecoverZoomSession(params: {
+  session: GroupWeeklySession;
+  sessions: GroupWeeklySession[];
+  records: ZoomMeetingRecord[];
+  history: ZoomMeetingHistory[];
+  timezone?: string;
+  actionType?: ZoomHistoryAction;
+  reason?: string;
+  cachedInventory?: ZoomScheduledMeetingItem[] | null;
+  inventoryLoader?: () => Promise<{ ok: boolean; meetings: ZoomScheduledMeetingItem[]; unavailable?: boolean; rateLimited?: boolean; error?: string }>;
+}): Promise<{
+  ok: boolean;
+  outcome: 'linked_existing' | 'created' | 'updated' | 'ambiguous' | 'error';
+  rateLimited?: boolean;
+  error?: string;
+  ambiguousItem?: ZoomAmbiguousMatchItem;
+  updatedSession?: GroupWeeklySession;
+  sessions: GroupWeeklySession[];
+  records: ZoomMeetingRecord[];
+  history: ZoomMeetingHistory[];
+  archivedPrevious: boolean;
+  planWarning40Min: boolean;
+}> {
+  const tz = params.timezone || params.session.timezone || loadZoomUiMeta().defaultTimezone || DEFAULT_ZOOM_TIMEZONE;
+
+  // Genuine schedule/title change on an already API-managed session -> PATCH update
+  if (
+    params.session.meetingSource === 'zoom_api' &&
+    params.session.zoomMeetingId &&
+    params.session.syncState === 'needs_update'
+  ) {
+    const upd = await updateZoomMeetingForSession({
+      session: params.session,
+      sessions: params.sessions,
+      records: params.records,
+      history: params.history,
+      timezone: tz
+    });
+    return {
+      ok: upd.ok,
+      outcome: upd.ok ? 'updated' : 'error',
+      rateLimited: upd.rateLimited,
+      error: upd.error,
+      updatedSession: upd.updatedSession,
+      sessions: upd.sessions,
+      records: upd.records,
+      history: upd.history,
+      archivedPrevious: Boolean(upd.replacedDeletedRemote),
+      planWarning40Min: Boolean(upd.updatedSession?.planWarning40Min)
+    };
+  }
+
+  // Non-destructive verification against existing remote Zoom meetings BEFORE creating anything!
+  const verification = await verifyAndRecoverZoomMeetingForSession({
+    session: params.session,
+    sessions: params.sessions,
+    timezone: tz,
+    cachedInventory: params.cachedInventory,
+    inventoryLoader: params.inventoryLoader
+  });
+
+  if (verification.outcome === 'verified_existing' && verification.candidate) {
+    const linked = linkVerifiedZoomMeetingToSession({
+      session: params.session,
+      meeting: {
+        zoomMeetingId: verification.candidate.zoomMeetingId,
+        joinUrl: verification.candidate.joinUrl,
+        meetingPasscode: verification.candidate.meetingPasscode,
+        topic: verification.candidate.topic,
+        timezone: verification.candidate.timezone || tz
+      },
+      sessions: params.sessions,
+      records: params.records,
+      history: params.history,
+      timezone: tz,
+      reason: 'Verified existing recurring Zoom meeting and recovered binding without creating a duplicate'
+    });
+    return {
+      ok: true,
+      outcome: 'linked_existing',
+      updatedSession: linked.updatedSession,
+      sessions: linked.sessions,
+      records: linked.records,
+      history: linked.history,
+      archivedPrevious: false,
+      planWarning40Min: linked.planWarning40Min
+    };
+  }
+
+  if (verification.outcome === 'ambiguous' && verification.ambiguousItem) {
+    return {
+      ok: false,
+      outcome: 'ambiguous',
+      error: verification.ambiguousItem.reason,
+      ambiguousItem: verification.ambiguousItem,
+      sessions: params.sessions,
+      records: params.records,
+      history: params.history,
+      archivedPrevious: false,
+      planWarning40Min: false
+    };
+  }
+
+  if (verification.outcome === 'error') {
+    return {
+      ok: false,
+      outcome: 'error',
+      rateLimited: verification.rateLimited,
+      error: verification.error || 'Failed to verify existing Zoom meetings.',
+      sessions: params.sessions,
+      records: params.records,
+      history: params.history,
+      archivedPrevious: false,
+      planWarning40Min: false
+    };
+  }
+
+  // Confirmed absent on Zoom -> create a fresh standardized recurring meeting
+  const created = await createOrReplaceZoomMeetingForSession({
+    session: params.session,
+    sessions: params.sessions,
+    records: params.records,
+    history: params.history,
+    timezone: tz,
+    actionType:
+      params.actionType ||
+      (params.session.zoomMeetingId || params.session.zoomJoinUrl ? 'migrated_replace' : 'created'),
+    reason: params.reason
+  });
+
+  return {
+    ok: created.ok,
+    outcome: created.ok ? 'created' : 'error',
+    rateLimited: created.rateLimited,
+    error: created.error,
+    updatedSession: created.updatedSession,
+    sessions: created.sessions,
+    records: created.records,
+    history: created.history,
+    archivedPrevious: created.archivedPrevious,
+    planWarning40Min: created.planWarning40Min
   };
 }
 
@@ -1390,9 +2252,13 @@ export function buildZoomMigrationPreview(params: {
     let action: ZoomMigrationPreviewItem['action'] = 'create_new';
 
     if (s.meetingSource === 'zoom_api' && s.zoomMeetingId && s.zoomJoinUrl) {
-      action = s.syncState === 'needs_update' || s.syncState === 'error'
-        ? 'update_standardized'
-        : 'already_standardized';
+      if (s.syncState === 'synced') {
+        action = 'already_standardized';
+      } else if (s.syncState === 'pending') {
+        action = 'verify_existing_pending';
+      } else {
+        action = 'update_standardized';
+      }
     } else if (hasExistingUrlOrId) {
       action = 'replace_manual_with_standardized';
     } else {
@@ -1409,9 +2275,15 @@ export function buildZoomMigrationPreview(params: {
       durationMinutes: s.durationMinutes,
       standardizedTitle: s.standardizedTitle,
       action,
+      syncState: s.syncState,
+      meetingSource: s.meetingSource,
       previousZoomUrl: s.zoomJoinUrl,
       previousZoomMeetingId: s.zoomMeetingId,
-      willArchivePrevious: hasExistingUrlOrId && action !== 'already_standardized' && action !== 'update_standardized',
+      willArchivePrevious:
+        hasExistingUrlOrId &&
+        action !== 'already_standardized' &&
+        action !== 'update_standardized' &&
+        action !== 'verify_existing_pending',
       planWarning40Min: Boolean(uiMeta.isBasicPlan && s.durationMinutes >= 41)
     };
   });
@@ -1422,6 +2294,7 @@ export function buildZoomMigrationPreview(params: {
     items,
     counts: {
       createNew: items.filter((i) => i.action === 'create_new').length,
+      verifyExistingPending: items.filter((i) => i.action === 'verify_existing_pending').length,
       replaceManual: items.filter((i) => i.action === 'replace_manual_with_standardized').length,
       updateStandardized: items.filter((i) => i.action === 'update_standardized').length,
       alreadyStandardized: items.filter((i) => i.action === 'already_standardized').length,
@@ -1434,10 +2307,11 @@ export function buildZoomMigrationPreview(params: {
 }
 
 /**
- * Executes idempotent, checkpointed bulk Zoom meeting standardization / creation across sessions.
- * - `mode: 'standardize_all'` updates/replaces every weekly session so all online groups have standardized API-managed Zoom meetings (archiving old links in history).
- * - `mode: 'create_missing_only'` only creates Zoom meetings for sessions that don't yet have a Zoom meeting URL/ID or have `meetingSource === 'zoom_api' && syncState !== 'synced'`.
- * - Persists checkpoint after EVERY session if `onCheckpoint` is provided so resuming skips already completed sessions.
+ * Executes idempotent, checkpointed bulk Zoom meeting standardization / recovery / creation across sessions.
+ * - `mode: 'standardize_all'` verifies/updates/replaces every non-synced weekly session so all online groups have standardized API-managed Zoom meetings (archiving old links in history).
+ * - `mode: 'create_missing_only'` processes missing sessions AND any `pending`/`error`/`needs_update` sessions (even if they already carry a Zoom meeting ID & URL), verifying existing Zoom meetings before creating. Only skips explicitly saved `manual` overrides (`syncState === 'manual'`) and already `synced` sessions.
+ * - Never returns `completed: true` when 0 sessions were actually processed (`noOp: true`).
+ * - Optionally verifies durable persistence before completing.
  */
 export async function executeBulkZoomMigration(params: {
   mode: 'standardize_all' | 'create_missing_only';
@@ -1447,13 +2321,14 @@ export async function executeBulkZoomMigration(params: {
   timezone?: string;
   skipSessionIds?: Set<string>;
   shouldAbort?: () => boolean;
+  persistDurably?: boolean;
   onProgress?: (progress: ZoomBulkMigrationProgress) => void;
   onCheckpoint?: (state: {
     sessions: GroupWeeklySession[];
     records: ZoomMeetingRecord[];
     history: ZoomMeetingHistory[];
     processedSessionIds: string[];
-  }) => void;
+  }) => void | Promise<void | { ok: boolean; error?: string }>;
 }): Promise<ZoomBulkMigrationResult> {
   const tz = params.timezone || loadZoomUiMeta().defaultTimezone || DEFAULT_ZOOM_TIMEZONE;
   let workingSessions = [...params.preview.reconciledSessions];
@@ -1464,6 +2339,14 @@ export async function executeBulkZoomMigration(params: {
     if (params.skipSessionIds?.has(item.sessionId)) return false;
     if (item.action === 'already_standardized') return false;
     if (params.mode === 'create_missing_only' && item.action === 'replace_manual_with_standardized') {
+      // Do NOT skip sessions that are still pending/error/needs_update even when they have ID & URL.
+      // Only skip intentional manual overrides (meetingSource === 'manual' && syncState === 'manual').
+      const sessionState =
+        item.syncState ||
+        workingSessions.find((s) => s.id === item.sessionId)?.syncState;
+      if (sessionState === 'pending' || sessionState === 'error' || sessionState === 'needs_update') {
+        return true;
+      }
       return false;
     }
     return true;
@@ -1472,13 +2355,52 @@ export async function executeBulkZoomMigration(params: {
   const total = targetItems.length;
   let completed = 0;
   let succeededCount = 0;
+  let linkedExistingCount = 0;
+  let createdCount = 0;
+  let updatedCount = 0;
+  let ambiguousCount = 0;
   let skippedCount = params.preview.items.length - total;
   let failedCount = 0;
   let archivedPreviousCount = 0;
   let rateLimited = false;
   let aborted = false;
   const errors: Array<{ sessionId: string; title: string; error: string }> = [];
+  const ambiguousItems: ZoomAmbiguousMatchItem[] = [];
   const processedSessionIds: string[] = [];
+
+  // Lazy cached remote inventory loader so bulk verification fetches GET /api/zoom/meetings at most once
+  let inventoryCache: {
+    loaded: boolean;
+    ok: boolean;
+    unavailable?: boolean;
+    rateLimited?: boolean;
+    error?: string;
+    meetings: ZoomScheduledMeetingItem[];
+  } | null = null;
+
+  const loadInventoryOnce = async () => {
+    if (inventoryCache?.loaded) {
+      return inventoryCache;
+    }
+    const invRes = await listAllZoomScheduledMeetings({ includeLiveCheck: false, maxRetries: 1, retryDelayMs: 150 });
+    if (!invRes.ok) {
+      inventoryCache = {
+        loaded: true,
+        ok: false,
+        unavailable: invRes.status === 404 || invRes.status === 501,
+        rateLimited: invRes.rateLimited,
+        error: invRes.error,
+        meetings: []
+      };
+      return inventoryCache;
+    }
+    inventoryCache = {
+      loaded: true,
+      ok: true,
+      meetings: invRes.meetings
+    };
+    return inventoryCache;
+  };
 
   for (const item of targetItems) {
     if (params.shouldAbort?.()) {
@@ -1499,65 +2421,56 @@ export async function executeBulkZoomMigration(params: {
       currentSessionId: item.sessionId,
       currentTitle: item.standardizedTitle,
       succeeded: succeededCount,
+      linkedExisting: linkedExistingCount,
+      ambiguous: ambiguousCount,
       skipped: skippedCount,
       failed: failedCount,
       rateLimited
     });
 
-    if (item.action === 'update_standardized') {
-      const upd = await updateZoomMeetingForSession({
-        session: currentSession,
-        sessions: workingSessions,
-        records: workingRecords,
-        history: workingHistory,
-        timezone: tz
-      });
-      workingSessions = upd.sessions;
-      workingRecords = upd.records;
-      workingHistory = upd.history;
-      if (upd.ok) {
-        succeededCount++;
-        processedSessionIds.push(item.sessionId);
-      } else {
-        failedCount++;
-        errors.push({ sessionId: item.sessionId, title: item.standardizedTitle, error: upd.error || 'Update failed' });
-        if (upd.rateLimited) {
-          rateLimited = true;
-          break;
-        }
-      }
+    const stepRes = await syncOrRecoverZoomSession({
+      session: currentSession,
+      sessions: workingSessions,
+      records: workingRecords,
+      history: workingHistory,
+      timezone: tz,
+      actionType: item.willArchivePrevious ? 'migrated_replace' : 'created',
+      reason:
+        item.action === 'replace_manual_with_standardized'
+          ? 'Bulk migration archived manual Zoom link and created standardized recurring meeting'
+          : 'Bulk setup created standardized recurring Zoom meeting',
+      inventoryLoader: loadInventoryOnce
+    });
+
+    workingSessions = stepRes.sessions;
+    workingRecords = stepRes.records;
+    workingHistory = stepRes.history;
+
+    if (stepRes.ok) {
+      succeededCount++;
+      if (stepRes.outcome === 'linked_existing') linkedExistingCount++;
+      else if (stepRes.outcome === 'created') createdCount++;
+      else if (stepRes.outcome === 'updated') updatedCount++;
+      if (stepRes.archivedPrevious) archivedPreviousCount++;
+      processedSessionIds.push(item.sessionId);
+    } else if (stepRes.outcome === 'ambiguous' && stepRes.ambiguousItem) {
+      ambiguousCount++;
+      ambiguousItems.push(stepRes.ambiguousItem);
     } else {
-      const created = await createOrReplaceZoomMeetingForSession({
-        session: currentSession,
-        sessions: workingSessions,
-        records: workingRecords,
-        history: workingHistory,
-        timezone: tz,
-        actionType: item.willArchivePrevious ? 'migrated_replace' : 'created',
-        reason:
-          item.action === 'replace_manual_with_standardized'
-            ? 'Bulk migration archived manual Zoom link and created standardized recurring meeting'
-            : 'Bulk setup created standardized recurring Zoom meeting'
+      failedCount++;
+      errors.push({
+        sessionId: item.sessionId,
+        title: item.standardizedTitle,
+        error: stepRes.error || 'Sync failed'
       });
-      workingSessions = created.sessions;
-      workingRecords = created.records;
-      workingHistory = created.history;
-      if (created.ok) {
-        succeededCount++;
-        if (created.archivedPrevious) archivedPreviousCount++;
-        processedSessionIds.push(item.sessionId);
-      } else {
-        failedCount++;
-        errors.push({ sessionId: item.sessionId, title: item.standardizedTitle, error: created.error || 'Create failed' });
-        if (created.rateLimited) {
-          rateLimited = true;
-          break;
-        }
+      if (stepRes.rateLimited) {
+        rateLimited = true;
+        break;
       }
     }
 
     completed++;
-    params.onCheckpoint?.({
+    await params.onCheckpoint?.({
       sessions: workingSessions,
       records: workingRecords,
       history: workingHistory,
@@ -1565,15 +2478,46 @@ export async function executeBulkZoomMigration(params: {
     });
   }
 
-  if (succeededCount > 0) {
+  let persistenceVerified: boolean | undefined;
+  let persistenceError: string | undefined;
+
+  if (params.persistDurably && succeededCount > 0) {
+    const persistRes = await persistZoomWorkspaceDurably({
+      sessions: workingSessions,
+      records: workingRecords,
+      history: workingHistory
+    });
+    persistenceVerified = persistRes.ok && persistRes.verified;
+    if (!persistenceVerified) {
+      persistenceError = persistRes.error || 'Failed to verify durable Zoom sync persistence.';
+    }
+  }
+
+  if (succeededCount > 0 && persistenceVerified !== false) {
     saveZoomUiMeta({ lastMigrationAt: new Date().toISOString(), lastError: null });
   }
 
+  const noOp = total === 0 || (succeededCount === 0 && failedCount === 0 && ambiguousCount === 0);
+  const isCompleted =
+    !noOp &&
+    !aborted &&
+    !rateLimited &&
+    failedCount === 0 &&
+    ambiguousCount === 0 &&
+    succeededCount > 0 &&
+    persistenceVerified !== false;
+
   return {
-    completed: !aborted && !rateLimited,
+    completed: isCompleted,
+    noOp,
     aborted,
     rateLimited,
     succeededCount,
+    linkedExistingCount,
+    createdCount,
+    updatedCount,
+    ambiguousCount,
+    ambiguousItems,
     skippedCount,
     failedCount,
     archivedPreviousCount,
@@ -1581,7 +2525,9 @@ export async function executeBulkZoomMigration(params: {
     records: workingRecords,
     history: workingHistory,
     errors,
-    processedSessionIds
+    processedSessionIds,
+    persistenceVerified,
+    persistenceError
   };
 }
 

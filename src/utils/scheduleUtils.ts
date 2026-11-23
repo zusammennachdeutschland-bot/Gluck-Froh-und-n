@@ -1,5 +1,6 @@
 import { Group, GroupScheduleSlot, GroupWeeklySession, Lesson, ScheduleRecurrence } from '../types';
 import { parseLocalDate, formatLocalDate, normalizeDateToISO } from './timeUtils';
+import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
 
 const normalizeTime = (t?: string): string => {
   if (!t || typeof t !== 'string') return '';
@@ -403,23 +404,15 @@ export function getProjectedLessonsForRange(
             : Math.round((group.monthlyPackagePrice || 1200) / (group.sessionCount || 8));
 
           const projectedWeekday = cursor.getDay();
-          const matchingSession = (groupWeeklySessions || [])
-            .filter(
-              (s) =>
-                s &&
-                !s.deleted &&
-                s.groupId === group.id &&
-                Boolean((s.zoomJoinUrl || '').trim())
-            )
-            .sort((a, b) => {
-              const exactA = a.weekday === projectedWeekday && a.startTime === sessionTime ? 2 : a.weekday === projectedWeekday ? 1 : 0;
-              const exactB = b.weekday === projectedWeekday && b.startTime === sessionTime ? 2 : b.weekday === projectedWeekday ? 1 : 0;
-              if (exactB !== exactA) return exactB - exactA;
-              const srcA = a.meetingSource === 'zoom_api' ? 1 : 0;
-              const srcB = b.meetingSource === 'zoom_api' ? 1 : 0;
-              return srcB - srcA;
-            })[0];
-          const resolvedSessionLink = (matchingSession?.zoomJoinUrl || '').trim();
+          const resolvedSessionLink = Array.isArray(groupWeeklySessions)
+            ? resolveActiveZoomLinkForLesson({
+                group,
+                groupId: group.id,
+                groupWeeklySessions,
+                targetDay: projectedWeekday,
+                targetTime: sessionTime
+              })
+            : '';
 
           projected.push({
             id: `l_auto_${group.id}_${dateStr}_${sessionTime.replace(':', '')}`,
@@ -437,7 +430,12 @@ export function getProjectedLessonsForRange(
             paymentStatus: 'pending',
             amountDue: perSessionPrice,
             amountPaid: 0,
-            meetingLink: group.type === 'online' ? (resolvedSessionLink || group.zoomLink || defaultZoomLink) : undefined,
+            meetingLink:
+              group.type === 'online'
+                ? Array.isArray(groupWeeklySessions)
+                  ? resolvedSessionLink || undefined
+                  : group.zoomLink || defaultZoomLink
+                : undefined,
             locationAddress: group.type === 'offline' ? (group.address || 'Cairo Center') : undefined,
             scheduleRecurrence: group.scheduleRecurrence || 'weekly',
             biweeklyWeek: getAlternatingWeek(cursor)
@@ -466,40 +464,36 @@ export function getProjectedLessonsForRange(
         l.status !== 'cancelled' &&
         l.groupId
       ) {
-        let sessionUrl = '';
-        if (Array.isArray(groupWeeklySessions) && groupWeeklySessions.length > 0 && l.date) {
-          const lessonWeekday = parseLocalDate(l.date).getDay();
-          const normLessonTime = normalizeTime(l.time) || (l.time || '').trim();
-          const activeSession = groupWeeklySessions
-            .filter(
-              (s) =>
-                s &&
-                !s.deleted &&
-                s.groupId === l.groupId &&
-                Boolean((s.zoomJoinUrl || '').trim())
-            )
-            .sort((a, b) => {
-              const normA = normalizeTime(a.startTime) || a.startTime;
-              const normB = normalizeTime(b.startTime) || b.startTime;
-              const exactA = a.weekday === lessonWeekday && normA === normLessonTime ? 2 : a.weekday === lessonWeekday ? 1 : 0;
-              const exactB = b.weekday === lessonWeekday && normB === normLessonTime ? 2 : b.weekday === lessonWeekday ? 1 : 0;
-              if (exactB !== exactA) return exactB - exactA;
-              const srcA = a.meetingSource === 'zoom_api' ? 1 : 0;
-              const srcB = b.meetingSource === 'zoom_api' ? 1 : 0;
-              return srcB - srcA;
-            })[0];
-          sessionUrl = (activeSession?.zoomJoinUrl || '').trim();
+        if (Array.isArray(groupWeeklySessions)) {
+          const canonicalLink = resolveActiveZoomLinkForLesson({
+            group: grp,
+            groupId: l.groupId,
+            lesson: l,
+            groupWeeklySessions
+          });
+          effectiveMeetingLink = canonicalLink || undefined;
+        } else {
+          const groupZoomUrl = (grp?.zoomLink || grp?.meetLink || '').trim();
+          const lessonMeetingUrl = (l.meetingLink || '').trim();
+          effectiveMeetingLink = groupZoomUrl || lessonMeetingUrl || defaultZoomLink || undefined;
         }
-        const groupZoomUrl = (grp?.zoomLink || grp?.meetLink || '').trim();
-        const lessonMeetingUrl = (l.meetingLink || '').trim();
-        effectiveMeetingLink = sessionUrl || groupZoomUrl || lessonMeetingUrl || defaultZoomLink || undefined;
       }
-      uniqueLessons.push({
+      const nextLesson: Lesson = {
         ...l,
-        ...(effectiveMeetingLink ? { meetingLink: effectiveMeetingLink } : {}),
         scheduleRecurrence: rec,
         biweeklyWeek: l.biweeklyWeek || (l.date ? getAlternatingWeek(l.date) : undefined)
-      });
+      };
+      if (effectiveMeetingLink) {
+        nextLesson.meetingLink = effectiveMeetingLink;
+      } else if (
+        Array.isArray(groupWeeklySessions) &&
+        (l.type === 'online' || grp?.type === 'online') &&
+        l.status !== 'completed' &&
+        l.status !== 'cancelled'
+      ) {
+        delete nextLesson.meetingLink;
+      }
+      uniqueLessons.push(nextLesson);
     }
   }
 
