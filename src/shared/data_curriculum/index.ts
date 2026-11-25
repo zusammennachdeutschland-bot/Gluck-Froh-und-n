@@ -1,14 +1,14 @@
-import { LernstudioSet, LernstudioItem, LernstudioDifficulty, LernstudioLevel } from '../../types/lernstudio';
-import { BATCH_01_SETS } from './batch01_first_words_numbers';
-import { BATCH_02_SETS } from './batch02_animals_nature';
-import { BATCH_03_SETS } from './batch03_food_drinks';
-import { BATCH_04_SETS } from './batch04_family_body_health';
-import { BATCH_05_SETS } from './batch05_school_toys_hobbies';
-import { BATCH_06_SETS } from './batch06_home_town_transport';
-import { BATCH_07_SETS } from './batch07_professions_routine';
-import { BATCH_08_SETS } from './batch08_actions_sports';
-import { BATCH_09_SETS } from './batch09_adjectives_grammar_shopping';
-import { BATCH_10_SETS } from './batch10_culture_tech_stories_expansion';
+import type { LernstudioSet, LernstudioItem, LernstudioDifficulty, LernstudioLevel } from '../../types/lernstudio.js';
+import { BATCH_01_SETS } from './batch01_first_words_numbers.js';
+import { BATCH_02_SETS } from './batch02_animals_nature.js';
+import { BATCH_03_SETS } from './batch03_food_drinks.js';
+import { BATCH_04_SETS } from './batch04_family_body_health.js';
+import { BATCH_05_SETS } from './batch05_school_toys_hobbies.js';
+import { BATCH_06_SETS } from './batch06_home_town_transport.js';
+import { BATCH_07_SETS } from './batch07_professions_routine.js';
+import { BATCH_08_SETS } from './batch08_actions_sports.js';
+import { BATCH_09_SETS } from './batch09_adjectives_grammar_shopping.js';
+import { BATCH_10_SETS } from './batch10_culture_tech_stories_expansion.js';
 
 export interface RawCurriculumSet {
   id: string;

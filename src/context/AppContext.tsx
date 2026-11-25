@@ -27,6 +27,7 @@ import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence, get
 import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
 import { getPrunedLessonIds, addPrunedLessonIds, executeLessonCleanup, analyzeLessonCleanup, formatLocalDateStr, LAST_CLEANUP_DATE_KEY, PRUNED_LESSONS_BACKUP_KEY, repairFutureAutoLessonTombstones, repairFutureAutoLessonTombstonesFromStorage } from '../services/lessonCleanupService';
 import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo, calculateSequentialSessionNumber, resolveLessonCycleNumber, buildGroupCycleAnchorFields, compareLessonsChronologically, resequenceScheduledLessonsAfterChange, isGroupPerLesson, shouldRetainLessonInActiveWindow, findInvalidBiweeklyAutoLessons, buildLessonSlotSet, buildBlockedLessonSlotSet, makeLessonSlotKey, normalizeTime } from '../utils/lessonUtils';
+import { filterActiveLessonsList, mergeLessonListsMonotonically, normalizeStudentPaymentsForLesson } from '../services/lessonPersistenceEngine';
 import { translations, TranslationKey } from '../i18n/translations';
 import { syncTodayLessonsToWidget } from '../services/widgetService';
 import { runSyncMigration } from '../services/sync/syncMigration';
@@ -204,11 +205,11 @@ interface AppContextType {
     quickNotes?: string;
   }) => Lesson;
   convertQuickLessonToStudent: (lessonId: string) => Student | null;
-  updateLesson: (id: string, updates: Partial<Lesson>) => void;
+  updateLesson: (id: string, updates: Partial<Lesson>, lessonSnapshot?: Lesson) => void;
   deleteLesson: (id: string) => void;
   deleteFutureGroupLessons: (groupId: string, fromDate: string, currentLessonId?: string) => void;
   deleteAllGroupLessons: (groupId: string, onlyScheduled?: boolean) => void;
-  saveLessonReport: (lessonId: string, report: LessonReport, packageCount?: number, sessionNumber?: number) => void;
+  saveLessonReport: (lessonId: string, report: LessonReport, packageCount?: number, sessionNumber?: number, lessonSnapshot?: Lesson) => void;
   cancelLesson: (lessonId: string, notes?: string) => void;
   generateGroupScheduleLessons: (groupId: string, days: string[], time: string, numWeeks?: number, customDayTimes?: Record<string, string>, groupOverride?: Group) => void;
   previewInvalidBiweeklyAutoLessons: () => Promise<Lesson[]>;
@@ -493,7 +494,7 @@ interface AppContextType {
     history?: ZoomMeetingHistory[];
     matches?: GrainRecordingMatch[];
   }) => Promise<ZoomPersistenceVerificationResult>;
-  reconcileGroupSessionsState: (group: Group) => {
+  reconcileGroupSessionsState: (group: Group, options?: { includeOffline?: boolean }) => {
     sessions: GroupWeeklySession[];
     historyEntries: ZoomMeetingHistory[];
     needsResyncCount: number;
@@ -955,81 +956,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
   // Memory Optimization: Filter active lessons for global RAM state (current month / last 60 days + future / pending + unpaid completed for paying students up to 365 days)
   const filterActiveLessons = (raw: Lesson[]): Lesson[] => {
-    const sixtyDaysAgo = new Date();
-    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
-    const cutoffStr = formatLocalDate(sixtyDaysAgo);
-
-    const oneYearAgo = new Date();
-    oneYearAgo.setDate(oneYearAgo.getDate() - 365);
-    const maxCutoffStr = formatLocalDate(oneYearAgo);
-
-    const filtered = (Array.isArray(raw) ? raw : []).filter(l =>
-      shouldRetainLessonInActiveWindow(l, cutoffStr, maxCutoffStr, students, groups)
-    );
-
-    const bestLessons = new Map<string, Lesson>();
-    filtered.forEach(lesson => {
-      if (lesson.groupId && lesson.groupId !== 'quick_group') {
-        const key = `${lesson.groupId}_${lesson.date}_${lesson.time}`;
-        const existingBest = bestLessons.get(key);
-        if (!existingBest) {
-          bestLessons.set(key, lesson);
-        } else {
-          const score = (l: Lesson) => {
-             let s = 0;
-             if (l.status !== 'scheduled') s += 100;
-             if (l.paymentStatus === 'paid' || l.report?.paymentStatus === 'paid') s += 100;
-             if ((l.amountPaid || 0) > 0) s += 50;
-             if (l.report && Object.keys(l.report).length > 0) s += 50;
-             if (l.studentPayments && Object.keys(l.studentPayments).length > 0) s += 50;
-             return s;
-          };
-          const currentScore = score(lesson);
-          const bestScore = score(existingBest);
-          let winner = currentScore > bestScore ? lesson : existingBest;
-          let loser = winner === lesson ? existingBest : lesson;
-
-          if (currentScore === bestScore) {
-             if (lesson.updatedAt && existingBest.updatedAt && lesson.updatedAt > existingBest.updatedAt) {
-               winner = lesson;
-               loser = existingBest;
-             } else if (!existingBest.updatedAt && lesson.updatedAt) {
-               winner = lesson;
-               loser = existingBest;
-             }
-          }
-
-          // Preserve paid status if either record was marked paid
-          const isEitherPaid = winner.paymentStatus === 'paid' || loser.paymentStatus === 'paid' ||
-                               winner.report?.paymentStatus === 'paid' || loser.report?.paymentStatus === 'paid';
-          if (isEitherPaid) {
-            winner = {
-              ...winner,
-              paymentStatus: 'paid',
-              amountPaid: Math.max(winner.amountPaid || 0, loser.amountPaid || 0),
-              report: winner.report ? { ...winner.report, paymentStatus: 'paid' } : loser.report
-            };
-          }
-
-          bestLessons.set(key, winner);
-        }
-      }
-    });
-
-    const seenIds = new Set<string>();
-    return filtered.filter(lesson => {
-      if (!lesson || !lesson.id || seenIds.has(lesson.id)) {
-        return false;
-      }
-      if (lesson.groupId && lesson.groupId !== 'quick_group') {
-        const key = `${lesson.groupId}_${lesson.date}_${lesson.time}`;
-        if (bestLessons.get(key)?.id !== lesson.id) {
-          return false;
-        }
-      }
-      seenIds.add(lesson.id);
-      return true;
-    });
+    return filterActiveLessonsList(raw, students, groups);
   };
 
   // One-time startup deduplication across all existing lessons & payments (students is already initialized above)
@@ -1342,38 +1269,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   // Safe atomic full-storage manipulation methods to prevent synchronization race conditions or phantom resurrection
   const updateFullLessonsStorage = useCallback(async (updater: (allLessons: Lesson[]) => Lesson[]): Promise<Lesson[]> => {
     return new Promise<Lesson[]>((resolve, reject) => {
-      lessonSyncQueue = lessonSyncQueue.then(async () => {
-        try {
-          const full = (fullLessonsRef.current && fullLessonsRef.current.length > 0)
-            ? fullLessonsRef.current
-            : ((await storage.getItem<Lesson[]>('dl_lessons')) || lessons);
-          const rawUpdated = updater(full || []);
-          
-          // Deduplicate by lesson.id strictly (keeping the latest occurrence)
-          const seen = new Set<string>();
-          const dedupedById: Lesson[] = [];
-          for (let i = rawUpdated.length - 1; i >= 0; i--) {
-            const item = rawUpdated[i];
-            if (item && item.id && !seen.has(item.id)) {
-              seen.add(item.id);
-              dedupedById.unshift(item);
-            }
+      const nextOp = lessonSyncQueue.then(async () => {
+        const full = (fullLessonsRef.current && fullLessonsRef.current.length > 0)
+          ? fullLessonsRef.current
+          : ((await storage.getItem<Lesson[]>('dl_lessons')) || lessons);
+        const rawUpdated = updater(full || []);
+        
+        // Deduplicate by lesson.id strictly (keeping the latest occurrence)
+        const seen = new Set<string>();
+        const dedupedById: Lesson[] = [];
+        for (let i = rawUpdated.length - 1; i >= 0; i--) {
+          const item = rawUpdated[i];
+          if (item && item.id && !seen.has(item.id)) {
+            seen.add(item.id);
+            dedupedById.unshift(item);
           }
-          
-          // Comprehensive lesson deduplication
-          const { deduplicated: deduped } = deduplicateLessonList(dedupedById, students);
-
-          fullLessonsRef.current = deduped;
-          setLessons(filterActiveLessons(deduped));
-          await storage.setItem('dl_lessons', deduped);
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('gluck-local-data-mutated'));
-          }
-          resolve(deduped);
-        } catch (e) {
-          reject(e);
         }
-      }).catch(err => {
+        
+        // Comprehensive lesson deduplication
+        const { deduplicated: deduped } = deduplicateLessonList(dedupedById, students);
+
+        fullLessonsRef.current = deduped;
+        setLessons(filterActiveLessons(deduped));
+        await storage.setItem('dl_lessons', deduped);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('gluck-local-data-mutated'));
+        }
+        resolve(deduped);
+      });
+      lessonSyncQueue = nextOp.catch(err => {
         console.error('updateFullLessonsStorage error:', err);
         reject(err);
       });
@@ -2018,12 +1942,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     return persistRes;
   }, [updateFullLessonsStorage]);
 
-  const reconcileGroupSessionsState = useCallback((group: Group) => {
+  const reconcileGroupSessionsState = useCallback((group: Group, options?: { includeOffline?: boolean }) => {
     const tz = profile.defaultZoomTimezone || loadZoomUiMeta().defaultTimezone || DEFAULT_ZOOM_TIMEZONE;
+    const hasExistingOfflineForGroup = groupWeeklySessionsRef.current.some(
+      (s) => s && !s.deleted && s.groupId === group.id && s.sessionMode === 'offline'
+    );
+    const shouldIncludeOffline =
+      typeof options?.includeOffline === 'boolean'
+        ? options.includeOffline
+        : group.type !== 'online' && (Boolean(profile.includeOfflineInGoogleCalendar) || hasExistingOfflineForGroup);
+
     const rec = reconcileGroupWeeklySessions({
       group,
       existingSessions: groupWeeklySessionsRef.current,
-      timezone: tz
+      timezone: tz,
+      includeOffline: shouldIncludeOffline
     });
     const cleanedSessions = rec.sessions.map((x) => sanitizeZoomRecordForStorage(x));
     groupWeeklySessionsRef.current = cleanedSessions;
@@ -2042,7 +1975,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     }
 
     const needsResyncCount = cleanedSessions.filter(
-      (s) => s.groupId === group.id && !s.deleted && s.syncState === 'needs_update'
+      (s) => s.groupId === group.id && !s.deleted && s.sessionMode !== 'offline' && s.syncState === 'needs_update'
     ).length;
 
     return {
@@ -2050,7 +1983,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       historyEntries: rec.historyEntries,
       needsResyncCount
     };
-  }, [profile.defaultZoomTimezone]);
+  }, [profile.defaultZoomTimezone, profile.includeOfflineInGoogleCalendar]);
 
   // Gold Price State
   const [latestGoldPrice, setLatestGoldPrice] = useState<GoldPriceResult | null>(null);
@@ -2631,39 +2564,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       if (!lessons) return;
       const currentLessons = lessons;
       lessonSyncQueue = lessonSyncQueue.then(async () => {
-        const full = (await storage.getItem<Lesson[]>('dl_lessons')) || fullLessonsRef.current || [];
-        const activeMap = new Map<string, Lesson>(currentLessons.map(l => [l.id, l]));
-        const fullIds = new Set(full.map(l => l.id));
-
+        // Always anchor against the freshest in-memory authoritative list first (falling back to storage)
+        // and merge monotonically so a stale React render snapshot can NEVER revert a newer completion!
+        const full = (fullLessonsRef.current && fullLessonsRef.current.length > 0)
+          ? fullLessonsRef.current
+          : ((await storage.getItem<Lesson[]>('dl_lessons')) || []);
         const prunedIds = getPrunedLessonIds();
-        const merged: Lesson[] = [];
-        (full as Lesson[]).forEach((l: Lesson) => {
-          if (l && l.id && prunedIds.has(l.id)) return; // Skip pruned records
-          if (activeMap.has(l.id)) {
-            merged.push(activeMap.get(l.id)!);
-          } else {
-            // Historical or tombstoned lesson, preserve in storage
-            merged.push(l);
-          }
-        });
+        const merged = mergeLessonListsMonotonically(full, currentLessons, prunedIds, 'react_sync');
 
-        currentLessons.forEach(l => {
-          if (l && l.id && prunedIds.has(l.id)) return; // Skip pruned records
-          if (!fullIds.has(l.id)) {
-            merged.push(l);
-          }
-        });
-
-        // Strict deduplication by lesson ID (keeping latest occurrence)
+        // Strict deduplication by lesson ID + safe same-slot dedup
         const seen = new Set<string>();
-        const deduped: Lesson[] = [];
+        const dedupedById: Lesson[] = [];
         for (let i = merged.length - 1; i >= 0; i--) {
           const item = merged[i];
           if (item && item.id && !seen.has(item.id)) {
             seen.add(item.id);
-            deduped.unshift(item);
+            dedupedById.unshift(item);
           }
         }
+        const { deduplicated: deduped } = deduplicateLessonList(dedupedById, students);
 
         fullLessonsRef.current = deduped;
         await storage.setItem('dl_lessons', deduped);
@@ -5374,7 +5293,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     return createdLessons;
   };
 
-  const updateLesson = (id: string, updates: Partial<Lesson>) => {
+  const updateLesson = (id: string, updates: Partial<Lesson>, lessonSnapshot?: Lesson) => {
+    const normalizedStudentPaymentsUpdate = updates.studentPayments
+      ? normalizeStudentPaymentsForLesson(updates.studentPayments as any, students)
+      : undefined;
+    const sanitizedUpdates: Partial<Lesson> = {
+      ...updates,
+      ...(updates.studentPayments
+        ? normalizedStudentPaymentsUpdate
+          ? { studentPayments: normalizedStudentPaymentsUpdate }
+          : {}
+        : {})
+    };
+    if (updates.studentPayments && !normalizedStudentPaymentsUpdate) {
+      delete sanitizedUpdates.studentPayments;
+    }
+
     const updater = (allLessons: Lesson[]) => {
       let found = false;
       let targetItem: Lesson | undefined;
@@ -5384,10 +5318,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       let previousGroupId: string | undefined;
       let previousGroupName: string | undefined;
       const isExplicitFieldEdit =
-        updates.status !== undefined ||
-        updates.date !== undefined ||
-        updates.time !== undefined ||
-        updates.report !== undefined;
+        sanitizedUpdates.status !== undefined ||
+        sanitizedUpdates.date !== undefined ||
+        sanitizedUpdates.time !== undefined ||
+        sanitizedUpdates.report !== undefined;
       let updated = allLessons.map(l => {
         if (l.id === id) {
           found = true;
@@ -5398,7 +5332,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           previousGroupName = l.groupName;
           const nextRaw = {
             ...l,
-            ...updates,
+            ...sanitizedUpdates,
             ...(isExplicitFieldEdit ? { isAutoGenerated: false } : {})
           } as Lesson;
           const mutated = stampFieldTimestamps(l, wrapMutation(nextRaw));
@@ -5408,9 +5342,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         return l;
       });
       if (!found) {
-        const base = (selectedLesson && selectedLesson.id === id) 
-          ? selectedLesson 
-          : lessons.find(l => l.id === id);
+        const base =
+          lessonSnapshot ||
+          ((selectedLesson && selectedLesson.id === id)
+            ? selectedLesson
+            : lessons.find(l => l.id === id));
         if (base) {
           previousStatus = base.status;
           previousDate = base.date;
@@ -5419,7 +5355,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           previousGroupName = base.groupName;
           const nextRaw = {
             ...base,
-            ...updates,
+            ...sanitizedUpdates,
             ...(isExplicitFieldEdit ? { isAutoGenerated: false } : {})
           } as Lesson;
           const mutated = stampFieldTimestamps(base, wrapMutation(nextRaw));
@@ -5659,11 +5595,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     autoSyncEngine.notifyMutation('lessons', groupId);
   };
 
-  const saveLessonReport = (lessonId: string, report: LessonReport, packageCount?: number, sessionNumber?: number) => {
+  const saveLessonReport = (
+    lessonId: string,
+    report: LessonReport,
+    packageCount?: number,
+    sessionNumber?: number,
+    lessonSnapshot?: Lesson
+  ) => {
     const targetLesson =
       (fullLessonsRef.current || []).find(l => l.id === lessonId) ||
       lessons.find(l => l.id === lessonId) ||
-      (selectedLesson && selectedLesson.id === lessonId ? selectedLesson : undefined);
+      (selectedLesson && selectedLesson.id === lessonId ? selectedLesson : undefined) ||
+      lessonSnapshot;
     if (!targetLesson) return;
 
     const targetGroup = groups.find(g => g.id === targetLesson.groupId || (g.name && targetLesson.groupId && g.name.trim().toLowerCase() === targetLesson.groupId.trim().toLowerCase()));
@@ -5715,19 +5658,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
 
     const reportUpdater = (allLessons: Lesson[]) => {
       let found = false;
-      const updatedStudentPayments: Record<string, StudentPaymentDetail> = {};
-      if (report.studentPayments) {
-        Object.entries(report.studentPayments).forEach(([stId, pDet]) => {
-          const stObj = students.find(s => s.id === stId);
-          updatedStudentPayments[stId] = {
-            studentId: stId,
-            studentName: stObj?.name || 'Schüler',
-            paymentStatus: pDet.status,
-            amountPaid: pDet.amount,
-            amountDue: targetLesson.amountDue || 200
-          };
-        });
-      }
+      const updatedStudentPayments =
+        normalizeStudentPaymentsForLesson(report.studentPayments as any, students, targetLesson.amountDue || 200) || {};
 
       const updated = allLessons.map(l => {
         if (l.id === lessonId) {
@@ -8900,15 +8832,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           break;
         }
         case 'lessons': {
-          const seen = new Set<string>();
-          const deduped = (Array.isArray(data) ? data : []).filter((l: any) => {
-            if (!l || !l.id || seen.has(l.id)) return false;
-            seen.add(l.id);
-            return true;
+          await new Promise<void>((resolve) => {
+            const nextOp = lessonSyncQueue.then(async () => {
+              const existingFull = (fullLessonsRef.current && fullLessonsRef.current.length > 0)
+                ? fullLessonsRef.current
+                : ((await storage.getItem<Lesson[]>('dl_lessons')) || []);
+              const incoming = Array.isArray(data) ? (data as Lesson[]) : [];
+              const merged = mergeLessonListsMonotonically(
+                existingFull,
+                incoming,
+                getPrunedLessonIds(),
+                'cloud_sync'
+              );
+              const seen = new Set<string>();
+              const dedupedById: Lesson[] = [];
+              for (let i = merged.length - 1; i >= 0; i--) {
+                const item = merged[i];
+                if (item && item.id && !seen.has(item.id)) {
+                  seen.add(item.id);
+                  dedupedById.unshift(item);
+                }
+              }
+              const { deduplicated: deduped } = deduplicateLessonList(dedupedById, students);
+              fullLessonsRef.current = deduped;
+              await storage.setItem('dl_lessons', deduped);
+              setLessons(filterActiveLessons(deduped));
+              resolve();
+            });
+            lessonSyncQueue = nextOp.catch((err) => {
+              console.error('Cloud lessons merge error:', err);
+              resolve();
+            });
           });
-          fullLessonsRef.current = deduped;
-          await storage.setItem('dl_lessons', deduped);
-          setLessons(filterActiveLessons(deduped));
           break;
         }
         case 'payments': {

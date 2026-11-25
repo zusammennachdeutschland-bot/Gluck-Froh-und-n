@@ -1,4 +1,4 @@
-import { LernstudioSet } from '../../types/lernstudio';
+import type { LernstudioSet } from '../../types/lernstudio.js';
 
 export const BATCH_08_SETS: LernstudioSet[] = [
   // 211. Everyday Actions & Movements (روضة / جريد 1)

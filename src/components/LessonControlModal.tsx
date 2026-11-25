@@ -916,20 +916,19 @@ export const LessonControlModal: React.FC = () => {
       savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
-    saveLessonReport(selectedLesson.id, reportData, cycleTotalSessions, currentSessionNumber);
+    saveLessonReport(selectedLesson.id, reportData, cycleTotalSessions, currentSessionNumber, selectedLesson);
     updateLesson(selectedLesson.id, { 
       status: 'completed',
       sessionNumber: currentSessionNumber,
       totalSessionsInPackage: cycleTotalSessions,
       paymentStatus: reportData.paymentStatus,
       amountPaid: reportData.amountPaid,
-      ...(reportData.studentPayments ? { studentPayments: reportData.studentPayments as any } : {}),
       recordingLink: lessonRecordingLink.trim() || undefined,
       recordingLink2: lessonRecordingLink2.trim() || undefined,
       zoomMeetingLink: lessonZoomMeetingLink.trim() || undefined,
       grainMeta: lessonGrainMeta,
       report: reportData
-    });
+    }, selectedLesson);
 
     if (shouldShowPaymentCollection) {
       const targetAcc = selectedReceivingAccountId || financeAccounts.find(a => !a.deleted)?.id || 'acc_main_cash';

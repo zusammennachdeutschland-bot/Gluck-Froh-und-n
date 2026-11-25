@@ -6,7 +6,9 @@ import {
   DEFAULT_ZOOM_TIMEZONE,
   computeNextSessionStartWallTime,
   deriveDeterministicGoogleEventId,
-  reconcileGroupWeeklySessions
+  isApprovedSyncedZoomSession,
+  reconcileGroupWeeklySessions,
+  reconcileOfflineGroupsWeeklySessions
 } from '../services/zoomSessionStandardizer';
 import {
   __resetCalendarOAuthStateForTesting,
@@ -21,6 +23,7 @@ import {
   getGoogleCalendarConnectionState,
   getInMemoryGoogleCalendarToken,
   handleCalendarOAuthDeepLinkCallback,
+  matchGoogleCalendarEventsToZoomCleanup,
   processPendingWebCalendarRedirectResult,
   requestGoogleCalendarAccessToken,
   syncSessionsToGoogleCalendar,
@@ -28,7 +31,7 @@ import {
   verifyOrSilentlyReauthorizeGoogleCalendar
 } from '../services/calendarSyncService';
 import { __setNativeAuthTestAdapter } from '../shared/googleCredentialAuthPlugin';
-import { setManualZoomLinkForSession } from '../services/zoomService';
+import { buildZoomMigrationPreview, setManualZoomLinkForSession } from '../services/zoomService';
 
 
 const VALID_GOOGLE_EVENT_ID_RE = /^[a-v0-9]{5,1024}$/;
@@ -1219,9 +1222,145 @@ async function runCalendarOAuthFlowTests() {
   }
 }
 
+async function runOfflineCalendarSyncTests() {
+  console.log('\n=== Starting Offline / In-Person Google Calendar Sync Tests ===');
+
+  const offlineGroup: Group = {
+    id: 'grp_offline_cal_1',
+    name: 'Nasr City Offline Group',
+    grade: 'Prim 4' as any,
+    type: 'offline',
+    monthlyPackagePrice: 1200,
+    sessionCount: 4,
+    scheduleDays: ['Tuesday', 'Thursday'],
+    scheduleTime: '16:30',
+    lessonDurationMinutes: 60,
+    address: '15 Abbas El Akkad St, Nasr City',
+    color: '#6366f1',
+    status: 'active',
+    updatedAt: Date.now()
+  };
+
+  // 1. Reconcile offline group slots with includeOffline: true
+  const recOffline = reconcileOfflineGroupsWeeklySessions({
+    groups: [offlineGroup],
+    existingSessions: [],
+    timezone: DEFAULT_ZOOM_TIMEZONE
+  });
+  assert.equal(recOffline.offlineActiveSessions.length, 2, 'Should create 2 weekly slots for offline group');
+  for (const s of recOffline.offlineActiveSessions) {
+    assert.equal(s.sessionMode, 'offline');
+    assert.equal(s.locationAddress, '15 Abbas El Akkad St, Nasr City');
+    assert.equal(s.meetingSource, 'manual');
+    assert.equal(s.syncState, 'manual_only');
+    assert.equal(s.zoomJoinUrl, undefined);
+    assert.equal(isApprovedSyncedZoomSession(s), false, 'Offline sessions must never be treated as approved Zoom links');
+  }
+
+  // 2. Zoom migration preview must ignore offline groups completely
+  const zoomPreview = buildZoomMigrationPreview({
+    groups: [offlineGroup],
+    existingSessions: recOffline.sessions,
+    targetTimezone: DEFAULT_ZOOM_TIMEZONE
+  });
+  assert.equal(zoomPreview.items.length, 0, 'Offline groups must never enter Zoom migration preview');
+
+  // 3. Google Calendar preview tags offline items with sessionMode & locationAddress
+  const calPreview = buildGoogleCalendarSyncPreview(recOffline.offlineActiveSessions);
+  assert.equal(calPreview.createCount, 2);
+  assert.equal(calPreview.items[0].sessionMode, 'offline');
+  assert.equal(calPreview.items[0].locationAddress, '15 Abbas El Akkad St, Nasr City');
+
+  // 4. Syncing offline session to Google Calendar writes address to location, in-person description, and gluckSessionMode=offline
+  const capturedBodies: any[] = [];
+  __setCalendarFetchForTesting(async (input, init) => {
+    const url = String(input);
+    const method = String(init?.method || 'GET').toUpperCase();
+    if (method === 'GET') {
+      return new Response(JSON.stringify({ items: [] }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (method === 'POST' && url.includes('/events')) {
+      const body = JSON.parse(String(init?.body || '{}'));
+      capturedBodies.push(body);
+      return new Response(
+        JSON.stringify({
+          id: body.id || 'offlineevt12345',
+          iCalUID: `${body.id || 'offlineevt12345'}@google.com`
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    return new Response(JSON.stringify({}), { status: 200 });
+  });
+
+  try {
+    const syncRes = await syncSessionsToGoogleCalendar({
+      allSessions: recOffline.sessions,
+      accessToken: 'test_offline_cal_token'
+    });
+    assert.equal(syncRes.success, true);
+    assert.equal(syncRes.createdCount, 2);
+    assert.equal(capturedBodies.length, 2);
+    assert.equal(capturedBodies[0].location, '15 Abbas El Akkad St, Nasr City');
+    assert.ok(String(capturedBodies[0].description).includes('In-Person'));
+    assert.equal(String(capturedBodies[0].description).includes('Zoom Link'), false);
+    assert.equal(capturedBodies[0].extendedProperties?.private?.gluckSessionMode, 'offline');
+    assert.equal(capturedBodies[0].extendedProperties?.private?.zoomMeetingId, undefined);
+
+    // 5. Updating the offline group's address flags its synced Calendar session as needs_update
+    const updatedAddressGroup: Group = {
+      ...offlineGroup,
+      address: '99 Makram Ebeid St, Nasr City'
+    };
+    const recAfterAddressEdit = reconcileGroupWeeklySessions({
+      group: updatedAddressGroup,
+      existingSessions: syncRes.sessions,
+      timezone: DEFAULT_ZOOM_TIMEZONE,
+      includeOffline: true
+    });
+    const updatedOffline = recAfterAddressEdit.sessions.filter((s) => !s.deleted && s.groupId === offlineGroup.id);
+    assert.equal(updatedOffline.length, 2);
+    assert.equal(updatedOffline[0].locationAddress, '99 Makram Ebeid St, Nasr City');
+    assert.equal(updatedOffline[0].calendarSyncStatus, 'needs_update');
+
+    // 6. ICS export uses location address and omits Zoom link noise
+    const ics = generateSessionsIcsContent(updatedOffline);
+    assert.ok(ics.includes('LOCATION:99 Makram Ebeid St\\, Nasr City'));
+    assert.equal(ics.includes('Zoom Link:'), false);
+
+    // 7. Zoom Cleanup & Rebuild must NEVER mark offline Google Calendar events for deletion
+    const cleanupMatch = matchGoogleCalendarEventsToZoomCleanup({
+      calendarEvents: [
+        {
+          id: syncRes.sessions[0].googleCalendarEventId || 'offlineevt12345',
+          summary: syncRes.sessions[0].standardizedTitle,
+          status: 'confirmed',
+          privateExtendedProperties: {
+            gluckSessionId: syncRes.sessions[0].id,
+            gluckSessionMode: 'offline'
+          },
+          conferenceJoinUrls: [],
+          extractedZoomMeetingIds: [],
+          extractedZoomJoinUrls: []
+        }
+      ],
+      targetZoomMeetingIds: new Set(['12345678901']),
+      targetZoomJoinUrls: new Set(['https://zoom.us/j/12345678901']),
+      sessions: syncRes.sessions
+    });
+    assert.equal(cleanupMatch.matchedToDelete.length, 0, 'Offline Calendar events must NEVER be deleted by Zoom cleanup');
+    assert.equal(cleanupMatch.untouchedEventsCount, 1);
+  } finally {
+    __setCalendarFetchForTesting(null);
+  }
+
+  console.log('✅ All Offline / In-Person Google Calendar Sync Tests Passed!');
+}
+
 async function runAll() {
   await runCalendarAuditTests();
   await runCalendarOAuthFlowTests();
+  await runOfflineCalendarSyncTests();
 }
 
 runAll().catch((err) => {

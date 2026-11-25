@@ -49,7 +49,12 @@ import {
   publishCustomLernstudioSetOnce,
   isBuiltinCurriculumSetId
 } from '../homeworkStorageSync';
-import { auth, signInTeacherWithGoogle } from '../firebaseCloudSync';
+import {
+  auth,
+  fetchHomeworkApi,
+  getHomeworkAuthToken,
+  signInTeacherWithGoogle
+} from '../firebaseCloudSync';
 import {
   ALL_VERBS,
   BUILTIN_VERB_GROUPS,
@@ -123,17 +128,13 @@ interface Props {
 }
 
 async function persistHomeworkAssignmentToServer(assignment: HomeworkAssignment): Promise<any> {
-  const idToken = await auth?.currentUser?.getIdToken().catch(() => null);
-  if (!idToken) {
-    throw new Error('يجب تسجيل الدخول بحساب المدرس لحفظ الواجب ومشاركة رابطه.');
-  }
-
+  const idToken = await getHomeworkAuthToken();
   const apiUrl = resolveHomeworkApiUrl('/api/teacher/assignments');
   const isCrossOrigin =
     /^https?:\/\//i.test(apiUrl) &&
     (typeof window === 'undefined' || !apiUrl.startsWith(window.location?.origin || '___'));
 
-  const response = await fetch(apiUrl, {
+  const response = await fetchHomeworkApi('/api/teacher/assignments', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -271,6 +272,13 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [createdShareLink, setCreatedShareLink] = useState<string | null>(null);
   const [createdCloudSynced, setCreatedCloudSynced] = useState<boolean>(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // Reuse the same id/shortId/shareToken after an ambiguous timeout so retries are idempotent.
+  const pendingHomeworkIdentityRef = useRef<{
+    id: string;
+    shortId: string;
+    shareToken: string;
+    key: string;
+  } | null>(null);
 
   // Results & Monitoring Tab State
   const [assignmentsList, setAssignmentsList] = useState<any[]>([]);
@@ -903,7 +911,46 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         finalVerbs.length,
         finalGrammarCount
       );
-      const generatedId = createHomeworkAssignmentId();
+      const retryKey = JSON.stringify({
+        contentSource,
+        setId: currentSet?.id || '',
+        title: title.trim(),
+        audienceMode,
+        groupId: isGroupMode ? selectedGroupId : '',
+        itemIds: finalItems.map((item) => item.id),
+        verbIds: finalVerbs.map((v) => v.id),
+        grammarIds: finalGrammarExercises.map((ex) => ex.id),
+        questionTypes: activeQuestionTypesForSource,
+        questionCounts: sanitizedCounts,
+        maxAttempts,
+        flowMode,
+        blooketMode,
+        hideTeacherBranding,
+        deadline: hasDeadline && deadlineDate ? new Date(deadlineDate).toISOString() : '',
+        ownerUid: resolvedOwnerUid || '',
+        groupName: isGroupMode && targetGroup ? targetGroup.name : '',
+        assignedStudents: isGroupMode
+          ? activeSelectedGroupStudents
+              .map((student) => ({
+                id: student.id,
+                name: student.name,
+                code: (student as any).code || '',
+                groupId: selectedGroupId
+              }))
+              .sort((a, b) => a.id.localeCompare(b.id))
+          : []
+      });
+      const pendingIdentity =
+        pendingHomeworkIdentityRef.current?.key === retryKey
+          ? pendingHomeworkIdentityRef.current
+          : {
+              id: createHomeworkAssignmentId(),
+              shortId: createHomeworkShortId(7),
+              shareToken: createHomeworkShareToken(),
+              key: retryKey
+            };
+      pendingHomeworkIdentityRef.current = pendingIdentity;
+      const generatedId = pendingIdentity.id;
 
       const assignedStudentsList = isGroupMode
         ? activeSelectedGroupStudents.map((s) => ({
@@ -948,8 +995,8 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
       const payload: HomeworkAssignment = {
         id: generatedId,
-        shortId: createHomeworkShortId(7),
-        shareToken: createHomeworkShareToken(),
+        shortId: pendingIdentity.shortId,
+        shareToken: pendingIdentity.shareToken,
         ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
         ...(resolvedOwnerEmail ? { ownerEmail: resolvedOwnerEmail } : {}),
         title: title.trim() || defaultTitle,
@@ -1050,6 +1097,9 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         },
         ...prev.filter((a) => a.id !== finalAssignment.id)
       ]);
+      if (isCloudSynced) {
+        pendingHomeworkIdentityRef.current = null;
+      }
       setCreatedCloudSynced(isCloudSynced);
       setCreatedAssignment(finalAssignment);
       setCreatedShareLink(buildHomeworkShareUrl(finalAssignment, vercelDomain));
@@ -1073,10 +1123,15 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       await loadAllAssignments(false).catch(() => {});
       const refreshedLocal = getLocalAssignments().find((a) => a.id === finalAssignment.id);
       if (refreshedLocal?.cloudSynced) {
+        pendingHomeworkIdentityRef.current = null;
         setCreatedCloudSynced(true);
       }
     } catch (err: any) {
-      setCreateError(err?.message || 'حدث خطأ غير متوقع أثناء إنشاء الواجب.');
+      const rawMessage = String(err?.message || '').trim();
+      const friendlyMessage = /failed to fetch|networkerror|load failed/i.test(rawMessage)
+        ? 'تعذر الاتصال بخادم الواجبات. تأكد من اتصال الإنترنت ثم حاول مرة أخرى.'
+        : rawMessage;
+      setCreateError(friendlyMessage || 'حدث خطأ غير متوقع أثناء إنشاء الواجب.');
     } finally {
       setIsCreating(false);
     }

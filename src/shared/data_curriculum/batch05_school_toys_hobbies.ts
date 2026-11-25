@@ -1,4 +1,4 @@
-import { LernstudioSet } from '../../types/lernstudio';
+import type { LernstudioSet } from '../../types/lernstudio.js';
 
 export const BATCH_05_SETS: LernstudioSet[] = [
   // 121. School Bag & Basic Supplies (روضة / جريد 1)

@@ -1,1 +1,1 @@
-export * from './data_curriculum';
+export * from './data_curriculum/index.js';

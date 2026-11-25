@@ -7,7 +7,7 @@ import {
   normalizeLernstudioSet,
   scrambleOrderingTokensDeterministic,
   stripHeavyGrammarMediaForSync
-} from '../shared/grammarEngine';
+} from '../shared/grammarEngine.js';
 import {
   getAuthoritativeAssignment,
   getAuthoritativeShortLink,
@@ -28,9 +28,9 @@ import {
   isBuiltinCurriculumSetId,
   invalidateServerAssignmentCache,
   resetAdminFirestoreForTesting
-} from '../server/firebaseAdmin';
-import { registerGrainServerRoutes } from '../server/grainServerProxy';
-import { registerZoomServerRoutes } from '../server/zoomServerProxy';
+} from '../server/firebaseAdmin.js';
+import { registerGrainServerRoutes } from '../server/grainServerProxy.js';
+import { registerZoomServerRoutes } from '../server/zoomServerProxy.js';
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
@@ -65,6 +65,7 @@ app.use((req, res, next) => {
   }
   if (origin) {
     res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
@@ -1075,7 +1076,7 @@ app.all('/api/teacher/assignments', async (req, res) => {
     }
     return res.json({ success: true, assignment: normalized });
   }
-  return res.json({ success: true });
+  return res.status(405).json({ success: false, error: 'Method not allowed' });
 });
 
 app.all('/api/homework/submissions', async (req, res) => {
@@ -1248,7 +1249,7 @@ app.all('/api/homework/submissions', async (req, res) => {
     }
     return res.json({ success: true, submission: cleanSub });
   }
-  return res.json({ success: true });
+  return res.status(405).json({ success: false, error: 'Method not allowed' });
 });
 
 app.get('/api/homework/short/:shortId', async (req, res) => {
@@ -1300,6 +1301,10 @@ app.get('/api/homework/short/:shortId', async (req, res) => {
 });
 
 app.get('/api/homework/info', async (req, res) => {
+  // Never let a browser/CDN reuse an old public assignment response after teacher deletion.
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   const shortIdParam = req.query.shortId ? String(req.query.shortId).trim() : '';
   if (shortIdParam) {
     try {

@@ -11,6 +11,7 @@ import {
   History,
   Link2,
   PlusCircle,
+  MapPin,
   X
 } from 'lucide-react';
 import { Group, GroupWeeklySession, ZoomMeetingRecord, ZoomMeetingHistory } from '../types';
@@ -108,17 +109,22 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
     [zoomMeetingHistory, group.id]
   );
 
+  const isOfflineGroup = group.type !== 'online';
+
   useEffect(() => {
     setZoomMeta(loadZoomUiMeta());
-    if (group.type === 'online' && groupSessions.length === 0 && autoInitGroupIdRef.current !== group.id) {
+    if (groupSessions.length === 0 && autoInitGroupIdRef.current !== group.id) {
       autoInitGroupIdRef.current = group.id;
-      reconcileGroupSessionsState(group);
+      reconcileGroupSessionsState(group, { includeOffline: isOfflineGroup });
     }
-  }, [group, groupSessions.length, reconcileGroupSessionsState]);
+  }, [group, groupSessions.length, isOfflineGroup, reconcileGroupSessionsState]);
 
   const needsZoomResyncSessions = useMemo(
-    () => groupSessions.filter((s) => s.syncState === 'needs_update' && s.meetingSource === 'zoom_api'),
-    [groupSessions]
+    () =>
+      isOfflineGroup
+        ? []
+        : groupSessions.filter((s) => s.syncState === 'needs_update' && s.meetingSource === 'zoom_api'),
+    [groupSessions, isOfflineGroup]
   );
 
   const needsCalendarResyncCount = useMemo(
@@ -140,7 +146,7 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
     [groupSessions, groupSessionsWithDeletedOrphans, calendarTargetSession, forceResyncAllCalendar]
   );
 
-  if (group.type !== 'online') {
+  if (group.deleted || group.status === 'archived') {
     return null;
   }
 
@@ -553,21 +559,34 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
-            <Video className="w-4 h-4" />
+            {isOfflineGroup ? <Calendar className="w-4 h-4" /> : <Video className="w-4 h-4" />}
           </div>
           <div className="min-w-0">
             <h4 className="text-xs sm:text-sm font-bold text-text-main truncate">
-              {_t(
-                `حصص Zoom والتقويم (${groupSessions.length})`,
-                `Zoom & Calendar Sessions (${groupSessions.length})`,
-                `Zoom & Kalender-Sitzungen (${groupSessions.length})`
-              )}
+              {isOfflineGroup
+                ? _t(
+                    `مزامنة تقويم Google (${groupSessions.length})`,
+                    `Google Calendar Sessions (${groupSessions.length})`,
+                    `Google-Kalender-Sitzungen (${groupSessions.length})`
+                  )
+                : _t(
+                    `حصص Zoom والتقويم (${groupSessions.length})`,
+                    `Zoom & Calendar Sessions (${groupSessions.length})`,
+                    `Zoom & Kalender-Sitzungen (${groupSessions.length})`
+                  )}
             </h4>
             <p className="text-[11px] text-text-muted truncate">
-              {_t(
-                'اجتماع أسبوعي موحد لكل موعد بدون أسماء طلاب في العنوان',
-                'Standardized recurring meeting per slot, no student names exposed'
-              )}
+              {isOfflineGroup
+                ? group.address
+                  ? `${_t('حضوري', 'In-Person')} · ${group.address}`
+                  : _t(
+                      'أضف مواعيد الحصص الأوفلاين (الحضورية) تلقائياً إلى تقويم Google بدون تكرار',
+                      'Sync recurring in-person sessions directly to Google Calendar without duplicates'
+                    )
+                : _t(
+                    'اجتماع أسبوعي موحد لكل موعد بدون أسماء طلاب في العنوان',
+                    'Standardized recurring meeting per slot, no student names exposed'
+                  )}
             </p>
           </div>
         </div>
@@ -585,7 +604,12 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
               </button>
               <button
                 type="button"
-                onClick={() => downloadSessionsIcsFile(groupSessions, `${group.name.replace(/\s+/g, '_')}_zoom.ics`)}
+                onClick={() =>
+                  downloadSessionsIcsFile(
+                    groupSessions,
+                    `${group.name.replace(/\s+/g, '_')}_${isOfflineGroup ? 'inperson' : 'zoom'}.ics`
+                  )
+                }
                 className="min-h-[36px] px-2.5 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-text-main text-xs font-semibold flex items-center gap-1 cursor-pointer"
                 title={_t('تصدير .ics', 'Export .ics')}
               >
@@ -594,14 +618,16 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
               </button>
             </>
           )}
-          <button
-            type="button"
-            onClick={() => setShowHistory((v) => !v)}
-            className="min-h-[36px] px-2.5 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-text-muted hover:text-text-main text-xs font-semibold flex items-center gap-1 cursor-pointer"
-          >
-            <History className="w-3.5 h-3.5" />
-            <span className="tabular-nums">{groupHistory.length}</span>
-          </button>
+          {!isOfflineGroup && (
+            <button
+              type="button"
+              onClick={() => setShowHistory((v) => !v)}
+              className="min-h-[36px] px-2.5 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-text-muted hover:text-text-main text-xs font-semibold flex items-center gap-1 cursor-pointer"
+            >
+              <History className="w-3.5 h-3.5" />
+              <span className="tabular-nums">{groupHistory.length}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -704,14 +730,19 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
       {groupSessions.length === 0 ? (
         <div className="p-4 rounded-xl bg-surface-hover/50 border border-dashed border-surface-border text-xs text-text-muted flex flex-wrap items-center justify-between gap-2">
           <span>
-            {_t(
-              'لا توجد مواعيد أسبوعية محددة بعد. أضف الأيام والأوقات أعلاه لتوليد الجلسات الموحدة تلقائياً.',
-              'No weekly slots configured yet. Set group days and times above to generate sessions.'
-            )}
+            {isOfflineGroup
+              ? _t(
+                  'لا توجد مواعيد أسبوعية محددة بعد. أضف الأيام والأوقات أعلاه ثم اضغط فحص المواعيد لإضافتها لتقويم Google.',
+                  'No weekly slots configured yet. Set group days and times above to prepare Google Calendar events.'
+                )
+              : _t(
+                  'لا توجد مواعيد أسبوعية محددة بعد. أضف الأيام والأوقات أعلاه لتوليد الجلسات الموحدة تلقائياً.',
+                  'No weekly slots configured yet. Set group days and times above to generate sessions.'
+                )}
           </span>
           <button
             type="button"
-            onClick={() => reconcileGroupSessionsState(group)}
+            onClick={() => reconcileGroupSessionsState(group, { includeOffline: isOfflineGroup })}
             className="min-h-[36px] px-3 rounded-xl bg-primary/10 text-primary text-xs font-bold shrink-0 cursor-pointer"
           >
             {_t('فحص المواعيد', 'Scan Slots')}
@@ -728,6 +759,9 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
             const calSynced = Boolean(session.googleCalendarEventId && session.calendarSyncStatus === 'synced');
             const calNeedsUpdate = Boolean(session.googleCalendarEventId && session.calendarSyncStatus === 'needs_update');
 
+            const isOfflineSlot = isOfflineGroup || session.sessionMode === 'offline';
+            const slotAddress = (session.locationAddress || group.address || '').trim();
+
             return (
               <div key={session.id} className="p-3.5 space-y-2.5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -736,7 +770,14 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
                       {session.standardizedTitle}
                     </div>
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-text-muted tabular-nums">
-                      <span className={`font-semibold ${zStatus.cls}`}>Zoom: {zStatus.text}</span>
+                      {isOfflineSlot ? (
+                        <span className="font-semibold text-primary inline-flex items-center gap-1">
+                          <MapPin className="w-3 h-3" />
+                          <span>{_t('حضوري (أوفلاين)', 'In-Person')}</span>
+                        </span>
+                      ) : (
+                        <span className={`font-semibold ${zStatus.cls}`}>Zoom: {zStatus.text}</span>
+                      )}
                       <span>·</span>
                       <span
                         className={`font-semibold ${
@@ -762,7 +803,7 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
                       <span>
                         {session.durationMinutes} {_t('د', 'm')}
                       </span>
-                      {session.zoomMeetingId && (
+                      {!isOfflineSlot && session.zoomMeetingId && (
                         <>
                           <span>·</span>
                           <span className="font-mono" dir="ltr">
@@ -770,7 +811,7 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
                           </span>
                         </>
                       )}
-                      {showBasicWarning && (
+                      {!isOfflineSlot && showBasicWarning && (
                         <>
                           <span>·</span>
                           <span className="text-amber-600 dark:text-amber-400 font-semibold">
@@ -783,7 +824,7 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
 
                   {/* Clean Action Controls */}
                   <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                    {session.meetingSource === 'zoom_api' && session.zoomMeetingId && zoomMeta.connected && (
+                    {!isOfflineSlot && session.meetingSource === 'zoom_api' && session.zoomMeetingId && zoomMeta.connected && (
                       <button
                         type="button"
                         onClick={() => handleHostStart(session)}
@@ -795,7 +836,7 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
                       </button>
                     )}
 
-                    {hostStartUrl && (
+                    {!isOfflineSlot && hostStartUrl && (
                       <a
                         href={hostStartUrl}
                         target="_blank"
@@ -807,7 +848,7 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
                       </a>
                     )}
 
-                    {zoomMeta.connected && (
+                    {!isOfflineSlot && zoomMeta.connected && (
                       <button
                         type="button"
                         onClick={() => handleCreateOrSyncZoom(session)}
@@ -838,22 +879,31 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
                       <span>{_t('التقويم', 'Cal')}</span>
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setManualModalSession(session);
-                        setManualUrlInput(joinUrl || '');
-                        setManualError(null);
-                      }}
-                      className="min-h-[36px] px-2.5 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-text-muted hover:text-text-main text-xs font-semibold flex items-center gap-1 cursor-pointer"
-                      title={_t('رابط يدوي', 'Manual URL')}
-                    >
-                      <Link2 className="w-3.5 h-3.5" />
-                    </button>
+                    {!isOfflineSlot && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManualModalSession(session);
+                          setManualUrlInput(joinUrl || '');
+                          setManualError(null);
+                        }}
+                        className="min-h-[36px] px-2.5 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-text-muted hover:text-text-main text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                        title={_t('رابط يدوي', 'Manual URL')}
+                      >
+                        <Link2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                {isApprovedSyncedZoomSession(session) && joinUrl ? (
+                {isOfflineSlot ? (
+                  slotAddress ? (
+                    <div className="flex items-center gap-1.5 bg-surface-hover/60 px-3 py-1.5 rounded-xl text-[11px] text-text-muted">
+                      <MapPin className="w-3.5 h-3.5 shrink-0 text-primary" />
+                      <span className="truncate">{slotAddress}</span>
+                    </div>
+                  ) : null
+                ) : isApprovedSyncedZoomSession(session) && joinUrl ? (
                   <div className="flex items-center justify-between gap-2 bg-surface-hover/60 px-3 py-1.5 rounded-xl text-[11px]">
                     <span className="font-mono text-primary truncate select-all" dir="ltr">
                       {joinUrl}
@@ -886,7 +936,7 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
                   </div>
                 )}
 
-                {(session.lastError || session.calendarSyncError) && (
+                {(session.calendarSyncError || (!isOfflineSlot && session.lastError)) && (
                   <div className="text-xs text-rose-600 dark:text-rose-400 bg-rose-500/10 px-3 py-1.5 rounded-lg">
                     {session.calendarSyncError || session.lastError}
                   </div>

@@ -73,6 +73,7 @@ export interface GoogleCredentialAuthPlugin {
   signOut(): Promise<GoogleCredentialSignOutResult>;
   getSigningInfo?(): Promise<AndroidApkSigningInfo>;
   authorizeCalendar?(options?: GoogleCalendarAuthorizeOptions): Promise<GoogleCalendarAuthorizeResult>;
+  cancelCalendarAuthorization?(): Promise<{ cancelled: boolean; wasInProgress?: boolean }>;
   clearCalendarToken?(options: { accessToken: string }): Promise<{ cleared: boolean }>;
   revokeCalendarAccess?(options: { accountEmail: string; scope?: string }): Promise<{ revoked: boolean }>;
   addListener?(
@@ -89,6 +90,7 @@ export interface NativeAuthTestAdapter {
   signOut?: () => Promise<GoogleCredentialSignOutResult>;
   getSigningInfo?: () => Promise<AndroidApkSigningInfo>;
   authorizeCalendar?: (options?: GoogleCalendarAuthorizeOptions) => Promise<GoogleCalendarAuthorizeResult>;
+  cancelCalendarAuthorization?: () => Promise<{ cancelled: boolean; wasInProgress?: boolean }>;
   clearCalendarToken?: (options: { accessToken: string }) => Promise<{ cleared: boolean }>;
   revokeCalendarAccess?: (options: { accountEmail: string; scope?: string }) => Promise<{ revoked: boolean }>;
 }
@@ -227,6 +229,23 @@ export async function invokeNativeGoogleCalendarAuthorize(
     );
   }
   return NativeGoogleCredentialAuth.authorizeCalendar(options);
+}
+
+export async function invokeNativeCancelCalendarAuthorization(): Promise<{
+  cancelled: boolean;
+  wasInProgress?: boolean;
+}> {
+  try {
+    if (testAdapter?.cancelCalendarAuthorization) {
+      return await testAdapter.cancelCalendarAuthorization();
+    }
+    if (typeof NativeGoogleCredentialAuth.cancelCalendarAuthorization === 'function') {
+      return await NativeGoogleCredentialAuth.cancelCalendarAuthorization();
+    }
+  } catch {
+    // Non-fatal cancellation cleanup
+  }
+  return { cancelled: false };
 }
 
 export async function invokeNativeClearCalendarToken(accessToken: string): Promise<{ cleared: boolean }> {

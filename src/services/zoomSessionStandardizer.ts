@@ -444,19 +444,25 @@ export interface ReconcileGroupSessionsResult {
  * - Archives removed slots via `deleted: true` (never destroys ZoomMeetingHistory).
  * - Never touches historical `Lesson`s, attendance, grades, or payments.
  */
+export function isOfflineWeeklySession(session?: GroupWeeklySession | null): boolean {
+  return Boolean(session && session.sessionMode === 'offline');
+}
+
 export function reconcileGroupWeeklySessions(options: {
   group: Group;
   existingSessions: GroupWeeklySession[];
   timezone?: string;
   nowMs?: number;
   deviceId?: string;
+  includeOffline?: boolean;
 }): ReconcileGroupSessionsResult {
   const {
     group,
     existingSessions,
     timezone = DEFAULT_ZOOM_TIMEZONE,
     nowMs = Date.now(),
-    deviceId = 'local_device'
+    deviceId = 'local_device',
+    includeOffline = false
   } = options;
 
   const nowIso = new Date(nowMs).toISOString();
@@ -467,17 +473,31 @@ export function reconcileGroupWeeklySessions(options: {
       .map((s) => s.sessionCode.toUpperCase())
   );
 
-  // Offline or deleted groups archive any active weekly sessions softly without deleting history
-  if (group.deleted || group.type !== 'online') {
-    const archived = groupSessions.map((s) => ({
+  const isOfflineGroup = group.type !== 'online';
+  const isArchivedOrDeleted = Boolean(group.deleted || group.status === 'archived');
+
+  // Deleted/archived groups always soft-archive all active weekly sessions (online & offline).
+  // Non-online groups without includeOffline archive any online Zoom sessions while leaving
+  // previously synced offline Calendar sessions intact.
+  if (isArchivedOrDeleted || (isOfflineGroup && !includeOffline)) {
+    const sessionsToArchive = isArchivedOrDeleted
+      ? groupSessions
+      : groupSessions.filter((s) => s.sessionMode !== 'offline');
+    const keptOfflineSessions = isArchivedOrDeleted
+      ? []
+      : groupSessions.filter((s) => s.sessionMode === 'offline');
+    const archived = sessionsToArchive.map((s) => ({
       ...s,
       deleted: true,
       updatedAt: nowMs,
       version: (s.version || 1) + 1
     }));
+    const preservedDeletedForGroup = (existingSessions || []).filter(
+      (s) => s && s.groupId === group.id && s.deleted
+    );
     const otherSessions = (existingSessions || []).filter((s) => s && s.groupId !== group.id);
     return {
-      sessions: [...otherSessions, ...archived],
+      sessions: [...otherSessions, ...preservedDeletedForGroup, ...keptOfflineSessions, ...archived],
       addedSessions: [],
       updatedSessions: [],
       archivedSessions: archived,
@@ -529,8 +549,14 @@ export function reconcileGroupWeeklySessions(options: {
   const historyEntries: ZoomMeetingHistory[] = [];
   const nextGroupSessions: GroupWeeklySession[] = [];
 
-  // Legacy group zoom URL (if present and valid)
-  const legacyZoomParsed = normalizeCanonicalZoomJoinUrl(group.zoomLink);
+  // Legacy group zoom URL (only for online groups)
+  const legacyZoomParsed = isOfflineGroup
+    ? { valid: false as const, canonicalUrl: undefined, meetingId: undefined, passcode: undefined }
+    : normalizeCanonicalZoomJoinUrl(group.zoomLink);
+  const normalizedLocationAddress = isOfflineGroup
+    ? String(group.address || '').replace(/\s+/g, ' ').trim() || undefined
+    : undefined;
+  const targetSessionMode: 'online' | 'offline' = isOfflineGroup ? 'offline' : 'online';
 
   // Helper to claim best existing session for each normalized slot
   const pool = [...groupSessions];
@@ -563,6 +589,10 @@ export function reconcileGroupWeeklySessions(options: {
       const existingStartTime = normalize24HourTime(existing.startTime, '');
       const existingDuration = Math.max(15, Number(existing.durationMinutes || durationMinutes));
       const existingRecurrence: ScheduleRecurrence = existing.recurrence || 'weekly';
+      const existingMode: 'online' | 'offline' = existing.sessionMode === 'offline' ? 'offline' : 'online';
+      const modeChanged = existingMode !== targetSessionMode;
+      const existingAddress = String(existing.locationAddress || '').replace(/\s+/g, ' ').trim() || undefined;
+      const locationChanged = isOfflineGroup && existingAddress !== normalizedLocationAddress;
       const scheduleChanged =
         existing.weekday !== slot.weekday ||
         existingStartTime !== slot.startTime ||
@@ -571,12 +601,15 @@ export function reconcileGroupWeeklySessions(options: {
       const topicChanged = existing.standardizedTitle !== standardizedTitle;
 
       const needsZoomPatch =
+        !isOfflineGroup &&
         existing.meetingSource === 'zoom_api' &&
         Boolean(existing.zoomMeetingId) &&
         (groupRenamed || scheduleChanged || topicChanged);
       const needsCalendarPatch =
-        Boolean(existing.googleCalendarEventId) && (groupRenamed || scheduleChanged || topicChanged);
+        Boolean(existing.googleCalendarEventId) &&
+        (groupRenamed || scheduleChanged || topicChanged || locationChanged || modeChanged);
 
+      const anyChanged = groupRenamed || scheduleChanged || topicChanged || locationChanged || modeChanged;
       const updated: GroupWeeklySession = {
         ...existing,
         groupNameSnapshot: group.name,
@@ -587,38 +620,51 @@ export function reconcileGroupWeeklySessions(options: {
         timezone: existing.timezone || effectiveTz,
         recurrence,
         standardizedTitle,
+        sessionMode: targetSessionMode,
+        locationAddress: normalizedLocationAddress,
+        ...(isOfflineGroup
+          ? {
+              zoomMeetingId: undefined,
+              zoomJoinUrl: undefined,
+              zoomPasscode: undefined,
+              meetingSource: 'manual' as const,
+              syncState: 'manual_only' as const,
+              planWarning40Min: undefined
+            }
+          : {
+              syncState: needsZoomPatch ? 'needs_update' : existing.syncState,
+              planWarning40Min: durationMinutes >= 41 ? true : existing.planWarning40Min
+            }),
         calendarEventUid: existing.calendarEventUid || generateStableCalendarUid(existing.id),
-        syncState: needsZoomPatch
-          ? 'needs_update'
-          : existing.syncState,
         calendarSyncStatus: needsCalendarPatch
           ? 'needs_update'
           : existing.calendarSyncStatus || 'not_synced',
-        planWarning40Min: durationMinutes >= 41 ? true : existing.planWarning40Min,
-        updatedAt: (groupRenamed || scheduleChanged || topicChanged) ? nowMs : existing.updatedAt,
-        version: (groupRenamed || scheduleChanged || topicChanged) ? (existing.version || 1) + 1 : existing.version
+        updatedAt: anyChanged ? nowMs : existing.updatedAt,
+        version: anyChanged ? (existing.version || 1) + 1 : existing.version
       };
 
-      if (groupRenamed || scheduleChanged || topicChanged) {
+      if (anyChanged) {
         updatedSessions.push(updated);
-        historyEntries.push({
-          id: `zmhist_${existing.id}_${nowMs}_${Math.random().toString(36).slice(2, 6)}`,
-          sessionId: existing.id,
-          groupId: group.id,
-          action: groupRenamed ? 'group_renamed' : 'schedule_changed',
-          previousZoomMeetingId: existing.zoomMeetingId,
-          previousJoinUrl: existing.zoomJoinUrl,
-          previousTopic: existing.standardizedTitle,
-          newTopic: standardizedTitle,
-          reason: groupRenamed
-            ? `Group renamed from "${existing.groupNameSnapshot}" to "${group.name}"`
-            : `Schedule slot updated (${existing.weekdayName} ${existing.startTime} -> ${slot.weekdayName} ${slot.startTime})`,
-          recordedAt: nowIso,
-          updatedAt: nowMs,
-          originDeviceId: deviceId,
-          originRevision: 1,
-          deleted: false
-        });
+        if (!isOfflineGroup && (groupRenamed || scheduleChanged || topicChanged)) {
+          historyEntries.push({
+            id: `zmhist_${existing.id}_${nowMs}_${Math.random().toString(36).slice(2, 6)}`,
+            sessionId: existing.id,
+            groupId: group.id,
+            action: groupRenamed ? 'group_renamed' : 'schedule_changed',
+            previousZoomMeetingId: existing.zoomMeetingId,
+            previousJoinUrl: existing.zoomJoinUrl,
+            previousTopic: existing.standardizedTitle,
+            newTopic: standardizedTitle,
+            reason: groupRenamed
+              ? `Group renamed from "${existing.groupNameSnapshot}" to "${group.name}"`
+              : `Schedule slot updated (${existing.weekdayName} ${existing.startTime} -> ${slot.weekdayName} ${slot.startTime})`,
+            recordedAt: nowIso,
+            updatedAt: nowMs,
+            originDeviceId: deviceId,
+            originRevision: 1,
+            deleted: false
+          });
+        }
       }
 
       nextGroupSessions.push(updated);
@@ -642,7 +688,7 @@ export function reconcileGroupWeeklySessions(options: {
       );
       allActiveCodes.add(sessionCode.toUpperCase());
 
-      const hasLegacyUrl = Boolean(legacyZoomParsed.valid && legacyZoomParsed.canonicalUrl);
+      const hasLegacyUrl = !isOfflineGroup && Boolean(legacyZoomParsed.valid && legacyZoomParsed.canonicalUrl);
       const newSession: GroupWeeklySession = {
         id,
         groupId: group.id,
@@ -655,14 +701,16 @@ export function reconcileGroupWeeklySessions(options: {
         recurrence,
         sessionCode,
         standardizedTitle,
-        zoomMeetingId: legacyZoomParsed.meetingId,
+        sessionMode: targetSessionMode,
+        locationAddress: normalizedLocationAddress,
+        zoomMeetingId: isOfflineGroup ? undefined : legacyZoomParsed.meetingId,
         zoomJoinUrl: hasLegacyUrl ? legacyZoomParsed.canonicalUrl : undefined,
-        zoomPasscode: legacyZoomParsed.passcode,
-        meetingSource: hasLegacyUrl ? 'legacy_migrated' : 'zoom_api',
-        syncState: 'pending',
+        zoomPasscode: isOfflineGroup ? undefined : legacyZoomParsed.passcode,
+        meetingSource: isOfflineGroup ? 'manual' : hasLegacyUrl ? 'legacy_migrated' : 'zoom_api',
+        syncState: isOfflineGroup ? 'manual_only' : 'pending',
         calendarEventUid: generateStableCalendarUid(id),
         calendarSyncStatus: 'not_synced',
-        planWarning40Min: durationMinutes >= 41 ? true : undefined,
+        planWarning40Min: !isOfflineGroup && durationMinutes >= 41 ? true : undefined,
         updatedAt: nowMs,
         originDeviceId: deviceId,
         originRevision: 1,
@@ -687,14 +735,66 @@ export function reconcileGroupWeeklySessions(options: {
     }
   }
 
+  const preservedDeletedForGroup = (existingSessions || []).filter(
+    (s) => s && s.groupId === group.id && s.deleted
+  );
   const otherSessions = (existingSessions || []).filter((s) => s && s.groupId !== group.id);
   return {
-    sessions: [...otherSessions, ...nextGroupSessions, ...archivedSessions],
+    sessions: [...otherSessions, ...preservedDeletedForGroup, ...nextGroupSessions, ...archivedSessions],
     addedSessions,
     updatedSessions,
     archivedSessions,
     historyEntries,
     slotsMissingSchedule: false
+  };
+}
+
+/**
+ * Reconciles weekly Calendar sessions for all offline/in-person groups without touching
+ * online Zoom sessions or creating Zoom meeting records.
+ */
+export function reconcileOfflineGroupsWeeklySessions(params: {
+  groups: Group[];
+  existingSessions: GroupWeeklySession[];
+  timezone?: string;
+  nowMs?: number;
+  deviceId?: string;
+}): {
+  sessions: GroupWeeklySession[];
+  offlineActiveSessions: GroupWeeklySession[];
+  groupsMissingSchedule: Array<{ groupId: string; groupName: string }>;
+} {
+  let workingSessions = [...(params.existingSessions || [])];
+  const groupsMissingSchedule: Array<{ groupId: string; groupName: string }> = [];
+  const offlineGroups = (params.groups || []).filter((g) => g && g.type !== 'online');
+  const activeOfflineGroupIds = new Set<string>();
+
+  for (const grp of offlineGroups) {
+    if (!grp.deleted && grp.status !== 'archived') {
+      activeOfflineGroupIds.add(grp.id);
+    }
+    const rec = reconcileGroupWeeklySessions({
+      group: grp,
+      existingSessions: workingSessions,
+      timezone: params.timezone || DEFAULT_ZOOM_TIMEZONE,
+      nowMs: params.nowMs,
+      deviceId: params.deviceId,
+      includeOffline: true
+    });
+    workingSessions = rec.sessions;
+    if (!grp.deleted && grp.status !== 'archived' && rec.slotsMissingSchedule) {
+      groupsMissingSchedule.push({ groupId: grp.id, groupName: grp.name });
+    }
+  }
+
+  const offlineActiveSessions = workingSessions.filter(
+    (s) => s && !s.deleted && s.sessionMode === 'offline' && activeOfflineGroupIds.has(s.groupId)
+  );
+
+  return {
+    sessions: workingSessions,
+    offlineActiveSessions,
+    groupsMissingSchedule
   };
 }
 
@@ -753,6 +853,7 @@ export function isApprovedSyncedZoomSession(session?: GroupWeeklySession | null)
   return Boolean(
     session &&
       !session.deleted &&
+      session.sessionMode !== 'offline' &&
       session.meetingSource === 'zoom_api' &&
       session.syncState === 'synced' &&
       Boolean((session.zoomJoinUrl || '').trim())

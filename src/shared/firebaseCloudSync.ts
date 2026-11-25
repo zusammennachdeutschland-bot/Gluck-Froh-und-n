@@ -71,16 +71,8 @@ export function isBuiltinCurriculumSetId(setId: string): boolean {
   );
 }
 
-// Exact configuration from firebase-applet-config.json so both Root App and lernstudio-web (Vercel) share the same Firestore DB
-export const FIREBASE_CONFIG = {
-  projectId: 'glueck-c8621',
-  appId: '1:874458026984:web:f88ecbf0df451173854a5d',
-  apiKey: 'AIzaSyBJVhFLw3NeS1MNHJ9ZnAipuZNwRaoaZ-g',
-  authDomain: 'glueck-c8621.firebaseapp.com',
-  firestoreDatabaseId: 'ai-studio-remixgluckgerman-fc71e704-09a9-492f-82ad-623b4e7b445e',
-  storageBucket: 'glueck-c8621.firebasestorage.app',
-  messagingSenderId: '874458026984'
-};
+import { FIREBASE_CONFIG } from './firebaseConfig';
+export { FIREBASE_CONFIG };
 
 const app = getApps().length > 0 ? getApp() : initializeApp(FIREBASE_CONFIG);
 
@@ -439,7 +431,12 @@ export function setVercelPublicDomain(domainUrl: string): string {
   return clean;
 }
 
-export function resolveHomeworkApiUrl(path: string): string {
+/**
+ * Resolves homework API requests to the deployed HTTPS Vercel origin on native Android/Capacitor.
+ * Web builds remain same-origin so local development and Vercel rewrites keep working.
+ * Ignores accidental HTTP values or saved path/query fragments in local settings.
+ */
+export function getHomeworkApiUrl(path: string): string {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   if (typeof window === 'undefined') {
     return `${DEFAULT_VERCEL_DOMAIN}${cleanPath}`;
@@ -451,9 +448,110 @@ export function resolveHomeworkApiUrl(path: string): string {
     protocol === 'ionic:' ||
     protocol === 'file:'
   ) {
-    return `${getVercelPublicDomain()}${cleanPath}`;
+    try {
+      const configuredUrl = new URL(getVercelPublicDomain());
+      const safeOrigin =
+        configuredUrl.protocol === 'https:' && configuredUrl.hostname
+          ? configuredUrl.origin
+          : DEFAULT_VERCEL_DOMAIN;
+      return `${safeOrigin}${cleanPath}`;
+    } catch {
+      return `${DEFAULT_VERCEL_DOMAIN}${cleanPath}`;
+    }
   }
   return cleanPath;
+}
+
+export function resolveHomeworkApiUrl(path: string): string {
+  return getHomeworkApiUrl(path);
+}
+
+/**
+ * Retrieves the teacher's Firebase ID token with a strict timeout so a stalled
+ * Android WebView token request never leaves the homework UI stuck indefinitely.
+ */
+export async function getHomeworkAuthToken(timeoutMs = 15000): Promise<string> {
+  const currentUser = (testHomeworkAuthUser !== undefined ? testHomeworkAuthUser : auth.currentUser) as any;
+  if (!currentUser || typeof currentUser.getIdToken !== 'function') {
+    throw new Error('يجب تسجيل الدخول بحساب المدرس أولاً.');
+  }
+
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const token = await Promise.race([
+      currentUser.getIdToken(),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error('انتهت مهلة التحقق من جلسة المدرس. سجّل الدخول مرة أخرى ثم حاول.')),
+          timeoutMs
+        );
+      })
+    ]);
+    if (!token) throw new Error('تعذر التحقق من جلسة المدرس. سجّل الدخول مرة أخرى.');
+    return token;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * Bounded homework API fetch helper for both Android WebView and Web.
+ * Keeps the timeout active across BOTH response headers AND response body consumption.
+ */
+export async function fetchHomeworkApi(
+  path: string,
+  init: RequestInit = {},
+  timeoutMs = 20000
+): Promise<Response> {
+  const controller = new AbortController();
+  let timedOut = false;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutMessage = 'انتهت مهلة الاتصال بخادم الواجبات. تحقق من الإنترنت ثم حاول مرة أخرى.';
+  const clearRequestTimeout = () => {
+    if (timeoutId) clearTimeout(timeoutId);
+    timeoutId = undefined;
+  };
+
+  timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    const response = await fetch(getHomeworkApiUrl(path), {
+      ...init,
+      signal: controller.signal
+    });
+
+    const wrapBodyReader = <T extends 'text' | 'json' | 'arrayBuffer' | 'blob' | 'formData'>(method: T) => {
+      const original = response[method].bind(response) as (...args: any[]) => Promise<any>;
+      return async (...args: any[]) => {
+        try {
+          return await original(...args);
+        } catch (error) {
+          if (timedOut) throw new Error(timeoutMessage);
+          throw error;
+        } finally {
+          clearRequestTimeout();
+        }
+      };
+    };
+
+    response.text = wrapBodyReader('text') as typeof response.text;
+    response.json = wrapBodyReader('json') as typeof response.json;
+    response.arrayBuffer = wrapBodyReader('arrayBuffer') as typeof response.arrayBuffer;
+    response.blob = wrapBodyReader('blob') as typeof response.blob;
+    response.formData = wrapBodyReader('formData') as typeof response.formData;
+
+    if (!response.body) clearRequestTimeout();
+    return response;
+  } catch (error: any) {
+    clearRequestTimeout();
+    if (timedOut || controller.signal.aborted) {
+      throw new Error(timeoutMessage);
+    }
+    throw error;
+  }
 }
 
 function isCrossOriginApiUrl(url: string): boolean {
@@ -1888,9 +1986,9 @@ export async function saveAssignmentToFirestore(
   const currentUser = (testHomeworkAuthUser !== undefined ? testHomeworkAuthUser : auth.currentUser) as any;
   if (!(firestoreSaved && shortLinkSaved) && currentUser && currentUser.uid === ownerUid && typeof currentUser.getIdToken === 'function') {
     try {
-      const idToken = await currentUser.getIdToken();
+      const idToken = await getHomeworkAuthToken();
       const apiUrl = resolveHomeworkApiUrl('/api/teacher/assignments');
-      const response = await fetch(apiUrl, {
+      const response = await fetchHomeworkApi('/api/teacher/assignments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
         ...(isCrossOriginApiUrl(apiUrl) ? {} : { credentials: 'include' as RequestCredentials }),
@@ -2615,10 +2713,9 @@ export async function deleteAssignmentFromFirestore(
   let apiDeleted = false;
   if (!(firestoreDeleted && shortLinksAllRevoked) && typeof fetch === 'function' && idToken) {
     try {
-      const deleteUrl = resolveHomeworkApiUrl(
-        `/api/teacher/assignments?id=${encodeURIComponent(assignmentId)}`
-      );
-      const response = await fetch(deleteUrl, {
+      const deletePath = `/api/teacher/assignments?id=${encodeURIComponent(assignmentId)}`;
+      const deleteUrl = resolveHomeworkApiUrl(deletePath);
+      const response = await fetchHomeworkApi(deletePath, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${idToken}` },
         ...(isCrossOriginApiUrl(deleteUrl) ? {} : { credentials: 'include' as RequestCredentials })

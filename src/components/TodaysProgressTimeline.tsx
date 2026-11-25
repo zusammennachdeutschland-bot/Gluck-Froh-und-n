@@ -237,7 +237,7 @@ export const TodaysProgressTimeline: React.FC = () => {
       savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
-    saveLessonReport(targetLesson.id, reportData, cycleTotalSessions, finalSessionNumber);
+    saveLessonReport(targetLesson.id, reportData, cycleTotalSessions, finalSessionNumber, targetLesson);
     storage.removeItem(`dl_draft_report_${targetLesson.id}`);
   };
 

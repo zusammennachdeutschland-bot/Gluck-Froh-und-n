@@ -1,4 +1,4 @@
-import { LernstudioSet } from '../../types/lernstudio';
+import type { LernstudioSet } from '../../types/lernstudio.js';
 
 export const BATCH_07_SETS: LernstudioSet[] = [
   // 181. Helping & Service Professions (روضة / جريد 1)

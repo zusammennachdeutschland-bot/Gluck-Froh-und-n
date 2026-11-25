@@ -22,7 +22,8 @@ import {
   Gauge,
   Zap
 } from 'lucide-react';
-import { speakGermanText } from '../shared/audioSpeechUtils';
+import { speakGermanText, stopGermanSpeech } from '../shared/audioSpeechUtils';
+import { fetchHomeworkApi } from '../shared/firebaseCloudSync';
 import {
   playLernstudioSound,
   playGermanVoiceFeedback,
@@ -353,7 +354,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
         const infoParams = new URLSearchParams({ id: routeAssignmentId });
         if (shareToken) infoParams.set('token', shareToken);
 
-        const res = await fetch(`/api/homework/info?${infoParams.toString()}`).catch(() => null);
+        const res = await fetchHomeworkApi(`/api/homework/info?${infoParams.toString()}`).catch(() => null);
         let data: any = {};
         if (res) {
           const responseText = await res.text();
@@ -363,7 +364,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             data = {};
           }
 
-          if (res.status === 403) {
+          if (res.status === 403 || res.status === 410) {
             setError(data?.error || 'هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
             return;
           }
@@ -390,6 +391,21 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             }
             return;
           }
+        }
+
+        // Fail closed when the authoritative API is unreachable or rejects the assignment
+        // so deleted/revoked links can never open from stale local cache or URL fragments.
+        if (!res) {
+          setError('تعذر الاتصال بخادم الواجبات. اتصل بالإنترنت ثم أعد فتح الرابط.');
+          return;
+        }
+        if (!res.ok) {
+          setError(
+            res.status === 404
+              ? 'هذا الواجب غير موجود على الخادم أو تم حذفه. لا يمكن فتح نسخة قديمة من الرابط.'
+              : data?.error || 'تعذر التحقق من حالة الواجب على الخادم. حاول مرة أخرى.'
+          );
+          return;
         }
 
         // 2. Check local assignments cache (verifying shareToken if configured on the local record)
@@ -1017,10 +1033,19 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
         // 1. Stage: true_false (صح أم خطأ — Richtig / Falsch)
         if (qType === 'true_false') {
           const isTrue = (itemIdx + stageIdx) % 2 === 0 || otherItems.length === 0;
-          const wrongItem = otherItems[(itemIdx + 1) % Math.max(1, otherItems.length)];
-          const shownArabic = isTrue
-            ? item.arabic
-            : wrongItem?.arabic || (isVerbStageItem ? 'يذهب' : 'المدرسة');
+          const distinctMeaningOthers = otherItems.filter((o) => o.arabic !== item.arabic);
+          const distractorPool = distinctMeaningOthers.length > 0 ? distinctMeaningOthers : otherItems;
+          const wrongItem = distractorPool[(itemIdx + 1) % Math.max(1, distractorPool.length)];
+          const fallbackWrongGerman = isVerbStageItem
+            ? item.german === 'gehen'
+              ? 'machen'
+              : 'gehen'
+            : item.german === 'die Schule'
+            ? 'das Buch'
+            : 'die Schule';
+          const shownGerman = isTrue
+            ? item.german
+            : wrongItem?.german || fallbackWrongGerman;
           const correctLabel = isTrue ? 'صح ✅ (Richtig)' : 'خطأ ❌ (Falsch)';
 
           list.push({
@@ -1034,10 +1059,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             arabicMeaning: item.arabic,
             emoji: item.emoji,
             promptTitleAr: isVerbStageItem
-              ? 'هل معنى هذا الفعل الألماني صحيح أم خطأ؟'
-              : 'هل معنى هذه الكلمة الألمانية صحيح أم خطأ؟',
-            promptMainText: item.german,
-            promptSubText: `المعنى المعروض: « ${shownArabic} »`,
+              ? 'هل ترجمة هذا الفعل الألماني صحيحة أم خطأ؟'
+              : 'هل الترجمة الألمانية صحيحة أم خطأ؟',
+            promptMainText: item.arabic,
+            promptSubText: shownGerman,
             options: ['صح ✅ (Richtig)', 'خطأ ❌ (Falsch)'],
             correctAnswer: correctLabel
           });
@@ -1527,7 +1552,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       setWrongStepsCount(0);
       setGrammarTypedInput('');
       setGrammarOrderedTiles([]);
-      if (!gamificationRef.current.pendingBonusRound && !activeOverlayRound) {
+      if (currentQuestion.type === 'true_false') {
+        stopGermanSpeech();
+      } else if (!gamificationRef.current.pendingBonusRound && !activeOverlayRound) {
         const timer = setTimeout(() => {
           if (!isSoundMuted()) {
             speakGermanText(currentQuestion.audioPromptText || currentQuestion.germanWord, 0.9);
@@ -2010,9 +2037,11 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       }
     } else {
       playLernstudioSound('wrong');
-      playGermanVoiceFeedback('noch_einmal');
+      if (currentQuestion.type !== 'true_false') {
+        playGermanVoiceFeedback('noch_einmal');
+      }
       gameEffects.triggerScorePopup(`${transition.pointsDelta || -5}`, 50, 28, false);
-      if (!isSoundMuted() && currentQuestion.audioPromptText) {
+      if (!isSoundMuted() && currentQuestion.type !== 'true_false' && currentQuestion.audioPromptText) {
         speakGermanText(currentQuestion.audioPromptText, 0.9);
       }
     }
@@ -3728,6 +3757,23 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                   <span>🔊 اضغط للاستماع للكلمة</span>
                 </button>
               </div>
+            ) : currentQuestion.type === 'true_false' ? (
+              <div className="space-y-2 py-1">
+                <div
+                  className="text-2xl sm:text-3xl font-black text-text-main leading-snug"
+                  dir="rtl"
+                >
+                  {currentQuestion.promptMainText}
+                </div>
+                {currentQuestion.promptSubText && (
+                  <div
+                    className="text-2xl sm:text-3xl font-black text-primary leading-snug"
+                    dir="ltr"
+                  >
+                    {currentQuestion.promptSubText}
+                  </div>
+                )}
+              </div>
             ) : (
               <h2
                 className="text-xl sm:text-3xl font-bold text-text-main tracking-wide"
@@ -3737,7 +3783,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
               </h2>
             )}
 
-            {currentQuestion.promptSubText && (
+            {currentQuestion.type !== 'true_false' && currentQuestion.promptSubText && (
               <div className="py-2 px-4 rounded-xl bg-surface-hover border border-surface-border inline-block">
                 <p className="text-base sm:text-xl font-bold text-primary">{currentQuestion.promptSubText}</p>
               </div>
@@ -3890,24 +3936,26 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             )}
 
             {/* Audio Pronunciation Helper */}
-            <div className="flex items-center justify-center gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => speakGermanText(currentQuestion.audioPromptText || currentQuestion.germanWord, 0.9)}
-                className="px-3 py-1.5 rounded-lg bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-semibold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
-              >
-                <Volume2 className="w-3.5 h-3.5 text-primary" />
-                <span>استمع</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => speakGermanText(currentQuestion.audioPromptText || currentQuestion.germanWord, 0.55)}
-                className="px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface border border-surface-border text-text-muted hover:text-text-main font-semibold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
-              >
-                <Snail className="w-3.5 h-3.5" />
-                <span>بطيء</span>
-              </button>
-            </div>
+            {currentQuestion.type !== 'true_false' && (
+              <div className="flex items-center justify-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => speakGermanText(currentQuestion.audioPromptText || currentQuestion.germanWord, 0.9)}
+                  className="px-3 py-1.5 rounded-lg bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-semibold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <Volume2 className="w-3.5 h-3.5 text-primary" />
+                  <span>استمع</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => speakGermanText(currentQuestion.audioPromptText || currentQuestion.germanWord, 0.55)}
+                  className="px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface border border-surface-border text-text-muted hover:text-text-main font-semibold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <Snail className="w-3.5 h-3.5" />
+                  <span>بطيء</span>
+                </button>
+              </div>
+            )}
 
             {selectedChoice !== null && currentQuestion.explanation && (
               <div className="mt-2 p-3 rounded-xl bg-primary/5 border border-primary/25 text-xs text-text-main font-medium text-right">

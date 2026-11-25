@@ -441,6 +441,7 @@ export interface TeacherProfile {
   defaultZoomLink: string;
   defaultMeetLink: string;
   defaultZoomTimezone?: string;
+  includeOfflineInGoogleCalendar?: boolean;
   enableLessonAlerts?: boolean; // In-app alerts for upcoming lessons (within 30 mins)
   enableBrowserPush?: boolean; // Browser push notifications
   parentMessageTemplates?: Record<string, string>;
@@ -1997,6 +1998,8 @@ export interface GroupWeeklySession extends SyncableRecord {
   lastError?: string;
   lastSyncError?: string;
   lastSyncedAt?: string;
+  sessionMode?: 'online' | 'offline'; // Defaults to 'online' for backward compatibility
+  locationAddress?: string; // In-person/offline group address snapshot for Google Calendar location
   calendarEventUid: string; // Immutable stable UID: e.g. 'gluck-session-{id}@glueck.app'
   googleCalendarEventId?: string;
   googleCalendarIcalUid?: string; // Actual iCalUID returned by Google Calendar API (independent of calendarEventUid)

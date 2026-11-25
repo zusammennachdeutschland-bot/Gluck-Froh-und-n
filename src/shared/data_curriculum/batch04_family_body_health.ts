@@ -1,4 +1,4 @@
-import { LernstudioSet } from '../../types/lernstudio';
+import type { LernstudioSet } from '../../types/lernstudio.js';
 
 export const BATCH_04_SETS: LernstudioSet[] = [
   // 91. Core Family Members (روضة / جريد 1)

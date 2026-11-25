@@ -1,3 +1,3 @@
-import expressApp from '../src/api/expressApp';
+import expressApp from '../src/api/expressApp.js';
 
 export default expressApp;

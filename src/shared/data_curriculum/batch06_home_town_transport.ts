@@ -1,4 +1,4 @@
-import { LernstudioSet } from '../../types/lernstudio';
+import type { LernstudioSet } from '../../types/lernstudio.js';
 
 export const BATCH_06_SETS: LernstudioSet[] = [
   // 151. House & Rooms (روضة / جريد 1)

@@ -1,4 +1,4 @@
-import { LernstudioSet } from '../../types/lernstudio';
+import type { LernstudioSet } from '../../types/lernstudio.js';
 
 export const BATCH_01_SETS: LernstudioSet[] = [
   // 1. First Words: Simple Greetings

@@ -694,16 +694,45 @@ export const areDuplicateLessons = (l1: any, l2: any, students?: any[], students
   if (!l1 || !l2 || l1.id === l2.id) return false;
   if (l1.deleted || l2.deleted) return false;
   if (l1.date !== l2.date) return false;
-  
+
   if (!isSameLessonTarget(l1, l2, students, studentsById)) return false;
 
   const t1 = normalizeTime(l1.time);
   const t2 = normalizeTime(l2.time);
-  const sameTime = !t1 || !t2 || t1 === t2;
-  const overlaps = checkOverlap(l1, l2);
-  const sameSession = l1.sessionNumber && l2.sessionNumber && l1.sessionNumber === l2.sessionNumber;
 
-  return sameTime || overlaps || sameSession;
+  // Distinct non-overlapping times on the same date are separate lessons (e.g. 16:00 and 19:00),
+  // even when both share sessionNumber === 1 (per-lesson groups or pre-resequencing).
+  if (t1 && t2 && t1 !== t2) {
+    if (l1.status === 'completed' && l2.status === 'completed') {
+      return false;
+    }
+    return checkOverlap(l1, l2);
+  }
+
+  // Exact same normalized start time on the same date for the same target -> true duplicate
+  if (t1 && t2 && t1 === t2) {
+    return true;
+  }
+
+  // Both lack a valid start time
+  if (!t1 && !t2) {
+    const sameSession = Boolean(l1.sessionNumber && l2.sessionNumber && l1.sessionNumber === l2.sessionNumber);
+    if (l1.status === 'completed' && l2.status === 'completed' && !sameSession) {
+      return false;
+    }
+    return true;
+  }
+
+  // One has a start time and one does not: never merge two distinct completed/cancelled lessons
+  const hasEngagement = (l: any) =>
+    l.status === 'completed' ||
+    l.status === 'cancelled' ||
+    Boolean(l.report?.attendanceStatus || l.report?.teacherNotes) ||
+    (l.amountPaid || 0) > 0;
+  if (hasEngagement(l1) && hasEngagement(l2)) {
+    return false;
+  }
+  return Boolean(l1.sessionNumber && l2.sessionNumber && l1.sessionNumber === l2.sessionNumber);
 };
 
 export const pickAuthoritativeLesson = (l1: any, l2: any): { survivor: any; duplicate: any } => {

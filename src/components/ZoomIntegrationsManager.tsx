@@ -24,11 +24,16 @@ import {
   ChevronUp,
   Layers,
   ListChecks,
-  Wrench
+  Wrench,
+  FileJson
 } from 'lucide-react';
 import { GroupWeeklySession, ZoomMeetingRecord, ZoomMeetingHistory } from '../types';
 import { useApp } from '../context/AppContext';
-import { DEFAULT_ZOOM_TIMEZONE, isApprovedSyncedZoomSession } from '../services/zoomSessionStandardizer';
+import {
+  DEFAULT_ZOOM_TIMEZONE,
+  isApprovedSyncedZoomSession,
+  reconcileOfflineGroupsWeeklySessions
+} from '../services/zoomSessionStandardizer';
 import {
   ZoomUiMetaState,
   ZoomMigrationPreviewSummary,
@@ -62,6 +67,12 @@ import {
   syncSessionsToGoogleCalendar,
   verifyOrSilentlyReauthorizeGoogleCalendar
 } from '../services/calendarSyncService';
+import {
+  buildAllMeetingsExportForAi,
+  downloadTextFileFallback,
+  formatMeetingsExportJson,
+  formatMeetingsExportMarkdown
+} from '../services/aiMeetingExportService';
 import { ZoomCleanupRebuildSection } from './ZoomCleanupRebuildSection';
 import { logZoomReminderPipeline } from '../utils/zoomReminderDiagnostics';
 
@@ -81,6 +92,8 @@ type WorkspaceTab = 'overview' | 'sessions' | 'cleanup';
 export const ZoomIntegrationsManager: React.FC = () => {
   const {
     groups,
+    lessons,
+    students,
     profile,
     updateProfile,
     groupWeeklySessions,
@@ -145,15 +158,36 @@ export const ZoomIntegrationsManager: React.FC = () => {
   } | null>(null);
   const [lastCalendarSyncResult, setLastCalendarSyncResult] = useState<CalendarSyncResult | null>(null);
   const [isConnectingCalendar, setIsConnectingCalendar] = useState(false);
+  const [isDisconnectingCalendar, setIsDisconnectingCalendar] = useState(false);
   const [calendarConn, setCalendarConn] = useState<GoogleCalendarConnectionState>(() =>
     getGoogleCalendarConnectionState()
   );
 
+  // Full Zoom & schedule meeting data export for AI modal state
+  const [aiExportModalOpen, setAiExportModalOpen] = useState(false);
+  const [aiExportFormat, setAiExportFormat] = useState<'json' | 'markdown'>('json');
+  const [aiExportHorizonDays, setAiExportHorizonDays] = useState<30 | 90 | 180>(90);
+  const [aiExportIncludeOffline, setAiExportIncludeOffline] = useState(true);
+  const [aiExportCopyStatus, setAiExportCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [aiExportCopyError, setAiExportCopyError] = useState<string | null>(null);
+
   useEffect(() => {
     const unsub = subscribeGoogleCalendarConnectionState((next) => {
       setCalendarConn(next);
+      // Never leave local connecting spinner stuck when state transitions to a terminal state
+      if (
+        next.status === 'connected' ||
+        next.status === 'disconnected' ||
+        next.status === 'error' ||
+        next.status === 'cancelled' ||
+        next.status === 'reconnect_required' ||
+        next.status === 'expired'
+      ) {
+        setIsConnectingCalendar(false);
+      }
     });
-    if (getGoogleCalendarConnectionState().status === 'needs_verification') {
+    const current = getGoogleCalendarConnectionState();
+    if (current.status === 'needs_verification' || current.status === 'verifying') {
       verifyOrSilentlyReauthorizeGoogleCalendar().catch(() => {});
     }
     return unsub;
@@ -203,15 +237,43 @@ export const ZoomIntegrationsManager: React.FC = () => {
     [groups, groupWeeklySessions, timezoneInput]
   );
 
+  const includeOfflineInCalendar = Boolean(profile.includeOfflineInGoogleCalendar);
+
+  const offlineCalendarReconcile = useMemo(
+    () =>
+      reconcileOfflineGroupsWeeklySessions({
+        groups,
+        existingSessions: livePreviewSummary.reconciledSessions,
+        timezone: timezoneInput || DEFAULT_ZOOM_TIMEZONE
+      }),
+    [groups, livePreviewSummary.reconciledSessions, timezoneInput]
+  );
+
+  // Full reconciled pool containing both online and offline sessions (never loses offline calendar links)
+  const combinedCalendarWorkspaceSessions = useMemo(
+    () => offlineCalendarReconcile.sessions,
+    [offlineCalendarReconcile.sessions]
+  );
+
+  const activeOfflineCalendarSessions = useMemo(
+    () => offlineCalendarReconcile.offlineActiveSessions,
+    [offlineCalendarReconcile.offlineActiveSessions]
+  );
+
   const activeSessions = useMemo(
-    () => livePreviewSummary.reconciledSessions.filter((s) => s && !s.deleted),
+    () => livePreviewSummary.reconciledSessions.filter((s) => s && !s.deleted && s.sessionMode !== 'offline'),
     [livePreviewSummary.reconciledSessions]
+  );
+
+  const activeCalendarSessions = useMemo(
+    () => (includeOfflineInCalendar ? [...activeSessions, ...activeOfflineCalendarSessions] : activeSessions),
+    [includeOfflineInCalendar, activeSessions, activeOfflineCalendarSessions]
   );
 
   const displayedSessions = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return (groupWeeklySessions || [])
-      .filter((s) => s && !s.deleted)
+      .filter((s) => s && !s.deleted && s.sessionMode !== 'offline')
       .filter((s) => {
         if (statusFilter === 'all') return true;
         if (statusFilter === 'manual') return s.syncState === 'manual' || s.syncState === 'manual_only';
@@ -233,13 +295,17 @@ export const ZoomIntegrationsManager: React.FC = () => {
       );
   }, [groupWeeklySessions, statusFilter, searchQuery]);
 
-  const calendarTargetSessionsList = useMemo(
-    () =>
-      calendarTargetSession
-        ? livePreviewSummary.reconciledSessions.filter((s) => s.id === calendarTargetSession.id)
-        : livePreviewSummary.reconciledSessions,
-    [livePreviewSummary.reconciledSessions, calendarTargetSession]
-  );
+  const calendarTargetSessionsList = useMemo(() => {
+    if (calendarTargetSession) {
+      return combinedCalendarWorkspaceSessions.filter((s) => s.id === calendarTargetSession.id);
+    }
+    return combinedCalendarWorkspaceSessions.filter((s) => {
+      if (!s) return false;
+      if (s.deleted) return Boolean(s.googleCalendarEventId);
+      if (s.sessionMode === 'offline') return includeOfflineInCalendar;
+      return true;
+    });
+  }, [combinedCalendarWorkspaceSessions, calendarTargetSession, includeOfflineInCalendar]);
 
   const calendarPreview = useMemo(
     () =>
@@ -258,7 +324,7 @@ export const ZoomIntegrationsManager: React.FC = () => {
   const apiManagedSessionsCount = useMemo(
     () =>
       (groupWeeklySessions || []).filter(
-        (s) => s && !s.deleted && s.meetingSource === 'zoom_api' && Boolean(s.zoomMeetingId)
+        (s) => s && !s.deleted && s.sessionMode !== 'offline' && s.meetingSource === 'zoom_api' && Boolean(s.zoomMeetingId)
       ).length,
     [groupWeeklySessions]
   );
@@ -266,7 +332,7 @@ export const ZoomIntegrationsManager: React.FC = () => {
   const metrics = useMemo(() => {
     const total = activeSessions.length;
     const zoomSynced = activeSessions.filter((s) => isApprovedSyncedZoomSession(s)).length;
-    const calSynced = activeSessions.filter((s) => s.googleCalendarEventId && s.calendarSyncStatus === 'synced').length;
+    const calSynced = activeCalendarSessions.filter((s) => s.googleCalendarEventId && s.calendarSyncStatus === 'synced').length;
     const needsAttention = activeSessions.filter(
       (s) =>
         s.syncState === 'needs_update' ||
@@ -274,11 +340,11 @@ export const ZoomIntegrationsManager: React.FC = () => {
         s.calendarSyncStatus === 'needs_update' ||
         s.calendarSyncStatus === 'error'
     ).length;
-    const deletedOrphanCalEvents = livePreviewSummary.reconciledSessions.filter(
+    const deletedOrphanCalEvents = combinedCalendarWorkspaceSessions.filter(
       (s) => s && s.deleted && Boolean(s.googleCalendarEventId)
     ).length;
     return { total, zoomSynced, calSynced, needsAttention, deletedOrphanCalEvents };
-  }, [activeSessions, livePreviewSummary.reconciledSessions]);
+  }, [activeSessions, activeCalendarSessions, combinedCalendarWorkspaceSessions]);
 
   const handleSaveCredentials = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -713,9 +779,123 @@ export const ZoomIntegrationsManager: React.FC = () => {
   };
 
   const handleDisconnectGoogleCalendar = async () => {
-    await disconnectGoogleCalendar();
+    setIsDisconnectingCalendar(true);
+    setIsConnectingCalendar(false);
+    setIsSyncingCalendar(false);
+    setCalendarSyncProgress(null);
     setLastCalendarSyncResult(null);
-    triggerToast(_t('تم فصل جلسة Google Calendar', 'Google Calendar session disconnected'));
+    try {
+      await disconnectGoogleCalendar();
+      triggerToast(
+        _t(
+          'تم فصل Google Calendar وإلغاء أي محاولة تحقق جارية',
+          'Google Calendar disconnected and reset',
+          'Google Kalender getrennt und zurückgesetzt'
+        )
+      );
+    } finally {
+      setIsDisconnectingCalendar(false);
+    }
+  };
+
+  const aiMeetingExportPayload = useMemo(() => {
+    if (!aiExportModalOpen) return null;
+    return buildAllMeetingsExportForAi({
+      groups,
+      lessons,
+      students,
+      groupWeeklySessions: combinedCalendarWorkspaceSessions,
+      zoomMeetingRecords,
+      profile: {
+        ...profile,
+        defaultZoomTimezone: timezoneInput || profile.defaultZoomTimezone || DEFAULT_ZOOM_TIMEZONE
+      },
+      zoomHostEmail: meta.hostEmail || null,
+      horizonDays: aiExportHorizonDays,
+      includeOffline: aiExportIncludeOffline
+    });
+  }, [
+    aiExportModalOpen,
+    groups,
+    lessons,
+    students,
+    combinedCalendarWorkspaceSessions,
+    zoomMeetingRecords,
+    profile,
+    timezoneInput,
+    meta.hostEmail,
+    aiExportHorizonDays,
+    aiExportIncludeOffline
+  ]);
+
+  const aiMeetingExportContent = useMemo(() => {
+    if (!aiMeetingExportPayload) return '';
+    return aiExportFormat === 'json'
+      ? formatMeetingsExportJson(aiMeetingExportPayload)
+      : formatMeetingsExportMarkdown(aiMeetingExportPayload);
+  }, [aiMeetingExportPayload, aiExportFormat]);
+
+  const handleOpenAiExportModal = () => {
+    setAiExportCopyStatus('idle');
+    setAiExportCopyError(null);
+    setAiExportModalOpen(true);
+  };
+
+  const handleCopyAiMeetingData = async () => {
+    if (!aiMeetingExportContent || !aiMeetingExportPayload) return;
+    setAiExportCopyStatus('idle');
+    setAiExportCopyError(null);
+    try {
+      if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+        throw new Error('Clipboard API is unavailable in this environment');
+      }
+      await navigator.clipboard.writeText(aiMeetingExportContent);
+      setAiExportCopyStatus('copied');
+      triggerToast(
+        _t(
+          `تم نسخ بيانات ${aiMeetingExportPayload.meetingCount} اجتماع بصيغة ${aiExportFormat.toUpperCase()}`,
+          `Copied ${aiMeetingExportPayload.meetingCount} meeting(s) as ${aiExportFormat.toUpperCase()}`
+        )
+      );
+    } catch (err: any) {
+      const msg =
+        err?.message ||
+        _t(
+          'تعذر النسخ التلقائي للحافظة — يمكنك استخدام زر التحميل بدلاً من ذلك.',
+          'Clipboard copy failed — use the Download fallback button below.'
+        );
+      setAiExportCopyStatus('failed');
+      setAiExportCopyError(msg);
+      triggerToast(
+        _t(
+          'فشل النسخ للحافظة — استخدم زر التحميل كبديل',
+          'Clipboard copy failed — use Download fallback'
+        )
+      );
+    }
+  };
+
+  const handleDownloadAiMeetingData = () => {
+    if (!aiMeetingExportContent || !aiMeetingExportPayload) return;
+    const ext = aiExportFormat === 'json' ? 'json' : 'md';
+    const mime =
+      aiExportFormat === 'json'
+        ? 'application/json;charset=utf-8'
+        : 'text/markdown;charset=utf-8';
+    const dateStamp = aiMeetingExportPayload.rangeStartDate;
+    const ok = downloadTextFileFallback(
+      aiMeetingExportContent,
+      `glueck_meetings_ai_${dateStamp}.${ext}`,
+      mime
+    );
+    if (ok) {
+      triggerToast(
+        _t(
+          `تم تحميل ملف الاجتماعات (.${ext}) بنجاح`,
+          `Downloaded meetings export (.${ext})`
+        )
+      );
+    }
   };
 
   const openCalendarSyncModal = (targetSession: GroupWeeklySession | null = null) => {
@@ -731,7 +911,9 @@ export const ZoomIntegrationsManager: React.FC = () => {
     setLastCalendarSyncResult(null);
     setCalendarSyncProgress({ completed: 0, total: Math.max(1, calendarPreview.createCount + calendarPreview.updateCount + calendarPreview.deleteCount), title: '' });
     try {
-      const sessionsToUse = livePreviewSummary.reconciledSessions;
+      const sessionsToUse = includeOfflineInCalendar
+        ? combinedCalendarWorkspaceSessions
+        : livePreviewSummary.reconciledSessions;
       let authRes = await requestGoogleCalendarAccessToken(forceReauth);
       if (!authRes.ok || !authRes.accessToken) {
         if (authRes.redirected) {
@@ -763,7 +945,9 @@ export const ZoomIntegrationsManager: React.FC = () => {
         return;
       }
 
-      const targetIds = calendarTargetSession ? new Set([calendarTargetSession.id]) : undefined;
+      const targetIds = calendarTargetSession
+        ? new Set([calendarTargetSession.id])
+        : new Set(calendarTargetSessionsList.map((s) => s.id));
       const shouldForce = Boolean(calendarTargetSession) || forceResyncAllCalendar;
       let syncRes = await syncSessionsToGoogleCalendar({
         allSessions: sessionsToUse,
@@ -988,37 +1172,53 @@ export const ZoomIntegrationsManager: React.FC = () => {
   };
 
   const calendarStatusInfo = useMemo(() => {
-    const isConnected = calendarConn.status === 'connected' && calendarConn.hasInMemoryToken;
+    const isConnected =
+      calendarConn.status === 'connected' &&
+      calendarConn.hasInMemoryToken &&
+      calendarConn.readVerified;
     if (isConnected) {
       return {
         label: _t('متصل وجاهز', 'Connected', 'Verbunden'),
         toneClass: 'text-emerald-600 dark:text-emerald-400',
         needsReconnect: false,
-        hasAlert: false
+        hasAlert: false,
+        isPending: false
       };
     }
-    if (calendarConn.status === 'needs_verification') {
+    if (calendarConn.status === 'connecting' || calendarConn.status === 'pending_redirect') {
+      return {
+        label: _t('جاري الربط...', 'Connecting...', 'Verbindet...'),
+        toneClass: 'text-sky-600 dark:text-sky-400',
+        needsReconnect: true,
+        hasAlert: false,
+        isPending: true
+      };
+    }
+    if (calendarConn.status === 'verifying' || calendarConn.status === 'needs_verification') {
       return {
         label: _t('جاري التحقق...', 'Verifying...', 'Wird geprüft...'),
         toneClass: 'text-sky-600 dark:text-sky-400',
-        needsReconnect: false,
-        hasAlert: false
+        needsReconnect: true,
+        hasAlert: false,
+        isPending: true
       };
     }
     if (calendarConn.status === 'reconnect_required' || calendarConn.status === 'expired') {
       return {
-        label: _t('يحتاج إعادة ربط', 'Reconnect required', 'Erneut verbinden'),
+        label: _t('يحتاج إعادة تفويض', 'Needs reauthorization', 'Erneut autorisieren'),
         toneClass: 'text-amber-600 dark:text-amber-400',
         needsReconnect: true,
-        hasAlert: true
+        hasAlert: true,
+        isPending: false
       };
     }
     if (calendarConn.status === 'error') {
       return {
-        label: _t('خطأ في الاتصال', 'Connection error', 'Verbindungsfehler'),
+        label: _t('فشل الاتصال', 'Failed', 'Fehlgeschlagen'),
         toneClass: 'text-rose-600 dark:text-rose-400',
         needsReconnect: true,
-        hasAlert: true
+        hasAlert: true,
+        isPending: false
       };
     }
     if (calendarConn.status === 'cancelled') {
@@ -1026,14 +1226,16 @@ export const ZoomIntegrationsManager: React.FC = () => {
         label: _t('تم الإلغاء', 'Cancelled', 'Abgebrochen'),
         toneClass: 'text-text-muted',
         needsReconnect: false,
-        hasAlert: false
+        hasAlert: false,
+        isPending: false
       };
     }
     return {
       label: _t('غير متصل', 'Not connected', 'Nicht verbunden'),
       toneClass: 'text-text-muted',
       needsReconnect: false,
-      hasAlert: false
+      hasAlert: false,
+      isPending: false
     };
   }, [calendarConn, _t]);
 
@@ -1536,15 +1738,16 @@ export const ZoomIntegrationsManager: React.FC = () => {
                     </div>
                   </div>
 
-                  {calendarConn.status === 'connected' && calendarConn.hasInMemoryToken && (
-                    <button
-                      type="button"
-                      onClick={handleDisconnectGoogleCalendar}
-                      className="min-h-[36px] px-2.5 rounded-lg text-xs font-semibold text-text-muted hover:text-rose-600 hover:bg-rose-500/10 cursor-pointer shrink-0"
-                    >
-                      {_t('فصل', 'Disconnect')}
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    data-testid="disconnect-google-calendar-btn"
+                    onClick={handleDisconnectGoogleCalendar}
+                    className="min-h-[36px] px-2.5 rounded-lg text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 border border-rose-500/20 cursor-pointer shrink-0 whitespace-nowrap"
+                  >
+                    {isDisconnectingCalendar
+                      ? _t('جاري الفصل...', 'Disconnecting...')
+                      : _t('فصل Google Calendar', 'Disconnect Google Calendar')}
+                  </button>
                 </div>
 
                 {/* Contextual Alert ONLY when an error or reconnect condition exists */}
@@ -1595,13 +1798,37 @@ export const ZoomIntegrationsManager: React.FC = () => {
                 )}
               </div>
 
-              {/* Google Calendar Action Buttons */}
-              <div className="pt-3 border-t border-surface-border space-y-2">
+              {/* Google Calendar Action Buttons — never permanently blocked by verifying/pending states */}
+              <div className="pt-3 border-t border-surface-border space-y-2.5">
+                {/* Offline / In-Person Lessons Calendar Sync Toggle */}
+                <label className="flex items-center justify-between gap-2.5 px-3 py-2 rounded-xl bg-surface-hover/70 border border-surface-border text-xs text-text-main cursor-pointer select-none">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={includeOfflineInCalendar}
+                      onChange={(e) => updateProfile({ includeOfflineInGoogleCalendar: e.target.checked })}
+                      className="w-4 h-4 rounded accent-primary shrink-0"
+                    />
+                    <span className="font-semibold leading-snug">
+                      {_t(
+                        'تضمين الحصص الأوفلاين (الحضورية) في تقويم Google',
+                        'Include offline (in-person) lessons in Google Calendar',
+                        'Präsenzstunden in Google Kalender einbeziehen'
+                      )}
+                    </span>
+                  </span>
+                  <span className="text-[11px] font-bold text-text-muted tabular-nums shrink-0">
+                    {activeOfflineCalendarSessions.length}
+                  </span>
+                </label>
+
                 <div className="flex flex-wrap items-center gap-2">
-                  {calendarConn.status === 'connected' && calendarConn.hasInMemoryToken ? (
+                  {calendarConn.status === 'connected' &&
+                  calendarConn.hasInMemoryToken &&
+                  calendarConn.readVerified ? (
                     <button
                       type="button"
-                      disabled={activeSessions.length === 0 && metrics.deletedOrphanCalEvents === 0}
+                      disabled={activeCalendarSessions.length === 0 && metrics.deletedOrphanCalEvents === 0}
                       onClick={() => openCalendarSyncModal(null)}
                       className="flex-1 min-h-[44px] px-3.5 rounded-xl bg-primary hover:bg-primary-hover text-primary-fg text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap"
                     >
@@ -1611,14 +1838,18 @@ export const ZoomIntegrationsManager: React.FC = () => {
                   ) : (
                     <button
                       type="button"
-                      onClick={() => handleConnectGoogleCalendar(calendarStatusInfo.needsReconnect)}
-                      disabled={isConnectingCalendar}
-                      className="flex-1 min-h-[44px] px-3.5 rounded-xl bg-primary hover:bg-primary-hover text-primary-fg text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                      data-testid="connect-google-calendar-btn"
+                      onClick={() =>
+                        handleConnectGoogleCalendar(
+                          calendarStatusInfo.needsReconnect || calendarStatusInfo.isPending
+                        )
+                      }
+                      className="flex-1 min-h-[44px] px-3.5 rounded-xl bg-primary hover:bg-primary-hover text-primary-fg text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
                     >
                       <Calendar className="w-3.5 h-3.5 shrink-0" />
                       <span>
-                        {isConnectingCalendar
-                          ? _t('جاري الربط...', 'Connecting...')
+                        {calendarStatusInfo.isPending || isConnectingCalendar
+                          ? _t('إعادة المحاولة / بدء الربط من جديد', 'Reconnect / Start Again')
                           : calendarStatusInfo.needsReconnect
                           ? _t('إعادة ربط Google Calendar', 'Reconnect Calendar')
                           : _t('ربط Google Calendar', 'Connect Google Calendar')}
@@ -1628,8 +1859,13 @@ export const ZoomIntegrationsManager: React.FC = () => {
 
                   <button
                     type="button"
-                    disabled={activeSessions.length === 0}
-                    onClick={() => downloadSessionsIcsFile(activeSessions, 'glueck_zoom_schedule.ics')}
+                    disabled={activeCalendarSessions.length === 0}
+                    onClick={() =>
+                      downloadSessionsIcsFile(
+                        activeCalendarSessions,
+                        includeOfflineInCalendar ? 'glueck_all_schedule.ics' : 'glueck_zoom_schedule.ics'
+                      )
+                    }
                     className="min-h-[44px] px-3.5 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-text-main text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap"
                   >
                     <Download className="w-3.5 h-3.5 shrink-0" />
@@ -1637,18 +1873,48 @@ export const ZoomIntegrationsManager: React.FC = () => {
                   </button>
                 </div>
 
-                {calendarConn.status === 'connected' && calendarConn.hasInMemoryToken && (
-                  <button
-                    type="button"
-                    onClick={() => handleConnectGoogleCalendar(true)}
-                    disabled={isConnectingCalendar}
-                    className="w-full min-h-[38px] px-3 rounded-xl text-xs font-medium text-text-muted hover:text-text-main hover:bg-surface-hover cursor-pointer"
-                  >
-                    {_t('تغيير حساب Google Calendar', 'Switch Google Calendar account')}
-                  </button>
-                )}
+                {calendarConn.status === 'connected' &&
+                  calendarConn.hasInMemoryToken &&
+                  calendarConn.readVerified && (
+                    <button
+                      type="button"
+                      onClick={() => handleConnectGoogleCalendar(true)}
+                      className="w-full min-h-[38px] px-3 rounded-xl text-xs font-medium text-text-muted hover:text-text-main hover:bg-surface-hover cursor-pointer"
+                    >
+                      {_t('تغيير حساب Google Calendar', 'Switch Google Calendar account')}
+                    </button>
+                  )}
               </div>
             </div>
+          </div>
+
+          {/* Full Schedule & Zoom Meeting Data Export for AI */}
+          <div className="rounded-2xl bg-surface border border-surface-border p-4 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-primary-soft border border-primary-border/60 text-primary flex items-center justify-center shrink-0">
+                <FileJson className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold text-text-main">
+                  {_t('تصدير جميع بيانات الاجتماعات للذكاء الاصطناعي', 'Full Meeting Data Export for AI')}
+                </h3>
+                <p className="text-xs text-text-muted">
+                  {_t(
+                    'نسخ أو تحميل جميع الحصص القادمة (الأونلاين والأوفلاين والمتكررة) بصيغة JSON أو Markdown جاهزة للاستخدام.',
+                    'Preview, copy, or download all upcoming recurring, edited, online & offline meetings as structured JSON or Markdown.'
+                  )}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              data-testid="copy-all-meetings-ai-btn"
+              onClick={handleOpenAiExportModal}
+              className="min-h-[42px] px-4 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-text-main text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <Copy className="w-3.5 h-3.5 shrink-0 text-primary" />
+              <span>{_t('نسخ كل بيانات الاجتماعات للـ AI', 'Copy All Meeting Data for AI')}</span>
+            </button>
           </div>
         </div>
       )}
@@ -2190,6 +2456,27 @@ export const ZoomIntegrationsManager: React.FC = () => {
               </div>
             </div>
 
+            {/* Offline Inclusion Toggle (for bulk sync) */}
+            {!calendarTargetSession && activeOfflineCalendarSessions.length > 0 && (
+              <label className="flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl bg-surface-hover/60 border border-surface-border text-xs text-text-main cursor-pointer select-none">
+                <span className="flex items-center gap-2.5 min-w-0">
+                  <input
+                    type="checkbox"
+                    checked={includeOfflineInCalendar}
+                    disabled={isSyncingCalendar}
+                    onChange={(e) => updateProfile({ includeOfflineInGoogleCalendar: e.target.checked })}
+                    className="w-4 h-4 rounded accent-primary shrink-0"
+                  />
+                  <span>
+                    {_t(
+                      `تضمين الحصص الأوفلاين (الحضورية) (${activeOfflineCalendarSessions.length})`,
+                      `Include offline (in-person) lessons (${activeOfflineCalendarSessions.length})`
+                    )}
+                  </span>
+                </span>
+              </label>
+            )}
+
             {/* Force Re-sync Toggle (for bulk sync) */}
             {!calendarTargetSession && calendarPreview.skipSyncedCount + calendarPreview.updateCount > 0 && (
               <label className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-surface-hover/60 border border-surface-border text-xs text-text-main cursor-pointer select-none">
@@ -2260,11 +2547,26 @@ export const ZoomIntegrationsManager: React.FC = () => {
             <div className="overflow-y-auto flex-1 max-h-52 rounded-xl border border-surface-border divide-y divide-surface-border text-xs">
               {calendarPreview.items.map((item) => {
                 const act = calendarActionLabel(item.action);
+                const isOfflineItem = item.sessionMode === 'offline';
                 return (
                   <div key={item.sessionId} className="px-3 py-2 flex items-center justify-between gap-2">
-                    <span className="font-medium text-text-main truncate" dir="ltr">
-                      {item.standardizedTitle}
-                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="font-medium text-text-main truncate" dir="ltr">
+                          {item.standardizedTitle}
+                        </span>
+                        <span
+                          className={`text-[10px] font-bold shrink-0 ${
+                            isOfflineItem ? 'text-primary' : 'text-text-muted'
+                          }`}
+                        >
+                          {isOfflineItem ? _t('حضوري', 'In-Person') : _t('أونلاين', 'Online')}
+                        </span>
+                      </div>
+                      {isOfflineItem && item.locationAddress && (
+                        <div className="text-[10.5px] text-text-muted truncate">{item.locationAddress}</div>
+                      )}
+                    </div>
                     <span className={`text-[11px] font-semibold shrink-0 ${act.cls}`}>{act.text}</span>
                   </div>
                 );
@@ -2369,6 +2671,172 @@ export const ZoomIntegrationsManager: React.FC = () => {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* =====================================================================
+          MODAL 4: COPY ALL MEETING DATA FOR AI (PREVIEW + COPY + DOWNLOAD)
+      ====================================================================== */}
+      {aiExportModalOpen && aiMeetingExportPayload && (
+        <div className="fixed inset-0 z-[120] bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-surface border-t sm:border border-surface-border rounded-t-3xl sm:rounded-2xl max-w-2xl w-full max-h-[88vh] flex flex-col shadow-2xl overflow-hidden">
+            <div className="p-4 sm:p-5 border-b border-surface-border flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h4 className="text-sm font-bold text-text-main flex items-center gap-2">
+                  <FileJson className="w-4 h-4 text-primary shrink-0" />
+                  <span>{_t('تصدير جميع بيانات الاجتماعات للـ AI', 'Copy All Meeting Data for AI')}</span>
+                </h4>
+                <p className="text-xs text-text-muted mt-0.5 tabular-nums">
+                  {_t(
+                    `إجمالي الاجتماعات المصدّرة: ${aiMeetingExportPayload.meetingCount} · من ${aiMeetingExportPayload.rangeStartDate} إلى ${aiMeetingExportPayload.rangeEndDate} (${aiMeetingExportPayload.timeZone})`,
+                    `Exported meetings: ${aiMeetingExportPayload.meetingCount} · ${aiMeetingExportPayload.rangeStartDate} to ${aiMeetingExportPayload.rangeEndDate} (${aiMeetingExportPayload.timeZone})`
+                  )}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAiExportModalOpen(false)}
+                className="min-h-[38px] min-w-[38px] rounded-xl flex items-center justify-center text-text-muted hover:text-text-main cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="px-4 sm:px-5 py-3 border-b border-surface-border flex flex-wrap items-center justify-between gap-2.5 bg-surface-hover/40">
+              <div className="inline-flex rounded-xl bg-surface border border-surface-border p-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAiExportFormat('json');
+                    setAiExportCopyStatus('idle');
+                  }}
+                  className={`min-h-[34px] px-3 rounded-lg text-xs font-bold cursor-pointer ${
+                    aiExportFormat === 'json'
+                      ? 'bg-primary text-primary-fg'
+                      : 'text-text-muted hover:text-text-main'
+                  }`}
+                >
+                  JSON
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAiExportFormat('markdown');
+                    setAiExportCopyStatus('idle');
+                  }}
+                  className={`min-h-[34px] px-3 rounded-lg text-xs font-bold cursor-pointer ${
+                    aiExportFormat === 'markdown'
+                      ? 'bg-primary text-primary-fg'
+                      : 'text-text-muted hover:text-text-main'
+                  }`}
+                >
+                  Markdown
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5 text-xs">
+                <label className="flex items-center gap-1.5 text-text-main cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={aiExportIncludeOffline}
+                    onChange={(e) => {
+                      setAiExportIncludeOffline(e.target.checked);
+                      setAiExportCopyStatus('idle');
+                    }}
+                    className="w-3.5 h-3.5 rounded accent-primary"
+                  />
+                  <span>{_t('تضمين الأوفلاين', 'Include offline')}</span>
+                </label>
+
+                <select
+                  value={aiExportHorizonDays}
+                  onChange={(e) => {
+                    setAiExportHorizonDays(Number(e.target.value) as 30 | 90 | 180);
+                    setAiExportCopyStatus('idle');
+                  }}
+                  className="min-h-[34px] px-2.5 rounded-lg bg-surface border border-surface-border text-xs font-semibold text-text-main"
+                >
+                  <option value={30}>{_t('30 يوم قادم', 'Next 30 days')}</option>
+                  <option value={90}>{_t('90 يوم قادم', 'Next 90 days')}</option>
+                  <option value={180}>{_t('180 يوم قادم', 'Next 180 days')}</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="p-4 sm:p-5 flex-1 min-h-0 overflow-y-auto space-y-2.5">
+              {aiExportCopyStatus === 'copied' && (
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-xs text-emerald-700 dark:text-emerald-300 font-semibold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>
+                    {_t(
+                      `تم النسخ بنجاح (${aiMeetingExportPayload.meetingCount} اجتماع).`,
+                      `Copied ${aiMeetingExportPayload.meetingCount} meeting(s) to clipboard.`
+                    )}
+                  </span>
+                </div>
+              )}
+
+              {aiExportCopyStatus === 'failed' && (
+                <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/25 text-xs text-rose-700 dark:text-rose-300 font-semibold flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>
+                    {aiExportCopyError ||
+                      _t(
+                        'فشل النسخ إلى الحافظة — استخدم زر التحميل أدناه كبديل.',
+                        'Clipboard copy failed — use Download below as a fallback.'
+                      )}
+                  </span>
+                </div>
+              )}
+
+              <pre
+                dir="ltr"
+                className="w-full max-h-[46vh] overflow-auto rounded-xl bg-surface-hover border border-surface-border p-3 text-[11px] leading-relaxed font-mono text-text-main whitespace-pre-wrap break-words select-all"
+              >
+                {aiMeetingExportContent}
+              </pre>
+            </div>
+
+            <div className="p-4 sm:p-5 border-t border-surface-border pb-safe-bottom sm:pb-5 flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setAiExportModalOpen(false)}
+                className="min-h-[42px] px-4 rounded-xl border border-surface-border text-xs font-semibold text-text-main cursor-pointer"
+              >
+                {_t('إغلاق', 'Close')}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDownloadAiMeetingData}
+                className="min-h-[42px] px-4 rounded-xl bg-surface-hover hover:bg-surface border border-surface-border text-text-main text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>
+                  {aiExportFormat === 'json'
+                    ? _t('تحميل .json', 'Download .json')
+                    : _t('تحميل .md', 'Download .md')}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCopyAiMeetingData}
+                className="min-h-[42px] px-4 rounded-xl bg-primary hover:bg-primary-hover text-primary-fg text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              >
+                {aiExportCopyStatus === 'copied' ? (
+                  <Check className="w-3.5 h-3.5" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {aiExportCopyStatus === 'copied'
+                    ? _t('تم النسخ', 'Copied')
+                    : _t('نسخ إلى الحافظة', 'Copy to Clipboard')}
+                </span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

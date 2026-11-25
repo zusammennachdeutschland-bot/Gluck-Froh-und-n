@@ -1,4 +1,4 @@
-import { LernstudioSet } from '../../types/lernstudio';
+import type { LernstudioSet } from '../../types/lernstudio.js';
 
 export const BATCH_03_SETS: LernstudioSet[] = [
   // 61. Fruits: Everyday Orchard Fruits (روضة / جريد 1)

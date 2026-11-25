@@ -1,11 +1,12 @@
 import type { Express, Request, Response } from 'express';
 import crypto from 'crypto';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import {
   isStrictLoopbackRequest,
   VerifyFirebaseIdTokenFn
-} from './grainServerProxy';
+} from './grainServerProxy.js';
 
 export const ZOOM_OAUTH_TOKEN_URL = 'https://zoom.us/oauth/token';
 export const ZOOM_API_BASE_URL = 'https://api.zoom.us/v2';
@@ -90,12 +91,19 @@ function checkZoomRateLimit(bucketKey: string): { allowed: boolean; retryAfterSe
   return { allowed: true };
 }
 
+function getZoomVaultStorageDir(): string {
+  if (process.env.VERCEL === '1' || Boolean(process.env.VERCEL_ENV)) {
+    return path.join(os.tmpdir(), 'glueck-aistudio');
+  }
+  return path.join(process.cwd(), '.aistudio');
+}
+
 function getZoomMasterKeyFilePath(): string {
-  return path.join(process.cwd(), '.aistudio', 'zoom-vault-master.key');
+  return path.join(getZoomVaultStorageDir(), 'zoom-vault-master.key');
 }
 
 function getZoomVaultFilePath(): string {
-  return path.join(process.cwd(), '.aistudio', 'zoom-server-vault.enc.json');
+  return path.join(getZoomVaultStorageDir(), 'zoom-server-vault.enc.json');
 }
 
 function loadOrCreateZoomMasterKey(): Buffer | null {

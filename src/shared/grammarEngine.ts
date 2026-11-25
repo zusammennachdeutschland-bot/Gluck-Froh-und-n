@@ -1,4 +1,4 @@
-import {
+import type {
   ExerciseSourceOrigin,
   GrammarContent,
   GrammarExample,
@@ -10,7 +10,7 @@ import {
   LernstudioExercise,
   LernstudioSet,
   LernstudioSetKind
-} from '../types/lernstudio';
+} from '../types/lernstudio.js';
 
 export const VALID_GRAMMAR_EXERCISE_TYPES: readonly GrammarExerciseType[] = [
   'multiple_choice',

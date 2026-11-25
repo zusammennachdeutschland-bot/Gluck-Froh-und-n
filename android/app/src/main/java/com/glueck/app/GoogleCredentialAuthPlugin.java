@@ -11,6 +11,8 @@ import android.content.pm.Signature;
 import android.content.pm.SigningInfo;
 import android.os.Build;
 import android.os.CancellationSignal;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultLauncher;
@@ -54,6 +56,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Native Capacitor 8 plugin for Google Sign-In using AndroidX Credential Manager
@@ -71,14 +74,24 @@ public class GoogleCredentialAuthPlugin extends Plugin {
     private static final String DEFAULT_CALENDAR_SCOPE =
         "https://www.googleapis.com/auth/calendar.events";
 
+    private static final long SILENT_CALENDAR_AUTH_TIMEOUT_MS = 12_000L;
+    private static final long INTERACTIVE_INIT_CALENDAR_AUTH_TIMEOUT_MS = 15_000L;
+    private static final long INTERACTIVE_CONSENT_CALENDAR_AUTH_TIMEOUT_MS = 120_000L;
+    private static final long CLEAR_TOKEN_TIMEOUT_MS = 5_000L;
+
     private final AtomicBoolean signInInProgress = new AtomicBoolean(false);
     private final AtomicBoolean calendarAuthInProgress = new AtomicBoolean(false);
+    private final AtomicLong calendarAuthGeneration = new AtomicLong(0L);
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    @Nullable
+    private volatile Runnable pendingCalendarTimeoutRunnable = null;
     @Nullable
     private volatile CancellationSignal activeCancellationSignal = null;
     @Nullable
     private ActivityResultLauncher<IntentSenderRequest> calendarAuthLauncher = null;
     @Nullable
     private volatile PluginCall pendingCalendarAuthCall = null;
+    private volatile long pendingCalendarAuthGeneration = 0L;
     private volatile long calendarAuthStartMs = 0L;
     @Nullable
     private volatile String pendingCalendarRequestedScope = DEFAULT_CALENDAR_SCOPE;
@@ -92,6 +105,94 @@ public class GoogleCredentialAuthPlugin extends Plugin {
             new ActivityResultContracts.StartIntentSenderForResult(),
             this::handleCalendarAuthorizationActivityResult
         );
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        clearCalendarTimeoutWatchdog();
+        calendarAuthInProgress.set(false);
+        pendingCalendarAuthCall = null;
+        super.handleOnDestroy();
+    }
+
+    private void clearCalendarTimeoutWatchdog() {
+        Runnable existing = pendingCalendarTimeoutRunnable;
+        pendingCalendarTimeoutRunnable = null;
+        if (existing != null) {
+            mainHandler.removeCallbacks(existing);
+        }
+    }
+
+    private void scheduleCalendarTimeoutWatchdog(
+        final long generation,
+        @NonNull final PluginCall call,
+        final long timeoutMs,
+        @NonNull final String stage
+    ) {
+        clearCalendarTimeoutWatchdog();
+        Runnable watchdog = () -> {
+            if (calendarAuthGeneration.get() != generation) {
+                return;
+            }
+            if (!calendarAuthInProgress.compareAndSet(true, false)) {
+                return;
+            }
+            pendingCalendarTimeoutRunnable = null;
+            if (pendingCalendarAuthCall == call) {
+                pendingCalendarAuthCall = null;
+            }
+            calendarAuthGeneration.incrementAndGet();
+            Log.w(TAG, "[CalendarOAuth] stage=" + stage + "_timeout elapsedMs=" + timeoutMs);
+            Context ctx = getActivity() != null ? getActivity() : getContext();
+            if (ctx != null) {
+                rejectCalendarAuthError(
+                    ctx,
+                    call,
+                    "Google Calendar authorization timed out. Tap Reconnect or Disconnect to try again.",
+                    "AUTH_TIMEOUT",
+                    null
+                );
+            } else {
+                rejectCallSafely(
+                    call,
+                    "Google Calendar authorization timed out. Tap Reconnect or Disconnect to try again.",
+                    "AUTH_TIMEOUT"
+                );
+            }
+        };
+        pendingCalendarTimeoutRunnable = watchdog;
+        mainHandler.postDelayed(watchdog, timeoutMs);
+    }
+
+    @PluginMethod
+    public void cancelCalendarAuthorization(final PluginCall call) {
+        long nextGen = calendarAuthGeneration.incrementAndGet();
+        clearCalendarTimeoutWatchdog();
+        boolean wasInProgress = calendarAuthInProgress.getAndSet(false);
+        PluginCall pending = pendingCalendarAuthCall;
+        pendingCalendarAuthCall = null;
+        pendingCalendarAuthGeneration = 0L;
+
+        if (pending != null) {
+            JSObject cancelled = new JSObject();
+            cancelled.put("cancelled", true);
+            cancelled.put("stage", "native_cancelled_by_disconnect");
+            cancelled.put("reason", "Google Calendar authorization was cancelled.");
+            Context ctx = getActivity() != null ? getActivity() : getContext();
+            if (ctx != null) {
+                populateApkSigningMetadata(ctx, cancelled);
+            }
+            resolveCallSafely(pending, cancelled);
+        }
+
+        Log.i(
+            TAG,
+            "[CalendarOAuth] stage=native_cancel_reset wasInProgress=" + wasInProgress + " gen=" + nextGen
+        );
+        JSObject ret = new JSObject();
+        ret.put("cancelled", true);
+        ret.put("wasInProgress", wasInProgress);
+        call.resolve(ret);
     }
 
     @PluginMethod
@@ -471,14 +572,37 @@ public class GoogleCredentialAuthPlugin extends Plugin {
             return;
         }
 
+        final boolean forceAccountSelection = Boolean.TRUE.equals(call.getBoolean("forceAccountSelection", false));
+        final boolean silentOnly = Boolean.TRUE.equals(call.getBoolean("silentOnly", false));
+
+        // If an interactive reconnect/connect is requested while a stale or silent attempt is stuck,
+        // supersede the prior attempt cleanly instead of permanently deadlocking with CALENDAR_AUTH_IN_PROGRESS.
         if (!calendarAuthInProgress.compareAndSet(false, true)) {
-            call.reject(
-                "A Google Calendar authorization request is already in progress.",
-                "CALENDAR_AUTH_IN_PROGRESS"
-            );
-            return;
+            if (!silentOnly) {
+                long supersededGen = calendarAuthGeneration.incrementAndGet();
+                clearCalendarTimeoutWatchdog();
+                PluginCall previousPending = pendingCalendarAuthCall;
+                pendingCalendarAuthCall = null;
+                pendingCalendarAuthGeneration = 0L;
+                if (previousPending != null) {
+                    JSObject superseded = new JSObject();
+                    superseded.put("cancelled", true);
+                    superseded.put("stage", "native_superseded");
+                    superseded.put("reason", "Superseded by a new Google Calendar authorization request.");
+                    resolveCallSafely(previousPending, superseded);
+                }
+                calendarAuthInProgress.set(true);
+                Log.w(TAG, "[CalendarOAuth] stage=native_superseded_inflight gen=" + supersededGen);
+            } else {
+                call.reject(
+                    "A Google Calendar authorization request is already in progress.",
+                    "CALENDAR_AUTH_IN_PROGRESS"
+                );
+                return;
+            }
         }
 
+        final long myGeneration = calendarAuthGeneration.incrementAndGet();
         call.setKeepAlive(true);
 
         final String rawScope = call.getString("scope", DEFAULT_CALENDAR_SCOPE);
@@ -487,13 +611,18 @@ public class GoogleCredentialAuthPlugin extends Plugin {
         final String rawAccountEmail = call.getString("accountEmail", null);
         final String accountEmail =
             (rawAccountEmail != null && !rawAccountEmail.trim().isEmpty()) ? rawAccountEmail.trim() : null;
-        final boolean forceAccountSelection = Boolean.TRUE.equals(call.getBoolean("forceAccountSelection", false));
-        final boolean silentOnly = Boolean.TRUE.equals(call.getBoolean("silentOnly", false));
         final String staleAccessToken = call.getString("staleAccessToken", null);
 
         calendarAuthStartMs = System.currentTimeMillis();
         pendingCalendarRequestedScope = requestedScope;
         pendingCalendarAccountHint = accountEmail;
+
+        scheduleCalendarTimeoutWatchdog(
+            myGeneration,
+            call,
+            silentOnly ? SILENT_CALENDAR_AUTH_TIMEOUT_MS : INTERACTIVE_INIT_CALENDAR_AUTH_TIMEOUT_MS,
+            silentOnly ? "native_silent_authorize" : "native_interactive_init"
+        );
 
         Log.i(
             TAG,
@@ -502,13 +631,21 @@ public class GoogleCredentialAuthPlugin extends Plugin {
             " forceAccountSelection=" +
             forceAccountSelection +
             " silentOnly=" +
-            silentOnly
+            silentOnly +
+            " gen=" +
+            myGeneration
         );
 
+        final Context appContext = activity.getApplicationContext();
         final AuthorizationClient authorizationClient = Identity.getAuthorizationClient(activity);
 
-        final Runnable launchAuthorization = () -> activity.runOnUiThread(() -> {
-            if (activity.isFinishing() || activity.isDestroyed()) {
+        final Runnable launchAuthorization = () -> mainHandler.post(() -> {
+            if (calendarAuthGeneration.get() != myGeneration) {
+                return;
+            }
+            Activity currentActivity = getActivity();
+            if (currentActivity == null || currentActivity.isFinishing() || currentActivity.isDestroyed()) {
+                clearCalendarTimeoutWatchdog();
                 calendarAuthInProgress.set(false);
                 rejectCallSafely(
                     call,
@@ -527,11 +664,20 @@ public class GoogleCredentialAuthPlugin extends Plugin {
 
                 AuthorizationRequest authorizationRequest = requestBuilder.build();
 
+                // CRITICAL: Use unscoped Task listeners (NOT activity-scoped) so backgrounding/pausing
+                // MainActivity cannot silently drop callbacks and leave calendarAuthInProgress stuck forever.
                 authorizationClient
                     .authorize(authorizationRequest)
-                    .addOnSuccessListener(activity, authorizationResult -> {
+                    .addOnSuccessListener(authorizationResult -> mainHandler.post(() -> {
+                        if (calendarAuthGeneration.get() != myGeneration) {
+                            Log.i(TAG, "[CalendarOAuth] stage=native_stale_success_ignored gen=" + myGeneration);
+                            return;
+                        }
+                        Activity liveActivity = getActivity();
+                        Context safeCtx = liveActivity != null ? liveActivity : appContext;
                         if (authorizationResult.hasResolution()) {
                             if (silentOnly) {
+                                clearCalendarTimeoutWatchdog();
                                 calendarAuthInProgress.set(false);
                                 Log.i(TAG, "[CalendarOAuth] stage=native_silent_resolution_required");
                                 JSObject resolutionRequired = new JSObject();
@@ -549,17 +695,18 @@ public class GoogleCredentialAuthPlugin extends Plugin {
                                 if (accountEmail != null) {
                                     resolutionRequired.put("email", accountEmail);
                                 }
-                                populateApkSigningMetadata(activity, resolutionRequired);
+                                populateApkSigningMetadata(safeCtx, resolutionRequired);
                                 resolveCallSafely(call, resolutionRequired);
                                 return;
                             }
 
                             PendingIntent pendingIntent = authorizationResult.getPendingIntent();
-                            if (pendingIntent == null || calendarAuthLauncher == null) {
+                            if (pendingIntent == null || calendarAuthLauncher == null || liveActivity == null || liveActivity.isFinishing()) {
+                                clearCalendarTimeoutWatchdog();
                                 calendarAuthInProgress.set(false);
                                 Log.w(TAG, "[CalendarOAuth] stage=native_resolution_unavailable");
                                 rejectCalendarAuthError(
-                                    activity,
+                                    safeCtx,
                                     call,
                                     "Google Calendar consent screen could not be launched on this device.",
                                     "RESOLUTION_UNAVAILABLE",
@@ -568,13 +715,22 @@ public class GoogleCredentialAuthPlugin extends Plugin {
                                 return;
                             }
                             pendingCalendarAuthCall = call;
-                            Log.i(TAG, "[CalendarOAuth] stage=native_resolution_launched");
+                            pendingCalendarAuthGeneration = myGeneration;
+                            scheduleCalendarTimeoutWatchdog(
+                                myGeneration,
+                                call,
+                                INTERACTIVE_CONSENT_CALENDAR_AUTH_TIMEOUT_MS,
+                                "native_consent_screen"
+                            );
+                            Log.i(TAG, "[CalendarOAuth] stage=native_resolution_launched gen=" + myGeneration);
                             try {
                                 IntentSenderRequest intentSenderRequest =
                                     new IntentSenderRequest.Builder(pendingIntent.getIntentSender()).build();
                                 calendarAuthLauncher.launch(intentSenderRequest);
                             } catch (Throwable launchErr) {
+                                clearCalendarTimeoutWatchdog();
                                 pendingCalendarAuthCall = null;
+                                pendingCalendarAuthGeneration = 0L;
                                 calendarAuthInProgress.set(false);
                                 Log.e(
                                     TAG,
@@ -582,7 +738,7 @@ public class GoogleCredentialAuthPlugin extends Plugin {
                                     launchErr.getClass().getSimpleName()
                                 );
                                 rejectCalendarAuthError(
-                                    activity,
+                                    safeCtx,
                                     call,
                                     "Failed to open Google Calendar consent screen: " +
                                     launchErr.getClass().getSimpleName(),
@@ -591,18 +747,34 @@ public class GoogleCredentialAuthPlugin extends Plugin {
                                 );
                             }
                         } else {
+                            clearCalendarTimeoutWatchdog();
                             calendarAuthInProgress.set(false);
                             Log.i(TAG, "[CalendarOAuth] stage=native_immediate_grant");
-                            resolveCalendarAuthorizationResult(
-                                activity,
-                                call,
-                                authorizationResult,
-                                "native_immediate_grant"
-                            );
+                            if (liveActivity != null) {
+                                resolveCalendarAuthorizationResult(
+                                    liveActivity,
+                                    call,
+                                    authorizationResult,
+                                    "native_immediate_grant"
+                                );
+                            } else {
+                                rejectCalendarAuthError(
+                                    safeCtx,
+                                    call,
+                                    "Activity unavailable while completing Google Calendar authorization.",
+                                    "ACTIVITY_UNAVAILABLE",
+                                    null
+                                );
+                            }
                         }
-                    })
-                    .addOnFailureListener(activity, err -> {
+                    }))
+                    .addOnFailureListener(err -> mainHandler.post(() -> {
+                        if (calendarAuthGeneration.get() != myGeneration) {
+                            return;
+                        }
+                        clearCalendarTimeoutWatchdog();
                         calendarAuthInProgress.set(false);
+                        Context safeCtx = getActivity() != null ? getActivity() : appContext;
                         String code = classifyCalendarAuthErrorCode(err);
                         Log.w(
                             TAG,
@@ -612,21 +784,44 @@ public class GoogleCredentialAuthPlugin extends Plugin {
                             err.getClass().getSimpleName()
                         );
                         rejectCalendarAuthError(
-                            activity,
+                            safeCtx,
                             call,
                             buildSafeCalendarErrorMessage(err, code),
                             code,
                             err
                         );
-                    });
+                    }))
+                    .addOnCanceledListener(() -> mainHandler.post(() -> {
+                        if (calendarAuthGeneration.get() != myGeneration) {
+                            return;
+                        }
+                        clearCalendarTimeoutWatchdog();
+                        calendarAuthInProgress.set(false);
+                        Log.i(TAG, "[CalendarOAuth] stage=native_authorize_task_cancelled");
+                        JSObject cancelled = new JSObject();
+                        cancelled.put("cancelled", true);
+                        cancelled.put("stage", "native_task_cancelled");
+                        cancelled.put("elapsedMs", Math.max(0L, System.currentTimeMillis() - calendarAuthStartMs));
+                        cancelled.put("reason", "Google Calendar authorization was cancelled.");
+                        Context safeCtx = getActivity() != null ? getActivity() : appContext;
+                        if (safeCtx != null) {
+                            populateApkSigningMetadata(safeCtx, cancelled);
+                        }
+                        resolveCallSafely(call, cancelled);
+                    }));
             } catch (Throwable ex) {
+                if (calendarAuthGeneration.get() != myGeneration) {
+                    return;
+                }
+                clearCalendarTimeoutWatchdog();
                 calendarAuthInProgress.set(false);
+                Context safeCtx = getActivity() != null ? getActivity() : appContext;
                 Log.e(
                     TAG,
                     "[CalendarOAuth] stage=native_authorize_exception type=" + ex.getClass().getSimpleName()
                 );
                 rejectCalendarAuthError(
-                    activity,
+                    safeCtx,
                     call,
                     "Unexpected error starting native Google Calendar authorization.",
                     "NATIVE_AUTH_EXCEPTION",
@@ -635,15 +830,31 @@ public class GoogleCredentialAuthPlugin extends Plugin {
             }
         });
 
-        // Strictly await AuthorizationClient.clearToken(ClearTokenRequest) completion BEFORE retrying authorize()
+        // Await AuthorizationClient.clearToken(ClearTokenRequest) with bounded timeout BEFORE retrying authorize()
         if (staleAccessToken != null && !staleAccessToken.trim().isEmpty()) {
             try {
+                final AtomicBoolean launched = new AtomicBoolean(false);
+                final Runnable launchOnce = () -> {
+                    if (launched.compareAndSet(false, true)) {
+                        launchAuthorization.run();
+                    }
+                };
+                mainHandler.postDelayed(() -> {
+                    if (calendarAuthGeneration.get() == myGeneration && launched.compareAndSet(false, true)) {
+                        Log.w(TAG, "[CalendarOAuth] stage=native_stale_token_clear_timeout");
+                        launchAuthorization.run();
+                    }
+                }, CLEAR_TOKEN_TIMEOUT_MS);
+
                 ClearTokenRequest clearRequest = ClearTokenRequest.builder()
                     .setToken(staleAccessToken.trim())
                     .build();
                 authorizationClient
                     .clearToken(clearRequest)
-                    .addOnCompleteListener(activity, task -> {
+                    .addOnCompleteListener(task -> {
+                        if (calendarAuthGeneration.get() != myGeneration) {
+                            return;
+                        }
                         if (task.isSuccessful()) {
                             Log.i(TAG, "[CalendarOAuth] stage=native_stale_token_cleared");
                         } else {
@@ -654,7 +865,7 @@ public class GoogleCredentialAuthPlugin extends Plugin {
                                 (clearErr != null ? clearErr.getClass().getSimpleName() : "unknown")
                             );
                         }
-                        launchAuthorization.run();
+                        launchOnce.run();
                     });
             } catch (Throwable clearBuildErr) {
                 Log.w(
@@ -671,8 +882,17 @@ public class GoogleCredentialAuthPlugin extends Plugin {
 
     private void handleCalendarAuthorizationActivityResult(@NonNull ActivityResult activityResult) {
         final PluginCall call = pendingCalendarAuthCall;
+        final long callGen = pendingCalendarAuthGeneration;
         pendingCalendarAuthCall = null;
+        pendingCalendarAuthGeneration = 0L;
+        clearCalendarTimeoutWatchdog();
         calendarAuthInProgress.set(false);
+
+        // If disconnect/cancel superseded this consent flow while it was in the background, drop the late callback!
+        if (call != null && callGen != 0L && calendarAuthGeneration.get() != callGen) {
+            Log.i(TAG, "[CalendarOAuth] stage=native_late_activity_result_ignored gen=" + callGen);
+            return;
+        }
 
         final Activity activity = getActivity();
         final Context context = activity != null ? activity : getContext();
@@ -680,6 +900,11 @@ public class GoogleCredentialAuthPlugin extends Plugin {
 
         // Process-death recovery: Android killed & recreated MainActivity while Google consent was foreground
         if (call == null) {
+            // If user explicitly cancelled/disconnected in this process (generation > 0), ignore late callbacks
+            if (calendarAuthGeneration.get() > 0L) {
+                Log.i(TAG, "[CalendarOAuth] stage=native_late_orphaned_result_ignored");
+                return;
+            }
             JSObject restored = new JSObject();
             restored.put("restoredAfterProcessDeath", true);
             if (activityResult.getResultCode() == Activity.RESULT_CANCELED || activityResult.getData() == null) {

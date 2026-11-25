@@ -8,8 +8,8 @@
 
 import { initializeApp, getApps, getApp, cert, applicationDefault, App } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
-import { FIREBASE_CONFIG } from '../shared/firebaseCloudSync';
-import { DEFAULT_LERNSTUDIO_SETS } from '../shared/defaultLernstudioSets';
+import { FIREBASE_CONFIG } from '../shared/firebaseConfig.js';
+import { DEFAULT_LERNSTUDIO_SETS } from '../shared/defaultLernstudioSets.js';
 import crypto from 'crypto';
 
 const BUILTIN_CURRICULUM_SET_MAP = new Map<string, any>(

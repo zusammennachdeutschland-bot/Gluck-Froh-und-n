@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import crypto from 'crypto';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 export const GRAIN_API_ORIGIN = 'https://api.grain.com';
@@ -28,9 +29,15 @@ export interface EncryptedEntry {
   updatedAt: string;
 }
 
+function getVaultStorageDir(): string {
+  if (process.env.VERCEL === '1' || Boolean(process.env.VERCEL_ENV)) {
+    return path.join(os.tmpdir(), 'glueck-aistudio');
+  }
+  return path.join(process.cwd(), '.aistudio');
+}
+
 function getMasterKeyFilePath(): string {
-  const dir = path.join(process.cwd(), '.aistudio');
-  return path.join(dir, 'grain-vault-master.key');
+  return path.join(getVaultStorageDir(), 'grain-vault-master.key');
 }
 
 /**
@@ -153,8 +160,7 @@ export function __resetGrainServerVaultForTesting(): void {
 }
 
 function getVaultFilePath(): string {
-  const dir = path.join(process.cwd(), '.aistudio');
-  return path.join(dir, 'grain-server-vault.enc.json');
+  return path.join(getVaultStorageDir(), 'grain-server-vault.enc.json');
 }
 
 function loadVaultFromDisk(): void {

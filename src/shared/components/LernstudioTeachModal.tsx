@@ -519,13 +519,18 @@ export const LernstudioTeachModal: React.FC<Props> = ({
 
   // Auto-speak word whenever item or question changes across vocab teach stages
   useEffect(() => {
-    if (!isOpen || teachViewMode !== 'vocab' || !items || items.length === 0 || !soundEnabled) return;
+    if (!isOpen || teachViewMode !== 'vocab' || !items || items.length === 0) return;
+
+    if (currentStage === 2) {
+      stopGermanSpeech();
+      return;
+    }
+
+    if (!soundEnabled) return;
 
     let textToSpeak = '';
     if (currentStage === 1 && items[stageQuestionIndex]) {
       textToSpeak = buildTeacherStudySpeechText(items[stageQuestionIndex]);
-    } else if (currentStage === 2 && stage2Questions[stageQuestionIndex]) {
-      textToSpeak = stage2Questions[stageQuestionIndex].displayedItem.german;
     } else if (currentStage === 3 && stage3Questions[stageQuestionIndex]) {
       textToSpeak = stage3Questions[stageQuestionIndex].targetItem.german;
     } else if (currentStage === 4 && stage4Questions[stageQuestionIndex]) {
@@ -666,7 +671,6 @@ export const LernstudioTeachModal: React.FC<Props> = ({
       setStars((prev) => Math.max(0, prev - 50));
       if (soundEnabled) {
         playLernstudioSound('wrong');
-        handleSpeakGerman(currentQ.targetItem.german);
       }
       setFeedbackMessage(
         `إجابة خاطئة (-50 💰)! الإجابة الصحيحة هي: الكلمة ${
@@ -1801,19 +1805,30 @@ export const LernstudioTeachModal: React.FC<Props> = ({
 
                 {/* Question Prompt */}
                 <div className="space-y-3 py-2">
-                  <div className="text-6xl sm:text-7xl select-none">
+                  <div className="text-5xl sm:text-6xl select-none">
                     {stage2Questions[stageQuestionIndex].targetItem.emoji || '🇩🇪'}
                   </div>
 
-                  <div className="space-y-1">
-                    <p className="text-xs font-bold text-text-muted">
-                      ({getItemTranslation(stage2Questions[stageQuestionIndex].targetItem, language)})
-                    </p>
-                    <p className="text-sm font-bold text-text-main">
-                      هل الكلمة الألمانية المطابقة هي:
-                    </p>
-                    <div className="text-2xl sm:text-3xl font-black text-primary font-mono py-1" dir="ltr">
-                      "{stage2Questions[stageQuestionIndex].displayedItem.german}"
+                  <p className="text-xs sm:text-sm font-bold text-text-muted">
+                    {language === 'de'
+                      ? 'Passt die deutsche Übersetzung? Richtig oder Falsch?'
+                      : language === 'en'
+                      ? 'Does this German word match the meaning?'
+                      : 'هل الترجمة الألمانية صحيحة أم خطأ؟'}
+                  </p>
+
+                  <div className="space-y-2 py-1">
+                    <div
+                      className="text-2xl sm:text-3xl font-black text-text-main leading-snug"
+                      dir={language === 'ar' ? 'rtl' : 'ltr'}
+                    >
+                      {getItemTranslation(stage2Questions[stageQuestionIndex].targetItem, language)}
+                    </div>
+                    <div
+                      className="text-2xl sm:text-3xl font-black text-primary leading-snug"
+                      dir="ltr"
+                    >
+                      {stage2Questions[stageQuestionIndex].displayedItem.german}
                     </div>
                   </div>
                 </div>
@@ -1864,7 +1879,7 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                   >
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <span>{feedbackMessage}</span>
-                      {isCorrectAnswer ? (
+                      {isCorrectAnswer && (
                         <span className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-500/20 px-3 py-1 rounded-full border border-emerald-500/30 shadow-2xs">
                           <span>{language === 'ar' ? 'الانتقال للسؤال التالي...' : language === 'de' ? 'Nächste Frage...' : 'Next question...'}</span>
                           <span className="inline-flex items-center gap-0.5 mr-1">
@@ -1873,15 +1888,6 @@ export const LernstudioTeachModal: React.FC<Props> = ({
                             <span className="w-1 h-2 bg-emerald-500 rounded-full animate-pulse [animation-delay:300ms]" />
                           </span>
                         </span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleSpeakGerman(stage2Questions[stageQuestionIndex].targetItem.german)}
-                          className="flex items-center gap-1.5 text-xs text-red-700 dark:text-red-300 font-bold bg-red-500/20 hover:bg-red-500/30 px-3 py-1 rounded-full border border-red-500/30 cursor-pointer transition-colors shadow-2xs"
-                        >
-                          <Volume2 className="w-3.5 h-3.5 text-red-500" />
-                          <span>{language === 'ar' ? 'استمع لنطق الكلمة' : language === 'de' ? 'Aussprache anhören' : 'Listen to word'}</span>
-                        </button>
                       )}
                     </div>
                     {isCorrectAnswer && (

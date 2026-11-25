@@ -1,0 +1,581 @@
+import assert from 'node:assert/strict';
+import {
+  createLessonPersistenceController,
+  filterActiveLessonsList,
+  LessonStorageAdapter,
+  mergeLessonListsMonotonically,
+  normalizeStudentPaymentsForLesson
+} from '../services/lessonPersistenceEngine';
+import { deduplicateLessonList } from '../utils/lessonUtils';
+import { Group, Lesson, LessonReport, Student } from '../types';
+import { formatLocalDate } from '../utils/timeUtils';
+
+function makeInMemoryStorage(): {
+  adapter: LessonStorageAdapter;
+  store: Map<string, string>;
+} {
+  const store = new Map<string, string>();
+  const adapter: LessonStorageAdapter = {
+    getItem: async <T>(key: string): Promise<T | null> => {
+      const raw = store.get(key);
+      if (!raw) return null;
+      return JSON.parse(raw) as T;
+    },
+    setItem: async (key: string, value: any): Promise<void> => {
+      store.set(key, JSON.stringify(value));
+    }
+  };
+  return { adapter, store };
+}
+
+function makeReport(overrides: Partial<LessonReport> = {}): LessonReport {
+  return {
+    attendanceStatus: 'present',
+    homeworkStatus: 'done',
+    teacherNotes: 'Completed unit exercises',
+    arabicTopicsExplained: 'تم شرح القواعد',
+    paymentStatus: 'paid',
+    amountPaid: 250,
+    savedAt: '18:30',
+    ...overrides
+  } as LessonReport;
+}
+
+async function runLessonCompletionPersistenceTests() {
+  console.log('=== Starting P0 Lesson Completion Persistence & Same-Date Multi-Lesson Suite ===');
+
+  const today = formatLocalDate(new Date());
+  const nextWeekDate = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    return formatLocalDate(d);
+  })();
+
+  let logicalClock = 1_700_000_000_000;
+  const wrapMutation = <T extends Record<string, any>>(item: T): T => {
+    logicalClock += 10;
+    return { ...item, updatedAt: logicalClock };
+  };
+  const stampFieldTimestamps = <T extends Record<string, any>>(prev: T | undefined, next: T): T => {
+    const prevTs = (prev as any)?.fieldTimestamps || {};
+    const fieldTimestamps = { ...prevTs };
+    const ts = Number((next as any).updatedAt || Date.now());
+    for (const k of Object.keys(next)) {
+      if (k === 'fieldTimestamps' || k === 'updatedAt') continue;
+      if (!prev || JSON.stringify(prev[k]) !== JSON.stringify(next[k])) {
+        fieldTimestamps[k] = ts;
+      }
+    }
+    return { ...next, fieldTimestamps };
+  };
+
+  const groups: Group[] = [
+    {
+      id: 'grp_a',
+      name: 'B1.1 Group A',
+      type: 'online',
+      status: 'active',
+      sessionCount: 4,
+      lessonDurationMinutes: 90,
+      paymentType: 'package',
+      schedules: [{ day: 'Mo', time: '16:00' }]
+    } as unknown as Group,
+    {
+      id: 'grp_b',
+      name: 'A2.2 Group B',
+      type: 'offline',
+      status: 'active',
+      sessionCount: 4,
+      lessonDurationMinutes: 90,
+      paymentType: 'package',
+      schedules: [{ day: 'Mo', time: '18:00' }]
+    } as unknown as Group,
+    {
+      id: 'grp_per_lesson',
+      name: 'C1 Per-Lesson Double',
+      type: 'online',
+      status: 'active',
+      sessionCount: 1,
+      lessonDurationMinutes: 60,
+      paymentType: 'per_lesson',
+      schedules: [
+        { day: 'Mo', time: '14:00' },
+        { day: 'Mo', time: '20:00' }
+      ]
+    } as unknown as Group
+  ];
+
+  const students: Student[] = [
+    { id: 'st_1', name: 'Ahmed', groupId: 'grp_a', paymentType: 'package', lessonFee: 250 } as unknown as Student,
+    { id: 'st_2', name: 'Mona', groupId: 'grp_a', paymentType: 'package', lessonFee: 250 } as unknown as Student,
+    { id: 'st_3', name: 'Kareem', groupId: 'grp_b', paymentType: 'package', lessonFee: 300 } as unknown as Student,
+    { id: 'st_4', name: 'Salma', groupId: 'grp_per_lesson', paymentType: 'per_lesson', lessonFee: 200 } as unknown as Student
+  ];
+
+  // ---------------------------------------------------------------------------
+  // 1. TWO LESSONS ON SAME DATE (A -> B): Completing B NEVER undoes A
+  //    (Includes projected l_auto_ snapshot completed from Home + Modal update)
+  // ---------------------------------------------------------------------------
+  console.log('1. Testing two lessons on same date (Home quick-complete + Modal saveLessonReport + updateLesson)...');
+  {
+    const { adapter, store } = makeInMemoryStorage();
+    let latestActive: Lesson[] = [];
+    const controller = createLessonPersistenceController({
+      storage: adapter,
+      getGroups: () => groups,
+      getStudents: () => students,
+      getPrunedLessonIds: () => new Set(),
+      wrapMutation,
+      stampFieldTimestamps,
+      onActiveLessonsChanged: (active) => {
+        latestActive = active;
+      }
+    });
+
+    const lessonA: Lesson = {
+      id: `l_auto_grp_a_${today}_1600`,
+      groupId: 'grp_a',
+      groupName: 'B1.1 Group A',
+      title: 'B1.1 Group A',
+      date: today,
+      time: '16:00',
+      durationMinutes: 90,
+      type: 'online',
+      status: 'scheduled',
+      isAutoGenerated: true,
+      sessionNumber: 1,
+      totalSessionsInPackage: 4,
+      amountDue: 250,
+      updatedAt: 100
+    } as Lesson;
+
+    const lessonB: Lesson = {
+      id: `l_auto_grp_b_${today}_1800`,
+      groupId: 'grp_b',
+      groupName: 'A2.2 Group B',
+      title: 'A2.2 Group B',
+      date: today,
+      time: '18:00',
+      durationMinutes: 90,
+      type: 'offline',
+      status: 'scheduled',
+      isAutoGenerated: true,
+      sessionNumber: 1,
+      totalSessionsInPackage: 4,
+      amountDue: 300,
+      updatedAt: 100
+    } as Lesson;
+
+    // Seed only lessonA in storage; lessonB is a freshly projected l_auto_ lesson (not yet in storage!)
+    await adapter.setItem('dl_lessons', [lessonA]);
+    await controller.hydrateFromStorage();
+
+    // Complete Lesson A (Modal flow: saveLessonReport + updateLesson with recording links & student payments)
+    const reportA = makeReport({
+      teacherNotes: 'Lesson A notes',
+      amountPaid: 500,
+      paymentStatus: 'paid',
+      studentPayments: {
+        st_1: { status: 'paid', amount: 250 },
+        st_2: { status: 'paid', amount: 250 }
+      }
+    });
+    await controller.saveLessonReport({
+      lessonId: lessonA.id,
+      report: reportA,
+      packageCount: 4,
+      sessionNumber: 1,
+      lessonSnapshot: lessonA
+    });
+    await controller.updateLesson({
+      lessonId: lessonA.id,
+      updates: {
+        status: 'completed',
+        recordingLink: 'https://grain.com/share/rec-a',
+        recordingLink2: 'https://zoom.us/rec/a2',
+        zoomMeetingLink: 'https://zoom.us/j/111222333',
+        report: reportA
+      },
+      lessonSnapshot: lessonA
+    });
+
+    // Simulate stale React render snapshot captured BEFORE Lesson A finished, firing concurrently with Lesson B completion!
+    const staleRenderBeforeA = [lessonA];
+    const reportB = makeReport({
+      teacherNotes: 'Lesson B quick complete',
+      amountPaid: 300,
+      paymentStatus: 'paid',
+      studentAttendance: { st_3: 'present' }
+    });
+
+    await Promise.all([
+      controller.syncActiveSnapshot(staleRenderBeforeA),
+      controller.saveLessonReport({
+        lessonId: lessonB.id,
+        report: reportB,
+        packageCount: 4,
+        sessionNumber: 1,
+        lessonSnapshot: lessonB
+      })
+    ]);
+
+    const afterBoth = controller.getFullLessons();
+    const persistedA = afterBoth.find((l) => l.id === lessonA.id);
+    const persistedB = afterBoth.find((l) => l.id === lessonB.id);
+    assert.ok(persistedA, 'Lesson A must still exist after completing Lesson B');
+    assert.ok(persistedB, 'Projected Lesson B must be persisted on completion');
+    assert.equal(persistedA!.status, 'completed', 'Lesson A MUST remain completed after completing Lesson B');
+    assert.equal(persistedB!.status, 'completed', 'Lesson B MUST remain completed');
+    assert.equal(persistedA!.recordingLink, 'https://grain.com/share/rec-a');
+    assert.equal(persistedA!.recordingLink2, 'https://zoom.us/rec/a2');
+    assert.equal(persistedA!.studentPayments?.st_1?.paymentStatus, 'paid');
+    assert.equal(persistedA!.studentPayments?.st_1?.amountPaid, 250);
+    assert.equal(persistedB!.report?.teacherNotes, 'Lesson B quick complete');
+    assert.equal(persistedB!.type, 'offline');
+    assert.equal(latestActive.filter((l) => l.status === 'completed').length, 2);
+
+    // Cold reload verification from durable storage
+    const reloadedController = createLessonPersistenceController({
+      storage: adapter,
+      getGroups: () => groups,
+      getStudents: () => students,
+      getPrunedLessonIds: () => new Set(),
+      wrapMutation,
+      stampFieldTimestamps
+    });
+    const { full: reloadedFull } = await reloadedController.hydrateFromStorage();
+    assert.equal(reloadedFull.find((l) => l.id === lessonA.id)?.status, 'completed');
+    assert.equal(reloadedFull.find((l) => l.id === lessonB.id)?.status, 'completed');
+    assert.equal(reloadedFull.find((l) => l.id === lessonA.id)?.recordingLink, 'https://grain.com/share/rec-a');
+    assert.ok(store.get('dl_lessons'), 'dl_lessons must be durably written');
+  }
+
+  // ---------------------------------------------------------------------------
+  // 2. THREE LESSONS ON SAME DATE (including same-group per-lesson 14:00 & 20:00 + 3rd group)
+  //    Completing all 3 must NEVER collapse or revert any of them!
+  // ---------------------------------------------------------------------------
+  console.log('2. Testing 3 lessons on same date including same-group distinct times (per-lesson sessionNumber=1)...');
+  {
+    const { adapter } = makeInMemoryStorage();
+    const controller = createLessonPersistenceController({
+      storage: adapter,
+      getGroups: () => groups,
+      getStudents: () => students,
+      getPrunedLessonIds: () => new Set(),
+      wrapMutation,
+      stampFieldTimestamps
+    });
+
+    const sameGroupEarly: Lesson = {
+      id: `l_auto_grp_per_lesson_${today}_1400`,
+      groupId: 'grp_per_lesson',
+      groupName: 'C1 Per-Lesson Double',
+      date: today,
+      time: '14:00',
+      durationMinutes: 60,
+      type: 'online',
+      status: 'scheduled',
+      sessionNumber: 1,
+      totalSessionsInPackage: 1,
+      amountDue: 200,
+      updatedAt: 100
+    } as Lesson;
+
+    const sameGroupLate: Lesson = {
+      id: `l_auto_grp_per_lesson_${today}_2000`,
+      groupId: 'grp_per_lesson',
+      groupName: 'C1 Per-Lesson Double',
+      date: today,
+      time: '20:00',
+      durationMinutes: 60,
+      type: 'online',
+      status: 'scheduled',
+      sessionNumber: 1,
+      totalSessionsInPackage: 1,
+      amountDue: 200,
+      updatedAt: 100
+    } as Lesson;
+
+    const thirdLessonOffline: Lesson = {
+      id: `l_manual_grp_b_${today}_1700`,
+      groupId: 'grp_b',
+      groupName: 'A2.2 Group B',
+      date: today,
+      time: '17:00',
+      durationMinutes: 90,
+      type: 'offline',
+      status: 'scheduled',
+      sessionNumber: 1,
+      totalSessionsInPackage: 4,
+      amountDue: 300,
+      updatedAt: 100
+    } as Lesson;
+
+    const futureScheduled: Lesson = {
+      id: `l_auto_grp_b_${nextWeekDate}_1800`,
+      groupId: 'grp_b',
+      groupName: 'A2.2 Group B',
+      date: nextWeekDate,
+      time: '18:00',
+      durationMinutes: 90,
+      type: 'offline',
+      status: 'scheduled',
+      sessionNumber: 2,
+      totalSessionsInPackage: 4,
+      amountDue: 300,
+      updatedAt: 100
+    } as Lesson;
+
+    await adapter.setItem('dl_lessons', [sameGroupEarly, sameGroupLate, thirdLessonOffline, futureScheduled]);
+    await controller.hydrateFromStorage();
+
+    // Complete 14:00, then 20:00 (SAME group, SAME date, SAME sessionNumber=1!), then 17:00 offline
+    await controller.saveLessonReport({
+      lessonId: sameGroupEarly.id,
+      report: makeReport({ teacherNotes: '14:00 C1 grammar', amountPaid: 200 })
+    });
+    await controller.saveLessonReport({
+      lessonId: sameGroupLate.id,
+      report: makeReport({ teacherNotes: '20:00 C1 speaking', amountPaid: 200 })
+    });
+    await controller.saveLessonReport({
+      lessonId: thirdLessonOffline.id,
+      report: makeReport({ teacherNotes: '17:00 A2 offline', amountPaid: 300 })
+    });
+
+    // Update a 3rd lesson metadata (recording link) on the same date — must NOT regress the other two
+    await controller.updateLesson({
+      lessonId: thirdLessonOffline.id,
+      updates: { recordingLink: 'https://example.com/rec-offline-notes' }
+    });
+
+    const full = controller.getFullLessons();
+    const l14 = full.find((l) => l.id === sameGroupEarly.id);
+    const l20 = full.find((l) => l.id === sameGroupLate.id);
+    const l17 = full.find((l) => l.id === thirdLessonOffline.id);
+    const lNext = full.find((l) => l.id === futureScheduled.id);
+
+    assert.ok(l14 && l20 && l17, 'All three same-date lessons must remain distinct and persisted');
+    assert.equal(l14!.status, 'completed');
+    assert.equal(l20!.status, 'completed');
+    assert.equal(l17!.status, 'completed');
+    assert.equal(l14!.report?.teacherNotes, '14:00 C1 grammar');
+    assert.equal(l20!.report?.teacherNotes, '20:00 C1 speaking');
+    assert.equal(l17!.recordingLink, 'https://example.com/rec-offline-notes');
+    assert.equal(lNext!.status, 'scheduled');
+    assert.equal(lNext!.sessionNumber, 2, 'Resequencing future scheduled lesson must preserve its cycle number');
+  }
+
+  // ---------------------------------------------------------------------------
+  // 3. CONCURRENT COMPLETIONS INTERLEAVED WITH STALE REACT SNAPSHOTS
+  // ---------------------------------------------------------------------------
+  console.log('3. Testing concurrent rapid completions interleaved with stale React syncActiveSnapshot calls...');
+  {
+    const { adapter } = makeInMemoryStorage();
+    const controller = createLessonPersistenceController({
+      storage: adapter,
+      getGroups: () => groups,
+      getStudents: () => students,
+      getPrunedLessonIds: () => new Set(),
+      wrapMutation,
+      stampFieldTimestamps
+    });
+
+    const l1: Lesson = {
+      id: `l_concurrent_1`,
+      groupId: 'grp_a',
+      groupName: 'B1.1 Group A',
+      date: today,
+      time: '10:00',
+      durationMinutes: 60,
+      type: 'online',
+      status: 'scheduled',
+      sessionNumber: 1,
+      totalSessionsInPackage: 4,
+      updatedAt: 500
+    } as Lesson;
+    const l2: Lesson = {
+      id: `l_concurrent_2`,
+      groupId: 'grp_a',
+      groupName: 'B1.1 Group A',
+      date: today,
+      time: '12:00',
+      durationMinutes: 60,
+      type: 'online',
+      status: 'scheduled',
+      sessionNumber: 2,
+      totalSessionsInPackage: 4,
+      updatedAt: 500
+    } as Lesson;
+    const l3: Lesson = {
+      id: `l_concurrent_3`,
+      groupId: 'grp_b',
+      groupName: 'A2.2 Group B',
+      date: today,
+      time: '15:00',
+      durationMinutes: 60,
+      type: 'offline',
+      status: 'scheduled',
+      sessionNumber: 1,
+      totalSessionsInPackage: 4,
+      updatedAt: 500
+    } as Lesson;
+
+    await adapter.setItem('dl_lessons', [l1, l2, l3]);
+    await controller.hydrateFromStorage();
+
+    // Fire 3 completions AND stale snapshots simultaneously (the exact React race!)
+    await Promise.all([
+      controller.saveLessonReport({ lessonId: l1.id, report: makeReport({ teacherNotes: 'C1' }) }),
+      controller.syncActiveSnapshot([l1, l2, l3]), // stale snapshot where all 3 are still scheduled!
+      controller.saveLessonReport({ lessonId: l2.id, report: makeReport({ teacherNotes: 'C2' }) }),
+      controller.syncActiveSnapshot([{ ...l1, status: 'completed', updatedAt: 505 }, l2, l3]), // partially stale!
+      controller.saveLessonReport({ lessonId: l3.id, report: makeReport({ teacherNotes: 'C3' }) })
+    ]);
+
+    const finalLessons = controller.getFullLessons();
+    assert.equal(finalLessons.find((l) => l.id === l1.id)?.status, 'completed');
+    assert.equal(finalLessons.find((l) => l.id === l2.id)?.status, 'completed');
+    assert.equal(finalLessons.find((l) => l.id === l3.id)?.status, 'completed');
+
+    // Verify storage matches memory 1:1
+    const stored = (await adapter.getItem<Lesson[]>('dl_lessons')) || [];
+    assert.equal(stored.filter((l) => l.status === 'completed').length, 3);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 4. DEDUPLICATION STILL COLLAPSES TRUE SAME-SLOT DUPLICATES WITHOUT DROPPING DISTINCT TIMES
+  // ---------------------------------------------------------------------------
+  console.log('4. Verifying deduplication still merges true same-slot duplicates while preserving distinct times...');
+  {
+    const autoDup: Lesson = {
+      id: `l_auto_grp_a_${today}_1600`,
+      groupId: 'grp_a',
+      date: today,
+      time: '16:00',
+      durationMinutes: 90,
+      status: 'scheduled',
+      updatedAt: 100
+    } as Lesson;
+    const completedSameSlot: Lesson = {
+      id: `l_manual_grp_a_${today}_1600`,
+      groupId: 'grp_a',
+      date: today,
+      time: '4:00 PM', // same normalized time as 16:00!
+      durationMinutes: 90,
+      status: 'completed',
+      paymentStatus: 'paid',
+      amountPaid: 250,
+      report: makeReport({ teacherNotes: 'Survivor report' }),
+      updatedAt: 200
+    } as Lesson;
+    const distinctEveningLesson: Lesson = {
+      id: `l_manual_grp_a_${today}_1900`,
+      groupId: 'grp_a',
+      date: today,
+      time: '19:00',
+      durationMinutes: 90,
+      status: 'completed',
+      sessionNumber: 1,
+      report: makeReport({ teacherNotes: 'Distinct 19:00 class' }),
+      updatedAt: 250
+    } as Lesson;
+
+    const { deduplicated } = deduplicateLessonList([autoDup, completedSameSlot, distinctEveningLesson], students);
+    assert.equal(deduplicated.length, 2, 'True same-slot duplicate must collapse while distinct 19:00 lesson survives');
+    assert.ok(deduplicated.some((l) => l.id === completedSameSlot.id && l.status === 'completed'));
+    assert.ok(deduplicated.some((l) => l.id === distinctEveningLesson.id && l.status === 'completed'));
+
+    // Also verify filterActiveLessonsList prefers completed over cancelled on exact same slot
+    const cancelledSameSlot: Lesson = {
+      id: 'l_cancelled_same_slot',
+      groupId: 'grp_a',
+      date: today,
+      time: '16:00',
+      status: 'cancelled',
+      updatedAt: 999
+    } as Lesson;
+    const activeFiltered = filterActiveLessonsList(
+      [cancelledSameSlot, completedSameSlot, distinctEveningLesson],
+      students,
+      groups
+    );
+    assert.equal(activeFiltered.length, 2);
+    assert.equal(activeFiltered.find((l) => l.time === '4:00 PM')?.status, 'completed');
+  }
+
+  // ---------------------------------------------------------------------------
+  // 5. CLOUD SYNC RECONCILIATION NEVER REVERTS LOCAL COMPLETION WITH STALE SCHEDULED REMOTE
+  // ---------------------------------------------------------------------------
+  console.log('5. Testing cloud sync conflict reconciliation preserves local completion against stale cloud snapshot...');
+  {
+    const { adapter } = makeInMemoryStorage();
+    const controller = createLessonPersistenceController({
+      storage: adapter,
+      getGroups: () => groups,
+      getStudents: () => students,
+      getPrunedLessonIds: () => new Set(),
+      wrapMutation,
+      stampFieldTimestamps
+    });
+
+    const localLesson: Lesson = {
+      id: 'l_cloud_conflict_1',
+      groupId: 'grp_a',
+      date: today,
+      time: '16:00',
+      status: 'scheduled',
+      updatedAt: 100
+    } as Lesson;
+    await adapter.setItem('dl_lessons', [localLesson]);
+    await controller.hydrateFromStorage();
+
+    await controller.saveLessonReport({
+      lessonId: localLesson.id,
+      report: makeReport({ teacherNotes: 'Local completed report', amountPaid: 250 })
+    });
+
+    // Stale remote cloud snapshot arrives where l_cloud_conflict_1 is still 'scheduled'
+    const staleRemote: Lesson = {
+      ...localLesson,
+      status: 'scheduled',
+      updatedAt: 150
+    };
+    const newRemoteLesson: Lesson = {
+      id: 'l_remote_only_2',
+      groupId: 'grp_b',
+      date: today,
+      time: '21:00',
+      status: 'completed',
+      report: makeReport({ teacherNotes: 'Completed on other device' }),
+      updatedAt: logicalClock + 100
+    } as Lesson;
+
+    const merged = await controller.reconcileCloudSnapshot([staleRemote, newRemoteLesson]);
+    const localAfter = merged.find((l) => l.id === localLesson.id);
+    const remoteAfter = merged.find((l) => l.id === newRemoteLesson.id);
+    assert.equal(localAfter?.status, 'completed', 'Stale cloud scheduled record MUST NOT revert local completion');
+    assert.equal(localAfter?.report?.teacherNotes, 'Local completed report');
+    assert.equal(remoteAfter?.status, 'completed', 'Valid remote completion must be preserved alongside local completion');
+
+    // Direct helper verification: mergeLessonListsMonotonically + normalizeStudentPaymentsForLesson
+    const directMerged = mergeLessonListsMonotonically([localAfter!], [staleRemote], new Set(), 'cloud_sync');
+    assert.equal(directMerged[0].status, 'completed');
+
+    const normalized = normalizeStudentPaymentsForLesson(
+      { st_1: { status: 'paid', amount: 250 } },
+      students,
+      250
+    );
+    assert.equal(normalized?.st_1.paymentStatus, 'paid');
+    assert.equal(normalized?.st_1.amountPaid, 250);
+    assert.equal(normalized?.st_1.studentName, 'Ahmed');
+  }
+
+  console.log('ALL P0 LESSON COMPLETION PERSISTENCE & MULTI-LESSON TESTS PASSED!');
+}
+
+runLessonCompletionPersistenceTests().catch((err) => {
+  console.error('Lesson completion persistence tests failed:', err);
+  process.exit(1);
+});
