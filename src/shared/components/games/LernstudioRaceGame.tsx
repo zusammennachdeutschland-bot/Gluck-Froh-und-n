@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { LernstudioSet, LernstudioTheme, TeamScore } from '../../../types/lernstudio';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { LernstudioSet, LernstudioTheme, TeamScore, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
 import {
   buildDynamicQuestionPool,
   evaluateGameQuestionAnswer,
@@ -10,63 +10,90 @@ import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
 import {
   ArrowRight,
-  Trophy,
   Users,
   CheckCircle2,
   XCircle,
   Flame,
   Flag,
   RotateCcw,
-  Sparkles,
   Volume2,
   VolumeX,
   Zap
 } from 'lucide-react';
 
 import { GameSetupConfig } from '../LernstudioGameSetupScreen';
-
-interface Props {
-  set: LernstudioSet;
-  activeTheme: LernstudioTheme;
-  language?: string;
-  gameConfig?: GameSetupConfig;
-  onBack: () => void;
-}
-
-interface RaceTeam extends TeamScore {
-  distance: number; // 0 to TARGET_DISTANCE
-  streak: number;
-}
-
-const TARGET_DISTANCE = 10; // 10 steps to reach the finish line
-
 import {
   getLernstudioTranslations,
   getLocalizedSetTitle,
   getLocalizedTeamName
 } from '../../../utils/lernstudioTranslations';
 
-export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language = 'ar', gameConfig, onBack }) => {
+interface Props {
+  set: LernstudioSet;
+  activeTheme: LernstudioTheme;
+  language?: string;
+  gameConfig?: GameSetupConfig;
+  onGameComplete?: (result: LernstudioGameCompletionPayload) => void;
+  onBack: () => void;
+}
+
+interface RaceTeam extends TeamScore {
+  distance: number;
+  streak: number;
+}
+
+const TEAM_COLORS = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B'];
+
+export const LernstudioRaceGame: React.FC<Props> = ({
+  set,
+  language = 'ar',
+  gameConfig,
+  onGameComplete,
+  onBack
+}) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const displaySetTitle = getLocalizedSetTitle(set, language);
   const { triggerSparkles, triggerScorePopup, triggerCelebration, EffectsOverlay, SettingsBar } = useGameEffects(language);
+  const targetDistance = Math.max(5, Math.min(20, gameConfig?.questionCount || 10));
 
-  const [teams, setTeams] = useState<RaceTeam[]>([
-    { id: 'team_1', name: getLocalizedTeamName('team_1', language), color: '#3B82F6', score: 0, distance: 0, streak: 0 },
-    { id: 'team_2', name: getLocalizedTeamName('team_2', language), color: '#EF4444', score: 0, distance: 0, streak: 0 }
-  ]);
+  const buildInitialTeams = useCallback(
+    (countOverride?: number): RaceTeam[] => {
+      const desiredCount =
+        countOverride ||
+        (gameConfig?.gameMode === 'pvp_4teams'
+          ? 4
+          : gameConfig?.gameMode === 'pvp_3teams'
+          ? 3
+          : gameConfig?.teamNames?.length
+          ? Math.min(4, Math.max(2, gameConfig.teamNames.length))
+          : 2);
+      return Array.from({ length: desiredCount }, (_, idx) => ({
+        id: `team_${idx + 1}`,
+        name: gameConfig?.teamNames?.[idx] || getLocalizedTeamName(`team_${idx + 1}`, language),
+        color: TEAM_COLORS[idx % TEAM_COLORS.length],
+        score: 0,
+        distance: 0,
+        streak: 0
+      }));
+    },
+    [gameConfig?.gameMode, gameConfig?.teamNames, language]
+  );
+
+  const [teams, setTeams] = useState<RaceTeam[]>(() => buildInitialTeams());
   const [activeTeamIndex, setActiveTeamIndex] = useState(0);
   const [winnerTeam, setWinnerTeam] = useState<RaceTeam | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(gameConfig?.enableSoundFx ?? true);
+  const [sessionSeed, setSessionSeed] = useState<number>(() => Date.now());
 
   // Questions
   const questionsPool = useMemo(
     () =>
       buildDynamicQuestionPool(set, language, {
-        questionModeFilter: gameConfig?.questionType || 'mixed'
+        questionModeFilter: gameConfig?.questionType || 'mixed',
+        seed: sessionSeed
       }),
-    [set, language, gameConfig?.questionType]
+    [set, language, gameConfig?.questionType, sessionSeed]
   );
   const [qIndex, setQIndex] = useState(0);
   const [selectedOpt, setSelectedOpt] = useState<string | null>(null);
@@ -74,6 +101,18 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
   const [boostApplied, setBoostApplied] = useState(false);
   const [sentenceArranged, setSentenceArranged] = useState<string[]>([]);
   const [typedAnswer, setTypedAnswer] = useState('');
+
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const correctRef = useRef(0);
+  const totalRef = useRef(0);
+  const startedAtRef = useRef(Date.now());
+
+  useEffect(() => {
+    return () => {
+      timeoutsRef.current.forEach(clearTimeout);
+      timeoutsRef.current = [];
+    };
+  }, []);
 
   const activeTeam = teams[activeTeamIndex] || teams[0];
   const currentQuestion: GameQuestion | undefined = questionsPool[qIndex % Math.max(1, questionsPool.length)] || questionsPool[0];
@@ -90,27 +129,23 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
   }, [qIndex]);
 
   const handleToggleTeamCount = (count: number) => {
-    const newTeams: RaceTeam[] = [
-      { id: 'team_1', name: getLocalizedTeamName('team_1', language), color: '#3B82F6', score: 0, distance: 0, streak: 0 },
-      { id: 'team_2', name: getLocalizedTeamName('team_2', language), color: '#EF4444', score: 0, distance: 0, streak: 0 }
-    ];
-    if (count >= 3) {
-      newTeams.push({ id: 'team_3', name: getLocalizedTeamName('team_3', language), color: '#10B981', score: 0, distance: 0, streak: 0 });
-    }
-    if (count >= 4) {
-      newTeams.push({ id: 'team_4', name: getLocalizedTeamName('team_4', language), color: '#F59E0B', score: 0, distance: 0, streak: 0 });
-    }
-    setTeams(newTeams);
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current = [];
+    setTeams(buildInitialTeams(count));
     setActiveTeamIndex(0);
     setWinnerTeam(null);
+    setAnsweredState(null);
+    setSelectedOpt(null);
   };
 
   const handleAnswer = (isCorrect: boolean) => {
-    if (answeredState) return;
+    if (answeredState || winnerTeam) return;
 
     setAnsweredState(isCorrect ? 'correct' : 'wrong');
+    totalRef.current += 1;
 
     if (isCorrect) {
+      correctRef.current += 1;
       if (soundEnabled) {
         playLernstudioSound('engine_boost');
         playGermanVoiceFeedback('correct');
@@ -123,7 +158,7 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
       setBoostApplied(isBoost);
 
       const advanceSteps = isBoost ? 2 : 1;
-      const newDistance = Math.min(TARGET_DISTANCE, activeTeam.distance + advanceSteps);
+      const newDistance = Math.min(targetDistance, activeTeam.distance + advanceSteps);
       const newScore = activeTeam.score + (isBoost ? 200 : 100);
 
       const updatedTeam = {
@@ -133,9 +168,10 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
         streak: currentStreak
       };
 
-      setTeams((prev) => prev.map((t, i) => (i === activeTeamIndex ? updatedTeam : t)));
+      const nextTeams = teams.map((tItem, i) => (i === activeTeamIndex ? updatedTeam : tItem));
+      setTeams(nextTeams);
 
-      if (newDistance >= TARGET_DISTANCE) {
+      if (newDistance >= targetDistance) {
         if (soundEnabled) {
           playLernstudioSound('victory');
           playGermanVoiceFeedback('victory');
@@ -148,6 +184,22 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
             : `Grand Race Champion: ${updatedTeam.name}! 🏎️🏁`;
         triggerCelebration(victoryMsg, `${t.scoreLabel}: ${updatedTeam.score}`);
         setWinnerTeam(updatedTeam);
+        if (onGameComplete) {
+          const teamScores: Record<string, number> = {};
+          nextTeams.forEach((tm) => {
+            teamScores[tm.name] = tm.score;
+          });
+          onGameComplete({
+            gameMode: 'race',
+            score: updatedTeam.score,
+            maxScore: targetDistance * 200,
+            accuracy: Math.min(100, Math.round((correctRef.current / Math.max(1, totalRef.current)) * 100)),
+            passed: true,
+            durationSeconds: Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)),
+            teamScores,
+            difficulty: gameConfig?.difficulty || set.difficulty
+          });
+        }
         return;
       }
     } else {
@@ -157,22 +209,29 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
       }
       setBoostApplied(false);
       setTeams((prev) =>
-        prev.map((t, i) => (i === activeTeamIndex ? { ...t, streak: 0 } : t))
+        prev.map((tItem, i) => (i === activeTeamIndex ? { ...tItem, streak: 0 } : tItem))
       );
     }
 
-    setTimeout(() => {
+    const tid = setTimeout(() => {
       setAnsweredState(null);
       setSelectedOpt(null);
       setBoostApplied(false);
       setActiveTeamIndex((prev) => (prev + 1) % teams.length);
       setQIndex((prev) => prev + 1);
-    }, isCorrect ? 2000 : 2800);
+    }, isCorrect ? 1600 : 2200);
+    timeoutsRef.current.push(tid);
   };
 
   const handleRestart = () => {
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current = [];
+    correctRef.current = 0;
+    totalRef.current = 0;
+    startedAtRef.current = Date.now();
+    setSessionSeed(Date.now());
     setTeams((prev) =>
-      prev.map((t) => ({ ...t, distance: 0, score: 0, streak: 0 }))
+      prev.map((tItem) => ({ ...tItem, distance: 0, score: 0, streak: 0 }))
     );
     setActiveTeamIndex(0);
     setWinnerTeam(null);
@@ -242,7 +301,7 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
                 ? `${displaySetTitle} • Rase mit Höchstgeschwindigkeit zur Ziellinie!`
                 : `${displaySetTitle} • Race to the finish line at top speed!`
             }
-            badgeText={`🏁 ${activeTeam.distance}/${TARGET_DISTANCE}`}
+            badgeText={`🏁 ${activeTeam.distance}/${targetDistance}`}
           />
         </div>
 
@@ -253,7 +312,7 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
               <Flag className="w-3.5 h-3.5 text-amber-400" /> {language === 'ar' ? 'مضمار السباق' : language === 'de' ? 'Rennstrecke' : 'Race Track'}
             </div>
             <div className="font-bold text-slate-400">
-              {language === 'ar' ? 'الهدف: الوصول لخط النهاية (10 خطوات)' : language === 'de' ? 'Ziel: Erreiche die Ziellinie (10 Schritte)' : 'Goal: Reach the finish line (10 steps)'}
+              {language === 'ar' ? `الهدف: الوصول لخط النهاية (${targetDistance} خطوات)` : language === 'de' ? `Ziel: Erreiche die Ziellinie (${targetDistance} Schritte)` : `Goal: Reach the finish line (${targetDistance} steps)`}
             </div>
           </div>
 
@@ -261,7 +320,7 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
           <div className="space-y-2 sm:space-y-4">
             {teams.map((tItem, idx) => {
               const isCurrent = idx === activeTeamIndex;
-              const percent = (tItem.distance / TARGET_DISTANCE) * 100;
+              const percent = (tItem.distance / targetDistance) * 100;
               return (
                 <div key={tItem.id} className="relative">
                   {/* Lane header */}
@@ -276,7 +335,7 @@ export const LernstudioRaceGame: React.FC<Props> = ({ set, activeTheme, language
                       )}
                     </div>
                     <div className="text-slate-400 font-mono text-[10px] sm:text-xs">
-                      {tItem.distance}/{TARGET_DISTANCE} · {tItem.score}{t.pointsUnit}
+                      {tItem.distance}/{targetDistance} · {tItem.score}{t.pointsUnit}
                     </div>
                   </div>
 

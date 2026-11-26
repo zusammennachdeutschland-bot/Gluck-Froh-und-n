@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from 'react';
-import { LernstudioSet, LernstudioTheme } from '../../../types/lernstudio';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { LernstudioSet, LernstudioTheme, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
 import { extractSortingItems, SortingItem } from '../../../utils/lernstudioQuestionAdapter';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
+import { GameSetupConfig } from '../LernstudioGameSetupScreen';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
 import { GameEffectsOverlay, GameSettingsControls } from '../effects/GameEffectsOverlay';
@@ -21,23 +22,71 @@ interface Props {
   set: LernstudioSet;
   activeTheme: LernstudioTheme;
   language?: string;
+  gameConfig?: GameSetupConfig;
+  onGameComplete?: (result: LernstudioGameCompletionPayload) => void;
   onBack: () => void;
 }
 
-export const LernstudioSortingGame: React.FC<Props> = ({ set, activeTheme, language = 'ar', onBack }) => {
+export const LernstudioSortingGame: React.FC<Props> = ({
+  set,
+  language = 'ar',
+  gameConfig,
+  onGameComplete,
+  onBack
+}) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const displaySetTitle = getLocalizedSetTitle(set, language);
+  const difficulty = gameConfig?.difficulty || set.difficulty || 'medium';
+  const maxLives = difficulty === 'easy' ? 4 : difficulty === 'hard' ? 2 : 3;
 
-  const itemsPool = useMemo(() => extractSortingItems(set.items || []), [set]);
+  const [sessionSeed, setSessionSeed] = useState<number>(() => Date.now());
+  const itemsPool = useMemo(() => {
+    const all = extractSortingItems(set.items || [], sessionSeed);
+    if (gameConfig?.questionCount && gameConfig.questionCount > 0) {
+      return all.slice(0, gameConfig.questionCount);
+    }
+    return all;
+  }, [set, sessionSeed, gameConfig?.questionCount]);
+
   const [currentIndex, setCurrentIndex] = useState(0);
   const [score, setScore] = useState(0);
   const [streak, setStreak] = useState(0);
-  const [lives, setLives] = useState(3);
+  const [lives, setLives] = useState(maxLives);
   const [feedback, setFeedback] = useState<{ isCorrect: boolean; selectedArticle: string } | null>(null);
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(gameConfig?.enableSoundFx ?? true);
   const [isGameOver, setIsGameOver] = useState(false);
   const { particles, popups, triggerCorrect, triggerWrong, triggerVictory } = useGameEffects();
+
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const correctRef = useRef(0);
+  const totalRef = useRef(0);
+  const reportedRef = useRef(false);
+  const startedAtRef = useRef(Date.now());
+
+  useEffect(() => {
+    return () => {
+      timeoutsRef.current.forEach(clearTimeout);
+      timeoutsRef.current = [];
+    };
+  }, []);
+
+  const reportCompletion = useCallback(
+    (passed: boolean, finalScore: number) => {
+      if (reportedRef.current || !onGameComplete) return;
+      reportedRef.current = true;
+      onGameComplete({
+        gameMode: 'sorting',
+        score: finalScore,
+        maxScore: Math.max(1, itemsPool.length) * 150,
+        accuracy: totalRef.current > 0 ? Math.min(100, Math.round((correctRef.current / totalRef.current) * 100)) : 0,
+        passed,
+        durationSeconds: Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)),
+        difficulty
+      });
+    },
+    [onGameComplete, itemsPool.length, difficulty]
+  );
 
   const currentItem: SortingItem | undefined = itemsPool[currentIndex];
 
@@ -45,10 +94,12 @@ export const LernstudioSortingGame: React.FC<Props> = ({ set, activeTheme, langu
     if (!currentItem || feedback || isGameOver) return;
 
     const isCorrect = currentItem.article.toLowerCase() === article.toLowerCase();
-
+    totalRef.current += 1;
     setFeedback({ isCorrect, selectedArticle: article });
 
+    let nextScore = score;
     if (isCorrect) {
+      correctRef.current += 1;
       if (soundEnabled) {
         playLernstudioSound('combo_ding');
         playLernstudioSound('correct');
@@ -56,7 +107,8 @@ export const LernstudioSortingGame: React.FC<Props> = ({ set, activeTheme, langu
       }
       const newStreak = streak + 1;
       const pts = 50 * (newStreak >= 5 ? 3 : newStreak >= 3 ? 2 : 1);
-      setScore((s) => s + pts);
+      nextScore = score + pts;
+      setScore(nextScore);
       setStreak(newStreak);
       triggerCorrect(pts, `${article} ${currentItem.nounOnly}!`);
     } else {
@@ -70,11 +122,12 @@ export const LernstudioSortingGame: React.FC<Props> = ({ set, activeTheme, langu
       setLives(newLives);
       if (newLives <= 0) {
         setIsGameOver(true);
+        reportCompletion(false, nextScore);
         return;
       }
     }
 
-    setTimeout(() => {
+    const tid = setTimeout(() => {
       setFeedback(null);
       if (currentIndex + 1 < itemsPool.length) {
         setCurrentIndex((prev) => prev + 1);
@@ -82,15 +135,24 @@ export const LernstudioSortingGame: React.FC<Props> = ({ set, activeTheme, langu
         setIsGameOver(true);
         triggerVictory();
         if (soundEnabled) playGermanVoiceFeedback('victory');
+        reportCompletion(true, nextScore);
       }
-    }, isCorrect ? 1800 : 2800);
+    }, isCorrect ? 1400 : 2000);
+    timeoutsRef.current.push(tid);
   };
 
   const handleRestart = () => {
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current = [];
+    correctRef.current = 0;
+    totalRef.current = 0;
+    reportedRef.current = false;
+    startedAtRef.current = Date.now();
+    setSessionSeed(Date.now());
     setCurrentIndex(0);
     setScore(0);
     setStreak(0);
-    setLives(3);
+    setLives(maxLives);
     setFeedback(null);
     setIsGameOver(false);
   };

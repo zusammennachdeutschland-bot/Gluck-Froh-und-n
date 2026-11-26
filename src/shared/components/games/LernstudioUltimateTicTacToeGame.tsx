@@ -1,16 +1,20 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
+import { LernstudioSet, LernstudioTheme, LernstudioItem, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
-import { getSetPlayableItems } from '../../../utils/lernstudioVocabularyAdapter';
+import {
+  getSetVocabularyItems,
+  createSeededRandom,
+  seededShuffle
+} from '../../../utils/lernstudioVocabularyAdapter';
+import { GameSetupConfig } from '../LernstudioGameSetupScreen';
 import { SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
 import {
   ArrowLeft,
   RotateCcw,
-  Trophy,
   Users,
   Bot,
   Volume2,
@@ -34,6 +38,8 @@ interface Props {
   set: LernstudioSet;
   activeTheme: LernstudioTheme;
   language?: string;
+  gameConfig?: GameSetupConfig;
+  onGameComplete?: (result: LernstudioGameCompletionPayload) => void;
   onBack: () => void;
 }
 
@@ -479,30 +485,38 @@ const AnimatedMarkO: React.FC<{ size?: 'sm' | 'lg' }> = ({ size = 'sm' }) => (
 
 export const LernstudioUltimateTicTacToeGame: React.FC<Props> = ({
   set,
-  activeTheme,
   language = 'ar',
+  gameConfig,
+  onGameComplete,
   onBack
 }) => {
   const isRtl = language === 'ar';
   const displayTitle = getLocalizedSetTitle(set, language);
-  const items = useMemo(() => getSetPlayableItems(set), [set]);
+  const [sessionSeed, setSessionSeed] = useState<number>(() => Date.now());
+  const items = useMemo(
+    () => getSetVocabularyItems(set, language, gameConfig?.questionCount, sessionSeed),
+    [set, language, gameConfig?.questionCount, sessionSeed]
+  );
   const { triggerSparkles, triggerScorePopup, triggerCelebration, EffectsOverlay } = useGameEffects(language);
 
   // Start Screen vs Active Match State
-  const [showStartScreen, setShowStartScreen] = useState<boolean>(true);
-  const [opponentMode, setOpponentMode] = useState<OpponentMode>('pvp');
-  const [aiDifficulty, setAiDifficulty] = useState<AIDifficulty>('medium');
+  const [showStartScreen, setShowStartScreen] = useState<boolean>(!gameConfig);
+  const [opponentMode, setOpponentMode] = useState<OpponentMode>(gameConfig?.gameMode === 'solo' ? 'ai' : 'pvp');
+  const [aiDifficulty, setAiDifficulty] = useState<AIDifficulty>(gameConfig?.difficulty || 'medium');
   const [starterChoice, setStarterChoice] = useState<StarterChoice>('X');
   const [vocabGateEnabled, setVocabGateEnabled] = useState<boolean>(true);
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(gameConfig?.enableSoundFx ?? true);
+  const enableAudio = gameConfig?.enableAudio ?? true;
   const [showRulesModal, setShowRulesModal] = useState<boolean>(false);
 
   // Player Names
   const [playerXName, setPlayerXName] = useState<string>(
-    isRtl ? 'البطل X (الأحمر الياقوتي)' : language === 'de' ? 'Spieler X (Rubinrot)' : 'Player X (Ruby)'
+    gameConfig?.teamNames?.[0] ||
+      (isRtl ? 'البطل X (الأحمر الياقوتي)' : language === 'de' ? 'Spieler X (Rubinrot)' : 'Player X (Ruby)')
   );
   const [playerOName, setPlayerOName] = useState<string>(
-    isRtl ? 'البطل O (الأزرق السماوي)' : language === 'de' ? 'Spieler O (Saphirblau)' : 'Player O (Sapphire)'
+    gameConfig?.teamNames?.[1] ||
+      (isRtl ? 'البطل O (الأزرق السماوي)' : language === 'de' ? 'Spieler O (Saphirblau)' : 'Player O (Sapphire)')
   );
 
   // 9x9 Ultimate XO Board State
@@ -548,6 +562,19 @@ export const LernstudioUltimateTicTacToeGame: React.FC<Props> = ({
   } | null>(null);
 
   const aiTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const uiTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const moveCounterRef = useRef(0);
+  const vocabCorrectRef = useRef(0);
+  const vocabTotalRef = useRef(0);
+  const startedAtRef = useRef(Date.now());
+
+  useEffect(() => {
+    return () => {
+      if (aiTimeoutRef.current) clearTimeout(aiTimeoutRef.current);
+      uiTimeoutsRef.current.forEach(clearTimeout);
+      uiTimeoutsRef.current = [];
+    };
+  }, []);
 
   // Sound helper respecting soundEnabled toggle
   const playGameSfx = useCallback(
@@ -631,7 +658,7 @@ export const LernstudioUltimateTicTacToeGame: React.FC<Props> = ({
             player: sim.subBoardWonByMove,
             item: pickedItem
           });
-          if (soundEnabled && pickedItem.german) {
+          if (soundEnabled && enableAudio && pickedItem.german) {
             speakGermanText(pickedItem.german, 0.9);
           }
         }
@@ -654,11 +681,24 @@ export const LernstudioUltimateTicTacToeGame: React.FC<Props> = ({
           setMatchScores((prev) => ({ ...prev, draws: prev.draws + 1 }));
           playGameSfx('powerup_swap');
         }
+        if (onGameComplete) {
+          const attempts = Math.max(1, vocabTotalRef.current);
+          const acc = vocabTotalRef.current > 0 ? Math.round((vocabCorrectRef.current / attempts) * 100) : 100;
+          onGameComplete({
+            gameMode: 'ultimate_tictactoe',
+            score: (sim.macroOutcome.winner === 'X' ? 200 : sim.macroOutcome.winner === 'draw' ? 100 : 50) + vocabCorrectRef.current * 20,
+            maxScore: 400,
+            accuracy: acc,
+            passed: sim.macroOutcome.winner !== 'O',
+            durationSeconds: Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)),
+            difficulty: aiDifficulty
+          });
+        }
       } else {
         setCurrentPlayer(player === 'X' ? 'O' : 'X');
       }
     },
-    [subBoards, macroBoard, items, playGameSfx, soundEnabled, triggerSparkles, triggerScorePopup, triggerCelebration]
+    [subBoards, macroBoard, items, playGameSfx, soundEnabled, enableAudio, triggerSparkles, triggerScorePopup, triggerCelebration, onGameComplete, aiDifficulty]
   );
 
   // Start / Restart Match cleanly
@@ -668,6 +708,13 @@ export const LernstudioUltimateTicTacToeGame: React.FC<Props> = ({
         clearTimeout(aiTimeoutRef.current);
         aiTimeoutRef.current = null;
       }
+      uiTimeoutsRef.current.forEach(clearTimeout);
+      uiTimeoutsRef.current = [];
+      moveCounterRef.current = 0;
+      vocabCorrectRef.current = 0;
+      vocabTotalRef.current = 0;
+      startedAtRef.current = Date.now();
+      setSessionSeed(Date.now());
 
       const resolvedStarter: Player =
         starterChoice === 'random'
@@ -687,6 +734,7 @@ export const LernstudioUltimateTicTacToeGame: React.FC<Props> = ({
       setConqueredVocabBanner(null);
       setPendingMove(null);
       setVocabQuestion(null);
+      setQuestionFeedback(null);
 
       if (goToStartScreen) {
         setShowStartScreen(true);
@@ -754,22 +802,24 @@ export const LernstudioUltimateTicTacToeGame: React.FC<Props> = ({
         { id: 'fb_6', german: 'das Haus', arabic: 'المنزل', english: 'House', emoji: '🏠' }
       ];
 
+      moveCounterRef.current += 1;
+      const rng = createSeededRandom(sessionSeed + boardIdx * 37 + cellIdx * 13 + moveCounterRef.current * 29);
       const sourcePool = items.length > 0 ? items : fallbackVocabulary;
-      const target = sourcePool[(boardIdx * 3 + cellIdx + Math.floor(Math.random() * sourcePool.length)) % sourcePool.length];
+      const target = sourcePool[(boardIdx * 3 + cellIdx + moveCounterRef.current) % sourcePool.length];
 
       const combinedDistractorPool = [...items, ...fallbackVocabulary].filter(
         (it) => it.id !== target.id && it.german.toLowerCase() !== target.german.toLowerCase()
       );
 
       const uniqueDistractors: LernstudioItem[] = [];
-      for (const candidate of combinedDistractorPool.sort(() => 0.5 - Math.random())) {
+      for (const candidate of seededShuffle(combinedDistractorPool, rng)) {
         if (!uniqueDistractors.some((d) => d.german.toLowerCase() === candidate.german.toLowerCase())) {
           uniqueDistractors.push(candidate);
         }
         if (uniqueDistractors.length >= 2) break;
       }
 
-      const choices = [target, ...uniqueDistractors].sort(() => 0.5 - Math.random());
+      const choices = seededShuffle([target, ...uniqueDistractors], rng);
 
       setPendingMove({ boardIdx, cellIdx });
       setVocabQuestion({ targetItem: target, choices });
@@ -784,12 +834,14 @@ export const LernstudioUltimateTicTacToeGame: React.FC<Props> = ({
   const handleVocabAnswer = (chosen: LernstudioItem) => {
     if (!vocabQuestion || !pendingMove || questionFeedback !== null) return;
     const isCorrect = chosen.id === vocabQuestion.targetItem.id;
+    vocabTotalRef.current += 1;
 
     if (isCorrect) {
+      vocabCorrectRef.current += 1;
       playGameSfx('correct');
       if (soundEnabled) {
         playGermanVoiceFeedback('richtig');
-        speakGermanText(vocabQuestion.targetItem.german, 0.9);
+        if (enableAudio) speakGermanText(vocabQuestion.targetItem.german, 0.9);
       }
       setQuestionFeedback({
         correct: true,
@@ -802,17 +854,18 @@ export const LernstudioUltimateTicTacToeGame: React.FC<Props> = ({
       });
 
       const moveToRun = pendingMove;
-      setTimeout(() => {
+      const tid = setTimeout(() => {
         setPendingMove(null);
         setVocabQuestion(null);
         setQuestionFeedback(null);
         executeMove(moveToRun, currentPlayer);
       }, 1100);
+      uiTimeoutsRef.current.push(tid);
     } else {
       playGameSfx('wrong');
       if (soundEnabled) {
         playGermanVoiceFeedback('noch_einmal');
-        speakGermanText(vocabQuestion.targetItem.german, 0.85);
+        if (enableAudio) speakGermanText(vocabQuestion.targetItem.german, 0.85);
       }
       setQuestionFeedback({
         correct: false,
@@ -825,12 +878,13 @@ export const LernstudioUltimateTicTacToeGame: React.FC<Props> = ({
       });
 
       // Turn passes to opponent after showing the correct answer
-      setTimeout(() => {
+      const tid = setTimeout(() => {
         setPendingMove(null);
         setVocabQuestion(null);
         setQuestionFeedback(null);
         setCurrentPlayer((prev) => (prev === 'X' ? 'O' : 'X'));
       }, 1900);
+      uiTimeoutsRef.current.push(tid);
     }
   };
 

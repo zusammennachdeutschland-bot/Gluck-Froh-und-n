@@ -1,11 +1,22 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
+import {
+  LernstudioSet,
+  LernstudioTheme,
+  LernstudioItem,
+  LernstudioGameCompletionPayload
+} from '../../../types/lernstudio';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
-import { speakGermanText } from '../../../utils/audioSpeechUtils';
+import { speakGermanText, stopGermanSpeech } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
-import { getSetPlayableItems } from '../../../utils/lernstudioVocabularyAdapter';
+import {
+  getSetPlayableItems,
+  buildSeededSessionDeck,
+  createSeededRandom,
+  seededShuffle
+} from '../../../utils/lernstudioVocabularyAdapter';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
+import { GameSetupConfig } from '../LernstudioGameSetupScreen';
 import {
   ArrowLeft,
   RotateCcw,
@@ -24,6 +35,8 @@ interface Props {
   set: LernstudioSet;
   activeTheme: LernstudioTheme;
   language?: string;
+  gameConfig?: GameSetupConfig;
+  onGameComplete?: (result: LernstudioGameCompletionPayload) => void;
   onBack: () => void;
 }
 
@@ -57,12 +70,24 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
   set,
   activeTheme,
   language = 'ar',
+  gameConfig,
+  onGameComplete,
   onBack
 }) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const displayTitle = getLocalizedSetTitle(set, language);
-  const items = useMemo(() => getSetPlayableItems(set), [set]);
+  const [sessionNonce, setSessionNonce] = useState(0);
+  const difficulty = gameConfig?.difficulty || 'medium';
+  const speedMultiplier = difficulty === 'hard' ? 1.45 : difficulty === 'easy' ? 0.7 : 1;
+  const maxLives = difficulty === 'easy' ? 4 : difficulty === 'hard' ? 2 : 3;
+
+  const rawItems = useMemo(() => getSetPlayableItems(set), [set]);
+  const items = useMemo(() => {
+    const count = gameConfig?.questionCount && gameConfig.questionCount > 0 ? gameConfig.questionCount : rawItems.length;
+    return buildSeededSessionDeck(rawItems, count, `${set.id}::ninja::${sessionNonce}`);
+  }, [rawItems, set.id, gameConfig?.questionCount, sessionNonce]);
+
   const { triggerSparkles, triggerScorePopup, triggerCelebration, EffectsOverlay, SettingsBar } = useGameEffects(language);
 
   // Game Progress
@@ -70,11 +95,29 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
   const [score, setScore] = useState<number>(0);
   const [combo, setCombo] = useState<number>(0);
   const [maxCombo, setMaxCombo] = useState<number>(0);
-  const [lives, setLives] = useState<number>(3);
+  const [lives, setLives] = useState<number>(maxLives);
   const [isGameOver, setIsGameOver] = useState<boolean>(false);
   const [isVictory, setIsVictory] = useState<boolean>(false);
   const [slashPoints, setSlashPoints] = useState<{ x: number; y: number }[]>([]);
   const isMouseDownRef = useRef<boolean>(false);
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const completedRef = useRef(false);
+  const correctRef = useRef(0);
+  const wrongRef = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      timeoutsRef.current.forEach(clearTimeout);
+      timeoutsRef.current = [];
+      stopGermanSpeech();
+    };
+  }, []);
+
+  const safeTimeout = (fn: () => void, ms: number) => {
+    const tid = setTimeout(fn, ms);
+    timeoutsRef.current.push(tid);
+    return tid;
+  };
 
   // Floating Fruits on Canvas
   const [fruits, setFruits] = useState<FloatingFruit[]>([]);
@@ -82,78 +125,79 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
 
   // Pronounce current target when it appears
   useEffect(() => {
-    if (targetItem?.german) {
+    if (gameConfig?.enableAudio !== false && targetItem?.german && !isGameOver && !isVictory) {
       speakGermanText(targetItem.german);
     }
-  }, [currentTargetIndex, targetItem]);
+  }, [currentTargetIndex, targetItem, gameConfig?.enableAudio, isGameOver, isVictory]);
 
-  // Spawn new wave of floating fruits whenever target changes or fruits get empty
+  // Spawn new wave of floating fruits whenever target changes
   useEffect(() => {
     if (isGameOver || isVictory || !targetItem || !items.length) return;
 
-    // Pick target fruit + 2-3 decoy fruits + 1 optional bomb
-    const otherItems = items.filter((it) => it.id !== targetItem.id);
-    const decoys = [...otherItems].sort(() => 0.5 - Math.random()).slice(0, 3);
+    const rng = createSeededRandom(`${set.id}::ninja_wave::${sessionNonce}::${currentTargetIndex}`);
+    const otherItems = rawItems.filter((it) => it.id !== targetItem.id);
+    const decoys = seededShuffle(otherItems, rng).slice(0, difficulty === 'hard' ? 4 : 3);
 
     const newWave: FloatingFruit[] = [];
 
     // Target fruit
     newWave.push({
-      id: `target-${Date.now()}-${Math.random()}`,
+      id: `target-${currentTargetIndex}-${sessionNonce}`,
       item: targetItem,
       text: targetItem.german,
       emoji: targetItem.emoji || '🎯',
       isTarget: true,
-      x: 20 + Math.random() * 60,
-      y: 20 + Math.random() * 50,
-      vx: (Math.random() - 0.5) * 0.4,
-      vy: (Math.random() - 0.5) * 0.4,
-      rotation: (Math.random() - 0.5) * 20,
-      vRot: (Math.random() - 0.5) * 1.5,
-      colorClass: FRUIT_COLORS[Math.floor(Math.random() * FRUIT_COLORS.length)],
+      x: 20 + rng() * 60,
+      y: 20 + rng() * 50,
+      vx: (rng() - 0.5) * 0.42 * speedMultiplier,
+      vy: (rng() - 0.5) * 0.42 * speedMultiplier,
+      rotation: (rng() - 0.5) * 20,
+      vRot: (rng() - 0.5) * 1.5,
+      colorClass: FRUIT_COLORS[Math.floor(rng() * FRUIT_COLORS.length)],
       isSliced: false
     });
 
     // Decoy fruits
     decoys.forEach((decoy, i) => {
       newWave.push({
-        id: `decoy-${i}-${Date.now()}-${Math.random()}`,
+        id: `decoy-${i}-${currentTargetIndex}-${sessionNonce}`,
         item: decoy,
         text: decoy.german,
         emoji: decoy.emoji || '🍏',
         isTarget: false,
-        x: 15 + Math.random() * 70,
-        y: 15 + Math.random() * 60,
-        vx: (Math.random() - 0.5) * 0.4,
-        vy: (Math.random() - 0.5) * 0.4,
-        rotation: (Math.random() - 0.5) * 20,
-        vRot: (Math.random() - 0.5) * 1.5,
+        x: 15 + rng() * 70,
+        y: 15 + rng() * 60,
+        vx: (rng() - 0.5) * 0.42 * speedMultiplier,
+        vy: (rng() - 0.5) * 0.42 * speedMultiplier,
+        rotation: (rng() - 0.5) * 20,
+        vRot: (rng() - 0.5) * 1.5,
         colorClass: FRUIT_COLORS[(i + 1) % FRUIT_COLORS.length],
         isSliced: false
       });
     });
 
-    // Occasional Bomb (35% chance)
-    if (Math.random() < 0.35) {
+    // Occasional Bomb (scaled by difficulty)
+    const bombChance = difficulty === 'hard' ? 0.55 : difficulty === 'easy' ? 0.2 : 0.35;
+    if (rng() < bombChance) {
       newWave.push({
-        id: `bomb-${Date.now()}`,
+        id: `bomb-${currentTargetIndex}-${sessionNonce}`,
         text: 'قنبلة 💣',
         emoji: '💣',
         isBomb: true,
         isTarget: false,
-        x: 25 + Math.random() * 50,
-        y: 20 + Math.random() * 50,
-        vx: (Math.random() - 0.5) * 0.3,
-        vy: (Math.random() - 0.5) * 0.3,
+        x: 25 + rng() * 50,
+        y: 20 + rng() * 50,
+        vx: (rng() - 0.5) * 0.35 * speedMultiplier,
+        vy: (rng() - 0.5) * 0.35 * speedMultiplier,
         rotation: 0,
-        vRot: (Math.random() - 0.5) * 2,
+        vRot: (rng() - 0.5) * 2,
         colorClass: 'from-zinc-900 to-black border-red-500 text-red-400',
         isSliced: false
       });
     }
 
     setFruits(newWave);
-  }, [currentTargetIndex, isGameOver, isVictory, targetItem, items]);
+  }, [currentTargetIndex, isGameOver, isVictory, targetItem, items.length, rawItems, set.id, sessionNonce, difficulty, speedMultiplier]);
 
   // Gentle float motion loop
   useEffect(() => {
@@ -188,6 +232,21 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
     return () => clearInterval(interval);
   }, [isGameOver, isVictory]);
 
+  const reportResultOnce = (finalScore: number, passed: boolean) => {
+    if (completedRef.current || !onGameComplete) return;
+    completedRef.current = true;
+    const totalAttempts = Math.max(1, correctRef.current + wrongRef.current);
+    const accuracy = Math.min(100, Math.round((correctRef.current / totalAttempts) * 100));
+    onGameComplete({
+      gameMode: 'word_ninja',
+      score: finalScore,
+      maxScore: items.length * 40,
+      accuracy,
+      passed,
+      difficulty
+    });
+  };
+
   // Slash / Slice handler
   const handleSliceFruit = (fruit: FloatingFruit) => {
     if (fruit.isSliced || isGameOver || isVictory) return;
@@ -198,13 +257,14 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
     );
 
     if (fruit.isBomb) {
-      // Hit a bomb!
-      playLernstudioSound('powerup_boom');
+      wrongRef.current += 1;
+      if (gameConfig?.enableSoundFx !== false) playLernstudioSound('powerup_boom');
       setCombo(0);
       setLives((prev) => {
         const next = prev - 1;
         if (next <= 0) {
           setIsGameOver(true);
+          reportResultOnce(score, false);
         }
         return Math.max(0, next);
       });
@@ -212,11 +272,11 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
     }
 
     if (fruit.isTarget) {
-      // Correct target sliced!
-      playLernstudioSound('slice');
-      playGermanVoiceFeedback('correct');
+      correctRef.current += 1;
+      if (gameConfig?.enableSoundFx !== false) playLernstudioSound('slice');
+      if (gameConfig?.enableAudio !== false) playGermanVoiceFeedback('correct');
       triggerSparkles(fruit.x, fruit.y, '#10b981');
-      if (fruit.item?.german) {
+      if (gameConfig?.enableAudio !== false && fruit.item?.german) {
         speakGermanText(fruit.item.german);
       }
 
@@ -225,36 +285,43 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
       setMaxCombo((prev) => Math.max(prev, nextCombo));
       const pointsAdded = 20 * Math.min(4, nextCombo);
       triggerScorePopup(`+${pointsAdded} 🥷`, fruit.x, Math.max(12, fruit.y - 8), 'positive');
-      setScore((s) => s + pointsAdded);
+      const nextScore = score + pointsAdded;
+      setScore(nextScore);
 
       // Check if finished whole set
       if (currentTargetIndex + 1 >= items.length) {
-        setTimeout(() => {
+        safeTimeout(() => {
           setIsVictory(true);
-          playLernstudioSound('victory');
-          playGermanVoiceFeedback('victory');
-          triggerCelebration('نينجا الكلمات الأسطوري! 🥷✨', `النتيجة: ${score + pointsAdded} نقطة`);
+          if (gameConfig?.enableSoundFx !== false) playLernstudioSound('victory');
+          if (gameConfig?.enableAudio !== false) playGermanVoiceFeedback('victory');
+          triggerCelebration('نينجا الكلمات الأسطوري! 🥷✨', `النتيجة: ${nextScore} نقطة`);
+          reportResultOnce(nextScore, true);
         }, 600);
       } else {
-        // Next target word after short moment
-        setTimeout(() => {
+        safeTimeout(() => {
           setCurrentTargetIndex((idx) => idx + 1);
         }, 500);
       }
     } else {
-      // Sliced a decoy wrong word
-      playLernstudioSound('wrong');
-      playGermanVoiceFeedback('wrong');
+      wrongRef.current += 1;
+      if (gameConfig?.enableSoundFx !== false) playLernstudioSound('wrong');
+      if (gameConfig?.enableAudio !== false) playGermanVoiceFeedback('wrong');
       setCombo(0);
     }
   };
 
   const restartGame = () => {
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current = [];
+    completedRef.current = false;
+    correctRef.current = 0;
+    wrongRef.current = 0;
+    setSessionNonce((n) => n + 1);
     setCurrentTargetIndex(0);
     setScore(0);
     setCombo(0);
     setMaxCombo(0);
-    setLives(3);
+    setLives(maxLives);
     setIsGameOver(false);
     setIsVictory(false);
     setFruits([]);
@@ -351,9 +418,6 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
             </div>
             <div className="text-base sm:text-xl font-black text-text-main flex items-center gap-2">
               <span>{getItemTranslation(targetItem, language)}</span>
-              <span className="text-text-muted text-xs font-bold">
-                ({targetItem?.german})
-              </span>
             </div>
           </div>
         </div>

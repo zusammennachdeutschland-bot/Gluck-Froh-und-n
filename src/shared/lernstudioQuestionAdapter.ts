@@ -25,6 +25,7 @@ import {
   SUBJECT_PROMPTS
 } from './verbEngine';
 import type { VerbEntry } from './verbLibrary/verbTypes';
+import { createSeededRandom, seededShuffle } from './lernstudioWorksheetBuilder';
 
 export type GameQuestionModeFilter =
   | 'mixed'
@@ -73,6 +74,87 @@ export interface BuildDynamicQuestionPoolOptions {
   questionModeFilter?: GameQuestionModeFilter;
   includeVerbExercises?: boolean;
   subjectPoolMode?: 'pronouns_and_names' | 'pronouns_only';
+  seed?: string | number;
+  rng?: () => number;
+}
+
+function resolveRng(seed?: string | number, rng?: () => number): () => number {
+  if (typeof rng === 'function') return rng;
+  if (seed !== undefined && seed !== null && String(seed).length > 0) {
+    return createSeededRandom(String(seed));
+  }
+  return Math.random;
+}
+
+function buildDistinctSentencePermutations(
+  words: string[],
+  rng: () => number,
+  targetTotal: number = 4
+): string[] {
+  const cleanWords = words.map((w) => String(w || '').trim()).filter(Boolean);
+  if (cleanWords.length === 0) return [];
+  const correct = cleanWords.join(' ');
+  if (cleanWords.length === 1) return [correct];
+
+  const seen = new Set<string>([correct.toLowerCase()]);
+  const out: string[] = [correct];
+
+  const addCandidate = (arr: string[]) => {
+    const joined = arr.join(' ').trim();
+    if (!joined) return;
+    const key = joined.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(joined);
+    }
+  };
+
+  addCandidate([...cleanWords].reverse());
+  // Rotations and adjacent swaps guarantee distinct options even on short 2-3 word arrays
+  for (let shift = 1; shift < cleanWords.length && out.length < targetTotal; shift++) {
+    addCandidate([...cleanWords.slice(shift), ...cleanWords.slice(0, shift)]);
+  }
+  for (let attempt = 0; attempt < 16 && out.length < targetTotal; attempt++) {
+    addCandidate(seededShuffle(cleanWords, rng));
+  }
+  for (let i = 0; i < cleanWords.length - 1 && out.length < targetTotal; i++) {
+    const copy = [...cleanWords];
+    [copy[i], copy[i + 1]] = [copy[i + 1], copy[i]];
+    addCandidate(copy);
+  }
+
+  return seededShuffle(out.slice(0, targetTotal), rng);
+}
+
+export function extractMissingLetterChar(german: string, missingLetterWord: string): string {
+  const masked = String(missingLetterWord || '').trim();
+  const full = String(german || '').trim();
+  const cleanTarget = cleanGermanNoun(full);
+  const blankIndex = masked.indexOf('_');
+  if (blankIndex < 0) return 'e';
+
+  const articlePrefixed = /^(der|die|das)\s+/i.test(masked);
+  const reference = articlePrefixed ? full : cleanTarget;
+
+  const directChar = reference[blankIndex];
+  if (directChar && directChar.trim() && directChar !== '_') {
+    return directChar;
+  }
+
+  // Try matching stripped target even when article presence differs slightly
+  const cleanBlankIdx = cleanGermanNoun(masked).indexOf('_');
+  if (cleanBlankIdx >= 0 && cleanTarget[cleanBlankIdx] && cleanTarget[cleanBlankIdx].trim()) {
+    return cleanTarget[cleanBlankIdx];
+  }
+
+  // Find the first non-space character differing around the mask position
+  for (let i = 0; i < reference.length; i++) {
+    if (reference[i] && reference[i].trim() && masked[i] === '_') {
+      return reference[i];
+    }
+  }
+  const fallbackAlpha = cleanTarget.replace(/[^a-zA-ZäöüßÄÖÜ]/g, '');
+  return fallbackAlpha[0] || 'e';
 }
 
 export type GameCompatibilityStatus = 'supported' | 'adapted' | 'unsupported';
@@ -369,18 +451,29 @@ function buildUniqueDistractors(
 
 export function buildGrammarExerciseOptions(
   ex: GrammarExercise,
-  allGrammarExercises: GrammarExercise[]
+  allGrammarExercises: GrammarExercise[],
+  rng: () => number = Math.random
 ): string[] | undefined {
   if (ex.type === 'short_answer' || ex.type === 'sentence_ordering') {
     return undefined;
   }
 
   if (Array.isArray(ex.options) && ex.options.length >= 2) {
-    const deduped = Array.from(new Set(ex.options.map((o) => String(o || '').trim()).filter(Boolean)));
-    const hasCorrect = deduped.some(
-      (o) => o.trim().toLowerCase() === ex.correctAnswer.trim().toLowerCase()
-    );
-    return hasCorrect ? deduped : [ex.correctAnswer, ...deduped];
+    const seen = new Set<string>();
+    const deduped: string[] = [];
+    for (const raw of ex.options) {
+      const trimmed = String(raw || '').trim();
+      if (!trimmed) continue;
+      const key = trimmed.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(trimmed);
+    }
+    const correctTrimmed = String(ex.correctAnswer || '').trim();
+    if (correctTrimmed && !seen.has(correctTrimmed.toLowerCase())) {
+      deduped.unshift(correctTrimmed);
+    }
+    return seededShuffle(deduped, rng);
   }
 
   const sameTypePeerAnswers = allGrammarExercises
@@ -389,7 +482,7 @@ export function buildGrammarExerciseOptions(
 
   const distractors = buildUniqueDistractors(ex.correctAnswer, sameTypePeerAnswers, [], 3);
   if (distractors.length >= 1) {
-    return [ex.correctAnswer, ...distractors].sort(() => 0.5 - Math.random());
+    return seededShuffle([ex.correctAnswer, ...distractors], rng);
   }
   return undefined;
 }
@@ -418,6 +511,7 @@ export function buildDynamicQuestionPool(
 
   const safeLang = (language || 'ar').toLowerCase();
   const modeFilter: GameQuestionModeFilter = poolOptions?.questionModeFilter || 'mixed';
+  const rng = resolveRng(poolOptions?.seed, poolOptions?.rng);
   const subjectPool =
     poolOptions?.subjectPoolMode === 'pronouns_only'
       ? PRONOUN_ONLY_SUBJECT_PROMPTS
@@ -428,7 +522,7 @@ export function buildDynamicQuestionPool(
     const grammarIdsSeen = new Set<string>();
     grammarExercises.forEach((ex, idx) => {
       grammarIdsSeen.add(ex.id);
-      const options = buildGrammarExerciseOptions(ex, grammarExercises);
+      const options = buildGrammarExerciseOptions(ex, grammarExercises, rng);
       const localizedExplanation =
         getLocalizedGrammarField(ex as any, 'explanation', safeLang) || ex.explanation;
 
@@ -472,13 +566,7 @@ export function buildDynamicQuestionPool(
         if ((!options || options.length === 0) && ex.correctAnswer) {
           const words = ex.correctAnswer.split(' ').filter(Boolean);
           if (words.length >= 2) {
-            const correctSent = ex.correctAnswer;
-            const perm1 = [...words].sort(() => 0.5 - Math.random()).join(' ');
-            const perm2 = [...words].reverse().join(' ');
-            const perm3 = [...words].sort(() => Math.random() - 0.5).join(' ');
-            options = Array.from(new Set([correctSent, perm1, perm2, perm3]))
-              .filter(Boolean)
-              .sort(() => 0.5 - Math.random());
+            options = buildDistinctSentencePermutations(words, rng, 4);
           }
         }
         pool.push({
@@ -499,13 +587,7 @@ export function buildDynamicQuestionPool(
       if ((!options || options.length === 0) && ex.correctAnswer) {
         const words = ex.correctAnswer.split(' ').filter(Boolean);
         if (words.length >= 2) {
-          const correctSent = ex.correctAnswer;
-          const perm1 = [...words].sort(() => 0.5 - Math.random()).join(' ');
-          const perm2 = [...words].reverse().join(' ');
-          const perm3 = [...words].sort(() => Math.random() - 0.5).join(' ');
-          options = Array.from(new Set([correctSent, perm1, perm2, perm3]))
-            .filter(Boolean)
-            .sort(() => 0.5 - Math.random());
+          options = buildDistinctSentencePermutations(words, rng, 4);
         }
       }
 
@@ -543,7 +625,7 @@ export function buildDynamicQuestionPool(
       (modeFilter === 'mixed' || modeFilter === 'verb_conjugation') &&
       poolOptions?.includeVerbExercises !== false
     ) {
-      const chosenPrompt = subjectPool[(index * 5 + Math.floor(Math.random() * subjectPool.length)) % subjectPool.length];
+      const chosenPrompt = subjectPool[(index * 5 + Math.floor(rng() * subjectPool.length)) % subjectPool.length];
       const conjEx = buildVerbConjugationExercise(verbEntry, chosenPrompt, 4);
       const promptText =
         safeLang === 'de'
@@ -618,17 +700,17 @@ export function buildDynamicQuestionPool(
 
     // C) Multiple Choice: Translation to German
     if (modeFilter === 'mixed' || modeFilter === 'ar_to_de') {
-      const otherGerman = items
-        .filter((it) => it.id !== item.id)
-        .map((it) => it.german)
-        .sort(() => 0.5 - Math.random());
+      const otherGerman = seededShuffle(
+        items.filter((it) => it.id !== item.id).map((it) => it.german),
+        rng
+      );
       const distractors = buildUniqueDistractors(
         item.german,
         otherGerman,
         itemIsVerb ? fallbackGermanVerbs : [],
         3
       );
-      const mcOptions = [item.german, ...distractors].sort(() => 0.5 - Math.random());
+      const mcOptions = seededShuffle([item.german, ...distractors], rng);
 
       const promptTransToDe =
         safeLang === 'en'
@@ -654,17 +736,17 @@ export function buildDynamicQuestionPool(
 
     // D) Multiple Choice: German to Translation
     if (modeFilter === 'mixed' || modeFilter === 'de_to_ar' || modeFilter === 'audio') {
-      const otherTrans = items
-        .filter((it) => it.id !== item.id)
-        .map((it) => getItemTranslation(it, safeLang))
-        .sort(() => 0.5 - Math.random());
+      const otherTrans = seededShuffle(
+        items.filter((it) => it.id !== item.id).map((it) => getItemTranslation(it, safeLang)),
+        rng
+      );
       const distractors = buildUniqueDistractors(
         itemTrans,
         otherTrans,
         itemIsVerb ? fallbackArabicVerbs : [],
         3
       );
-      const mcOptionsAr = [itemTrans, ...distractors].sort(() => 0.5 - Math.random());
+      const mcOptionsAr = seededShuffle([itemTrans, ...distractors], rng);
 
       const promptDeToTrans =
         safeLang === 'en'
@@ -703,7 +785,7 @@ export function buildDynamicQuestionPool(
         prompt: articlePrompt,
         subPrompt: itemTrans,
         emoji: item.emoji,
-        options: ['der', 'die', 'das'],
+        options: seededShuffle(['der', 'die', 'das'], rng),
         correctAnswer: article,
         explanation: `${article} ${nounOnly}`,
         itemRef: item
@@ -712,18 +794,14 @@ export function buildDynamicQuestionPool(
 
     // F) Missing Letter Question
     if (modeFilter === 'mixed' && item.missingLetterWord && item.missingLetterWord.includes('_')) {
-      const blankIndex = item.missingLetterWord.indexOf('_');
-      const cleanTarget = cleanGermanNoun(item.german);
-      const missingChar = cleanTarget[blankIndex] || 'e';
+      const missingChar = extractMissingLetterChar(item.german, item.missingLetterWord);
 
       const alphabet = ['a', 'e', 'i', 'o', 'u', 'l', 'r', 's', 't', 'n', 'm'];
-      const distractorLetters = alphabet
-        .filter((c) => c.toLowerCase() !== missingChar.toLowerCase())
-        .sort(() => 0.5 - Math.random())
-        .slice(0, 3);
-      const letterOptions = [missingChar.toLowerCase(), ...distractorLetters].sort(
-        () => 0.5 - Math.random()
-      );
+      const distractorLetters = seededShuffle(
+        alphabet.filter((c) => c.toLowerCase() !== missingChar.toLowerCase()),
+        rng
+      ).slice(0, 3);
+      const letterOptions = seededShuffle([missingChar.toLowerCase(), ...distractorLetters], rng);
 
       const missingPrompt =
         safeLang === 'en'
@@ -767,12 +845,7 @@ export function buildDynamicQuestionPool(
             : `رتّب الكلمات لتكوين جملة صحيحة:`;
 
         const correctSentence = sentencePieces.join(' ');
-        const perm1 = [...sentencePieces].sort(() => 0.5 - Math.random()).join(' ');
-        const perm2 = [...sentencePieces].reverse().join(' ');
-        const perm3 = [...sentencePieces].sort(() => Math.random() - 0.5).join(' ');
-        const sentOptions = Array.from(new Set([correctSentence, perm1, perm2, perm3]))
-          .filter(Boolean)
-          .sort(() => 0.5 - Math.random());
+        const sentOptions = buildDistinctSentencePermutations(sentencePieces, rng, 4);
 
         pool.push({
           id: `dyn_sent_${item.id}_${index}`,
@@ -796,13 +869,18 @@ export function buildDynamicQuestionPool(
 
     // H) Plural Form Question (strictly for nouns)
     if (modeFilter === 'mixed' && !itemIsVerb && item.plural) {
-      const otherPlurals = items
-        .filter((it) => it.id !== item.id && it.plural)
-        .map((it) => it.plural as string)
-        .slice(0, 3);
-      const pluralOptions = Array.from(new Set([item.plural, ...otherPlurals])).sort(
-        () => 0.5 - Math.random()
-      );
+      const seenPlural = new Set<string>([item.plural.trim().toLowerCase()]);
+      const otherPlurals: string[] = [];
+      for (const candidate of seededShuffle(items, rng)) {
+        if (candidate.id === item.id || !candidate.plural) continue;
+        const pTrim = candidate.plural.trim();
+        const pKey = pTrim.toLowerCase();
+        if (!pTrim || seenPlural.has(pKey)) continue;
+        seenPlural.add(pKey);
+        otherPlurals.push(pTrim);
+        if (otherPlurals.length >= 3) break;
+      }
+      const pluralOptions = seededShuffle([item.plural, ...otherPlurals], rng);
 
       if (pluralOptions.length >= 2) {
         const pluralPrompt =
@@ -835,7 +913,7 @@ export function buildDynamicQuestionPool(
     });
   }
 
-  return pool.sort(() => 0.5 - Math.random());
+  return seededShuffle(pool, rng);
 }
 
 export interface MemoryCard {
@@ -853,12 +931,11 @@ export interface MemoryCard {
 export function generateMemoryCards(
   items: LernstudioItem[],
   pairsCount: number = 6,
-  language: string = 'ar'
+  language: string = 'ar',
+  rng: () => number = Math.random
 ): MemoryCard[] {
   const safeLang = (language || 'ar').toLowerCase();
-  const selectedItems = [...items]
-    .sort(() => 0.5 - Math.random())
-    .slice(0, Math.min(pairsCount, items.length));
+  const selectedItems = seededShuffle(items, rng).slice(0, Math.min(pairsCount, items.length));
   const cards: MemoryCard[] = [];
 
   selectedItems.forEach((item, index) => {
@@ -892,7 +969,7 @@ export function generateMemoryCards(
     });
   });
 
-  return cards.sort(() => 0.5 - Math.random());
+  return seededShuffle(cards, rng);
 }
 
 /**
@@ -901,10 +978,11 @@ export function generateMemoryCards(
 export function generateMemoryCardsForSet(
   set: LernstudioSet,
   pairsCount: number = 6,
-  language: string = 'ar'
+  language: string = 'ar',
+  rng: () => number = Math.random
 ): MemoryCard[] {
   const playable = getSetPlayableItems(set);
-  return generateMemoryCards(playable, pairsCount, language);
+  return generateMemoryCards(playable, pairsCount, language, rng);
 }
 
 /**
@@ -936,7 +1014,10 @@ export interface SortingItem {
   emoji?: string;
 }
 
-export function extractSortingItems(items: LernstudioItem[]): SortingItem[] {
+export function extractSortingItems(
+  items: LernstudioItem[],
+  rng: () => number = Math.random
+): SortingItem[] {
   const result: SortingItem[] = [];
 
   items.forEach((it) => {
@@ -954,7 +1035,7 @@ export function extractSortingItems(items: LernstudioItem[]): SortingItem[] {
     }
   });
 
-  return result.sort(() => 0.5 - Math.random());
+  return seededShuffle(result, rng);
 }
 
 /**
@@ -975,11 +1056,20 @@ export interface SentenceGameQuestion {
  */
 export function buildSentenceGameQuestions(
   set: LernstudioSet,
-  language: string = 'ar'
+  language: string = 'ar',
+  rng: () => number = Math.random
 ): SentenceGameQuestion[] {
   const safeLang = (language || 'ar').toLowerCase();
   const results: SentenceGameQuestion[] = [];
   const items = set.items || [];
+
+  const scrambleWordsNonEqual = (words: string[]): string[] => {
+    const shuffled = seededShuffle(words, rng);
+    if (shuffled.join(' ') === words.join(' ') && words.length > 1) {
+      return [...shuffled].reverse();
+    }
+    return shuffled;
+  };
 
   // 0. From unified Grammar Content (sentence_ordering exercises + grammar examples)
   const grammarExercises = getGrammarLessonExercises(set);
@@ -988,10 +1078,7 @@ export function buildSentenceGameQuestions(
       const full = ex.correctAnswer.trim();
       const words = (ex.tokens && ex.tokens.length >= 2 ? ex.tokens : full.split(/\s+/)).filter(Boolean);
       if (words.length >= 2) {
-        const shuffled = [...words].sort(() => 0.5 - Math.random());
-        if (shuffled.join(' ') === words.join(' ') && words.length > 1) {
-          shuffled.reverse();
-        }
+        const shuffled = scrambleWordsNonEqual(words);
         results.push({
           id: ex.id || `gram_sb_${idx}`,
           germanFull: full,
@@ -1019,10 +1106,7 @@ export function buildSentenceGameQuestions(
       const words = full.split(/\s+/).filter(Boolean);
       if (words.length >= 3 && words.length <= 12) {
         if (results.some((r) => r.germanFull.toLowerCase() === full.toLowerCase())) return;
-        const shuffled = [...words].sort(() => 0.5 - Math.random());
-        if (shuffled.join(' ') === words.join(' ') && words.length > 1) {
-          shuffled.reverse();
-        }
+        const shuffled = scrambleWordsNonEqual(words);
         results.push({
           id: `gram_eg_sb_${eg.id || idx}`,
           germanFull: full,
@@ -1044,7 +1128,7 @@ export function buildSentenceGameQuestions(
         if (results.some((r) => r.germanFull.toLowerCase() === full.toLowerCase())) return;
         const words = full.split(/\s+/).filter(Boolean);
         if (words.length >= 3) {
-          const shuffled = [...words].sort(() => 0.5 - Math.random());
+          const shuffled = scrambleWordsNonEqual(words);
           const defaultArPrompt = 'رتب الكلمات الألمانية بالترتيب الصحيح';
           const defaultEnPrompt = 'Arrange German words in correct order';
           const defaultDePrompt = 'Ordne die deutschen Wörter richtig an';
@@ -1082,7 +1166,7 @@ export function buildSentenceGameQuestions(
       if (words.length >= 3) {
         const full = words.join(' ');
         if (results.some((r) => r.germanFull.toLowerCase() === full.toLowerCase())) return;
-        const shuffled = [...words].sort(() => 0.5 - Math.random());
+        const shuffled = scrambleWordsNonEqual(words);
         const trans = getItemTranslation(item, safeLang);
         results.push({
           id: `item_s4_${item.id}_${idx}`,
@@ -1119,10 +1203,7 @@ export function buildSentenceGameQuestions(
 
       const words = full.split(/\s+/).filter(Boolean);
       if (words.length >= 3 && words.length <= 12) {
-        const shuffled = [...words].sort(() => 0.5 - Math.random());
-        if (shuffled.join(' ') === words.join(' ') && words.length > 1) {
-          shuffled.reverse();
-        }
+        const shuffled = scrambleWordsNonEqual(words);
         const trans = getItemTranslation(item, safeLang);
         results.push({
           id: `item_ex_${item.id}_${idx}`,
@@ -1193,7 +1274,7 @@ export function buildSentenceGameQuestions(
       }
 
       const words = sentenceDe.split(/\s+/).filter(Boolean);
-      const shuffled = [...words].sort(() => 0.5 - Math.random());
+      const shuffled = scrambleWordsNonEqual(words);
       results.push({
         id: `synth_${item.id}_${idx}`,
         germanFull: sentenceDe,

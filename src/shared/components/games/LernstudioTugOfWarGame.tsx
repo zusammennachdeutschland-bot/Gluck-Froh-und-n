@@ -1,31 +1,32 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { LernstudioSet, LernstudioTheme, LernstudioItem, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation, getLocalizedTeamName } from '../../../utils/lernstudioTranslations';
-import { getSetPlayableItems } from '../../../utils/lernstudioVocabularyAdapter';
+import {
+  getSetVocabularyItems,
+  getDistractorChoices,
+  createSeededRandom,
+  seededShuffle
+} from '../../../utils/lernstudioVocabularyAdapter';
+import { GameSetupConfig } from '../LernstudioGameSetupScreen';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
 import {
   ArrowLeft,
   RotateCcw,
-  Trophy,
   Volume2,
   Users,
-  User,
-  Sparkles,
-  Zap,
-  Flame,
   Bot,
-  Swords,
-  ChevronRight,
-  ChevronLeft
+  Flame
 } from 'lucide-react';
 
 interface Props {
   set: LernstudioSet;
   activeTheme: LernstudioTheme;
   language?: string;
+  gameConfig?: GameSetupConfig;
+  onGameComplete?: (result: LernstudioGameCompletionPayload) => void;
   onBack: () => void;
 }
 
@@ -39,28 +40,43 @@ interface QuestionData {
 
 export const LernstudioTugOfWarGame: React.FC<Props> = ({
   set,
-  activeTheme,
   language = 'ar',
+  gameConfig,
+  onGameComplete,
   onBack
 }) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const displayTitle = getLocalizedSetTitle(set, language);
-  const items = useMemo(() => getSetPlayableItems(set), [set]);
+  const difficulty = gameConfig?.difficulty || set.difficulty || 'medium';
+  const enableAudio = gameConfig?.enableAudio ?? true;
+  const enableSoundFx = gameConfig?.enableSoundFx ?? true;
+  const maxRounds = Math.max(6, gameConfig?.questionCount || 12);
+
+  const [sessionSeed, setSessionSeed] = useState<number>(() => Date.now());
+  const items = useMemo(
+    () => getSetVocabularyItems(set, language, maxRounds, sessionSeed),
+    [set, language, maxRounds, sessionSeed]
+  );
   const { triggerSparkles, triggerScorePopup, triggerCelebration, EffectsOverlay, SettingsBar } = useGameEffects(language);
 
   // Game Settings
-  const [gameMode, setGameMode] = useState<'teams' | 'vs_bot'>('teams');
-  const [team1Name, setTeam1Name] = useState<string>(() => getLocalizedTeamName('teamRed', language, 'الفريق الأحمر 🔴'));
-  const [team2Name, setTeam2Name] = useState<string>(() => getLocalizedTeamName('teamBlue', language, 'الفريق الأزرق 🔵'));
+  const [gameMode, setGameMode] = useState<'teams' | 'vs_bot'>(
+    gameConfig?.gameMode === 'solo' ? 'vs_bot' : 'teams'
+  );
+  const [team1Name, setTeam1Name] = useState<string>(
+    () => gameConfig?.teamNames?.[0] || getLocalizedTeamName('teamRed', language, 'الفريق الأحمر 🔴')
+  );
+  const [team2Name, setTeam2Name] = useState<string>(
+    () => gameConfig?.teamNames?.[1] || getLocalizedTeamName('teamBlue', language, 'الفريق الأزرق 🔵')
+  );
 
   useEffect(() => {
-    setTeam1Name(getLocalizedTeamName('teamRed', language, 'الفريق الأحمر 🔴'));
-    setTeam2Name(getLocalizedTeamName('teamBlue', language, 'الفريق الأزرق 🔵'));
-  }, [language]);
-  
+    setTeam1Name(gameConfig?.teamNames?.[0] || getLocalizedTeamName('teamRed', language, 'الفريق الأحمر 🔴'));
+    setTeam2Name(gameConfig?.teamNames?.[1] || getLocalizedTeamName('teamBlue', language, 'الفريق الأزرق 🔵'));
+  }, [language, gameConfig?.teamNames]);
+
   // Game State
-  // ropePosition: from -100 (Team 1 wins) to +100 (Team 2 / Bot wins), 0 is middle
   const [ropePosition, setRopePosition] = useState<number>(0);
   const [currentTurn, setCurrentTurn] = useState<1 | 2>(1);
   const [team1Score, setTeam1Score] = useState<number>(0);
@@ -68,7 +84,6 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
   const [team1Streak, setTeam1Streak] = useState<number>(0);
   const [team2Streak, setTeam2Streak] = useState<number>(0);
   const [roundNumber, setRoundNumber] = useState<number>(1);
-  const maxRounds = 12;
 
   const [isGameOver, setIsGameOver] = useState<boolean>(false);
   const [winner, setWinner] = useState<1 | 2 | 'draw' | null>(null);
@@ -81,17 +96,65 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
   const [feedback, setFeedback] = useState<{ isCorrect: boolean; message: string } | null>(null);
   const [isBotThinking, setIsBotThinking] = useState<boolean>(false);
 
-  // Generate Questions from items
+  const ropePosRef = useRef(0);
+  const roundRef = useRef(1);
+  const isGameOverRef = useRef(false);
+  const team1ScoreRef = useRef(0);
+  const team2ScoreRef = useRef(0);
+  const correctRef = useRef(0);
+  const totalRef = useRef(0);
+  const reportedRef = useRef(false);
+  const startedAtRef = useRef(Date.now());
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const scheduleTimeout = useCallback((fn: () => void, ms: number) => {
+    const id = setTimeout(fn, ms);
+    timeoutsRef.current.push(id);
+    return id;
+  }, []);
+
+  const clearAllTimeouts = useCallback(() => {
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current = [];
+  }, []);
+
+  useEffect(() => {
+    return () => clearAllTimeouts();
+  }, [clearAllTimeouts]);
+
+  const reportCompletion = useCallback(
+    (victor: 1 | 2 | 'draw') => {
+      if (reportedRef.current || !onGameComplete) return;
+      reportedRef.current = true;
+      const attempts = Math.max(1, totalRef.current);
+      const accuracy = Math.min(100, Math.round((correctRef.current / attempts) * 100));
+      onGameComplete({
+        gameMode: 'tug_of_war',
+        score: Math.max(team1ScoreRef.current, team2ScoreRef.current),
+        maxScore: maxRounds * 25,
+        accuracy,
+        passed: victor !== 2 || gameMode === 'teams',
+        durationSeconds: Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)),
+        teamScores: {
+          [team1Name]: team1ScoreRef.current,
+          [gameMode === 'vs_bot' ? t.smartBot : team2Name]: team2ScoreRef.current
+        },
+        difficulty
+      });
+    },
+    [onGameComplete, maxRounds, gameMode, team1Name, team2Name, t.smartBot, difficulty]
+  );
+
+  // Generate Seeded Questions from items
   const questions: QuestionData[] = useMemo(() => {
     if (!items.length) return [];
     const safeLang = (language || 'ar').toLowerCase();
-    
+    const rng = createSeededRandom(sessionSeed);
+
     return items.map((item, idx) => {
-      const otherItems = items.filter((_, i) => i !== idx);
-      
-      // Determine question type: if item has article, occasionally do article quiz
-      const canDoArticle = Boolean(item.article);
-      const isArticleQ = canDoArticle && Math.random() > 0.55;
+      const canDoArticle = Boolean(item.article) && gameConfig?.questionType !== 'translation';
+      const wantArticleOnly = gameConfig?.questionType === 'article';
+      const isArticleQ = canDoArticle && (wantArticleOnly || rng() > 0.6);
 
       if (isArticleQ) {
         const cleanNoun = item.german.replace(/^(der|die|das)\s+/i, '');
@@ -105,20 +168,18 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
         return {
           item,
           prompt: articlePrompt,
-          options: ['der', 'die', 'das'],
+          options: seededShuffle(['der', 'die', 'das'], createSeededRandom(sessionSeed + idx * 17)),
           correctAnswer: item.article || 'der',
           type: 'article'
         };
       }
 
-      // Normal translation: German to Target Language
-      const wrongTrans = otherItems
-        .sort(() => 0.5 - Math.random())
-        .slice(0, 3)
-        .map((it) => getItemTranslation(it, language));
-      
+      const distItems = getDistractorChoices(item, items, 3, createSeededRandom(sessionSeed + idx * 31));
       const targetTrans = getItemTranslation(item, language);
-      const options = [targetTrans, ...wrongTrans].sort(() => 0.5 - Math.random());
+      const wrongTrans = distItems
+        .map((it) => getItemTranslation(it, language))
+        .filter((tr) => tr && tr.toLowerCase() !== targetTrans.toLowerCase());
+      const options = seededShuffle(Array.from(new Set([targetTrans, ...wrongTrans])), rng);
 
       const qPrompt =
         safeLang === 'en'
@@ -135,76 +196,97 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
         type: 'meaning'
       };
     });
-  }, [items, language]);
+  }, [items, language, sessionSeed, gameConfig?.questionType]);
 
   const currentQ = questions[questionIndex % Math.max(1, questions.length)];
 
   // Trigger sound and speech when turn starts
   useEffect(() => {
-    if (currentQ?.item?.german && currentTurn === 1) {
+    if (enableAudio && currentQ?.item?.german && currentTurn === 1 && !isGameOver) {
       speakGermanText(currentQ.item.german);
     }
-  }, [questionIndex, currentTurn]);
+  }, [questionIndex, currentTurn, currentQ, enableAudio, isGameOver]);
 
-  // Bot Turn Logic
-  useEffect(() => {
-    if (gameMode === 'vs_bot' && currentTurn === 2 && !isGameOver && !isAnswered && currentQ) {
-      setIsBotThinking(true);
-      const botDelay = setTimeout(() => {
-        setIsBotThinking(false);
-        // Bot has ~70% accuracy
-        const willBeCorrect = Math.random() < 0.70;
-        const botAnswer = willBeCorrect
-          ? currentQ.correctAnswer
-          : currentQ.options.find((opt) => opt !== currentQ.correctAnswer) || currentQ.correctAnswer;
-        
-        handleAnswer(botAnswer, 2);
-      }, 1600);
+  const triggerGameOver = useCallback(
+    (victor: 1 | 2) => {
+      isGameOverRef.current = true;
+      setIsGameOver(true);
+      setWinner(victor);
+      if (enableSoundFx) {
+        playLernstudioSound('victory');
+        playGermanVoiceFeedback('victory');
+      }
+      const victorName = victor === 1 ? team1Name : (gameMode === 'vs_bot' ? t.smartBot : team2Name);
+      const winMsg = language === 'ar' ? `فاز ${victorName}! 🪢` : language === 'de' ? `${victorName} hat gewonnen! 🪢` : `${victorName} won! 🪢`;
+      triggerCelebration(winMsg);
+      reportCompletion(victor);
+    },
+    [enableSoundFx, team1Name, team2Name, gameMode, t.smartBot, language, triggerCelebration, reportCompletion]
+  );
 
-      return () => clearTimeout(botDelay);
+  const finishGameByPosition = useCallback(() => {
+    isGameOverRef.current = true;
+    setIsGameOver(true);
+    const pos = ropePosRef.current;
+    const victor: 1 | 2 | 'draw' = pos < -5 ? 1 : pos > 5 ? 2 : 'draw';
+    setWinner(victor);
+    if (enableSoundFx) {
+      playLernstudioSound('victory');
+      playGermanVoiceFeedback('victory');
     }
-  }, [currentTurn, gameMode, isGameOver, isAnswered, currentQ]);
+    triggerCelebration(language === 'ar' ? 'نهاية شد الحبل! 🪢' : language === 'de' ? 'Ende des Tauziehens! 🪢' : 'Tug of war ended! 🪢');
+    reportCompletion(victor);
+  }, [enableSoundFx, language, triggerCelebration, reportCompletion]);
 
   // Handle answering
   const handleAnswer = (answer: string, answeringTeam: 1 | 2) => {
-    if (isAnswered || isGameOver || !currentQ) return;
+    if (isAnswered || isGameOverRef.current || !currentQ) return;
     setIsAnswered(true);
     setSelectedOption(answer);
+    totalRef.current += 1;
 
     const isCorrect = answer === currentQ.correctAnswer;
     const isTeam1 = answeringTeam === 1;
 
     if (isCorrect) {
-      playLernstudioSound('correct');
-      playGermanVoiceFeedback('correct');
+      correctRef.current += 1;
+      if (enableSoundFx) {
+        playLernstudioSound('correct');
+        playGermanVoiceFeedback('correct');
+      }
       triggerSparkles(isTeam1 ? 30 : 70, 45, isTeam1 ? '#f43f5e' : '#3b82f6');
       triggerScorePopup('+15 🪢', isTeam1 ? 30 : 70, 35, 'positive');
 
       const streak = isTeam1 ? team1Streak + 1 : team2Streak + 1;
+      const pts = streak > 1 ? 25 : 15;
       if (isTeam1) {
+        team1ScoreRef.current += pts;
         setTeam1Streak(streak);
-        setTeam1Score((prev) => prev + (streak > 1 ? 25 : 15));
+        setTeam1Score(team1ScoreRef.current);
       } else {
+        team2ScoreRef.current += pts;
         setTeam2Streak(streak);
-        setTeam2Score((prev) => prev + (streak > 1 ? 25 : 15));
+        setTeam2Score(team2ScoreRef.current);
       }
 
-      // Pull rope: Team 1 pulls Left (-), Team 2 pulls Right (+)
       const pullAmount = streak > 1 ? 24 : 16;
       setPullAnimation(isTeam1 ? 'left' : 'right');
 
-      setRopePosition((prev) => {
-        const nextPos = isTeam1 ? prev - pullAmount : prev + pullAmount;
-        // Check instant win
-        if (nextPos <= -85) {
-          triggerGameOver(1);
-          return -100;
-        } else if (nextPos >= 85) {
-          triggerGameOver(2);
-          return 100;
-        }
-        return nextPos;
-      });
+      const nextPos = isTeam1 ? ropePosRef.current - pullAmount : ropePosRef.current + pullAmount;
+      if (nextPos <= -85) {
+        ropePosRef.current = -100;
+        setRopePosition(-100);
+        triggerGameOver(1);
+        return;
+      } else if (nextPos >= 85) {
+        ropePosRef.current = 100;
+        setRopePosition(100);
+        triggerGameOver(2);
+        return;
+      } else {
+        ropePosRef.current = nextPos;
+        setRopePosition(nextPos);
+      }
 
       setFeedback({
         isCorrect: true,
@@ -213,19 +295,20 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
           : (language === 'ar' ? 'سحبة قوية وصحيحة! 💪 +15 نقطة' : language === 'de' ? 'Starker richtiger Zug! 💪 +15 Punkte' : 'Strong correct pull! 💪 +15 pts')
       });
     } else {
-      playLernstudioSound('wrong');
-      playGermanVoiceFeedback('wrong');
+      if (enableSoundFx) {
+        playLernstudioSound('wrong');
+        playGermanVoiceFeedback('wrong');
+      }
       if (isTeam1) {
         setTeam1Streak(0);
       } else {
         setTeam2Streak(0);
       }
 
-      // Slight slip back
       const slipAmount = 6;
-      setRopePosition((prev) => {
-        return isTeam1 ? Math.min(85, prev + slipAmount) : Math.max(-85, prev - slipAmount);
-      });
+      const nextPos = isTeam1 ? Math.min(85, ropePosRef.current + slipAmount) : Math.max(-85, ropePosRef.current - slipAmount);
+      ropePosRef.current = nextPos;
+      setRopePosition(nextPos);
 
       setFeedback({
         isCorrect: false,
@@ -237,49 +320,56 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
       });
     }
 
-    // Auto advance to next turn after delay (allowing full German speech + grace period)
-    setTimeout(() => {
+    scheduleTimeout(() => {
+      if (isGameOverRef.current) return;
       setPullAnimation(null);
       setIsAnswered(false);
       setSelectedOption(null);
       setFeedback(null);
 
-      // Check if max rounds reached
-      if (roundNumber >= maxRounds && !isGameOver) {
+      if (roundRef.current >= maxRounds) {
         finishGameByPosition();
       } else {
-        setRoundNumber((r) => r + 1);
-        setCurrentTurn((t) => (t === 1 ? 2 : 1));
+        roundRef.current += 1;
+        setRoundNumber(roundRef.current);
+        setCurrentTurn((prevTurn) => (prevTurn === 1 ? 2 : 1));
         setQuestionIndex((q) => q + 1);
       }
-    }, isCorrect ? 2000 : 2800);
+    }, isCorrect ? 1600 : 2200);
   };
 
-  const triggerGameOver = (victor: 1 | 2) => {
-    setIsGameOver(true);
-    setWinner(victor);
-    playLernstudioSound('victory');
-    playGermanVoiceFeedback('victory');
-    const victorName = victor === 1 ? team1Name : (gameMode === 'vs_bot' ? t.smartBot : team2Name);
-    const winMsg = language === 'ar' ? `فاز ${victorName}! 🪢` : language === 'de' ? `${victorName} hat gewonnen! 🪢` : `${victorName} won! 🪢`;
-    triggerCelebration(winMsg);
-  };
+  // Bot Turn Logic (accuracy scaled by difficulty)
+  const botAccuracy = difficulty === 'easy' ? 0.45 : difficulty === 'hard' ? 0.9 : 0.7;
+  useEffect(() => {
+    if (gameMode === 'vs_bot' && currentTurn === 2 && !isGameOver && !isAnswered && currentQ) {
+      setIsBotThinking(true);
+      const botDelay = setTimeout(() => {
+        setIsBotThinking(false);
+        const rng = createSeededRandom(sessionSeed + roundRef.current * 47);
+        const willBeCorrect = rng() < botAccuracy;
+        const botAnswer = willBeCorrect
+          ? currentQ.correctAnswer
+          : currentQ.options.find((opt) => opt !== currentQ.correctAnswer) || currentQ.correctAnswer;
 
-  const finishGameByPosition = () => {
-    setIsGameOver(true);
-    if (ropePosition < -5) {
-      setWinner(1);
-    } else if (ropePosition > 5) {
-      setWinner(2);
-    } else {
-      setWinner('draw');
+        handleAnswer(botAnswer, 2);
+      }, 1200);
+
+      return () => clearTimeout(botDelay);
     }
-    playLernstudioSound('victory');
-    playGermanVoiceFeedback('victory');
-    triggerCelebration(language === 'ar' ? 'نهاية شد الحبل! 🪢' : language === 'de' ? 'Ende des Tauziehens! 🪢' : 'Tug of war ended! 🪢');
-  };
+  }, [currentTurn, gameMode, isGameOver, isAnswered, currentQ, botAccuracy, sessionSeed]);
 
   const restartGame = () => {
+    clearAllTimeouts();
+    ropePosRef.current = 0;
+    roundRef.current = 1;
+    isGameOverRef.current = false;
+    team1ScoreRef.current = 0;
+    team2ScoreRef.current = 0;
+    correctRef.current = 0;
+    totalRef.current = 0;
+    reportedRef.current = false;
+    startedAtRef.current = Date.now();
+    setSessionSeed(Date.now());
     setRopePosition(0);
     setCurrentTurn(1);
     setTeam1Score(0);

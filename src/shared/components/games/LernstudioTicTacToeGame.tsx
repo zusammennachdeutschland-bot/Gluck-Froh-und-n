@@ -1,9 +1,15 @@
-import React, { useState, useMemo } from 'react';
-import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { LernstudioSet, LernstudioTheme, LernstudioItem, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
-import { getSetPlayableItems } from '../../../utils/lernstudioVocabularyAdapter';
+import {
+  getSetVocabularyItems,
+  getDistractorChoices,
+  createSeededRandom,
+  seededShuffle
+} from '../../../utils/lernstudioVocabularyAdapter';
+import { GameSetupConfig } from '../LernstudioGameSetupScreen';
 import { GameStageBanner } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
 import {
@@ -12,41 +18,65 @@ import {
   Trophy,
   Users,
   Bot,
-  Volume2,
-  Sparkles,
-  CheckCircle2,
-  XCircle,
-  HelpCircle
+  Volume2
 } from 'lucide-react';
 
 interface Props {
   set: LernstudioSet;
   activeTheme: LernstudioTheme;
   language?: string;
+  gameConfig?: GameSetupConfig;
+  onGameComplete?: (result: LernstudioGameCompletionPayload) => void;
   onBack: () => void;
 }
 
 type Player = 'X' | 'O';
-type GameOpponent = 'pvp' | 'ai'; // Player vs Player / Teams OR Player vs AI
+type GameOpponent = 'pvp' | 'ai';
+
+const WIN_LINES = [
+  [0, 1, 2],
+  [3, 4, 5],
+  [6, 7, 8],
+  [0, 3, 6],
+  [1, 4, 7],
+  [2, 5, 8],
+  [0, 4, 8],
+  [2, 4, 6]
+];
 
 export const LernstudioTicTacToeGame: React.FC<Props> = ({
   set,
-  activeTheme,
   language = 'ar',
+  gameConfig,
+  onGameComplete,
   onBack
 }) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const displayTitle = getLocalizedSetTitle(set, language);
-  const items = useMemo(() => getSetPlayableItems(set), [set]);
+  const difficulty = gameConfig?.difficulty || set.difficulty || 'medium';
+  const enableAudio = gameConfig?.enableAudio ?? true;
+  const enableSoundFx = gameConfig?.enableSoundFx ?? true;
+
+  const [sessionSeed, setSessionSeed] = useState<number>(() => Date.now());
+  const items = useMemo(
+    () => getSetVocabularyItems(set, language, gameConfig?.questionCount, sessionSeed),
+    [set, language, gameConfig?.questionCount, sessionSeed]
+  );
   const { triggerSparkles, triggerScorePopup, triggerCelebration, EffectsOverlay, SettingsBar } = useGameEffects(language);
 
   // Board: 9 cells (0 to 8)
   const [board, setBoard] = useState<(Player | null)[]>(Array(9).fill(null));
   const [currentPlayer, setCurrentPlayer] = useState<Player>('X');
-  const [opponentMode, setOpponentMode] = useState<GameOpponent>('pvp');
-  const [teamXName, setTeamXName] = useState(isRtl ? 'الفريق ❌ (الأزرق)' : 'Team ❌ (Blue)');
-  const [teamOName, setTeamOName] = useState(isRtl ? 'الفريق ⭕ (الأخضر)' : 'Team ⭕ (Green)');
+  const [opponentMode, setOpponentMode] = useState<GameOpponent>(
+    gameConfig?.gameMode === 'solo' ? 'ai' : 'pvp'
+  );
+  const [teamXName, setTeamXName] = useState(
+    gameConfig?.teamNames?.[0] || (isRtl ? 'الفريق ❌ (الأزرق)' : 'Team ❌ (Blue)')
+  );
+  const [teamOName, setTeamOName] = useState(
+    gameConfig?.teamNames?.[1] || (isRtl ? 'الفريق ⭕ (الأخضر)' : 'Team ⭕ (Green)')
+  );
   const [scores, setScores] = useState({ X: 0, O: 0, draws: 0 });
 
   // In-turn question modal state
@@ -61,63 +91,162 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
   const [winner, setWinner] = useState<Player | 'draw' | null>(null);
   const [winningLine, setWinningLine] = useState<number[] | null>(null);
 
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const turnCounterRef = useRef(0);
+  const correctAnswersRef = useRef(0);
+  const totalAnswersRef = useRef(0);
+  const startedAtRef = useRef(Date.now());
+
+  const scheduleTimeout = useCallback((fn: () => void, ms: number) => {
+    const id = setTimeout(fn, ms);
+    timeoutsRef.current.push(id);
+    return id;
+  }, []);
+
+  const clearAllTimeouts = useCallback(() => {
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current = [];
+  }, []);
+
+  useEffect(() => {
+    return () => clearAllTimeouts();
+  }, [clearAllTimeouts]);
+
+  useEffect(() => {
+    if (gameConfig?.teamNames?.[0]) setTeamXName(gameConfig.teamNames[0]);
+    if (gameConfig?.teamNames?.[1]) setTeamOName(gameConfig.teamNames[1]);
+  }, [gameConfig?.teamNames]);
+
+  const reportMatchComplete = useCallback(
+    (matchWinner: Player | 'draw', updatedScores: { X: number; O: number; draws: number }) => {
+      if (!onGameComplete) return;
+      const attempts = Math.max(1, totalAnswersRef.current);
+      const accuracy = Math.min(100, Math.round((correctAnswersRef.current / attempts) * 100));
+      onGameComplete({
+        gameMode: 'tictactoe',
+        score: (matchWinner === 'X' ? 100 : matchWinner === 'draw' ? 50 : 25) + correctAnswersRef.current * 25,
+        maxScore: 325,
+        accuracy,
+        passed: matchWinner === 'X' || (opponentMode === 'pvp' && matchWinner !== null),
+        durationSeconds: Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)),
+        teamScores: { [teamXName]: updatedScores.X, [teamOName]: updatedScores.O },
+        difficulty
+      });
+    },
+    [onGameComplete, opponentMode, teamXName, teamOName, difficulty]
+  );
+
   // Check winning lines
   const checkWinner = (squares: (Player | null)[]) => {
-    const lines = [
-      [0, 1, 2],
-      [3, 4, 5],
-      [6, 7, 8],
-      [0, 3, 6],
-      [1, 4, 7],
-      [2, 5, 8],
-      [0, 4, 8],
-      [2, 4, 6]
-    ];
-
-    for (let i = 0; i < lines.length; i++) {
-      const [a, b, c] = lines[i];
+    for (let i = 0; i < WIN_LINES.length; i++) {
+      const [a, b, c] = WIN_LINES[i];
       if (squares[a] && squares[a] === squares[b] && squares[a] === squares[c]) {
-        return { winner: squares[a] as Player, line: lines[i] };
+        return { winner: squares[a] as Player, line: WIN_LINES[i] };
       }
     }
-
     if (squares.every((sq) => sq !== null)) {
       return { winner: 'draw' as const, line: null };
     }
-
     return null;
+  };
+
+  const pickAiCell = (currentBoard: (Player | null)[], emptyIndices: number[], rng: () => number): number => {
+    if (difficulty === 'easy') {
+      return emptyIndices[Math.floor(rng() * emptyIndices.length)];
+    }
+    // Check immediate AI win ('O')
+    for (const idx of emptyIndices) {
+      const copy = [...currentBoard];
+      copy[idx] = 'O';
+      if (checkWinner(copy)?.winner === 'O') return idx;
+    }
+    // Block human win ('X')
+    for (const idx of emptyIndices) {
+      const copy = [...currentBoard];
+      copy[idx] = 'X';
+      if (checkWinner(copy)?.winner === 'X') return idx;
+    }
+    if (difficulty === 'hard') {
+      if (currentBoard[4] === null) return 4;
+      const corners = [0, 2, 6, 8].filter((c) => currentBoard[c] === null);
+      if (corners.length > 0) return corners[Math.floor(rng() * corners.length)];
+    }
+    return emptyIndices[Math.floor(rng() * emptyIndices.length)];
   };
 
   // Click on a grid cell
   const handleCellClick = (index: number) => {
     if (board[index] || winner || activeCellIndex !== null || items.length === 0) return;
 
-    // Pick a random word from set for this cell challenge
-    const target = items[Math.floor(Math.random() * items.length)];
-    const distractors = items
-      .filter((it) => it.id !== target.id)
-      .sort(() => 0.5 - Math.random())
-      .slice(0, 2);
-
-    const choices = [target, ...distractors].sort(() => 0.5 - Math.random());
+    turnCounterRef.current += 1;
+    const rng = createSeededRandom(sessionSeed + index * 43 + turnCounterRef.current * 19);
+    const target = items[(turnCounterRef.current + index) % items.length];
+    const distractors = getDistractorChoices(target, items, 2, rng);
+    const choices = seededShuffle([target, ...distractors], rng);
 
     setActiveCellIndex(index);
     setActiveQuestion({ targetItem: target, choices });
     setQuestionFeedback(null);
   };
 
+  // Basic Computer AI Move
+  const triggerAiMove = (currentBoard: (Player | null)[]) => {
+    const emptyIndices = currentBoard
+      .map((val, idx) => (val === null ? idx : null))
+      .filter((v): v is number => v !== null);
+
+    if (emptyIndices.length === 0) return;
+
+    scheduleTimeout(() => {
+      turnCounterRef.current += 1;
+      const rng = createSeededRandom(sessionSeed + turnCounterRef.current * 61);
+      const chosenIndex = pickAiCell(currentBoard, emptyIndices, rng);
+      const newBoard = [...currentBoard];
+      newBoard[chosenIndex] = 'O';
+      setBoard(newBoard);
+
+      if (enableSoundFx) playLernstudioSound('card_match');
+
+      const result = checkWinner(newBoard);
+      if (result) {
+        if (result.winner === 'draw') {
+          setWinner('draw');
+          setScores((s) => {
+            const next = { ...s, draws: s.draws + 1 };
+            reportMatchComplete('draw', next);
+            return next;
+          });
+        } else {
+          setWinner(result.winner);
+          setWinningLine(result.line);
+          setScores((s) => {
+            const next = { ...s, [result.winner]: s[result.winner] + 1 };
+            reportMatchComplete(result.winner, next);
+            return next;
+          });
+        }
+      } else {
+        setCurrentPlayer('X');
+      }
+    }, 850);
+  };
+
   // Submit answer for the active cell challenge
   const handleAnswerQuestion = (selectedItem: LernstudioItem) => {
-    if (!activeQuestion || activeCellIndex === null) return;
+    if (!activeQuestion || activeCellIndex === null || questionFeedback) return;
 
     const isCorrect = selectedItem.id === activeQuestion.targetItem.id;
+    totalAnswersRef.current += 1;
 
     if (isCorrect) {
-      playLernstudioSound('correct');
-      playGermanVoiceFeedback('correct');
+      correctAnswersRef.current += 1;
+      if (enableSoundFx) {
+        playLernstudioSound('correct');
+        playGermanVoiceFeedback('correct');
+      }
       triggerSparkles(50, 50, '#10b981');
       triggerScorePopup(currentPlayer === 'X' ? '❌' : '⭕', 50, 40, 'positive');
-      speakGermanText(activeQuestion.targetItem.german);
+      if (enableAudio) speakGermanText(activeQuestion.targetItem.german);
 
       setQuestionFeedback({
         correct: true,
@@ -130,7 +259,7 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
 
       const result = checkWinner(newBoard);
 
-      setTimeout(() => {
+      scheduleTimeout(() => {
         setActiveCellIndex(null);
         setActiveQuestion(null);
         setQuestionFeedback(null);
@@ -138,29 +267,39 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
         if (result) {
           if (result.winner === 'draw') {
             setWinner('draw');
-            setScores((s) => ({ ...s, draws: s.draws + 1 }));
+            setScores((s) => {
+              const next = { ...s, draws: s.draws + 1 };
+              reportMatchComplete('draw', next);
+              return next;
+            });
           } else {
             setWinner(result.winner);
             setWinningLine(result.line);
-            setScores((s) => ({ ...s, [result.winner]: s[result.winner] + 1 }));
-            playLernstudioSound('victory');
-            playGermanVoiceFeedback('victory');
+            setScores((s) => {
+              const next = { ...s, [result.winner]: s[result.winner] + 1 };
+              reportMatchComplete(result.winner, next);
+              return next;
+            });
+            if (enableSoundFx) {
+              playLernstudioSound('victory');
+              playGermanVoiceFeedback('victory');
+            }
             triggerCelebration(`الفائز: ${result.winner === 'X' ? teamXName : teamOName}! ❌⭕`);
           }
         } else {
-          // Switch player
           const nextPlayer: Player = currentPlayer === 'X' ? 'O' : 'X';
           setCurrentPlayer(nextPlayer);
 
-          // If AI mode and it's O's turn, trigger computer play
           if (opponentMode === 'ai' && nextPlayer === 'O') {
             triggerAiMove(newBoard);
           }
         }
-      }, 1800);
+      }, 1400);
     } else {
-      playLernstudioSound('wrong');
-      playGermanVoiceFeedback('wrong');
+      if (enableSoundFx) {
+        playLernstudioSound('wrong');
+        playGermanVoiceFeedback('wrong');
+      }
       setQuestionFeedback({
         correct: false,
         msg: isRtl
@@ -168,8 +307,8 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
           : `Wrong! Correct word is: ${activeQuestion.targetItem.german}`
       });
 
-      // Failed to claim: turn switches to opponent (allowing 2800ms for full feedback speech)
-      setTimeout(() => {
+      const snapshotBoard = [...board];
+      scheduleTimeout(() => {
         setActiveCellIndex(null);
         setActiveQuestion(null);
         setQuestionFeedback(null);
@@ -178,46 +317,19 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
         setCurrentPlayer(nextPlayer);
 
         if (opponentMode === 'ai' && nextPlayer === 'O') {
-          triggerAiMove(board);
+          triggerAiMove(snapshotBoard);
         }
-      }, 2800);
+      }, 2200);
     }
   };
 
-  // Basic Computer AI Move
-  const triggerAiMove = (currentBoard: (Player | null)[]) => {
-    const emptyIndices = currentBoard
-      .map((val, idx) => (val === null ? idx : null))
-      .filter((v): v is number => v !== null);
-
-    if (emptyIndices.length === 0) return;
-
-    // AI randomly picks an available cell with 80% accuracy chance
-    setTimeout(() => {
-      const chosenIndex = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
-      const newBoard = [...currentBoard];
-      newBoard[chosenIndex] = 'O';
-      setBoard(newBoard);
-
-      playLernstudioSound('card_match');
-
-      const result = checkWinner(newBoard);
-      if (result) {
-        if (result.winner === 'draw') {
-          setWinner('draw');
-          setScores((s) => ({ ...s, draws: s.draws + 1 }));
-        } else {
-          setWinner(result.winner);
-          setWinningLine(result.line);
-          setScores((s) => ({ ...s, [result.winner]: s[result.winner] + 1 }));
-        }
-      } else {
-        setCurrentPlayer('X');
-      }
-    }, 900);
-  };
-
   const handleResetBoard = () => {
+    clearAllTimeouts();
+    turnCounterRef.current = 0;
+    correctAnswersRef.current = 0;
+    totalAnswersRef.current = 0;
+    startedAtRef.current = Date.now();
+    setSessionSeed(Date.now());
     setBoard(Array(9).fill(null));
     setCurrentPlayer('X');
     setWinner(null);

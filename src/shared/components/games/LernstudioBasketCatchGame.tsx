@@ -1,28 +1,33 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { LernstudioSet, LernstudioTheme, LernstudioItem, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText, stopGermanSpeech } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
-import { getSetPlayableItems } from '../../../utils/lernstudioVocabularyAdapter';
+import {
+  getSetVocabularyItems,
+  getDistractorChoices,
+  createSeededRandom,
+  seededShuffle
+} from '../../../utils/lernstudioVocabularyAdapter';
+import { GameSetupConfig } from '../LernstudioGameSetupScreen';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
 import { GameEffectsOverlay, GameSettingsControls } from '../effects/GameEffectsOverlay';
 import {
   ArrowLeft,
   RotateCcw,
-  Trophy,
   Heart,
   Volume2,
   ChevronLeft,
-  ChevronRight,
-  Sparkles,
-  Zap
+  ChevronRight
 } from 'lucide-react';
 
 interface Props {
   set: LernstudioSet;
   activeTheme: LernstudioTheme;
   language?: string;
+  gameConfig?: GameSetupConfig;
+  onGameComplete?: (result: LernstudioGameCompletionPayload) => void;
   onBack: () => void;
 }
 
@@ -37,56 +42,122 @@ interface FallingWord {
 
 export const LernstudioBasketCatchGame: React.FC<Props> = ({
   set,
-  activeTheme,
   language = 'ar',
+  gameConfig,
+  onGameComplete,
   onBack
 }) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const displayTitle = getLocalizedSetTitle(set, language);
-  const items = useMemo(() => getSetPlayableItems(set), [set]);
+  const difficulty = gameConfig?.difficulty || set.difficulty || 'medium';
+  const maxLives = difficulty === 'easy' ? 4 : difficulty === 'hard' ? 2 : 3;
+  const baseSpeed = difficulty === 'easy' ? 0.25 : difficulty === 'hard' ? 0.55 : 0.38;
+  const enableAudio = gameConfig?.enableAudio ?? true;
+  const enableSoundFx = gameConfig?.enableSoundFx ?? true;
+
+  const [sessionSeed, setSessionSeed] = useState<number>(() => Date.now());
+  const items = useMemo(
+    () => getSetVocabularyItems(set, language, gameConfig?.questionCount, sessionSeed),
+    [set, language, gameConfig?.questionCount, sessionSeed]
+  );
 
   // Game state
   const [targetIndex, setTargetIndex] = useState(0);
   const [basketXPercent, setBasketXPercent] = useState(50); // 10% to 90%
   const [fallingWords, setFallingWords] = useState<FallingWord[]>([]);
   const [score, setScore] = useState(0);
-  const [lives, setLives] = useState(3);
+  const [lives, setLives] = useState(maxLives);
   const [isGameOver, setIsGameOver] = useState(false);
   const [isVictory, setIsVictory] = useState(false);
   const [catchFlash, setCatchFlash] = useState<{ text: string; correct: boolean } | null>(null);
   const { particles, popups, triggerCorrect, triggerWrong, triggerVictory } = useGameEffects();
 
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const targetItem: LernstudioItem | undefined = items[targetIndex % items.length];
+  const fallingWordsRef = useRef<FallingWord[]>([]);
+  const basketXRef = useRef(50);
+  const targetIndexRef = useRef(0);
+  const scoreRef = useRef(0);
+  const livesRef = useRef(maxLives);
+  const isGameOverRef = useRef(false);
+  const isVictoryRef = useRef(false);
+  const waveCounterRef = useRef(0);
+  const correctCountRef = useRef(0);
+  const attemptsCountRef = useRef(0);
+  const reportedRef = useRef(false);
+  const startedAtRef = useRef(Date.now());
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  // Spawn falling word items periodically
+  const scheduleTimeout = useCallback((fn: () => void, ms: number) => {
+    const id = setTimeout(fn, ms);
+    timeoutsRef.current.push(id);
+    return id;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      timeoutsRef.current.forEach(clearTimeout);
+      timeoutsRef.current = [];
+      stopGermanSpeech();
+    };
+  }, []);
+
+  const reportCompletion = useCallback(
+    (passed: boolean, finalScore: number) => {
+      if (reportedRef.current || !onGameComplete) return;
+      reportedRef.current = true;
+      const total = Math.max(1, items.length);
+      const attempts = Math.max(1, attemptsCountRef.current);
+      const accuracy = Math.min(100, Math.round((correctCountRef.current / attempts) * 100));
+      onGameComplete({
+        gameMode: 'basket_catch',
+        score: finalScore,
+        maxScore: total * 100,
+        accuracy,
+        passed,
+        durationSeconds: Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)),
+        difficulty
+      });
+    },
+    [onGameComplete, items.length, difficulty]
+  );
+
+  const targetItem: LernstudioItem | undefined = items[targetIndex % Math.max(1, items.length)];
+
+  const createWaveForTarget = useCallback(
+    (target: LernstudioItem, roundIdx: number): FallingWord[] => {
+      waveCounterRef.current += 1;
+      const rng = createSeededRandom(sessionSeed + roundIdx * 97 + waveCounterRef.current * 31);
+      const distractors = getDistractorChoices(target, items, 2, rng);
+      const candidates = seededShuffle([target, ...distractors], rng);
+      return candidates.map((it, idx) => ({
+        id: `${it.id}_${waveCounterRef.current}_${idx}`,
+        item: it,
+        xPercent: Math.min(88, Math.max(12, 16 + idx * 32 + (rng() * 8 - 4))),
+        yPercent: idx * -18,
+        speed: baseSpeed + rng() * 0.14,
+        caught: false
+      }));
+    },
+    [sessionSeed, items, baseSpeed]
+  );
+
+  // Sync basket ref
+  useEffect(() => {
+    basketXRef.current = basketXPercent;
+  }, [basketXPercent]);
+
+  // Spawn initial wave when target changes
   useEffect(() => {
     if (!targetItem || isGameOver || isVictory || items.length === 0) return;
-
-    // Pick 3 candidate words to drop: target item + 2 distractors
-    const distractors = items
-      .filter((it) => it.id !== targetItem.id)
-      .sort(() => 0.5 - Math.random())
-      .slice(0, 2);
-
-    const candidates = [targetItem, ...distractors].sort(() => 0.5 - Math.random());
-
-    const initialWords: FallingWord[] = candidates.map((it, idx) => ({
-      id: `${it.id}_${Date.now()}_${idx}`,
-      item: it,
-      xPercent: 15 + idx * 30 + (Math.random() * 8 - 4),
-      yPercent: idx * -15, // stagger fall
-      speed: 0.35 + Math.random() * 0.15,
-      caught: false
-    }));
-
-    setFallingWords(initialWords);
-  }, [targetIndex, isGameOver, isVictory, items]);
+    const wave = createWaveForTarget(targetItem, targetIndex);
+    fallingWordsRef.current = wave;
+    setFallingWords(wave);
+  }, [targetIndex, isGameOver, isVictory, items.length, targetItem, createWaveForTarget]);
 
   // Auto-pronounce German target word when new round starts
   useEffect(() => {
-    if (targetItem?.german && !isGameOver && !isVictory) {
+    if (enableAudio && targetItem?.german && !isGameOver && !isVictory) {
       const timer = setTimeout(() => {
         speakGermanText(targetItem.german);
       }, 350);
@@ -95,106 +166,148 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
         stopGermanSpeech();
       };
     }
-  }, [targetItem, isGameOver, isVictory]);
+  }, [targetItem, isGameOver, isVictory, enableAudio]);
 
-  // Falling & Collision Loop
+  // Falling & Collision Loop (mutates refs synchronously, updates React states outside updater)
   useEffect(() => {
     if (isGameOver || isVictory || !targetItem) return;
 
     const interval = setInterval(() => {
-      setFallingWords((prev) => {
-        const nextWords: FallingWord[] = [];
+      if (isGameOverRef.current || isVictoryRef.current) return;
 
-        for (const word of prev) {
-          if (word.caught) continue;
+      const currentWords = fallingWordsRef.current;
+      const nextWords: FallingWord[] = [];
+      const curBasketX = basketXRef.current;
 
-          const newY = word.yPercent + word.speed;
+      for (const word of currentWords) {
+        if (word.caught) continue;
+        const newY = word.yPercent + word.speed;
 
-          // Check Basket Collision (Basket is at Y ~ 82% to 92%, X around basketXPercent +- 12%)
-          const isAtBasketHeight = newY >= 80 && newY <= 92;
-          const isInsideBasketWidth = Math.abs(word.xPercent - basketXPercent) <= 12;
+        const isAtBasketHeight = newY >= 80 && newY <= 92;
+        const isInsideBasketWidth = Math.abs(word.xPercent - curBasketX) <= 13;
 
-          if (isAtBasketHeight && isInsideBasketWidth) {
-            // Collision caught!
-            const isCorrect = word.item.id === targetItem.id;
-            setCatchFlash({ text: word.item.german, correct: isCorrect });
-            setTimeout(() => setCatchFlash(null), 800);
+        if (isAtBasketHeight && isInsideBasketWidth) {
+          const isCorrect = word.item.id === targetItem.id;
+          attemptsCountRef.current += 1;
+          setCatchFlash({ text: word.item.german, correct: isCorrect });
+          scheduleTimeout(() => setCatchFlash(null), 800);
 
-            if (isCorrect) {
+          if (isCorrect) {
+            correctCountRef.current += 1;
+            if (enableSoundFx) {
               playLernstudioSound('catch');
               playLernstudioSound('card_match');
+              playGermanVoiceFeedback('correct');
+            }
+            if (enableAudio) {
               speakGermanText(word.item.german);
-              setScore((s) => s + 100);
-              triggerCorrect(100, 'Gefangen!', basketXPercent, 80);
+            }
+            const nextScore = scoreRef.current + 100;
+            scoreRef.current = nextScore;
+            setScore(nextScore);
+            triggerCorrect(100, 'Gefangen!', curBasketX, 80);
 
-              if (targetIndex + 1 >= items.length) {
-                setIsVictory(true);
-                triggerVictory();
-                playGermanVoiceFeedback('victory');
-              } else {
-                setTargetIndex((ti) => ti + 1);
-              }
+            if (targetIndexRef.current + 1 >= items.length) {
+              isVictoryRef.current = true;
+              setIsVictory(true);
+              triggerVictory();
+              if (enableSoundFx) playGermanVoiceFeedback('victory');
+              reportCompletion(true, nextScore);
+              fallingWordsRef.current = [];
+              setFallingWords([]);
+              return;
             } else {
+              const nextIdx = targetIndexRef.current + 1;
+              targetIndexRef.current = nextIdx;
+              setTargetIndex(nextIdx);
+              fallingWordsRef.current = [];
+              setFallingWords([]);
+              return;
+            }
+          } else {
+            if (enableSoundFx) {
               playLernstudioSound('wrong');
-              triggerWrong(basketXPercent, 80);
               playGermanVoiceFeedback('try_again');
-              setLives((l) => {
-                const nextL = l - 1;
-                if (nextL <= 0) setIsGameOver(true);
-                return Math.max(0, nextL);
-              });
             }
-            continue; // word consumed
-          }
-
-          // If word reached bottom ground
-          if (newY > 105) {
-            if (word.item.id === targetItem.id) {
-              // Missed the correct word
-              setLives((l) => {
-                const nextL = l - 1;
-                if (nextL <= 0) setIsGameOver(true);
-                return Math.max(0, nextL);
-              });
+            triggerWrong(curBasketX, 80);
+            const nextLives = Math.max(0, livesRef.current - 1);
+            livesRef.current = nextLives;
+            setLives(nextLives);
+            if (nextLives <= 0) {
+              isGameOverRef.current = true;
+              setIsGameOver(true);
+              reportCompletion(false, scoreRef.current);
+              fallingWordsRef.current = [];
+              setFallingWords([]);
+              return;
             }
-            continue; // despawn
           }
-
-          nextWords.push({ ...word, yPercent: newY });
+          continue;
         }
 
-        // If all words cleared, respawn target wave
-        if (nextWords.length === 0 && !isGameOver && !isVictory) {
-          const distractors = items
-            .filter((it) => it.id !== targetItem.id)
-            .sort(() => 0.5 - Math.random())
-            .slice(0, 2);
-
-          const candidates = [targetItem, ...distractors].sort(() => 0.5 - Math.random());
-          return candidates.map((it, idx) => ({
-            id: `${it.id}_${Date.now()}_${idx}`,
-            item: it,
-            xPercent: 15 + idx * 30 + (Math.random() * 8 - 4),
-            yPercent: idx * -15,
-            speed: 0.35 + Math.random() * 0.15,
-            caught: false
-          }));
+        if (newY > 105) {
+          if (word.item.id === targetItem.id) {
+            attemptsCountRef.current += 1;
+            if (enableSoundFx) playLernstudioSound('wrong');
+            const nextLives = Math.max(0, livesRef.current - 1);
+            livesRef.current = nextLives;
+            setLives(nextLives);
+            if (nextLives <= 0) {
+              isGameOverRef.current = true;
+              setIsGameOver(true);
+              reportCompletion(false, scoreRef.current);
+              fallingWordsRef.current = [];
+              setFallingWords([]);
+              return;
+            }
+          }
+          continue;
         }
 
-        return nextWords;
-      });
+        nextWords.push({ ...word, yPercent: newY });
+      }
+
+      if (nextWords.length === 0 && !isGameOverRef.current && !isVictoryRef.current) {
+        const respawned = createWaveForTarget(targetItem, targetIndexRef.current);
+        fallingWordsRef.current = respawned;
+        setFallingWords(respawned);
+      } else {
+        fallingWordsRef.current = nextWords;
+        setFallingWords(nextWords);
+      }
     }, 40);
 
     return () => clearInterval(interval);
-  }, [basketXPercent, targetItem, targetIndex, isGameOver, isVictory, items]);
+  }, [
+    targetItem,
+    isGameOver,
+    isVictory,
+    items.length,
+    createWaveForTarget,
+    enableAudio,
+    enableSoundFx,
+    scheduleTimeout,
+    triggerCorrect,
+    triggerWrong,
+    triggerVictory,
+    reportCompletion
+  ]);
 
   // Keyboard Navigation Controls
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'ArrowLeft') {
-        setBasketXPercent((x) => Math.max(10, x - 7));
+        setBasketXPercent((x) => {
+          const next = Math.max(10, x - 7);
+          basketXRef.current = next;
+          return next;
+        });
       } else if (e.key === 'ArrowRight') {
-        setBasketXPercent((x) => Math.min(90, x + 7));
+        setBasketXPercent((x) => {
+          const next = Math.min(90, x + 7);
+          basketXRef.current = next;
+          return next;
+        });
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -207,15 +320,31 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
     const rect = containerRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const percent = Math.max(10, Math.min(90, (x / rect.width) * 100));
+    basketXRef.current = percent;
     setBasketXPercent(percent);
   };
 
   const handleRestart = () => {
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current = [];
+    stopGermanSpeech();
+    targetIndexRef.current = 0;
+    basketXRef.current = 50;
+    scoreRef.current = 0;
+    livesRef.current = maxLives;
+    isGameOverRef.current = false;
+    isVictoryRef.current = false;
+    fallingWordsRef.current = [];
+    correctCountRef.current = 0;
+    attemptsCountRef.current = 0;
+    reportedRef.current = false;
+    startedAtRef.current = Date.now();
+    setSessionSeed(Date.now());
     setTargetIndex(0);
     setBasketXPercent(50);
     setFallingWords([]);
     setScore(0);
-    setLives(3);
+    setLives(maxLives);
     setIsGameOver(false);
     setIsVictory(false);
     setCatchFlash(null);
@@ -254,7 +383,7 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
         {/* Stats */}
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-black">
-            {Array.from({ length: 3 }).map((_, i) => (
+            {Array.from({ length: maxLives }).map((_, i) => (
               <Heart
                 key={i}
                 className={`w-4 h-4 ${i < lives ? 'fill-rose-500 text-rose-500' : 'text-slate-300 dark:text-slate-700'}`}

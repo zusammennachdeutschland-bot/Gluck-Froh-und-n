@@ -1,12 +1,23 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
+import {
+  LernstudioSet,
+  LernstudioTheme,
+  LernstudioItem,
+  LernstudioGameCompletionPayload
+} from '../../../types/lernstudio';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText, stopGermanSpeech } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
-import { getSetPlayableItems } from '../../../utils/lernstudioVocabularyAdapter';
+import {
+  getSetPlayableItems,
+  buildSeededSessionDeck,
+  createSeededRandom,
+  seededShuffle
+} from '../../../utils/lernstudioVocabularyAdapter';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
 import { GameEffectsOverlay, GameSettingsControls } from '../effects/GameEffectsOverlay';
+import { GameSetupConfig } from '../LernstudioGameSetupScreen';
 import {
   ArrowLeft,
   RotateCcw,
@@ -25,6 +36,8 @@ interface Props {
   set: LernstudioSet;
   activeTheme: LernstudioTheme;
   language?: string;
+  gameConfig?: GameSetupConfig;
+  onGameComplete?: (result: LernstudioGameCompletionPayload) => void;
   onBack: () => void;
 }
 
@@ -52,54 +65,107 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
   set,
   activeTheme,
   language = 'ar',
+  gameConfig,
+  onGameComplete,
   onBack
 }) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const displayTitle = getLocalizedSetTitle(set, language);
-  const items = useMemo(() => getSetPlayableItems(set), [set]);
+  const [sessionNonce, setSessionNonce] = useState(0);
+  const difficulty = gameConfig?.difficulty || 'medium';
+  const speedMultiplier = difficulty === 'hard' ? 1.55 : difficulty === 'easy' ? 0.65 : 1;
+  const maxLives = difficulty === 'easy' ? 4 : difficulty === 'hard' ? 2 : 3;
+
+  const rawItems = useMemo(() => getSetPlayableItems(set), [set]);
+  const items = useMemo(() => {
+    const count = gameConfig?.questionCount && gameConfig.questionCount > 0 ? gameConfig.questionCount : rawItems.length;
+    return buildSeededSessionDeck(rawItems, count, `${set.id}::balloon::${sessionNonce}`);
+  }, [rawItems, set.id, gameConfig?.questionCount, sessionNonce]);
 
   // Game States
   const [targetIndex, setTargetIndex] = useState(0);
+  const [waveRev, setWaveRev] = useState(0);
   const [score, setScore] = useState(0);
   const [streak, setStreak] = useState(0);
-  const [lives, setLives] = useState(3);
+  const [lives, setLives] = useState(maxLives);
   const [isGameOver, setIsGameOver] = useState(false);
   const [isVictory, setIsVictory] = useState(false);
   const [balloons, setBalloons] = useState<Balloon[]>([]);
+  const balloonsRef = useRef<Balloon[]>([]);
+  const livesRef = useRef(maxLives);
+  const scoreRef = useRef(0);
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const completedRef = useRef(false);
+  const correctRef = useRef(0);
+  const wrongRef = useRef(0);
   const [poppedBurst, setPoppedBurst] = useState<{ x: number; y: number; text: string; correct: boolean } | null>(null);
   const { particles, popups, triggerCorrect, triggerWrong, triggerVictory } = useGameEffects();
 
-  const targetItem: LernstudioItem | undefined = items[targetIndex % items.length];
+  useEffect(() => {
+    livesRef.current = lives;
+  }, [lives]);
 
-  // Spawn a wave of balloons whenever target changes
+  useEffect(() => {
+    scoreRef.current = score;
+  }, [score]);
+
+  useEffect(() => {
+    return () => {
+      timeoutsRef.current.forEach(clearTimeout);
+      timeoutsRef.current = [];
+      stopGermanSpeech();
+    };
+  }, []);
+
+  const targetItem: LernstudioItem | undefined = items[targetIndex % Math.max(1, items.length)];
+
+  const reportFinishOnce = (finalScore: number, passed: boolean) => {
+    if (completedRef.current || !onGameComplete) return;
+    completedRef.current = true;
+    const total = Math.max(1, correctRef.current + wrongRef.current);
+    const accuracy = Math.min(100, Math.round((correctRef.current / total) * 100));
+    onGameComplete({
+      gameMode: 'balloon_pop',
+      score: finalScore,
+      maxScore: items.length * 150,
+      accuracy,
+      passed,
+      difficulty
+    });
+  };
+
+  // Spawn a wave of balloons whenever target or waveRev changes
   useEffect(() => {
     if (!targetItem || isGameOver || isVictory || items.length === 0) return;
 
-    // Pick 3-5 candidates including the correct target
-    const distractors = items
-      .filter((it) => it.id !== targetItem.id)
-      .sort(() => 0.5 - Math.random())
-      .slice(0, 3);
+    const rng = createSeededRandom(
+      `${set.id}::balloon_wave::${sessionNonce}::${targetIndex}::${waveRev}`
+    );
+    const distractors = seededShuffle(
+      rawItems.filter((it) => it.id !== targetItem.id),
+      rng
+    ).slice(0, 3);
 
-    const candidates = [targetItem, ...distractors].sort(() => 0.5 - Math.random());
+    const candidates = seededShuffle([targetItem, ...distractors], rng);
 
     const initialBalloons: Balloon[] = candidates.map((it, idx) => ({
-      id: `${it.id}_${Date.now()}_${idx}`,
+      id: `${it.id}_${targetIndex}_${waveRev}_${idx}`,
       item: it,
       color: BALLOON_COLORS[idx % BALLOON_COLORS.length],
-      xPercent: 12 + idx * 22 + (Math.random() * 8 - 4),
+      xPercent: 12 + idx * 22 + (rng() * 8 - 4),
       yPercent: 85 + (idx % 2 === 0 ? 0 : 12),
-      speed: 0.28 + Math.random() * 0.15,
+      speed: (0.28 + rng() * 0.15) * speedMultiplier,
       popped: false
     }));
 
+    balloonsRef.current = initialBalloons;
     setBalloons(initialBalloons);
-  }, [targetIndex, isGameOver, isVictory, items]);
+  }, [targetIndex, waveRev, isGameOver, isVictory, items.length, rawItems, targetItem, set.id, sessionNonce, speedMultiplier]);
 
   // Auto-pronounce German target word when new round starts
   useEffect(() => {
-    if (targetItem?.german && !isGameOver && !isVictory) {
+    if (gameConfig?.enableAudio !== false && targetItem?.german && !isGameOver && !isVictory) {
       const timer = setTimeout(() => {
         speakGermanText(targetItem.german);
       }, 350);
@@ -108,34 +174,44 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
         stopGermanSpeech();
       };
     }
-  }, [targetItem, isGameOver, isVictory]);
+  }, [targetItem, isGameOver, isVictory, gameConfig?.enableAudio]);
 
-  // Floating Loop
+  // Floating Loop (state updates happen cleanly outside state updaters)
   useEffect(() => {
-    if (isGameOver || isVictory) return;
+    if (isGameOver || isVictory || !targetItem) return;
 
     const interval = setInterval(() => {
-      setBalloons((prev) =>
-        prev
-          .map((b) => {
-            if (b.popped) return b;
-            const newY = b.yPercent - b.speed;
-            return { ...b, yPercent: newY };
-          })
-          .filter((b) => {
-            // If correct balloon floats off top without being popped: small penalty or cycle
-            if (b.yPercent < -15 && !b.popped && b.item.id === targetItem?.id) {
-              setLives((l) => {
-                const nextL = l - 1;
-                if (nextL <= 0) setIsGameOver(true);
-                return Math.max(0, nextL);
-              });
-              setStreak(0);
-              return false;
-            }
-            return b.yPercent >= -20;
-          })
-      );
+      const prev = balloonsRef.current;
+      let missedTarget = false;
+      const next: Balloon[] = [];
+
+      for (const b of prev) {
+        const moved = b.popped ? b : { ...b, yPercent: b.yPercent - b.speed };
+        if (moved.yPercent < -15 && !moved.popped && moved.item.id === targetItem.id) {
+          missedTarget = true;
+          continue;
+        }
+        if (moved.yPercent >= -20) {
+          next.push(moved);
+        }
+      }
+
+      balloonsRef.current = next;
+      setBalloons(next);
+
+      if (missedTarget) {
+        wrongRef.current += 1;
+        setStreak(0);
+        const nextL = Math.max(0, livesRef.current - 1);
+        livesRef.current = nextL;
+        setLives(nextL);
+        if (nextL <= 0) {
+          setIsGameOver(true);
+          reportFinishOnce(scoreRef.current, false);
+        } else {
+          setWaveRev((r) => r + 1);
+        }
+      }
     }, 40);
 
     return () => clearInterval(interval);
@@ -154,21 +230,28 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
       text: balloon.item.german,
       correct: isCorrect
     });
-    setTimeout(() => setPoppedBurst(null), 800);
+    timeoutsRef.current.push(setTimeout(() => setPoppedBurst(null), 800));
 
     // Mark as popped
-    setBalloons((prev) =>
-      prev.map((b) => (b.id === balloon.id ? { ...b, popped: true } : b))
+    const updatedBalloons = balloonsRef.current.map((b) =>
+      b.id === balloon.id ? { ...b, popped: true } : b
     );
+    balloonsRef.current = updatedBalloons;
+    setBalloons(updatedBalloons);
 
     if (isCorrect) {
-      playLernstudioSound('pop');
-      playLernstudioSound('correct');
-      speakGermanText(balloon.item.german);
+      correctRef.current += 1;
+      if (gameConfig?.enableSoundFx !== false) {
+        playLernstudioSound('pop');
+        playLernstudioSound('correct');
+      }
+      if (gameConfig?.enableAudio !== false) speakGermanText(balloon.item.german);
 
       const nextStreak = streak + 1;
       const points = 100 + nextStreak * 25;
-      setScore((s) => s + points);
+      const nextScore = score + points;
+      scoreRef.current = nextScore;
+      setScore(nextScore);
       setStreak(nextStreak);
       triggerCorrect(points, nextStreak >= 2 ? `x${nextStreak} Pop!` : 'Super!', balloon.xPercent, balloon.yPercent);
 
@@ -176,34 +259,48 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
       if (targetIndex + 1 >= items.length) {
         setIsVictory(true);
         triggerVictory();
-        playGermanVoiceFeedback('victory');
+        if (gameConfig?.enableAudio !== false) playGermanVoiceFeedback('victory');
+        reportFinishOnce(nextScore, true);
       } else {
-        setTimeout(() => {
-          setTargetIndex((prev) => prev + 1);
-        }, 2200);
+        timeoutsRef.current.push(
+          setTimeout(() => {
+            setTargetIndex((prev) => prev + 1);
+          }, 1600)
+        );
       }
     } else {
-      playLernstudioSound('wrong');
+      wrongRef.current += 1;
+      if (gameConfig?.enableSoundFx !== false) playLernstudioSound('wrong');
       triggerWrong(balloon.xPercent, balloon.yPercent);
-      playGermanVoiceFeedback('try_again');
+      if (gameConfig?.enableAudio !== false) playGermanVoiceFeedback('try_again');
       setStreak(0);
-      setLives((l) => {
-        const next = l - 1;
-        if (next <= 0) {
-          setIsGameOver(true);
-        }
-        return Math.max(0, next);
-      });
+      const nextL = Math.max(0, livesRef.current - 1);
+      livesRef.current = nextL;
+      setLives(nextL);
+      if (nextL <= 0) {
+        setIsGameOver(true);
+        reportFinishOnce(scoreRef.current, false);
+      }
     }
   };
 
   const handleRestart = () => {
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current = [];
+    completedRef.current = false;
+    correctRef.current = 0;
+    wrongRef.current = 0;
+    setSessionNonce((n) => n + 1);
     setTargetIndex(0);
+    setWaveRev(0);
     setScore(0);
+    scoreRef.current = 0;
     setStreak(0);
-    setLives(3);
+    setLives(maxLives);
+    livesRef.current = maxLives;
     setIsGameOver(false);
     setIsVictory(false);
+    balloonsRef.current = [];
     setBalloons([]);
     setPoppedBurst(null);
   };

@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { LernstudioSet, LernstudioTheme, TeamScore } from '../../../types/lernstudio';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { LernstudioSet, LernstudioTheme, TeamScore, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
 import {
   buildDynamicQuestionPool,
   evaluateGameQuestionAnswer,
   GameQuestion
 } from '../../../utils/lernstudioQuestionAdapter';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
-import { GameStageBanner } from '../GameArtAssets';
+import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
 import {
   RotateCcw,
@@ -15,23 +15,14 @@ import {
   Users,
   CheckCircle2,
   XCircle,
-  HelpCircle,
   Sparkles,
   Volume2,
   VolumeX,
-  Play
+  Play,
+  Crown
 } from 'lucide-react';
 
 import { GameSetupConfig } from '../LernstudioGameSetupScreen';
-
-interface Props {
-  set: LernstudioSet;
-  activeTheme: LernstudioTheme;
-  language?: string;
-  gameConfig?: GameSetupConfig;
-  onBack: () => void;
-}
-
 import {
   getLernstudioTranslations,
   getLocalizedSetTitle,
@@ -40,20 +31,59 @@ import {
   WheelSegment
 } from '../../../utils/lernstudioTranslations';
 
-export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, language = 'ar', gameConfig, onBack }) => {
+interface Props {
+  set: LernstudioSet;
+  activeTheme: LernstudioTheme;
+  language?: string;
+  gameConfig?: GameSetupConfig;
+  onGameComplete?: (result: LernstudioGameCompletionPayload) => void;
+  onBack: () => void;
+}
+
+const TEAM_COLORS = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B'];
+
+export const LernstudioWheelGame: React.FC<Props> = ({
+  set,
+  language = 'ar',
+  gameConfig,
+  onGameComplete,
+  onBack
+}) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const displaySetTitle = getLocalizedSetTitle(set, language);
   const segments = useMemo(() => getWheelSegments(language), [language]);
-  const { triggerSparkles, triggerScorePopup, EffectsOverlay, SettingsBar } = useGameEffects(language);
+  const { triggerSparkles, triggerScorePopup, triggerCelebration, EffectsOverlay, SettingsBar } = useGameEffects(language);
+  const maxTurns = Math.max(6, gameConfig?.questionCount || 12);
+
+  const buildInitialTeams = useCallback(
+    (countOverride?: number): TeamScore[] => {
+      const desiredCount =
+        countOverride ||
+        (gameConfig?.gameMode === 'pvp_4teams'
+          ? 4
+          : gameConfig?.gameMode === 'pvp_3teams'
+          ? 3
+          : gameConfig?.teamNames?.length
+          ? Math.min(4, Math.max(2, gameConfig.teamNames.length))
+          : 2);
+      return Array.from({ length: desiredCount }, (_, idx) => ({
+        id: `team_${idx + 1}`,
+        name: gameConfig?.teamNames?.[idx] || getLocalizedTeamName(`team_${idx + 1}`, language),
+        color: TEAM_COLORS[idx % TEAM_COLORS.length],
+        score: 0
+      }));
+    },
+    [gameConfig?.gameMode, gameConfig?.teamNames, language]
+  );
 
   // Teams setup
-  const [teams, setTeams] = useState<TeamScore[]>([
-    { id: 'team_1', name: getLocalizedTeamName('team_1', language), color: '#3B82F6', score: 0 },
-    { id: 'team_2', name: getLocalizedTeamName('team_2', language), color: '#EF4444', score: 0 }
-  ]);
+  const [teams, setTeams] = useState<TeamScore[]>(() => buildInitialTeams());
   const [activeTeamIndex, setActiveTeamIndex] = useState(0);
+  const [turnsCompleted, setTurnsCompleted] = useState(0);
+  const [isGameFinished, setIsGameFinished] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(gameConfig?.enableSoundFx ?? true);
+  const [sessionSeed, setSessionSeed] = useState<number>(() => Date.now());
 
   // Wheel state
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -65,9 +95,10 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
   const questionsPool = useMemo(
     () =>
       buildDynamicQuestionPool(set, language, {
-        questionModeFilter: gameConfig?.questionType || 'mixed'
+        questionModeFilter: gameConfig?.questionType || 'mixed',
+        seed: sessionSeed
       }),
-    [set, language, gameConfig?.questionType]
+    [set, language, gameConfig?.questionType, sessionSeed]
   );
   const [questionIndex, setQuestionIndex] = useState(0);
   const [activeQuestion, setActiveQuestion] = useState<GameQuestion | null>(null);
@@ -76,6 +107,27 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
   const [sentenceArranged, setSentenceArranged] = useState<string[]>([]);
   const [typedAnswer, setTypedAnswer] = useState('');
   const [eventAlert, setEventAlert] = useState<string | null>(null);
+
+  const rafRef = useRef<number | null>(null);
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const teamsRef = useRef(teams);
+  const turnsRef = useRef(0);
+  const correctRef = useRef(0);
+  const totalRef = useRef(0);
+  const reportedRef = useRef(false);
+  const startedAtRef = useRef(Date.now());
+
+  useEffect(() => {
+    teamsRef.current = teams;
+  }, [teams]);
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      timeoutsRef.current.forEach(clearTimeout);
+      timeoutsRef.current = [];
+    };
+  }, []);
 
   const activeTeam = teams[activeTeamIndex] || teams[0];
   const isWheelSentenceOrdering = Boolean(
@@ -204,10 +256,10 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
       }
 
       if (progress < 1) {
-        requestAnimationFrame(animate);
+        rafRef.current = requestAnimationFrame(animate);
       } else {
+        rafRef.current = null;
         setIsSpinning(false);
-        // Calculate landed segment (pointer at top: -PI/2)
         const numSegments = segments.length;
         const arc = (2 * Math.PI) / numSegments;
         const normalized = ((3 * Math.PI) / 2 - (newRot % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
@@ -218,12 +270,43 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
       }
     };
 
-    requestAnimationFrame(animate);
+    rafRef.current = requestAnimationFrame(animate);
   };
+
+  const finishWheelMatch = useCallback(() => {
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current = [];
+    setActiveQuestion(null);
+    setEventAlert(null);
+    setIsGameFinished(true);
+    if (soundEnabled) {
+      playLernstudioSound('victory');
+      playGermanVoiceFeedback('victory');
+    }
+    triggerCelebration(language === 'ar' ? 'انتهت جولات عجلة الحظ! 🎡🏆' : 'Wheel challenge complete! 🎡🏆');
+    if (!reportedRef.current && onGameComplete) {
+      reportedRef.current = true;
+      const latestTeams = teamsRef.current;
+      const bestScore = latestTeams.reduce((max, tm) => Math.max(max, tm.score), 0);
+      const teamScores: Record<string, number> = {};
+      latestTeams.forEach((tm) => {
+        teamScores[tm.name] = tm.score;
+      });
+      onGameComplete({
+        gameMode: 'wheel',
+        score: bestScore,
+        maxScore: maxTurns * 200,
+        accuracy: totalRef.current > 0 ? Math.min(100, Math.round((correctRef.current / totalRef.current) * 100)) : 100,
+        passed: true,
+        durationSeconds: Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)),
+        teamScores,
+        difficulty: gameConfig?.difficulty || set.difficulty
+      });
+    }
+  }, [soundEnabled, triggerCelebration, language, onGameComplete, maxTurns, gameConfig?.difficulty, set.difficulty]);
 
   const handleLandedSegment = (seg: WheelSegment) => {
     if (seg.type === 'bonus') {
-      // Direct bonus points
       if (soundEnabled) playLernstudioSound('powerup_star');
       const bonusText = language === 'ar'
         ? `🎉 مكافأة حظ سعيدة! حصل ${activeTeam.name} على ${seg.value} نقطة مباشرة دون سؤال!`
@@ -232,18 +315,18 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
         : `🎉 ${t.luckyBonusAlert} ${activeTeam.name} gets ${seg.value} ${t.pointsUnit} without a question!`;
       setEventAlert(bonusText);
       awardActiveTeamPoints(seg.value);
-      setTimeout(nextTeamTurn, 2500);
+      const tid = setTimeout(nextTeamTurn, 2200);
+      timeoutsRef.current.push(tid);
     } else if (seg.type === 'steal') {
-      // Steal points from another team
       if (soundEnabled) playLernstudioSound('powerup_steal');
       const otherTeam = teams.find((_, idx) => idx !== activeTeamIndex);
       if (otherTeam && otherTeam.score > 0) {
         const stolen = Math.min(otherTeam.score, seg.value);
         setTeams((prev) =>
-          prev.map((t, idx) => {
-            if (idx === activeTeamIndex) return { ...t, score: t.score + stolen };
-            if (t.id === otherTeam.id) return { ...t, score: Math.max(0, t.score - stolen) };
-            return t;
+          prev.map((tItem, idx) => {
+            if (idx === activeTeamIndex) return { ...tItem, score: tItem.score + stolen };
+            if (tItem.id === otherTeam.id) return { ...tItem, score: Math.max(0, tItem.score - stolen) };
+            return tItem;
           })
         );
         const stealMsg = language === 'ar'
@@ -260,9 +343,9 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
           : `🥷 ${activeTeam.name} attempted a steal, but rival has 0 ${t.pointsUnit}!`;
         setEventAlert(zeroMsg);
       }
-      setTimeout(nextTeamTurn, 2500);
+      const tid = setTimeout(nextTeamTurn, 2200);
+      timeoutsRef.current.push(tid);
     } else {
-      // Show question for points, double, or challenge
       const q = questionsPool[questionIndex % Math.max(1, questionsPool.length)] || questionsPool[0];
       setActiveQuestion(q);
       setSelectedAnswer(null);
@@ -275,12 +358,18 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
 
   const awardActiveTeamPoints = (pts: number) => {
     setTeams((prev) =>
-      prev.map((t, idx) => (idx === activeTeamIndex ? { ...t, score: t.score + pts } : t))
+      prev.map((tItem, idx) => (idx === activeTeamIndex ? { ...tItem, score: tItem.score + pts } : tItem))
     );
   };
 
   const nextTeamTurn = () => {
-    setActiveTeamIndex((prev) => (prev + 1) % teams.length);
+    turnsRef.current += 1;
+    setTurnsCompleted(turnsRef.current);
+    if (turnsRef.current >= maxTurns) {
+      finishWheelMatch();
+      return;
+    }
+    setActiveTeamIndex((prev) => (prev + 1) % teamsRef.current.length);
     setSelectedSegment(null);
     setActiveQuestion(null);
     setEventAlert(null);
@@ -290,8 +379,10 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
     if (answeredState) return;
 
     setAnsweredState(isCorrect ? 'correct' : 'wrong');
+    totalRef.current += 1;
 
     if (isCorrect) {
+      correctRef.current += 1;
       if (soundEnabled) {
         playLernstudioSound('correct');
         playGermanVoiceFeedback('correct');
@@ -310,24 +401,40 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
       }
     }
 
-    setTimeout(() => {
+    const tid = setTimeout(() => {
       nextTeamTurn();
-    }, isCorrect ? 2000 : 2800);
+    }, isCorrect ? 1600 : 2200);
+    timeoutsRef.current.push(tid);
+  };
+
+  const handleRestartWheel = () => {
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current = [];
+    turnsRef.current = 0;
+    correctRef.current = 0;
+    totalRef.current = 0;
+    reportedRef.current = false;
+    startedAtRef.current = Date.now();
+    setSessionSeed(Date.now());
+    setTurnsCompleted(0);
+    setIsGameFinished(false);
+    setIsSpinning(false);
+    setSelectedSegment(null);
+    setActiveQuestion(null);
+    setEventAlert(null);
+    setTeams(buildInitialTeams(teams.length));
+    setActiveTeamIndex(0);
   };
 
   // Add / Remove teams
   const handleToggleTeamCount = (count: number) => {
-    const newTeams: TeamScore[] = [
-      { id: 'team_1', name: getLocalizedTeamName('team_1', language), color: '#3B82F6', score: 0 },
-      { id: 'team_2', name: getLocalizedTeamName('team_2', language), color: '#EF4444', score: 0 }
-    ];
-    if (count >= 3) {
-      newTeams.push({ id: 'team_3', name: getLocalizedTeamName('team_3', language), color: '#10B981', score: 0 });
-    }
-    if (count >= 4) {
-      newTeams.push({ id: 'team_4', name: getLocalizedTeamName('team_4', language), color: '#F59E0B', score: 0 });
-    }
-    setTeams(newTeams);
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current = [];
+    turnsRef.current = 0;
+    setTurnsCompleted(0);
+    setIsGameFinished(false);
+    setTeams(buildInitialTeams(count));
     setActiveTeamIndex(0);
   };
 
@@ -347,11 +454,21 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
           <div className="h-6 w-px bg-slate-700 hidden sm:block" />
           <h1 className="text-sm sm:text-base font-black flex items-center gap-2">
             <span>🎡 {t.wheelGameTitle}</span>
-            <span className="text-xs font-normal text-slate-400">· {displaySetTitle}</span>
+            <span className="text-xs font-normal text-slate-400">· {displaySetTitle} ({turnsCompleted}/{maxTurns})</span>
           </h1>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-4">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            type="button"
+            onClick={finishWheelMatch}
+            disabled={isGameFinished}
+            className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 text-xs font-black cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-40"
+          >
+            <Crown className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{language === 'ar' ? 'إنهاء وإعلان الفائز' : 'Finish'}</span>
+          </button>
+
           {/* Team count switcher */}
           <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-xl text-xs font-bold">
             <span className="text-slate-400 px-2 flex items-center gap-1 text-[11px]">
@@ -668,6 +785,55 @@ export const LernstudioWheelGame: React.FC<Props> = ({ set, activeTheme, languag
                   <XCircle className="w-3.5 h-3.5" /> {t.markWrong}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Victory Summary Modal */}
+      {isGameFinished && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border-2 border-amber-400/50 rounded-3xl max-w-md w-full p-7 text-center space-y-5 shadow-2xl animate-scale-up">
+            <SharedVictoryTrophyArt className="w-24 h-24 mx-auto rounded-3xl shadow-xl border border-amber-400/40" />
+            <div>
+              <h2 className="text-2xl font-black text-white">
+                {(() => {
+                  const sorted = [...teams].sort((a, b) => b.score - a.score);
+                  return language === 'ar'
+                    ? `الفائز: ${sorted[0]?.name || ''}! 🏆`
+                    : `Winner: ${sorted[0]?.name || ''}! 🏆`;
+                })()}
+              </h2>
+            </div>
+            <div className="space-y-2 bg-slate-800/80 rounded-2xl p-4 border border-slate-700">
+              {[...teams]
+                .sort((a, b) => b.score - a.score)
+                .map((tm, idx) => (
+                  <div key={tm.id} className="flex items-center justify-between text-xs font-bold">
+                    <span className="text-slate-200">
+                      #{idx + 1} {tm.name}
+                    </span>
+                    <span className="text-amber-300 font-mono font-black">
+                      {tm.score} {t.pointsUnit}
+                    </span>
+                  </div>
+                ))}
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleRestartWheel}
+                className="flex-1 py-3 rounded-2xl bg-primary hover:bg-primary-hover text-white font-black text-sm cursor-pointer inline-flex items-center justify-center gap-2"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>{t.playAgain}</span>
+              </button>
+              <button
+                type="button"
+                onClick={onBack}
+                className="px-5 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-sm cursor-pointer"
+              >
+                {t.gamesPortalBack}
+              </button>
             </div>
           </div>
         </div>

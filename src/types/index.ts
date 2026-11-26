@@ -1033,7 +1033,9 @@ export interface PurgedRecordTombstone {
     | 'hodVisits'
     | 'goldHoldings'
     | 'goldHolding'
-    | 'customAiBackgrounds';
+    | 'customAiBackgrounds'
+    | 'lernstudioSet'
+    | 'lernstudioSets';
   purgedAt: string;
   updatedAt: number;
   originRevision?: number;

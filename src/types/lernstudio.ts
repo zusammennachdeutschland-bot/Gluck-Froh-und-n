@@ -216,6 +216,25 @@ export interface GrammarContent {
   extractionConfidenceNote?: string;
 }
 
+export interface LernstudioGameResult {
+  id: string;
+  setId: string;
+  gameMode: LernstudioGameMode;
+  score: number;
+  maxScore?: number;
+  accuracy?: number;
+  passed?: boolean;
+  playedAt: number;
+  durationSeconds?: number;
+  playerName?: string;
+  teamScores?: Record<string, number>;
+  difficulty?: LernstudioDifficulty;
+}
+
+export type LernstudioGameCompletionPayload = Omit<LernstudioGameResult, 'id' | 'setId' | 'playedAt'> & {
+  setId?: string;
+};
+
 export interface LernstudioSet {
   id: string;
   title: string;
@@ -245,6 +264,12 @@ export interface LernstudioSet {
   published?: boolean;
   publishedAt?: string;
   deleted?: boolean;
+  version?: number;
+  originDeviceId?: string;
+  originRevision?: number;
+  originPlatform?: 'web' | 'android' | 'desktop';
+  lastSyncedAt?: number;
+  lastModifiedBy?: string;
   createdAt: string;
   updatedAt: number;
 }

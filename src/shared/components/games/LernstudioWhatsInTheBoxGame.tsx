@@ -1,6 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { LernstudioSet, LernstudioTheme } from '../../../types/lernstudio';
-import { getSetVocabularyItems, AdaptedVocabItem, getDistractorChoices } from '../../../utils/lernstudioVocabularyAdapter';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import {
+  LernstudioSet,
+  LernstudioTheme,
+  LernstudioGameCompletionPayload
+} from '../../../types/lernstudio';
+import {
+  getSetVocabularyItems,
+  AdaptedVocabItem,
+  getDistractorChoices,
+  createSeededRandom
+} from '../../../utils/lernstudioVocabularyAdapter';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText, stopGermanSpeech } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations } from '../../../utils/lernstudioTranslations';
@@ -15,6 +24,7 @@ interface Props {
   activeTheme: LernstudioTheme;
   language?: string;
   gameConfig?: GameSetupConfig;
+  onGameComplete?: (result: LernstudioGameCompletionPayload) => void;
   onBack: () => void;
 }
 
@@ -23,14 +33,30 @@ export const LernstudioWhatsInTheBoxGame: React.FC<Props> = ({
   activeTheme,
   language = 'ar',
   gameConfig,
+  onGameComplete,
   onBack
 }) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const { triggerSparkles, triggerScorePopup, triggerCelebration, EffectsOverlay, SettingsBar } = useGameEffects(language);
+  const [sessionNonce, setSessionNonce] = useState(0);
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const completedRef = useRef(false);
+  const correctRef = useRef(0);
 
-  const rawVocabItems = getSetVocabularyItems(set, language);
-  const vocabItems = gameConfig?.questionCount ? rawVocabItems.slice(0, gameConfig.questionCount) : rawVocabItems;
+  useEffect(() => {
+    return () => {
+      timeoutsRef.current.forEach(clearTimeout);
+      timeoutsRef.current = [];
+      stopGermanSpeech();
+    };
+  }, []);
+
+  const allVocabPool = useMemo(() => getSetVocabularyItems(set, language), [set, language]);
+  const vocabItems = useMemo(() => {
+    const requested = gameConfig?.questionCount && gameConfig.questionCount > 0 ? gameConfig.questionCount : allVocabPool.length;
+    return getSetVocabularyItems(set, language, requested, `${set.id}::box::${sessionNonce}`);
+  }, [set, language, gameConfig?.questionCount, allVocabPool.length, sessionNonce]);
 
   const team1Name = gameConfig?.teamNames?.[0] || (isRtl ? 'الفريق 1 (🔴)' : 'Team 1 (🔴)');
   const team2Name = gameConfig?.teamNames?.[1] || (isRtl ? 'الفريق 2 (🔵)' : 'Team 2 (🔵)');
@@ -45,10 +71,14 @@ export const LernstudioWhatsInTheBoxGame: React.FC<Props> = ({
   const [isVictory, setIsVictory] = useState(false);
 
   const currentItem = vocabItems[currentIndex];
-  const choices = currentItem ? getDistractorChoices(currentItem, vocabItems) : [];
+  const choices = useMemo(() => {
+    if (!currentItem) return [];
+    const rng = createSeededRandom(`${set.id}::box_choices::${sessionNonce}::${currentIndex}::${currentItem.id}`);
+    return getDistractorChoices(currentItem, allVocabPool, 3, rng);
+  }, [currentItem, allVocabPool, set.id, sessionNonce, currentIndex]);
 
   useEffect(() => {
-    if (currentItem && !isVictory) {
+    if (gameConfig?.enableAudio !== false && currentItem && !isVictory) {
       const timer = setTimeout(() => {
         speakGermanText(currentItem.german);
       }, 300);
@@ -57,7 +87,7 @@ export const LernstudioWhatsInTheBoxGame: React.FC<Props> = ({
         stopGermanSpeech();
       };
     }
-  }, [currentIndex, isVictory]);
+  }, [currentIndex, isVictory, currentItem, gameConfig?.enableAudio]);
 
   if (!currentItem || vocabItems.length === 0) {
     return (
@@ -68,6 +98,25 @@ export const LernstudioWhatsInTheBoxGame: React.FC<Props> = ({
     );
   }
 
+  const reportFinish = (finalTeamScores: [number, number]) => {
+    if (completedRef.current || !onGameComplete) return;
+    completedRef.current = true;
+    const total = Math.max(1, vocabItems.length);
+    const accuracy = Math.min(100, Math.round((correctRef.current / total) * 100));
+    onGameComplete({
+      gameMode: 'whats_in_box',
+      score: Math.max(finalTeamScores[0], finalTeamScores[1]),
+      maxScore: total * 100,
+      accuracy,
+      passed: accuracy >= 50,
+      difficulty: gameConfig?.difficulty,
+      teamScores: {
+        [team1Name]: finalTeamScores[0],
+        [team2Name]: finalTeamScores[1]
+      }
+    });
+  };
+
   const handleSelectChoice = (choice: AdaptedVocabItem) => {
     if (isAnswerSubmitted) return;
     setSelectedChoice(choice.id);
@@ -76,23 +125,23 @@ export const LernstudioWhatsInTheBoxGame: React.FC<Props> = ({
     const awardPoints = clueStage === 1 ? 100 : clueStage === 2 ? 70 : 50;
 
     if (choice.id === currentItem.id) {
+      correctRef.current += 1;
       setIsCorrect(true);
-      playLernstudioSound('correct');
-      playGermanVoiceFeedback('correct');
+      if (gameConfig?.enableSoundFx !== false) playLernstudioSound('correct');
+      if (gameConfig?.enableAudio !== false) playGermanVoiceFeedback('correct');
       triggerSparkles(50, 45, '#f59e0b');
       triggerScorePopup(`+${awardPoints} 📦`, 50, 35, 'positive');
-      setTeamScores((prev) => {
-        const next = [...prev] as [number, number];
-        next[activeTeam] += awardPoints;
-        return next;
-      });
+      const nextScores: [number, number] = [...teamScores] as [number, number];
+      nextScores[activeTeam] += awardPoints;
+      setTeamScores(nextScores);
 
-      setTimeout(() => {
+      const tid = setTimeout(() => {
         if (currentIndex + 1 >= vocabItems.length) {
           setIsVictory(true);
-          playLernstudioSound('victory');
-          playGermanVoiceFeedback('victory');
+          if (gameConfig?.enableSoundFx !== false) playLernstudioSound('victory');
+          if (gameConfig?.enableAudio !== false) playGermanVoiceFeedback('victory');
           triggerCelebration('انفتح الصندوق الذهبي! 📦', 'اكتملت المسابقة!');
+          reportFinish(nextScores);
         } else {
           setCurrentIndex((prev) => prev + 1);
           setActiveTeam((prev) => (prev === 0 ? 1 : 0));
@@ -102,16 +151,18 @@ export const LernstudioWhatsInTheBoxGame: React.FC<Props> = ({
           setIsCorrect(null);
         }
       }, 2000);
+      timeoutsRef.current.push(tid);
     } else {
       setIsCorrect(false);
-      playLernstudioSound('wrong');
-      playGermanVoiceFeedback('wrong');
+      if (gameConfig?.enableSoundFx !== false) playLernstudioSound('wrong');
+      if (gameConfig?.enableAudio !== false) playGermanVoiceFeedback('wrong');
 
-      setTimeout(() => {
+      const tid = setTimeout(() => {
         if (currentIndex + 1 >= vocabItems.length) {
           setIsVictory(true);
-          playLernstudioSound('victory');
+          if (gameConfig?.enableSoundFx !== false) playLernstudioSound('victory');
           triggerCelebration('انتهت المسابقة! 📦');
+          reportFinish(teamScores);
         } else {
           setCurrentIndex((prev) => prev + 1);
           setActiveTeam((prev) => (prev === 0 ? 1 : 0));
@@ -121,10 +172,16 @@ export const LernstudioWhatsInTheBoxGame: React.FC<Props> = ({
           setIsCorrect(null);
         }
       }, 2800);
+      timeoutsRef.current.push(tid);
     }
   };
 
   const handleRestart = () => {
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current = [];
+    completedRef.current = false;
+    correctRef.current = 0;
+    setSessionNonce((n) => n + 1);
     setCurrentIndex(0);
     setActiveTeam(0);
     setClueStage(1);
@@ -135,7 +192,14 @@ export const LernstudioWhatsInTheBoxGame: React.FC<Props> = ({
     setIsVictory(false);
   };
 
-  const winningTeamName = teamScores[0] > teamScores[1] ? 'الفريق الأوّل (🔴)' : teamScores[1] > teamScores[0] ? 'الفريق الثاني (🔵)' : 'تعادل الفريقين! 🤝';
+  const winningTeamName =
+    teamScores[0] > teamScores[1]
+      ? team1Name
+      : teamScores[1] > teamScores[0]
+      ? team2Name
+      : isRtl
+      ? 'تعادل الفريقين! 🤝'
+      : 'Draw! 🤝';
 
   return (
     <div className="p-4 sm:p-6 rounded-3xl min-h-[85vh] flex flex-col justify-between bg-background text-text-main relative overflow-hidden" dir={isRtl ? 'rtl' : 'ltr'}>
@@ -190,7 +254,15 @@ export const LernstudioWhatsInTheBoxGame: React.FC<Props> = ({
                 )}
               </div>
               <p className="text-xs font-bold text-amber-400">
-                {clueStage === 1 ? 'دليل 1: استمع للنطق أو انقر لكشف المزيد' : clueStage === 2 ? `دليل 2: الترجمة (${currentItem.translation})` : `دليل 3: الصورة الصريحة (${currentItem.emoji})`}
+                {clueStage === 1
+                  ? 'دليل 1: استمع للنطق أو انقر لكشف تلميح ذكي'
+                  : clueStage === 2
+                  ? currentItem.exampleSentenceArabic
+                    ? `دليل 2 (سياق الجملة): ${currentItem.exampleSentenceArabic}`
+                    : currentItem.article
+                    ? `دليل 2 (تلميح نحوي): الأداة "${currentItem.article}" — عدد حروف الكلمة ${currentItem.german.replace(/^(der|die|das)\s+/i, '').length}`
+                    : `دليل 2 (تلميح): تبدأ بـ "${currentItem.german.trim().slice(0, 2)}..." (${currentItem.german.trim().length} أحرف)`
+                  : `دليل 3: شاهد الرمز التوضيحي (${currentItem.emoji})`}
               </p>
               {clueStage < 3 && !isAnswerSubmitted && (
                 <button

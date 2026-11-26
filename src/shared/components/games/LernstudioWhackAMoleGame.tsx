@@ -1,12 +1,23 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
+import {
+  LernstudioSet,
+  LernstudioTheme,
+  LernstudioItem,
+  LernstudioGameCompletionPayload
+} from '../../../types/lernstudio';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
-import { speakGermanText } from '../../../utils/audioSpeechUtils';
+import { speakGermanText, stopGermanSpeech } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
-import { getSetPlayableItems } from '../../../utils/lernstudioVocabularyAdapter';
+import {
+  getSetPlayableItems,
+  buildSeededSessionDeck,
+  createSeededRandom,
+  seededShuffle
+} from '../../../utils/lernstudioVocabularyAdapter';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
 import { GameEffectsOverlay, GameSettingsControls } from '../effects/GameEffectsOverlay';
+import { GameSetupConfig } from '../LernstudioGameSetupScreen';
 import {
   ArrowLeft,
   RotateCcw,
@@ -22,6 +33,8 @@ interface Props {
   set: LernstudioSet;
   activeTheme: LernstudioTheme;
   language?: string;
+  gameConfig?: GameSetupConfig;
+  onGameComplete?: (result: LernstudioGameCompletionPayload) => void;
   onBack: () => void;
 }
 
@@ -32,56 +45,97 @@ interface MoleHole {
   isHit: boolean;
 }
 
+function createEmptyHoles(): MoleHole[] {
+  return Array.from({ length: 6 }).map((_, i) => ({
+    holeIndex: i,
+    item: null,
+    isVisible: false,
+    isHit: false
+  }));
+}
+
 export const LernstudioWhackAMoleGame: React.FC<Props> = ({
   set,
   activeTheme,
   language = 'ar',
+  gameConfig,
+  onGameComplete,
   onBack
 }) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const displayTitle = getLocalizedSetTitle(set, language);
-  const items = useMemo(() => getSetPlayableItems(set), [set]);
+  const [sessionNonce, setSessionNonce] = useState(0);
+  const difficulty = gameConfig?.difficulty || 'medium';
+  const moleIntervalMs = difficulty === 'hard' ? 1450 : difficulty === 'easy' ? 2800 : 2200;
+  const maxLives = difficulty === 'easy' ? 4 : difficulty === 'hard' ? 2 : 3;
+
+  const rawItems = useMemo(() => getSetPlayableItems(set), [set]);
+  const items = useMemo(() => {
+    const count = gameConfig?.questionCount && gameConfig.questionCount > 0 ? gameConfig.questionCount : rawItems.length;
+    return buildSeededSessionDeck(rawItems, count, `${set.id}::mole::${sessionNonce}`);
+  }, [rawItems, set.id, gameConfig?.questionCount, sessionNonce]);
 
   const [targetIndex, setTargetIndex] = useState(0);
   const [score, setScore] = useState(0);
   const [streak, setStreak] = useState(0);
-  const [lives, setLives] = useState(3);
+  const [lives, setLives] = useState(maxLives);
   const [isGameOver, setIsGameOver] = useState(false);
   const [isVictory, setIsVictory] = useState(false);
   const [hammerPos, setHammerPos] = useState<{ holeIdx: number; correct: boolean } | null>(null);
   const { particles, popups, triggerCorrect, triggerWrong, triggerVictory } = useGameEffects();
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const spawnTickRef = useRef(0);
+  const completedRef = useRef(false);
+  const correctRef = useRef(0);
+  const wrongRef = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      timeoutsRef.current.forEach(clearTimeout);
+      timeoutsRef.current = [];
+      stopGermanSpeech();
+    };
+  }, []);
 
   // 6 Holes (2 rows x 3 cols)
-  const [holes, setHoles] = useState<MoleHole[]>(
-    Array.from({ length: 6 }).map((_, i) => ({
-      holeIndex: i,
-      item: null,
-      isVisible: false,
-      isHit: false
-    }))
-  );
+  const [holes, setHoles] = useState<MoleHole[]>(createEmptyHoles);
 
-  const targetItem: LernstudioItem | undefined = items[targetIndex % items.length];
+  const targetItem: LernstudioItem | undefined = items[targetIndex % Math.max(1, items.length)];
+
+  const reportFinishOnce = (finalScore: number, passed: boolean) => {
+    if (completedRef.current || !onGameComplete) return;
+    completedRef.current = true;
+    const total = Math.max(1, correctRef.current + wrongRef.current);
+    const accuracy = Math.min(100, Math.round((correctRef.current / total) * 100));
+    onGameComplete({
+      gameMode: 'whack_a_mole',
+      score: finalScore,
+      maxScore: items.length * 150,
+      accuracy,
+      passed,
+      difficulty
+    });
+  };
 
   // Spawn moles loop
   useEffect(() => {
     if (!targetItem || isGameOver || isVictory || items.length === 0) return;
 
-    const interval = setInterval(() => {
-      // Pick 2-3 random holes to pop up
-      const holeIndices = [0, 1, 2, 3, 4, 5].sort(() => 0.5 - Math.random()).slice(0, 3);
+    const spawnWave = () => {
+      spawnTickRef.current += 1;
+      const rng = createSeededRandom(
+        `${set.id}::mole_wave::${sessionNonce}::${targetIndex}::${spawnTickRef.current}`
+      );
+      const holeIndices = seededShuffle([0, 1, 2, 3, 4, 5], rng).slice(0, difficulty === 'hard' ? 4 : 3);
+      const distractors = seededShuffle(
+        rawItems.filter((it) => it.id !== targetItem.id),
+        rng
+      ).slice(0, holeIndices.length - 1);
+      const assignedCandidates = seededShuffle([targetItem, ...distractors], rng);
 
-      // Distribute candidates: exactly one target and others distractors
-      const distractors = items
-        .filter((it) => it.id !== targetItem.id)
-        .sort(() => 0.5 - Math.random())
-        .slice(0, 2);
-
-      const assignedCandidates = [targetItem, ...distractors].sort(() => 0.5 - Math.random());
-
-      setHoles((prev) =>
-        prev.map((h, idx) => {
+      setHoles(
+        Array.from({ length: 6 }).map((_, idx) => {
           const matchPos = holeIndices.indexOf(idx);
           if (matchPos !== -1 && assignedCandidates[matchPos]) {
             return {
@@ -99,10 +153,13 @@ export const LernstudioWhackAMoleGame: React.FC<Props> = ({
           };
         })
       );
-    }, 2200);
+    };
+
+    spawnWave();
+    const interval = setInterval(spawnWave, moleIntervalMs);
 
     return () => clearInterval(interval);
-  }, [targetItem, isGameOver, isVictory, items]);
+  }, [targetItem, targetIndex, isGameOver, isVictory, items.length, rawItems, moleIntervalMs, set.id, sessionNonce, difficulty]);
 
   // Handle whacking a mole
   const handleWhack = (holeIdx: number) => {
@@ -113,7 +170,7 @@ export const LernstudioWhackAMoleGame: React.FC<Props> = ({
 
     // Trigger Hammer visual
     setHammerPos({ holeIdx, correct: isCorrect });
-    setTimeout(() => setHammerPos(null), 500);
+    timeoutsRef.current.push(setTimeout(() => setHammerPos(null), 500));
 
     // Mark hole as hit
     setHoles((prev) =>
@@ -121,46 +178,64 @@ export const LernstudioWhackAMoleGame: React.FC<Props> = ({
     );
 
     if (isCorrect) {
-      playLernstudioSound('whack');
-      playLernstudioSound('combo_ding');
-      speakGermanText(hole.item.german);
+      correctRef.current += 1;
+      if (gameConfig?.enableSoundFx !== false) {
+        playLernstudioSound('whack');
+        playLernstudioSound('combo_ding');
+      }
+      if (gameConfig?.enableAudio !== false) speakGermanText(hole.item.german);
 
       const nextStreak = streak + 1;
       const pts = 100 + nextStreak * 25;
+      const nextScore = score + pts;
       setStreak(nextStreak);
-      setScore((s) => s + pts);
+      setScore(nextScore);
       triggerCorrect(pts, nextStreak >= 2 ? `x${nextStreak} Whack!` : 'Treffer!');
 
       if (targetIndex + 1 >= items.length) {
         setIsVictory(true);
         triggerVictory();
-        playGermanVoiceFeedback('victory');
+        if (gameConfig?.enableAudio !== false) playGermanVoiceFeedback('victory');
+        reportFinishOnce(nextScore, true);
       } else {
-        setTimeout(() => {
-          setTargetIndex((prev) => prev + 1);
-        }, 400);
+        timeoutsRef.current.push(
+          setTimeout(() => {
+            setTargetIndex((prev) => prev + 1);
+          }, 400)
+        );
       }
     } else {
-      playLernstudioSound('wrong');
+      wrongRef.current += 1;
+      if (gameConfig?.enableSoundFx !== false) playLernstudioSound('wrong');
       triggerWrong();
-      playGermanVoiceFeedback('try_again');
+      if (gameConfig?.enableAudio !== false) playGermanVoiceFeedback('try_again');
       setStreak(0);
       setLives((l) => {
         const next = l - 1;
-        if (next <= 0) setIsGameOver(true);
+        if (next <= 0) {
+          setIsGameOver(true);
+          reportFinishOnce(score, false);
+        }
         return Math.max(0, next);
       });
     }
   };
 
   const handleRestart = () => {
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current = [];
+    completedRef.current = false;
+    correctRef.current = 0;
+    wrongRef.current = 0;
+    setSessionNonce((n) => n + 1);
     setTargetIndex(0);
     setScore(0);
     setStreak(0);
-    setLives(3);
+    setLives(maxLives);
     setIsGameOver(false);
     setIsVictory(false);
     setHammerPos(null);
+    setHoles(createEmptyHoles());
   };
 
   return (

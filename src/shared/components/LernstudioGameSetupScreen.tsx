@@ -51,6 +51,7 @@ export interface GameSetupConfig {
   rosterMode?: 'split_teams' | 'individual' | 'custom_colors';
   assignedStudents?: { teamIdx: number; students: Student[] }[];
   extraVerbGroupIds?: string[];
+  difficulty?: 'easy' | 'medium' | 'hard';
 }
 
 interface Props {
@@ -160,6 +161,9 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
   ]);
 
   const [timerSeconds, setTimerSeconds] = useState<number>(15);
+  const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>(() =>
+    set.difficulty === 'easy' || set.difficulty === 'hard' ? set.difficulty : 'medium'
+  );
   const [enableAudio, setEnableAudio] = useState<boolean>(true);
   const [enableSoundFx, setEnableSoundFx] = useState<boolean>(true);
 
@@ -269,6 +273,7 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
       selectedStudentObj,
       rosterMode: isSoloGame ? undefined : rosterMode,
       assignedStudents,
+      difficulty,
       ...(extraVerbGroupIds.length > 0 ? { extraVerbGroupIds } : {})
     });
   };
@@ -582,6 +587,38 @@ export const LernstudioGameSetupScreen: React.FC<Props> = ({
                       <div className="text-xs font-black">{isRtl ? item.labelAr : item.labelEn}</div>
                       <div className="text-[10.5px] text-text-muted leading-tight">{item.descAr}</div>
                     </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Difficulty Selector */}
+          <div className="space-y-2 pt-2">
+            <label className="text-xs font-bold text-text-muted block">
+              {isRtl ? 'مستوى الصعوبة والسرعة:' : language === 'de' ? 'Schwierigkeitsgrad:' : 'Difficulty Level:'}
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {(
+                [
+                  { id: 'easy', labelAr: '🟢 سهل', labelDe: '🟢 Leicht', labelEn: '🟢 Easy' },
+                  { id: 'medium', labelAr: '🟡 متوسط', labelDe: '🟡 Mittel', labelEn: '🟡 Medium' },
+                  { id: 'hard', labelAr: '🔴 صعب', labelDe: '🔴 Schwer', labelEn: '🔴 Hard' }
+                ] as const
+              ).map((lvl) => {
+                const isSelected = difficulty === lvl.id;
+                return (
+                  <button
+                    key={lvl.id}
+                    type="button"
+                    onClick={() => setDifficulty(lvl.id)}
+                    className={`py-2.5 px-3 rounded-2xl text-xs font-black border transition-all cursor-pointer text-center ${
+                      isSelected
+                        ? 'bg-primary text-white border-primary shadow-sm scale-105'
+                        : 'bg-surface-hover text-text-main border-surface-border hover:border-primary/40'
+                    }`}
+                  >
+                    {isRtl ? lvl.labelAr : language === 'de' ? lvl.labelDe : lvl.labelEn}
                   </button>
                 );
               })}

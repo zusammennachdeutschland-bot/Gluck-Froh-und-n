@@ -1,5 +1,11 @@
-import React, { useState, useMemo } from 'react';
-import { LernstudioSet, LernstudioItem, LernstudioExerciseType, LernstudioTheme } from '../../types/lernstudio';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import {
+  LernstudioSet,
+  LernstudioItem,
+  LernstudioExerciseType,
+  LernstudioTheme,
+  LernstudioGameCompletionPayload
+} from '../../types/lernstudio';
 import { CheckCircle2, XCircle, RotateCcw, ArrowRight, Award, Trophy, HelpCircle, ThumbsUp, Volume2 } from 'lucide-react';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../utils/audioSpeechUtils';
@@ -8,7 +14,17 @@ import { GameStageBanner, SharedVictoryTrophyArt } from './GameArtAssets';
 import { useGameEffects } from './effects/GameEffectsOverlay';
 import { GameSetupConfig } from './LernstudioGameSetupScreen';
 import { hasGrammarContent, isGrammarSet } from '../grammarEngine';
-import { buildDynamicQuestionPool, evaluateGameQuestionAnswer, GameQuestion } from '../lernstudioQuestionAdapter';
+import {
+  buildDynamicQuestionPool,
+  evaluateGameQuestionAnswer,
+  extractMissingLetterChar,
+  GameQuestion
+} from '../lernstudioQuestionAdapter';
+import {
+  buildSeededSessionDeck,
+  createSeededRandom,
+  seededShuffle
+} from '../lernstudioVocabularyAdapter';
 import {
   ALL_VERBS,
   SUBJECT_PROMPTS,
@@ -25,26 +41,73 @@ interface Props {
   activeTheme: LernstudioTheme;
   language: string;
   gameConfig?: GameSetupConfig;
+  onGameComplete?: (result: LernstudioGameCompletionPayload) => void;
   onBack: () => void;
 }
 
-export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, language = 'ar', gameConfig, onBack }) => {
+export const LernstudioGameRunner: React.FC<Props> = ({
+  set,
+  activeTheme,
+  language = 'ar',
+  gameConfig,
+  onGameComplete,
+  onBack
+}) => {
   const t = getLernstudioTranslations(language);
   const { triggerSparkles, triggerFloatingText, triggerConfetti } = useGameEffects();
+  const [sessionNonce, setSessionNonce] = useState(0);
+  const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const completedReportedRef = useRef(false);
+  const correctCountRef = useRef(0);
+  const attemptCountRef = useRef(0);
 
-  const items = useMemo(() => set.items || [], [set.items]);
+  useEffect(() => {
+    return () => {
+      if (pendingTimeoutRef.current) clearTimeout(pendingTimeoutRef.current);
+    };
+  }, []);
+
+  const scheduleTimeout = (fn: () => void, ms: number) => {
+    if (pendingTimeoutRef.current) clearTimeout(pendingTimeoutRef.current);
+    pendingTimeoutRef.current = setTimeout(fn, ms);
+  };
+
+  const soundFxEnabled = gameConfig?.enableSoundFx !== false;
+  const playSfx = (sound: Parameters<typeof playLernstudioSound>[0]) => {
+    if (soundFxEnabled) playLernstudioSound(sound);
+  };
+  const playVoice = (feedbackKey: Parameters<typeof playGermanVoiceFeedback>[0]) => {
+    if (gameConfig?.enableAudio !== false) playGermanVoiceFeedback(feedbackKey);
+  };
+
+  const rawItems = useMemo(() => set.items || [], [set.items]);
+  const sessionSeed = `${set.id}::runner::${sessionNonce}`;
+  const items = useMemo(() => {
+    const requested = gameConfig?.questionCount;
+    if (rawItems.length === 0) return [];
+    const targetCount = requested && requested > 0 ? requested : rawItems.length;
+    return buildSeededSessionDeck(rawItems, targetCount, `${sessionSeed}::items`);
+  }, [rawItems, gameConfig?.questionCount, sessionSeed]);
+
   const hasGrammar = useMemo(() => hasGrammarContent(set), [set]);
-  const isPureGrammarSet = useMemo(() => isGrammarSet(set) && items.length === 0, [set, items.length]);
+  const isPureGrammarSet = useMemo(() => isGrammarSet(set) && rawItems.length === 0, [set, rawItems.length]);
 
   const grammarQuestions: GameQuestion[] = useMemo(() => {
     if (!hasGrammar) return [];
-    const pool = buildDynamicQuestionPool(set, language, { questionModeFilter: 'grammar' });
-    return pool.filter((q) => q.type === 'grammar_exercise');
-  }, [set, language, hasGrammar]);
+    const pool = buildDynamicQuestionPool(set, language, {
+      questionModeFilter: 'grammar',
+      seed: `${sessionSeed}::grammar`
+    }).filter((q) => q.type === 'grammar_exercise');
+    const requested = gameConfig?.questionCount;
+    if (requested && requested > 0 && pool.length > requested) {
+      return pool.slice(0, requested);
+    }
+    return pool;
+  }, [set, language, hasGrammar, gameConfig?.questionCount, sessionSeed]);
 
   const hasVerbsInSet = useMemo(
-    () => set.setKind === 'verb_group' || items.some((it) => isItemVerb(it)),
-    [set.setKind, items]
+    () => set.setKind === 'verb_group' || rawItems.some((it) => isItemVerb(it)),
+    [set.setKind, rawItems]
   );
 
   const [selectedGameType, setSelectedGameType] = useState<GameRunnerMode>(() => {
@@ -62,7 +125,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
   // Game specific states
   const [userAnswerText, setUserAnswerText] = useState('');
   const [selectedOptionIndex, setSelectedOptionIndex] = useState<number | null>(null);
-  const [sentenceBuilt, setSentenceBuilt] = useState<string[]>([]);
+  const [sentenceBuiltIndices, setSentenceBuiltIndices] = useState<number[]>([]);
   const [scrambledSelected, setScrambledSelected] = useState<number[]>([]);
   const [grammarOrderedTokens, setGrammarOrderedTokens] = useState<number[]>([]);
   const [feedback, setFeedback] = useState<{ isCorrect: boolean; message: string; showSolution?: boolean } | null>(null);
@@ -72,51 +135,71 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
   const currentGrammarQuestion: GameQuestion | undefined = grammarQuestions[currentIndex];
   const activeListLength = selectedGameType === 'grammar' ? grammarQuestions.length : items.length;
 
-  // Prepare Multiple Choice Options (German Target Words)
+  // Prepare Multiple Choice Options (German Target Words, deduplicated & seeded)
   const mcOptions = useMemo(() => {
     const isMcLike =
       selectedGameType === 'multiple_choice' ||
       selectedGameType === 'verb_conjugation' ||
       selectedGameType === 'verb_sentence';
     if (!currentItem || !isMcLike) return [];
-    const correct = currentItem.german;
-    const distractors = items
-      .filter((it) => it.id !== currentItem.id)
-      .map((it) => it.german)
-      .sort(() => 0.5 - Math.random())
-      .slice(0, 3);
-
-    const all = [correct, ...distractors].sort(() => 0.5 - Math.random());
-    return all;
-  }, [currentItem, items, selectedGameType, currentIndex]);
+    const rng = createSeededRandom(`${sessionSeed}::mc::${currentIndex}::${currentItem.id}`);
+    const correct = currentItem.german.trim();
+    const seen = new Set<string>([correct.toLowerCase()]);
+    const uniquePool: string[] = [];
+    for (const candidate of seededShuffle(rawItems, rng)) {
+      if (!candidate || candidate.id === currentItem.id) continue;
+      const g = candidate.german.trim();
+      if (!g || seen.has(g.toLowerCase())) continue;
+      seen.add(g.toLowerCase());
+      uniquePool.push(g);
+      if (uniquePool.length >= 3) break;
+    }
+    return seededShuffle([correct, ...uniquePool], rng);
+  }, [currentItem, rawItems, selectedGameType, currentIndex, sessionSeed]);
 
   // Prepare Scrambled Letters
   const scrambledLetters = useMemo(() => {
     if (!currentItem || selectedGameType !== 'scrambled_letters') return [];
+    const rng = createSeededRandom(`${sessionSeed}::scram::${currentIndex}::${currentItem.id}`);
     const cleanWord = currentItem.german.replace(/^(der|die|das)\s+/i, '').trim();
     const chars = cleanWord.split('').map((char, index) => ({ id: index, char }));
-    return chars.sort(() => 0.5 - Math.random());
-  }, [currentItem, selectedGameType, currentIndex]);
+    const shuffled = seededShuffle(chars, rng);
+    if (shuffled.map((c) => c.char).join('') === cleanWord && shuffled.length > 1) {
+      return [...shuffled].reverse();
+    }
+    return shuffled;
+  }, [currentItem, selectedGameType, currentIndex, sessionSeed]);
 
-  // Prepare Sentence 4 Elements
-  const sentenceElements = useMemo(() => {
-    if (!currentItem) return [];
+  // Prepare Sentence Elements and Target Sentence cleanly so check target ALWAYS matches display pieces
+  const { sentenceElements, sentenceTarget } = useMemo(() => {
+    if (!currentItem) return { sentenceElements: [] as string[], sentenceTarget: '' };
+    const rng = createSeededRandom(`${sessionSeed}::sent::${currentIndex}::${currentItem.id}`);
+    let orderedParts: string[];
     if (currentItem.sentence4Elements && currentItem.sentence4Elements.length === 4) {
-      return [...currentItem.sentence4Elements].sort(() => 0.5 - Math.random());
+      orderedParts = currentItem.sentence4Elements.map((s) => s.trim()).filter(Boolean);
+    } else if (currentItem.exampleSentenceGerman && currentItem.exampleSentenceGerman.trim()) {
+      const words = currentItem.exampleSentenceGerman.trim().split(/\s+/).filter(Boolean);
+      if (words.length >= 4) {
+        const chunk = Math.ceil(words.length / 4);
+        orderedParts = [
+          words.slice(0, chunk).join(' '),
+          words.slice(chunk, chunk * 2).join(' '),
+          words.slice(chunk * 2, chunk * 3).join(' '),
+          words.slice(chunk * 3).join(' ')
+        ].filter(Boolean);
+      } else {
+        orderedParts = words;
+      }
+    } else {
+      orderedParts = [currentItem.german.trim(), 'ist', 'sehr', 'schön'];
     }
-    const sent = currentItem.exampleSentenceGerman || `${currentItem.german} ist gut`;
-    const words = sent.split(' ');
-    if (words.length >= 4) {
-      const chunk = Math.ceil(words.length / 4);
-      return [
-        words.slice(0, chunk).join(' '),
-        words.slice(chunk, chunk * 2).join(' '),
-        words.slice(chunk * 2, chunk * 3).join(' '),
-        words.slice(chunk * 3).join(' ')
-      ].sort(() => 0.5 - Math.random());
+    const target = orderedParts.join(' ');
+    let shuffled = seededShuffle(orderedParts, rng);
+    if (shuffled.join(' ') === target && orderedParts.length > 1) {
+      shuffled = [...orderedParts].reverse();
     }
-    return [currentItem.german, 'ist', 'sehr', 'schön'].sort(() => 0.5 - Math.random());
-  }, [currentItem, currentIndex]);
+    return { sentenceElements: shuffled, sentenceTarget: target };
+  }, [currentItem, currentIndex, sessionSeed]);
 
   const currentVerbEntry = useMemo(() => {
     if (!currentItem) return null;
@@ -137,17 +220,22 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
 
   const grammarScrambledTokens = useMemo(() => {
     if (!currentGrammarQuestion || currentGrammarQuestion.grammarType !== 'sentence_ordering') return [];
+    const rng = createSeededRandom(`${sessionSeed}::gsent::${currentIndex}::${currentGrammarQuestion.id}`);
     const base =
       currentGrammarQuestion.sentencePieces && currentGrammarQuestion.sentencePieces.length >= 2
         ? currentGrammarQuestion.sentencePieces
         : currentGrammarQuestion.correctAnswer.split(/\s+/).filter(Boolean);
-    return base.map((word, idx) => ({ idx, word })).sort(() => 0.5 - Math.random());
-  }, [currentGrammarQuestion, currentIndex]);
+    return seededShuffle(base.map((word, idx) => ({ idx, word })), rng);
+  }, [currentGrammarQuestion, currentIndex, sessionSeed]);
 
   const resetQuestionState = () => {
+    if (pendingTimeoutRef.current) {
+      clearTimeout(pendingTimeoutRef.current);
+      pendingTimeoutRef.current = null;
+    }
     setUserAnswerText('');
     setSelectedOptionIndex(null);
-    setSentenceBuilt([]);
+    setSentenceBuiltIndices([]);
     setScrambledSelected([]);
     setGrammarOrderedTokens([]);
     setFeedback(null);
@@ -160,13 +248,30 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
       setCurrentIndex((prev) => prev + 1);
     } else {
       setIsCompleted(true);
-      playLernstudioSound('fanfare_victory');
-      playGermanVoiceFeedback('gewonnen');
+      playSfx('fanfare_victory');
+      playVoice('gewonnen');
       triggerConfetti();
+      if (!completedReportedRef.current && onGameComplete) {
+        completedReportedRef.current = true;
+        const attempts = Math.max(1, attemptCountRef.current);
+        const accuracy = Math.min(100, Math.round((correctCountRef.current / attempts) * 100));
+        onGameComplete({
+          gameMode: 'game',
+          score,
+          maxScore: activeListLength * 10,
+          accuracy,
+          passed: accuracy >= 60,
+          difficulty: gameConfig?.difficulty
+        });
+      }
     }
   };
 
   const handleRestartGame = () => {
+    completedReportedRef.current = false;
+    correctCountRef.current = 0;
+    attemptCountRef.current = 0;
+    setSessionNonce((n) => n + 1);
     setCurrentIndex(0);
     setScore(0);
     setStreak(0);
@@ -178,17 +283,19 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
   const handleCheckMultipleChoice = (opt: string, idx: number) => {
     if (!currentItem || feedback) return;
     setSelectedOptionIndex(idx);
+    attemptCountRef.current += 1;
 
     const isCorrect = opt.trim().toLowerCase() === currentItem.german.trim().toLowerCase();
     if (isCorrect) {
+      correctCountRef.current += 1;
       setScore((s) => s + 10);
       setStreak((st) => st + 1);
       setFeedback({ isCorrect: true, message: t.rightAnswerMsg });
-      playLernstudioSound('correct');
-      playGermanVoiceFeedback('richtig');
+      playSfx('correct');
+      playVoice('richtig');
       triggerSparkles(50, 50, '#10b981');
       triggerFloatingText('+10 ★ Richtig!', 50, 40, '#10b981');
-      setTimeout(() => {
+      scheduleTimeout(() => {
         handleNextQuestion();
       }, 900);
     } else {
@@ -197,32 +304,43 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
         isCorrect: false,
         message: `${t.wrongAnswerMsg} (حاول مرة أخرى / Try again)`
       });
-      playLernstudioSound('wrong');
-      playGermanVoiceFeedback('noch_einmal');
-      setTimeout(() => {
+      playSfx('wrong');
+      playVoice('noch_einmal');
+      scheduleTimeout(() => {
         setFeedback(null);
         setSelectedOptionIndex(null);
       }, 1000);
     }
   };
 
-  // 2. Missing Letter Check
+  // 2. Missing Letter Check (strictly exact missing char OR exact full word)
+  const activeMaskedWord = currentItem
+    ? currentItem.missingLetterWord || currentItem.german.replace(/[aeiouäöü]/i, '_')
+    : '';
+
   const handleCheckMissingLetter = () => {
     if (!currentItem || feedback) return;
-    const expectedChar = currentItem.german.replace(/^(der|die|das)\s+/i, '');
+    attemptCountRef.current += 1;
+    const expectedFullClean = currentItem.german.replace(/^(der|die|das)\s+/i, '').trim().toLowerCase();
+    const expectedFullWithArticle = currentItem.german.trim().toLowerCase();
+    const expectedMissingChar = extractMissingLetterChar(currentItem.german, activeMaskedWord).trim().toLowerCase();
     const userClean = userAnswerText.trim().toLowerCase();
-    const fullWordClean = expectedChar.trim().toLowerCase();
 
-    const isCorrect = fullWordClean.includes(userClean) || userClean === fullWordClean;
-    if (isCorrect || userClean === currentItem.german.toLowerCase()) {
+    const isCorrect =
+      Boolean(userClean) &&
+      (userClean === expectedMissingChar ||
+        userClean === expectedFullClean ||
+        userClean === expectedFullWithArticle);
+    if (isCorrect) {
+      correctCountRef.current += 1;
       setScore((s) => s + 10);
       setStreak((st) => st + 1);
       setFeedback({ isCorrect: true, message: t.rightAnswerMsg });
-      playLernstudioSound('correct');
-      playGermanVoiceFeedback('super');
+      playSfx('correct');
+      playVoice('super');
       triggerSparkles(50, 50, '#10b981');
       triggerFloatingText('+10 ★ Super!', 50, 40, '#fbbf24');
-      setTimeout(() => {
+      scheduleTimeout(() => {
         handleNextQuestion();
       }, 900);
     } else {
@@ -231,9 +349,9 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
         isCorrect: false,
         message: `${t.wrongAnswerMsg} (حاول مرة أخرى)`
       });
-      playLernstudioSound('wrong');
-      playGermanVoiceFeedback('noch_einmal');
-      setTimeout(() => {
+      playSfx('wrong');
+      playVoice('noch_einmal');
+      scheduleTimeout(() => {
         setFeedback(null);
       }, 1000);
     }
@@ -242,20 +360,27 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
   // 3. Sentence Builder Check
   const handleCheckSentenceBuilder = () => {
     if (!currentItem || feedback) return;
-    const constructedSentence = sentenceBuilt.join(' ').trim().toLowerCase();
-    const originalTarget = (currentItem.exampleSentenceGerman || `${currentItem.german} ist gut`).trim().toLowerCase();
+    attemptCountRef.current += 1;
+    const constructedSentence = sentenceBuiltIndices
+      .map((i) => sentenceElements[i] || '')
+      .join(' ')
+      .trim()
+      .toLowerCase();
+    const originalTarget = sentenceTarget.trim().toLowerCase();
 
-    const isCorrect = constructedSentence.replace(/[.,!?]/g, '') === originalTarget.replace(/[.,!?]/g, '');
+    const isCorrect =
+      constructedSentence.replace(/[.,!?]/g, '') === originalTarget.replace(/[.,!?]/g, '');
 
     if (isCorrect || teacherOverride) {
+      correctCountRef.current += 1;
       setScore((s) => s + 15);
       setStreak((st) => st + 1);
       setFeedback({ isCorrect: true, message: t.perfectSentenceMsg });
-      playLernstudioSound('correct');
-      playGermanVoiceFeedback('fantastisch');
+      playSfx('correct');
+      playVoice('fantastisch');
       triggerSparkles(50, 50, '#10b981');
       triggerFloatingText('+15 ★ Fantastisch!', 50, 40, '#fbbf24');
-      setTimeout(() => {
+      scheduleTimeout(() => {
         handleNextQuestion();
       }, 900);
     } else {
@@ -265,9 +390,9 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
         message: `${t.reorderSolutionMsg} (حاول مرة أخرى)`,
         showSolution: false
       });
-      playLernstudioSound('wrong');
-      playGermanVoiceFeedback('noch_einmal');
-      setTimeout(() => {
+      playSfx('wrong');
+      playVoice('noch_einmal');
+      scheduleTimeout(() => {
         setFeedback(null);
       }, 1200);
     }
@@ -276,20 +401,22 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
   // 4. Emoji Vocabulary Check
   const handleCheckEmojiVocab = () => {
     if (!currentItem || feedback) return;
+    attemptCountRef.current += 1;
     const userText = userAnswerText.trim().toLowerCase();
     const targetGerman = currentItem.german.trim().toLowerCase();
     const targetClean = targetGerman.replace(/^(der|die|das)\s+/i, '');
 
     const isCorrect = userText === targetGerman || userText === targetClean;
     if (isCorrect || teacherOverride) {
+      correctCountRef.current += 1;
       setScore((s) => s + 10);
       setStreak((st) => st + 1);
       setFeedback({ isCorrect: true, message: t.rightAnswerMsg });
-      playLernstudioSound('correct');
-      playGermanVoiceFeedback('richtig');
+      playSfx('correct');
+      playVoice('richtig');
       triggerSparkles(50, 50, '#10b981');
       triggerFloatingText('+10 ★ Richtig!', 50, 40, '#10b981');
-      setTimeout(() => {
+      scheduleTimeout(() => {
         handleNextQuestion();
       }, 900);
     } else {
@@ -298,9 +425,9 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
         isCorrect: false,
         message: `${t.wrongAnswerMsg} ${language === 'ar' ? '(حاول مرة أخرى)' : language === 'de' ? '(Versuche es noch einmal)' : '(Try again)'}`
       });
-      playLernstudioSound('wrong');
-      playGermanVoiceFeedback('noch_einmal');
-      setTimeout(() => {
+      playSfx('wrong');
+      playVoice('noch_einmal');
+      scheduleTimeout(() => {
         setFeedback(null);
       }, 1000);
     }
@@ -309,18 +436,20 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
   // 5. Scrambled Letters Check
   const handleCheckScrambled = () => {
     if (!currentItem || feedback) return;
-    const constructedWord = scrambledSelected.map((i) => scrambledLetters[i].char).join('').toLowerCase();
+    attemptCountRef.current += 1;
+    const constructedWord = scrambledSelected.map((i) => scrambledLetters[i]?.char || '').join('').toLowerCase();
     const targetWord = currentItem.german.replace(/^(der|die|das)\s+/i, '').trim().toLowerCase();
 
     if (constructedWord === targetWord) {
+      correctCountRef.current += 1;
       setScore((s) => s + 10);
       setStreak((st) => st + 1);
       setFeedback({ isCorrect: true, message: t.rightAnswerMsg });
-      playLernstudioSound('correct');
-      playGermanVoiceFeedback('weiter_so');
+      playSfx('correct');
+      playVoice('weiter_so');
       triggerSparkles(50, 50, '#10b981');
       triggerFloatingText('+10 ★ Weiter so!', 50, 40, '#fbbf24');
-      setTimeout(() => {
+      scheduleTimeout(() => {
         handleNextQuestion();
       }, 900);
     } else {
@@ -329,9 +458,9 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
         isCorrect: false,
         message: `${t.wrongAnswerMsg} ${language === 'ar' ? '(حاول مرة أخرى)' : language === 'de' ? '(Versuche es noch einmal)' : '(Try again)'}`
       });
-      playLernstudioSound('wrong');
-      playGermanVoiceFeedback('noch_einmal');
-      setTimeout(() => {
+      playSfx('wrong');
+      playVoice('noch_einmal');
+      scheduleTimeout(() => {
         setFeedback(null);
         setScrambledSelected([]);
       }, 1000);
@@ -340,9 +469,11 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
 
   const handleCheckGrammarAnswer = (answerStr: string, optIdx?: number) => {
     if (!currentGrammarQuestion || feedback) return;
+    attemptCountRef.current += 1;
     if (optIdx !== undefined) setSelectedOptionIndex(optIdx);
     const isCorrect = evaluateGameQuestionAnswer(answerStr, currentGrammarQuestion) || teacherOverride;
     if (isCorrect) {
+      correctCountRef.current += 1;
       setScore((s) => s + 10);
       setStreak((st) => st + 1);
       setFeedback({
@@ -351,11 +482,11 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
           ? `${t.rightAnswerMsg} — ${currentGrammarQuestion.explanation}`
           : t.rightAnswerMsg
       });
-      playLernstudioSound('correct');
-      playGermanVoiceFeedback('richtig');
+      playSfx('correct');
+      playVoice('richtig');
       triggerSparkles(50, 50, '#10b981');
       triggerFloatingText('+10 ★ Richtig!', 50, 40, '#10b981');
-      setTimeout(() => handleNextQuestion(), 1100);
+      scheduleTimeout(() => handleNextQuestion(), 1100);
     } else {
       setStreak(0);
       setFeedback({
@@ -365,8 +496,8 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
         }`,
         showSolution: true
       });
-      playLernstudioSound('wrong');
-      playGermanVoiceFeedback('noch_einmal');
+      playSfx('wrong');
+      playVoice('noch_einmal');
     }
   };
 
@@ -923,7 +1054,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
                 <div className="p-4 bg-primary-soft/50 border border-primary-border/40 rounded-2xl text-center space-y-2">
                   <span className="text-3xl block">{currentItem.emoji || '🔤'}</span>
                   <h3 className="text-2xl sm:text-3xl font-black text-primary tracking-widest font-mono" dir="ltr">
-                    {currentItem.missingLetterWord || currentItem.german.replace(/[aeiou]/g, '_')}
+                    {activeMaskedWord}
                   </h3>
                   <p className="text-xs text-text-muted font-bold">{getItemTranslation(currentItem, language)}</p>
                 </div>
@@ -935,6 +1066,9 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
                     disabled={feedback !== null}
                     value={userAnswerText}
                     onChange={(e) => setUserAnswerText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && userAnswerText.trim()) handleCheckMissingLetter();
+                    }}
                     placeholder="..."
                     dir="ltr"
                     className="w-full px-4 py-3 rounded-2xl border border-surface-border bg-surface text-text-main text-center font-bold text-lg focus:outline-none focus:border-primary font-mono"
@@ -961,17 +1095,17 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
 
                 {/* Built sentence drop target */}
                 <div className="p-4 bg-surface rounded-2xl border-2 border-dashed border-primary/40 min-h-[70px] flex items-center justify-center gap-2 flex-wrap" dir="ltr">
-                  {sentenceBuilt.length === 0 ? (
+                  {sentenceBuiltIndices.length === 0 ? (
                     <span className="text-xs text-text-muted font-bold">...</span>
                   ) : (
-                    sentenceBuilt.map((elem, idx) => (
+                    sentenceBuiltIndices.map((elemIdx, pos) => (
                       <button
-                        key={idx}
+                        key={`${elemIdx}_${pos}`}
                         type="button"
-                        onClick={() => setSentenceBuilt((prev) => prev.filter((_, i) => i !== idx))}
+                        onClick={() => setSentenceBuiltIndices((prev) => prev.filter((_, i) => i !== pos))}
                         className="px-3 py-1.5 bg-primary text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer hover:bg-red-500 transition-colors font-mono"
                       >
-                        {elem} ×
+                        {sentenceElements[elemIdx]} ×
                       </button>
                     ))
                   )}
@@ -980,13 +1114,13 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
                 {/* Elements choices */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5" dir="ltr">
                   {sentenceElements.map((elem, idx) => {
-                    const isUsed = sentenceBuilt.includes(elem);
+                    const isUsed = sentenceBuiltIndices.includes(idx);
                     return (
                       <button
                         key={idx}
                         type="button"
                         disabled={isUsed || feedback !== null}
-                        onClick={() => setSentenceBuilt((prev) => [...prev, elem])}
+                        onClick={() => setSentenceBuiltIndices((prev) => [...prev, idx])}
                         className={`p-3 rounded-xl font-bold text-xs border transition-all cursor-pointer font-mono ${
                           isUsed
                             ? 'opacity-30 bg-surface-hover border-surface-border'
@@ -1011,7 +1145,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({ set, activeTheme, langua
 
                   <button
                     type="button"
-                    disabled={feedback !== null || sentenceBuilt.length === 0}
+                    disabled={feedback !== null || sentenceBuiltIndices.length === 0}
                     onClick={handleCheckSentenceBuilder}
                     className={`px-6 py-2.5 rounded-xl font-black text-xs shadow-md transition-all cursor-pointer ${activeTheme.primaryBg}`}
                   >

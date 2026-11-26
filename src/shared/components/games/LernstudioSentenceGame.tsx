@@ -1,10 +1,11 @@
-import React, { useState, useMemo } from 'react';
-import { LernstudioSet, LernstudioTheme, TeamScore } from '../../../types/lernstudio';
+import React, { useState, useMemo, useRef, useCallback } from 'react';
+import { LernstudioSet, LernstudioTheme, TeamScore, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
 import { buildSentenceGameQuestions, SentenceGameQuestion } from '../../../utils/lernstudioQuestionAdapter';
 import { evaluateNormalizedGrammarAnswer } from '../../grammarEngine';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedTeamName } from '../../../utils/lernstudioTranslations';
+import { GameSetupConfig } from '../LernstudioGameSetupScreen';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/GameEffectsOverlay';
 import {
@@ -28,31 +29,75 @@ interface Props {
   activeTheme: LernstudioTheme;
   language?: string;
   initialMode?: 'solo' | 'team';
+  gameConfig?: GameSetupConfig;
+  onGameComplete?: (result: LernstudioGameCompletionPayload) => void;
   onBack: () => void;
 }
+
+const TEAM_STYLE_CLASSES = [
+  'from-rose-500 to-red-600',
+  'from-blue-500 to-cyan-600',
+  'from-emerald-500 to-teal-600',
+  'from-amber-500 to-yellow-600'
+];
 
 export const LernstudioSentenceGame: React.FC<Props> = ({
   set,
   activeTheme,
   language = 'ar',
   initialMode = 'solo',
+  gameConfig,
+  onGameComplete,
   onBack
 }) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const { triggerSparkles, triggerFloatingText, triggerConfetti } = useGameEffects();
+  const enableAudio = gameConfig?.enableAudio ?? true;
+  const enableSoundFx = gameConfig?.enableSoundFx ?? true;
 
-  const defaultTeams: TeamScore[] = useMemo(() => [
-    { id: 'team_red', name: getLocalizedTeamName('teamRed', language, 'الفريق الأحمر 🦁'), color: 'from-rose-500 to-red-600', score: 0 },
-    { id: 'team_blue', name: getLocalizedTeamName('teamBlue', language, 'الفريق الأزرق 🦅'), color: 'from-blue-500 to-cyan-600', score: 0 },
-    { id: 'team_green', name: getLocalizedTeamName('teamGreen', language, 'الفريق الأخضر 🐉'), color: 'from-emerald-500 to-teal-600', score: 0 },
-    { id: 'team_gold', name: getLocalizedTeamName('teamYellow', language, 'الفريق الذهبي 👑'), color: 'from-amber-500 to-yellow-600', score: 0 },
-  ], [language]);
+  const defaultTeams: TeamScore[] = useMemo(() => {
+    const fallbackNames = [
+      getLocalizedTeamName('teamRed', language, 'الفريق الأحمر 🦁'),
+      getLocalizedTeamName('teamBlue', language, 'الفريق الأزرق 🦅'),
+      getLocalizedTeamName('teamGreen', language, 'الفريق الأخضر 🐉'),
+      getLocalizedTeamName('teamYellow', language, 'الفريق الذهبي 👑')
+    ];
+    return TEAM_STYLE_CLASSES.map((color, idx) => ({
+      id: `team_${idx + 1}`,
+      name: gameConfig?.teamNames?.[idx] || fallbackNames[idx],
+      color,
+      score: 0
+    }));
+  }, [language, gameConfig?.teamNames]);
 
-  const questions = useMemo(() => buildSentenceGameQuestions(set, language), [set, language]);
+  const [sessionSeed, setSessionSeed] = useState<number>(() => Date.now());
+  const questions = useMemo(() => {
+    const all = buildSentenceGameQuestions(set, language, sessionSeed);
+    if (gameConfig?.questionCount && gameConfig.questionCount > 0) {
+      return all.slice(0, gameConfig.questionCount);
+    }
+    return all;
+  }, [set, language, sessionSeed, gameConfig?.questionCount]);
 
-  const [gameMode, setGameMode] = useState<'solo' | 'team'>(initialMode);
-  const [teams, setTeams] = useState<TeamScore[]>(defaultTeams.slice(0, 2));
+  const resolvedInitialMode: 'solo' | 'team' =
+    gameConfig?.gameMode === 'solo'
+      ? 'solo'
+      : gameConfig?.gameMode
+      ? 'team'
+      : initialMode;
+
+  const teamCountFromConfig =
+    gameConfig?.gameMode === 'pvp_4teams'
+      ? 4
+      : gameConfig?.gameMode === 'pvp_3teams'
+      ? 3
+      : gameConfig?.teamNames?.length
+      ? Math.min(4, Math.max(2, gameConfig.teamNames.length))
+      : 2;
+
+  const [gameMode, setGameMode] = useState<'solo' | 'team'>(resolvedInitialMode);
+  const [teams, setTeams] = useState<TeamScore[]>(() => defaultTeams.slice(0, teamCountFromConfig));
   const [currentTeamIndex, setCurrentTeamIndex] = useState(0);
 
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -63,29 +108,35 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
   const [showHint, setShowHint] = useState(false);
   const [isGameOver, setIsGameOver] = useState(false);
 
+  const correctRef = useRef(0);
+  const totalRef = useRef(0);
+  const startedAtRef = useRef(Date.now());
   const currentQ: SentenceGameQuestion | undefined = questions[currentIndex];
 
-  const handleSpeak = (text: string) => {
-    speakGermanText(text, 0.9);
-  };
+  const handleSpeak = useCallback(
+    (text: string) => {
+      if (enableAudio) speakGermanText(text, 0.9);
+    },
+    [enableAudio]
+  );
 
   const handleSelectWord = (bankIndex: number) => {
     if (checkedState !== 'idle') return;
     if (selectedWordIndices.includes(bankIndex)) return;
     setSelectedWordIndices((prev) => [...prev, bankIndex]);
-    playLernstudioSound('card_flip');
+    if (enableSoundFx) playLernstudioSound('card_flip');
   };
 
   const handleRemoveWord = (slotIndex: number) => {
     if (checkedState !== 'idle') return;
     setSelectedWordIndices((prev) => prev.filter((_, idx) => idx !== slotIndex));
-    playLernstudioSound('card_flip');
+    if (enableSoundFx) playLernstudioSound('card_flip');
   };
 
   const handleUndo = () => {
     if (checkedState !== 'idle') return;
     setSelectedWordIndices((prev) => prev.slice(0, -1));
-    playLernstudioSound('card_flip');
+    if (enableSoundFx) playLernstudioSound('card_flip');
   };
 
   const handleReset = () => {
@@ -96,6 +147,7 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
 
   const handleCheck = () => {
     if (!currentQ || checkedState !== 'idle') return;
+    totalRef.current += 1;
 
     const constructedSentence = selectedWordIndices
       .map((idx) => currentQ.scrambledWords[idx])
@@ -106,8 +158,9 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
     const expectedSentence = currentQ.germanFull.replace(/\s+/g, ' ').trim();
 
     if (evaluateNormalizedGrammarAnswer(constructedSentence, { correctAnswer: expectedSentence })) {
+      correctRef.current += 1;
       setCheckedState('correct');
-      playLernstudioSound('correct');
+      if (enableSoundFx) playLernstudioSound('correct');
       triggerSparkles(50, 45, '#10b981');
       triggerFloatingText('+15 ★ Fantastisch!', 50, 38, '#fbbf24');
       handleSpeak(currentQ.germanFull);
@@ -124,8 +177,10 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
       }
     } else {
       setCheckedState('wrong');
-      playLernstudioSound('wrong');
-      playGermanVoiceFeedback('noch_einmal');
+      if (enableSoundFx) {
+        playLernstudioSound('wrong');
+        playGermanVoiceFeedback('noch_einmal');
+      }
       triggerFloatingText('Versuch es noch einmal!', 50, 42, '#f43f5e');
       if (gameMode === 'solo') {
         setStreak(0);
@@ -144,13 +199,41 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
       }
     } else {
       setIsGameOver(true);
-      playLernstudioSound('fanfare_victory');
-      playGermanVoiceFeedback('gewonnen');
+      if (enableSoundFx) {
+        playLernstudioSound('fanfare_victory');
+        playGermanVoiceFeedback('gewonnen');
+      }
       triggerConfetti();
+      if (onGameComplete) {
+        const finalScore =
+          gameMode === 'solo'
+            ? soloScore
+            : teams.reduce((max, tm) => Math.max(max, tm.score), 0);
+        const teamScores: Record<string, number> = {};
+        if (gameMode === 'team') {
+          teams.forEach((tm) => {
+            teamScores[tm.name] = tm.score;
+          });
+        }
+        onGameComplete({
+          gameMode: gameMode === 'solo' ? 'solo_sentence' : 'sentence_builder',
+          score: finalScore,
+          maxScore: Math.max(1, questions.length) * 15,
+          accuracy: totalRef.current > 0 ? Math.min(100, Math.round((correctRef.current / totalRef.current) * 100)) : 100,
+          passed: true,
+          durationSeconds: Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)),
+          teamScores: gameMode === 'team' ? teamScores : undefined,
+          difficulty: gameConfig?.difficulty || set.difficulty
+        });
+      }
     }
   };
 
   const handleRestart = () => {
+    correctRef.current = 0;
+    totalRef.current = 0;
+    startedAtRef.current = Date.now();
+    setSessionSeed(Date.now());
     setCurrentIndex(0);
     setSelectedWordIndices([]);
     setCheckedState('idle');
@@ -158,7 +241,7 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
     setSoloScore(0);
     setShowHint(false);
     setIsGameOver(false);
-    setTeams(defaultTeams.slice(0, 2));
+    setTeams(defaultTeams.slice(0, teamCountFromConfig));
     setCurrentTeamIndex(0);
   };
 
