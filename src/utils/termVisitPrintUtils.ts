@@ -8,7 +8,7 @@ import { GenerationResult } from '../services/termVisitPlannerService';
 import { getEffectiveSchoolLogo, getEffectiveSchoolName, getReportSchoolNameHtml } from './alsunLogoData';
 import { renderContainerToCanvas, prepareClonedDocForHtml2Canvas, saveReportAsOfflineHtml } from './printObservationUtils';
 import { escapeHtml } from './securityUtils';
-import { formatLocalDate } from './timeUtils';
+import { formatLocalDate, normalizeDateToISO, parseLocalDate } from './timeUtils';
 import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesService';
 
 export interface TermVisitReportExportOptions {
@@ -44,15 +44,23 @@ export function extractWeeksFromVisits(
   
   // 1. Populate map from term range if provided so all calendar weeks exist
   if (termStartDate && termEndDate) {
-    const start = new Date(termStartDate);
-    const end = new Date(termEndDate);
-    if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && start <= end) {
+    const startIso = normalizeDateToISO(termStartDate) || termStartDate;
+    const endIso = normalizeDateToISO(termEndDate) || termEndDate;
+    const start = parseLocalDate(startIso);
+    const end = parseLocalDate(endIso);
+    start.setHours(12, 0, 0, 0);
+    end.setHours(12, 0, 0, 0);
+    if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && startIso <= endIso) {
       const curr = new Date(start);
+      curr.setHours(12, 0, 0, 0);
       // Align curr to Sunday
       curr.setDate(curr.getDate() - curr.getDay());
-      while (curr <= end) {
+      while (formatLocalDate(curr) <= endIso) {
         const startOfYear = new Date(curr.getFullYear(), 0, 1);
-        const wNum = Math.ceil((((curr.getTime() - startOfYear.getTime()) / 86400000) + startOfYear.getDay() + 1) / 7);
+        const dayOfYear = Math.round(
+          (Date.UTC(curr.getFullYear(), curr.getMonth(), curr.getDate()) - Date.UTC(curr.getFullYear(), 0, 1)) / 86400000
+        );
+        const wNum = Math.ceil((dayOfYear + startOfYear.getDay() + 1) / 7);
         if (!map.has(wNum)) {
           const wEnd = new Date(curr);
           wEnd.setDate(wEnd.getDate() + 6);

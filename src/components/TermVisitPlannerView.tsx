@@ -14,7 +14,7 @@ import {
 } from '../utils/termVisitPrintUtils';
 import { PlannedVisitRecord, VisitPlannerStatus, TermVisitRequirement } from '../types';
 import { calculatePeriodsTimings } from '../utils/schoolUtils';
-import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
+import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
 
 export const TermVisitPlannerView: React.FC = () => {
   const { profile, updateProfile, lessons, _t, language } = useApp();
@@ -110,22 +110,30 @@ export const TermVisitPlannerView: React.FC = () => {
       dateRangeStr: string;
     }>();
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    const startIso = normalizeDateToISO(startDate) || startDate;
+    const endIso = normalizeDateToISO(endDate) || endDate;
+    const start = parseLocalDate(startIso);
+    const end = parseLocalDate(endIso);
+    start.setHours(12, 0, 0, 0);
+    end.setHours(12, 0, 0, 0);
 
-    if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && start <= end) {
+    if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && startIso <= endIso) {
       const curr = new Date(start);
+      curr.setHours(12, 0, 0, 0);
       // Align curr to start of week (Sunday = day 0)
       const dayOffset = curr.getDay();
       curr.setDate(curr.getDate() - dayOffset);
 
-      while (curr <= end) {
+      while (formatLocalDate(curr) <= endIso) {
         const weekStartDate = new Date(curr);
         const weekEndDate = new Date(curr);
         weekEndDate.setDate(weekEndDate.getDate() + 6);
 
         const jan1 = new Date(curr.getFullYear(), 0, 1);
-        const weekNum = Math.ceil((((curr.getTime() - jan1.getTime()) / 86400000) + jan1.getDay() + 1) / 7);
+        const dayOfYear = Math.round(
+          (Date.UTC(curr.getFullYear(), curr.getMonth(), curr.getDate()) - Date.UTC(curr.getFullYear(), 0, 1)) / 86400000
+        );
+        const weekNum = Math.ceil((dayOfYear + jan1.getDay() + 1) / 7);
         const weekKey = `${_t('الأسبوع', 'Week', 'Woche')} ${weekNum}`;
 
         const firstDateStr = formatLocalDate(weekStartDate);

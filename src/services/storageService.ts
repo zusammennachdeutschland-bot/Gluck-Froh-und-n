@@ -484,3 +484,60 @@ export const storage = {
   }
 };
 
+export interface StoragePersistenceDiagnosticEntry {
+  key: string;
+  context?: string;
+  message: string;
+  recordedAt: string;
+}
+
+const MAX_STORAGE_FAILURE_DIAGNOSTICS = 50;
+const storagePersistenceDiagnostics: StoragePersistenceDiagnosticEntry[] = [];
+
+function sanitizePersistenceErrorMessage(err: unknown): string {
+  const raw =
+    err instanceof Error
+      ? err.message
+      : typeof err === 'string'
+      ? err
+      : 'Unknown storage persistence failure';
+  return String(raw || 'Unknown storage persistence failure')
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+    .replace(/grain_pat_[A-Za-z0-9._~+/=-]+/gi, 'grain_pat_[REDACTED]')
+    .replace(/(access_token|refresh_token|client_secret)=([^&\s]+)/gi, '$1=[REDACTED]')
+    .slice(0, 240);
+}
+
+export function recordStoragePersistenceFailure(
+  key: string,
+  err: unknown,
+  context?: string
+): void {
+  try {
+    const safeKey = String(key || 'unknown_key').slice(0, 120);
+    const message = sanitizePersistenceErrorMessage(err);
+    const entry: StoragePersistenceDiagnosticEntry = {
+      key: safeKey,
+      ...(context ? { context: String(context).slice(0, 80) } : {}),
+      message,
+      recordedAt: new Date().toISOString()
+    };
+    storagePersistenceDiagnostics.unshift(entry);
+    if (storagePersistenceDiagnostics.length > MAX_STORAGE_FAILURE_DIAGNOSTICS) {
+      storagePersistenceDiagnostics.length = MAX_STORAGE_FAILURE_DIAGNOSTICS;
+    }
+    console.warn(`[storage] Failed to persist "${safeKey}"${context ? ` (${context})` : ''}:`, message);
+  } catch {
+    // Diagnostics recording must never throw or block callers
+  }
+}
+
+export function getStoragePersistenceDiagnostics(): StoragePersistenceDiagnosticEntry[] {
+  return storagePersistenceDiagnostics.map((entry) => ({ ...entry }));
+}
+
+export function __resetStoragePersistenceDiagnosticsForTesting(): void {
+  storagePersistenceDiagnostics.length = 0;
+}
+
+

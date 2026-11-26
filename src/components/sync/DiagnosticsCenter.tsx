@@ -11,6 +11,7 @@ import { CopyableBlock } from './CopyableBlock';
 import { connectivityEngine } from '../../services/sync/connectivityEngine';
 import { getLanNetworkStatus, getLastLanAttempts } from '../../services/sync/lanTransport';
 import { runSyncStressBenchmark, BenchmarkMetrics } from '../../services/sync/benchmarkSync';
+import { getStoragePersistenceDiagnostics } from '../../services/storageService';
 import { useApp } from '../../context/AppContext';
 
 interface DiagnosticsCenterProps {
@@ -85,6 +86,7 @@ export const DiagnosticsCenter: React.FC<DiagnosticsCenterProps> = ({
     },
     presences: presenceList,
     recentAttempts: attempts,
+    storagePersistenceFailures: getStoragePersistenceDiagnostics(),
     testResults
   };
 

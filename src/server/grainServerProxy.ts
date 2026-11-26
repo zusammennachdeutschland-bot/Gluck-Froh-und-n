@@ -29,8 +29,33 @@ export interface EncryptedEntry {
   updatedAt: string;
 }
 
+function isVercelRuntime(): boolean {
+  return process.env.VERCEL === '1' || Boolean(process.env.VERCEL_ENV);
+}
+
+function parseGrainMasterKeyFromEnv(): Buffer | null {
+  const envKey = String(process.env.GRAIN_VAULT_MASTER_KEY || '').trim();
+  if (!envKey) return null;
+  if (/^[0-9a-fA-F]{64}$/.test(envKey)) {
+    return Buffer.from(envKey, 'hex');
+  }
+  const b64 = Buffer.from(envKey, 'base64');
+  if (b64.length === 32) {
+    return b64;
+  }
+  return crypto.createHash('sha256').update(envKey, 'utf8').digest();
+}
+
+export function isGrainVercelMissingEnvKey(): boolean {
+  return isVercelRuntime() && !parseGrainMasterKeyFromEnv();
+}
+
+function getGrainVaultUnavailableError(): string {
+  return 'Grain vault encryption key not configured. Set GRAIN_VAULT_MASTER_KEY in Vercel environment variables.';
+}
+
 function getVaultStorageDir(): string {
-  if (process.env.VERCEL === '1' || Boolean(process.env.VERCEL_ENV)) {
+  if (isVercelRuntime()) {
     return path.join(os.tmpdir(), 'glueck-aistudio');
   }
   return path.join(process.cwd(), '.aistudio');
@@ -42,22 +67,20 @@ function getMasterKeyFilePath(): string {
 
 /**
  * Part 3 (FIX-2B): Strong random 32-byte encryption master key.
- * - Loaded from `process.env.GRAIN_VAULT_MASTER_KEY` (hex/base64) or persisted in `.aistudio/grain-vault-master.key` (mode 0o600).
- * - Never derived from `process.cwd()` or `process.platform`.
+ * - Loaded from `process.env.GRAIN_VAULT_MASTER_KEY` (hex/base64).
+ * - On Vercel serverless, NEVER creates/relies on ephemeral `os.tmpdir()` key files; fails explicitly if env key is missing.
+ * - In local/desktop runtimes, persists in `.aistudio/grain-vault-master.key` (mode 0o600).
  * - Never hardcoded in source code, never logged, stable across server restarts.
  */
 function loadOrCreateVaultMasterKey(): Buffer | null {
   try {
-    const envKey = String(process.env.GRAIN_VAULT_MASTER_KEY || '').trim();
-    if (envKey) {
-      if (/^[0-9a-fA-F]{64}$/.test(envKey)) {
-        return Buffer.from(envKey, 'hex');
-      }
-      const b64 = Buffer.from(envKey, 'base64');
-      if (b64.length === 32) {
-        return b64;
-      }
-      return crypto.createHash('sha256').update(envKey, 'utf8').digest();
+    const envKeyBuf = parseGrainMasterKeyFromEnv();
+    if (envKeyBuf) {
+      return envKeyBuf;
+    }
+
+    if (isVercelRuntime()) {
+      return null;
     }
 
     const keyPath = getMasterKeyFilePath();
@@ -76,7 +99,10 @@ function loadOrCreateVaultMasterKey(): Buffer | null {
     fs.writeFileSync(keyPath, randomKey.toString('hex'), { encoding: 'utf8', mode: 0o600 });
     return randomKey;
   } catch {
-    // Fallback to ephemeral process random key if filesystem is strictly read-only
+    if (isVercelRuntime()) {
+      return null;
+    }
+    // Fallback to ephemeral process random key only in non-Vercel read-only local containers
     return crypto.randomBytes(32);
   }
 }
@@ -226,6 +252,15 @@ export function maskGrainTokenString(token: string): string {
 
 export function isServerVaultEncryptionAvailable(): boolean {
   if (forceMasterKeyUnavailableForTesting) return false;
+  const envKeyBuf = parseGrainMasterKeyFromEnv();
+  if (envKeyBuf && envKeyBuf.length === 32) {
+    vaultMasterKey = envKeyBuf;
+    return true;
+  }
+  if (isVercelRuntime()) {
+    vaultMasterKey = null;
+    return false;
+  }
   if (!vaultMasterKey || vaultMasterKey.length !== 32) {
     vaultMasterKey = loadOrCreateVaultMasterKey();
   }
@@ -965,6 +1000,7 @@ export function registerGrainServerRoutes(
       });
     }
 
+    const keyMissingOnVercel = isGrainVercelMissingEnvKey();
     const encryptionReady = isServerVaultEncryptionAvailable();
     const { token, maskedToken } = encryptionReady
       ? getDecryptedTokenForUser(authResult.uid)
@@ -972,9 +1008,16 @@ export function registerGrainServerRoutes(
     return res.status(200).json({
       supported: encryptionReady,
       secureStorageAvailable: encryptionReady,
-      runtime: 'web',
+      keyConfigured: !keyMissingOnVercel,
+      runtime: isVercelRuntime() ? 'vercel' : 'web',
       hasToken: Boolean(token),
-      maskedToken: token ? maskedToken : null
+      maskedToken: token ? maskedToken : null,
+      ...(keyMissingOnVercel
+        ? {
+            code: 'VAULT_KEY_NOT_CONFIGURED',
+            error: getGrainVaultUnavailableError()
+          }
+        : {})
     });
   });
 
@@ -1000,10 +1043,13 @@ export function registerGrainServerRoutes(
     }
 
     if (!isServerVaultEncryptionAvailable()) {
+      const missingEnvKey = isGrainVercelMissingEnvKey();
       return res.status(503).json({
         saved: false,
-        error: 'Server encryption master key is unavailable; refusing to store token insecurely.',
-        code: 'SECURE_STORAGE_UNAVAILABLE'
+        error: missingEnvKey
+          ? getGrainVaultUnavailableError()
+          : 'Server encryption master key is unavailable (key not configured); refusing to store token insecurely.',
+        code: missingEnvKey ? 'VAULT_KEY_NOT_CONFIGURED' : 'SECURE_STORAGE_UNAVAILABLE'
       });
     }
 
@@ -1080,6 +1126,16 @@ export function registerGrainServerRoutes(
       return res.status(400).json({
         error: validation.error || 'Invalid Grain proxy request',
         code: validation.code || 'BAD_REQUEST'
+      });
+    }
+
+    if (!isServerVaultEncryptionAvailable()) {
+      const missingEnvKey = isGrainVercelMissingEnvKey();
+      return res.status(503).json({
+        error: missingEnvKey
+          ? getGrainVaultUnavailableError()
+          : 'Server encryption master key is unavailable (key not configured).',
+        code: missingEnvKey ? 'VAULT_KEY_NOT_CONFIGURED' : 'SECURE_STORAGE_UNAVAILABLE'
       });
     }
 

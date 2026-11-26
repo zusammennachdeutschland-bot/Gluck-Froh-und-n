@@ -122,6 +122,8 @@ jobs:
   unit-tests:
     name: 1C. Tests (Shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
+    env:
+      TZ: Africa/Cairo
     strategy:
       fail-fast: true
       matrix:
@@ -377,12 +379,21 @@ jobs:
           prerelease: true
           files: android/app/build/outputs/apk/release/app-release.apk
 
+      - name: Publish Stable Latest APK Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-latest
+          name: Android APK Latest (Build #${{ github.run_number }})
+          prerelease: false
+          make_latest: true
+          files: android/app/build/outputs/apk/release/app-release.apk
+
       - name: Clean Up Old APK Releases
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          OLD_TAGS="$(gh release list --repo "${{ github.repository }}" --limit 50 --json tagName --jq '.[].tagName' | grep '^apk-' | tail -n +6 || true)"
+          OLD_TAGS="$(gh release list --repo "${{ github.repository }}" --limit 50 --json tagName --jq '.[].tagName' | grep '^apk-' | grep -v '^apk-latest$' | tail -n +6 || true)"
           for tag in $OLD_TAGS; do
             echo "Removing old APK release and tag: $tag"
             gh release delete "$tag" --repo "${{ github.repository }}" --yes --cleanup-tag || true
@@ -390,13 +401,13 @@ jobs:
 
       - name: Produce Build Summary
         run: |
-          VERSION_CODE=$((200 + ${GITHUB_RUN_NUMBER:-1}))
+          VERSION_CODE=$((300 + ${GITHUB_RUN_NUMBER:-1}))
           APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
           SHA1_FP="$(keytool -printcert -jarfile "$APK_PATH" 2>/dev/null | grep -i "SHA1:" | head -n 1 | awk '{print $2}' || echo 'N/A')"
           SHA256_FP="$(keytool -printcert -jarfile "$APK_PATH" 2>/dev/null | grep -i "SHA256:" | head -n 1 | awk '{print $2}' || echo 'N/A')"
           echo "### 🚀 Android Build Success" >> $GITHUB_STEP_SUMMARY
           echo "- **Application ID:** com.glueck.teacher" >> $GITHUB_STEP_SUMMARY
-          echo "- **Version Name:** 2.0" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version Name:** 3.0.0" >> $GITHUB_STEP_SUMMARY
           echo "- **Version Code:** ${VERSION_CODE}" >> $GITHUB_STEP_SUMMARY
           echo "- **Signing Status:** Permanent Release Keystore Confirmed" >> $GITHUB_STEP_SUMMARY
           echo "- **APK Signing SHA-1 (for Firebase Android App):** \`${SHA1_FP}\`" >> $GITHUB_STEP_SUMMARY

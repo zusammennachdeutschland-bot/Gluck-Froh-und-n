@@ -362,15 +362,19 @@ export function getProjectedLessonsForRange(
 
   const projected: Lesson[] = [];
 
+  const normalizedEndDateStr = normalizeDateToISO(endDateStr) || endDateStr;
   const startD = parseLocalDate(startDateStr);
-  const endD = parseLocalDate(endDateStr);
+  startD.setHours(12, 0, 0, 0);
+  const endD = parseLocalDate(normalizedEndDateStr);
+  endD.setHours(12, 0, 0, 0);
 
   activeGroups.forEach(group => {
     const slots = getGroupScheduleSlots(group);
     if (slots.length === 0) return;
 
     const cursor = new Date(startD);
-    while (cursor <= endD) {
+    cursor.setHours(12, 0, 0, 0);
+    while (!isNaN(cursor.getTime()) && !isNaN(endD.getTime()) && formatLocalDate(cursor) <= normalizedEndDateStr) {
       const dayNum = cursor.getDay();
       const dateStr = formatLocalDate(cursor);
 

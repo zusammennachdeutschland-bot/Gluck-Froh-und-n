@@ -21,7 +21,7 @@ import {
   sendSystemNotification
 } from '../services/notificationService';
 import { App as CapacitorApp } from '@capacitor/app';
-import { storage } from '../services/storageService';
+import { storage, recordStoragePersistenceFailure } from '../services/storageService';
 import { getStudentCyclePricing, calculateEstimatedPastDate, sanitizePaymentLessonDates, allocateAdvancePaymentFifo, buildMovedStudentRecord, recalculatePendingPaymentsForGroupPriceChange } from '../utils/paymentUtils';
 import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence, getAlternatingWeek } from '../utils/scheduleUtils';
 import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
@@ -1816,7 +1816,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   useEffect(() => {
     groupWeeklySessionsRef.current = groupWeeklySessions;
     if (!isInitializedRef.current) return;
-    storage.setItem('glueck_group_weekly_sessions_v1', groupWeeklySessions.map((x) => sanitizeZoomRecordForStorage(x))).catch(() => {});
+    storage
+      .setItem('glueck_group_weekly_sessions_v1', groupWeeklySessions.map((x) => sanitizeZoomRecordForStorage(x)))
+      .catch((err) => recordStoragePersistenceFailure('glueck_group_weekly_sessions_v1', err, 'AppContext:autoSave'));
   }, [groupWeeklySessions]);
 
   const [zoomMeetingRecords, setZoomMeetingRecords] = useState<ZoomMeetingRecord[]>(() => {
@@ -1827,7 +1829,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   useEffect(() => {
     zoomMeetingRecordsRef.current = zoomMeetingRecords;
     if (!isInitializedRef.current) return;
-    storage.setItem('glueck_zoom_meeting_records_v1', zoomMeetingRecords.map((x) => sanitizeZoomRecordForStorage(x))).catch(() => {});
+    storage
+      .setItem('glueck_zoom_meeting_records_v1', zoomMeetingRecords.map((x) => sanitizeZoomRecordForStorage(x)))
+      .catch((err) => recordStoragePersistenceFailure('glueck_zoom_meeting_records_v1', err, 'AppContext:autoSave'));
   }, [zoomMeetingRecords]);
 
   const [zoomMeetingHistory, setZoomMeetingHistory] = useState<ZoomMeetingHistory[]>(() => {
@@ -1838,7 +1842,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   useEffect(() => {
     zoomMeetingHistoryRef.current = zoomMeetingHistory;
     if (!isInitializedRef.current) return;
-    storage.setItem('glueck_zoom_meeting_history_v1', zoomMeetingHistory.map((x) => sanitizeZoomRecordForStorage(x))).catch(() => {});
+    storage
+      .setItem('glueck_zoom_meeting_history_v1', zoomMeetingHistory.map((x) => sanitizeZoomRecordForStorage(x)))
+      .catch((err) => recordStoragePersistenceFailure('glueck_zoom_meeting_history_v1', err, 'AppContext:autoSave'));
   }, [zoomMeetingHistory]);
 
   const [grainRecordingMatches, setGrainRecordingMatches] = useState<GrainRecordingMatch[]>(() => {
@@ -1847,7 +1853,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   });
   useEffect(() => {
     if (!isInitializedRef.current) return;
-    storage.setItem('glueck_grain_recording_matches_v1', grainRecordingMatches.map((x) => sanitizeZoomRecordForStorage(x))).catch(() => {});
+    storage
+      .setItem('glueck_grain_recording_matches_v1', grainRecordingMatches.map((x) => sanitizeZoomRecordForStorage(x)))
+      .catch((err) => recordStoragePersistenceFailure('glueck_grain_recording_matches_v1', err, 'AppContext:autoSave'));
   }, [grainRecordingMatches]);
 
   const applyZoomWorkspaceSnapshot = useCallback(async (snapshot: {

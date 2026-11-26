@@ -91,8 +91,31 @@ function checkZoomRateLimit(bucketKey: string): { allowed: boolean; retryAfterSe
   return { allowed: true };
 }
 
+function isZoomVercelRuntime(): boolean {
+  return process.env.VERCEL === '1' || Boolean(process.env.VERCEL_ENV);
+}
+
+function parseZoomMasterKeyFromEnv(): Buffer | null {
+  const envKey = String(process.env.ZOOM_VAULT_MASTER_KEY || process.env.GRAIN_VAULT_MASTER_KEY || '').trim();
+  if (!envKey) return null;
+  if (/^[0-9a-fA-F]{64}$/.test(envKey)) {
+    return Buffer.from(envKey, 'hex');
+  }
+  const b64 = Buffer.from(envKey, 'base64');
+  if (b64.length === 32) return b64;
+  return crypto.createHash('sha256').update(envKey, 'utf8').digest();
+}
+
+export function isZoomVercelMissingEnvKey(): boolean {
+  return isZoomVercelRuntime() && !parseZoomMasterKeyFromEnv();
+}
+
+function getZoomVaultUnavailableError(): string {
+  return 'Zoom vault encryption key not configured. Set ZOOM_VAULT_MASTER_KEY in Vercel environment variables.';
+}
+
 function getZoomVaultStorageDir(): string {
-  if (process.env.VERCEL === '1' || Boolean(process.env.VERCEL_ENV)) {
+  if (isZoomVercelRuntime()) {
     return path.join(os.tmpdir(), 'glueck-aistudio');
   }
   return path.join(process.cwd(), '.aistudio');
@@ -108,14 +131,13 @@ function getZoomVaultFilePath(): string {
 
 function loadOrCreateZoomMasterKey(): Buffer | null {
   try {
-    const envKey = String(process.env.ZOOM_VAULT_MASTER_KEY || process.env.GRAIN_VAULT_MASTER_KEY || '').trim();
-    if (envKey) {
-      if (/^[0-9a-fA-F]{64}$/.test(envKey)) {
-        return Buffer.from(envKey, 'hex');
-      }
-      const b64 = Buffer.from(envKey, 'base64');
-      if (b64.length === 32) return b64;
-      return crypto.createHash('sha256').update(envKey, 'utf8').digest();
+    const envKeyBuf = parseZoomMasterKeyFromEnv();
+    if (envKeyBuf) {
+      return envKeyBuf;
+    }
+
+    if (isZoomVercelRuntime()) {
+      return null;
     }
 
     const keyPath = getZoomMasterKeyFilePath();
@@ -134,6 +156,9 @@ function loadOrCreateZoomMasterKey(): Buffer | null {
     fs.writeFileSync(keyPath, randomKey.toString('hex'), { encoding: 'utf8', mode: 0o600 });
     return randomKey;
   } catch {
+    if (isZoomVercelRuntime()) {
+      return null;
+    }
     return crypto.randomBytes(32);
   }
 }
@@ -155,6 +180,15 @@ export function __resetZoomServerVaultForTesting(): void {
 
 export function isZoomVaultEncryptionAvailable(): boolean {
   if (forceZoomMasterKeyUnavailableForTesting) return false;
+  const envKeyBuf = parseZoomMasterKeyFromEnv();
+  if (envKeyBuf && envKeyBuf.length === 32) {
+    zoomMasterKey = envKeyBuf;
+    return true;
+  }
+  if (isZoomVercelRuntime()) {
+    zoomMasterKey = null;
+    return false;
+  }
   if (!zoomMasterKey || zoomMasterKey.length !== 32) {
     zoomMasterKey = loadOrCreateZoomMasterKey();
   }
@@ -572,12 +606,32 @@ export function registerZoomServerRoutes(
     if (!authResult.authenticated || !authResult.uid) {
       return res.status(authResult.status || 401).json({ error: authResult.error || 'Unauthorized' });
     }
+    const keyMissingOnVercel = isZoomVercelMissingEnvKey();
     const vaultReady = isZoomVaultEncryptionAvailable();
+    if (!vaultReady) {
+      return res.status(200).json({
+        secureStorageAvailable: false,
+        keyConfigured: !keyMissingOnVercel,
+        hasCredentials: false,
+        defaultTimezone: 'Africa/Cairo',
+        planType: 'unknown',
+        isBasicPlan: false,
+        maxMeetingMinutes: null,
+        code: keyMissingOnVercel ? 'VAULT_KEY_NOT_CONFIGURED' : 'SECURE_STORAGE_UNAVAILABLE',
+        error: keyMissingOnVercel
+          ? getZoomVaultUnavailableError()
+          : 'Zoom server encryption master key not configured.'
+      });
+    }
+
     const entry = inMemoryZoomVault.get(authResult.uid);
-    if (!entry) {
+    const decrypted = entry ? decryptZoomPayloadFromVault(entry) : null;
+    if (!entry || !decrypted) {
       return res.status(200).json({
         secureStorageAvailable: vaultReady,
+        keyConfigured: true,
         hasCredentials: false,
+        credentialsUnreadable: Boolean(entry && !decrypted),
         defaultTimezone: 'Africa/Cairo',
         planType: 'unknown',
         isBasicPlan: false,
@@ -587,6 +641,7 @@ export function registerZoomServerRoutes(
 
     return res.status(200).json({
       secureStorageAvailable: vaultReady,
+      keyConfigured: true,
       hasCredentials: true,
       maskedAccountId: entry.maskedAccountId,
       maskedClientId: entry.maskedClientId,
@@ -608,9 +663,13 @@ export function registerZoomServerRoutes(
     }
 
     if (!isZoomVaultEncryptionAvailable()) {
+      const missingEnvKey = isZoomVercelMissingEnvKey();
       return res.status(503).json({
         saved: false,
-        error: 'Server encryption master key unavailable; refusing insecure storage.'
+        error: missingEnvKey
+          ? getZoomVaultUnavailableError()
+          : 'Server encryption master key not configured; refusing insecure storage.',
+        code: missingEnvKey ? 'VAULT_KEY_NOT_CONFIGURED' : 'SECURE_STORAGE_UNAVAILABLE'
       });
     }
 
@@ -679,6 +738,15 @@ export function registerZoomServerRoutes(
       return res.status(authResult.status || 401).json({ error: authResult.error || 'Unauthorized' });
     }
 
+    if (!isZoomVaultEncryptionAvailable()) {
+      const missingEnvKey = isZoomVercelMissingEnvKey();
+      return res.status(503).json({
+        connected: false,
+        error: missingEnvKey ? getZoomVaultUnavailableError() : 'Zoom server encryption master key not configured.',
+        code: missingEnvKey ? 'VAULT_KEY_NOT_CONFIGURED' : 'SECURE_STORAGE_UNAVAILABLE'
+      });
+    }
+
     const entry = inMemoryZoomVault.get(authResult.uid);
     if (!entry) {
       return res.status(404).json({ connected: false, error: 'Zoom credentials are not configured.' });
@@ -728,6 +796,15 @@ export function registerZoomServerRoutes(
       return res.status(authResult.status || 401).json({ error: authResult.error || 'Unauthorized' });
     }
 
+    if (!isZoomVaultEncryptionAvailable()) {
+      const missingEnvKey = isZoomVercelMissingEnvKey();
+      return res.status(503).json({
+        saved: false,
+        error: missingEnvKey ? getZoomVaultUnavailableError() : 'Zoom server encryption master key not configured.',
+        code: missingEnvKey ? 'VAULT_KEY_NOT_CONFIGURED' : 'SECURE_STORAGE_UNAVAILABLE'
+      });
+    }
+
     const defaultTimezone = String(req.body?.defaultTimezone || 'Africa/Cairo').trim() || 'Africa/Cairo';
     const entry = inMemoryZoomVault.get(authResult.uid);
     if (!entry) {
@@ -772,6 +849,14 @@ export function registerZoomServerRoutes(
     if (!rate.allowed) {
       res.setHeader('Retry-After', String(rate.retryAfterSeconds || 30));
       return res.status(429).json({ error: 'Rate limit exceeded. Please wait briefly.', code: 'RATE_LIMITED' });
+    }
+
+    if (!isZoomVaultEncryptionAvailable()) {
+      const missingEnvKey = isZoomVercelMissingEnvKey();
+      return res.status(503).json({
+        error: missingEnvKey ? getZoomVaultUnavailableError() : 'Zoom server encryption master key not configured.',
+        code: missingEnvKey ? 'VAULT_KEY_NOT_CONFIGURED' : 'SECURE_STORAGE_UNAVAILABLE'
+      });
     }
 
     const entry = inMemoryZoomVault.get(authResult.uid);
@@ -860,6 +945,14 @@ export function registerZoomServerRoutes(
     const authResult = await resolveAuthenticatedZoomUser(req, verifyFirebaseIdToken);
     if (!authResult.authenticated || !authResult.uid) {
       return res.status(authResult.status || 401).json({ error: authResult.error || 'Unauthorized' });
+    }
+
+    if (!isZoomVaultEncryptionAvailable()) {
+      const missingEnvKey = isZoomVercelMissingEnvKey();
+      return res.status(503).json({
+        error: missingEnvKey ? getZoomVaultUnavailableError() : 'Zoom server encryption master key not configured.',
+        code: missingEnvKey ? 'VAULT_KEY_NOT_CONFIGURED' : 'SECURE_STORAGE_UNAVAILABLE'
+      });
     }
 
     const entry = inMemoryZoomVault.get(authResult.uid);
@@ -996,6 +1089,14 @@ export function registerZoomServerRoutes(
       return res.status(400).json({ error: 'Valid numeric Zoom meetingId is required.' });
     }
 
+    if (!isZoomVaultEncryptionAvailable()) {
+      const missingEnvKey = isZoomVercelMissingEnvKey();
+      return res.status(503).json({
+        error: missingEnvKey ? getZoomVaultUnavailableError() : 'Zoom server encryption master key not configured.',
+        code: missingEnvKey ? 'VAULT_KEY_NOT_CONFIGURED' : 'SECURE_STORAGE_UNAVAILABLE'
+      });
+    }
+
     const entry = inMemoryZoomVault.get(authResult.uid);
     const creds = entry ? decryptZoomPayloadFromVault(entry) : null;
     if (!creds) {
@@ -1069,6 +1170,14 @@ export function registerZoomServerRoutes(
     const meetingId = String(req.params?.meetingId || '').replace(/[^0-9]/g, '');
     if (!meetingId || meetingId.length < 8) {
       return res.status(400).json({ error: 'Valid numeric Zoom meetingId is required.' });
+    }
+
+    if (!isZoomVaultEncryptionAvailable()) {
+      const missingEnvKey = isZoomVercelMissingEnvKey();
+      return res.status(503).json({
+        error: missingEnvKey ? getZoomVaultUnavailableError() : 'Zoom server encryption master key not configured.',
+        code: missingEnvKey ? 'VAULT_KEY_NOT_CONFIGURED' : 'SECURE_STORAGE_UNAVAILABLE'
+      });
     }
 
     const entry = inMemoryZoomVault.get(authResult.uid);
@@ -1172,6 +1281,14 @@ export function registerZoomServerRoutes(
     const meetingId = String(req.params?.meetingId || '').replace(/[^0-9]/g, '');
     if (!meetingId || meetingId.length < 8) {
       return res.status(400).json({ error: 'Valid numeric Zoom meetingId is required.' });
+    }
+
+    if (!isZoomVaultEncryptionAvailable()) {
+      const missingEnvKey = isZoomVercelMissingEnvKey();
+      return res.status(503).json({
+        error: missingEnvKey ? getZoomVaultUnavailableError() : 'Zoom server encryption master key not configured.',
+        code: missingEnvKey ? 'VAULT_KEY_NOT_CONFIGURED' : 'SECURE_STORAGE_UNAVAILABLE'
+      });
     }
 
     const entry = inMemoryZoomVault.get(authResult.uid);

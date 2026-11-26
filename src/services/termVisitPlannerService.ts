@@ -4,7 +4,7 @@ import {
 } from '../types';
 import { calculatePeriodsTimings, parseTimeToMinutes, getSchoolSettings } from '../utils/schoolUtils';
 import { normalizeClassCode } from '../utils/classNormalizer';
-import { formatLocalDate } from '../utils/timeUtils';
+import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
 
 export interface GenerationResult {
   settings: TermVisitPlannerSettings;
@@ -263,21 +263,29 @@ export function generateTermVisitPlan(
 
   // 4. Build List of Term Working Dates
   const termDates: Array<{ dateStr: string; dayKey: string; weekIndex: number }> = [];
-  const start = new Date(startDate);
-  const end = new Date(endDate);
+  const startIso = normalizeDateToISO(startDate) || startDate;
+  const endIso = normalizeDateToISO(endDate) || endDate;
+  const start = parseLocalDate(startIso);
+  const end = parseLocalDate(endIso);
+  start.setHours(12, 0, 0, 0);
+  end.setHours(12, 0, 0, 0);
 
-  if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && start <= end) {
+  if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && startIso <= endIso) {
     const curr = new Date(start);
+    curr.setHours(12, 0, 0, 0);
     let weekCounter = 0;
     let prevWeekNum = -1;
 
-    while (curr <= end) {
+    while (formatLocalDate(curr) <= endIso) {
       const dayKey = curr.getDay().toString();
       const dateStr = formatLocalDate(curr);
 
-      // Track calendar week index
+      // Track calendar week index using exact calendar days so DST transitions cannot drift week boundaries
       const jan1 = new Date(curr.getFullYear(), 0, 1);
-      const weekNum = Math.ceil((((curr.getTime() - jan1.getTime()) / 86400000) + jan1.getDay() + 1) / 7);
+      const dayOfYear = Math.round(
+        (Date.UTC(curr.getFullYear(), curr.getMonth(), curr.getDate()) - Date.UTC(curr.getFullYear(), 0, 1)) / 86400000
+      );
+      const weekNum = Math.ceil((dayOfYear + jan1.getDay() + 1) / 7);
       if (prevWeekNum !== -1 && weekNum !== prevWeekNum) {
         weekCounter++;
       }
