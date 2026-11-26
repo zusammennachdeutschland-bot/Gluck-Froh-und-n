@@ -796,7 +796,7 @@ export const LernstudioView: React.FC<Props> = ({
       createdByUid: activeAuthUid || undefined,
       createdByTeacherName: resolvedCreatorName,
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      updatedAt: Date.now()
     };
     setSetToEdit(forked);
     setIsSetEditorOpen(true);

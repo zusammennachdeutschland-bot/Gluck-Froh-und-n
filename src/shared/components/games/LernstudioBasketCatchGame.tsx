@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LernstudioSet, LernstudioTheme, LernstudioItem, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
+import { LernstudioSet, LernstudioTheme, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText, stopGermanSpeech } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
 import {
   getSetVocabularyItems,
+  AdaptedVocabItem,
   getDistractorChoices,
   createSeededRandom
 } from '../../../utils/lernstudioVocabularyAdapter';
@@ -32,7 +33,7 @@ interface Props {
 
 interface FallingWord {
   id: string;
-  item: LernstudioItem;
+  item: AdaptedVocabItem;
   xPercent: number; // 5% to 85%
   yPercent: number; // 0 (top) to 100 (bottom)
   speed: number;
@@ -121,10 +122,10 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
     [onGameComplete, items.length, difficulty]
   );
 
-  const targetItem: LernstudioItem | undefined = items[targetIndex % Math.max(1, items.length)];
+  const targetItem: AdaptedVocabItem | undefined = items[targetIndex % Math.max(1, items.length)];
 
   const createWaveForTarget = useCallback(
-    (target: LernstudioItem, roundIdx: number): FallingWord[] => {
+    (target: AdaptedVocabItem, roundIdx: number): FallingWord[] => {
       waveCounterRef.current += 1;
       const rng = createSeededRandom(sessionSeed + roundIdx * 97 + waveCounterRef.current * 31);
       const candidates = getDistractorChoices(target, items, 2, rng);
@@ -422,7 +423,7 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
           <div className="flex items-center justify-center gap-2.5">
             {targetItem.emoji && <span className="text-2xl">{targetItem.emoji}</span>}
             <h2 className="text-xl sm:text-2xl font-black text-text-main">
-              {getItemTranslation(targetItem, language)}
+              {getItemTranslation(targetItem.originalItem, language)}
             </h2>
             <button
               type="button"

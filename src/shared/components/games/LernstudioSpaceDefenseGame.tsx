@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LernstudioSet, LernstudioTheme, LernstudioItem, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
+import { LernstudioSet, LernstudioTheme, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
 import {
   getSetVocabularyItems,
+  AdaptedVocabItem,
   getDistractorChoices,
   createSeededRandom
 } from '../../../utils/lernstudioVocabularyAdapter';
@@ -31,7 +32,7 @@ interface Props {
 
 interface AlienShip {
   id: string;
-  item: LernstudioItem;
+  item: AdaptedVocabItem;
   xPercent: number;
   yPercent: number;
   color: string;
@@ -71,7 +72,7 @@ export const LernstudioSpaceDefenseGame: React.FC<Props> = ({
 
   // Game Settings
   const [playMode, setPlayMode] = useState<'solo' | 'teams'>(
-    gameConfig?.gameMode && gameConfig.gameMode !== 'solo' ? 'teams' : 'solo'
+    gameConfig?.gameMode ? (gameConfig.gameMode === 'single' ? 'solo' : 'teams') : 'solo'
   );
   const [currentTeamTurn, setCurrentTeamTurn] = useState<1 | 2>(1);
   const [teamScores, setTeamScores] = useState({ team1: 0, team2: 0 });
@@ -120,7 +121,7 @@ export const LernstudioSpaceDefenseGame: React.FC<Props> = ({
     [onGameComplete, items.length, playMode, team1Label, team2Label, difficulty]
   );
 
-  const targetItem: LernstudioItem | undefined = items[targetIndex % Math.max(1, items.length)];
+  const targetItem: AdaptedVocabItem | undefined = items[targetIndex % Math.max(1, items.length)];
 
   // Spawn Seeded Alien Squad
   useEffect(() => {
@@ -375,7 +376,7 @@ export const LernstudioSpaceDefenseGame: React.FC<Props> = ({
           <div className="flex items-center justify-center gap-3 pt-1">
             {targetItem.emoji && <span className="text-3xl select-none">{targetItem.emoji}</span>}
             <h2 className="text-2xl sm:text-3xl font-black text-cyan-300">
-              {getItemTranslation(targetItem, language)}
+              {getItemTranslation(targetItem.originalItem, language)}
             </h2>
             <button
               type="button"

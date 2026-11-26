@@ -1,9 +1,9 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { LernstudioSet, LernstudioTheme, LernstudioItem, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
+import { LernstudioSet, LernstudioTheme, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
-import { getSetVocabularyItems, createSeededRandom } from '../../../utils/lernstudioVocabularyAdapter';
+import { getSetVocabularyItems, AdaptedVocabItem, createSeededRandom } from '../../../utils/lernstudioVocabularyAdapter';
 import { GameSetupConfig } from '../LernstudioGameSetupScreen';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
@@ -90,7 +90,7 @@ export const LernstudioWordDetectiveGame: React.FC<Props> = ({
     [onGameComplete, items.length, difficulty]
   );
 
-  const currentItem: LernstudioItem | undefined = items[currentIndex % Math.max(1, items.length)];
+  const currentItem: AdaptedVocabItem | undefined = items[currentIndex % Math.max(1, items.length)];
   const targetWord = (currentItem?.german || '').trim();
 
   // Normalize target characters (ignoring spaces and punctuation in guess requirements)

@@ -82,7 +82,7 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
   }, [set, language, sessionSeed, gameConfig?.questionCount]);
 
   const resolvedInitialMode: 'solo' | 'team' =
-    gameConfig?.gameMode === 'solo'
+    gameConfig?.gameMode === 'single'
       ? 'solo'
       : gameConfig?.gameMode
       ? 'team'

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
 import { generateMemoryCardsForSet, MemoryCard } from '../../../utils/lernstudioQuestionAdapter';
+import { createSeededRandom } from '../../../utils/lernstudioVocabularyAdapter';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { GameSetupConfig } from '../LernstudioGameSetupScreen';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
@@ -50,7 +51,7 @@ export const LernstudioMemoryGame: React.FC<Props> = ({
   const [sessionSeed, setSessionSeed] = useState<number>(() => Date.now());
   const [cardsCount, setCardsCount] = useState<number>(initialPairs);
   const [cards, setCards] = useState<MemoryCard[]>(() =>
-    generateMemoryCardsForSet(set, initialPairs, language, sessionSeed)
+    generateMemoryCardsForSet(set, initialPairs, language, createSeededRandom(sessionSeed))
   );
   const [flippedCards, setFlippedCards] = useState<MemoryCard[]>([]);
   const [movesCount, setMovesCount] = useState(0);
@@ -164,7 +165,7 @@ export const LernstudioMemoryGame: React.FC<Props> = ({
       const nextSeed = Date.now();
       setSessionSeed(nextSeed);
       setCardsCount(newPairCount);
-      setCards(generateMemoryCardsForSet(set, newPairCount, language, nextSeed));
+      setCards(generateMemoryCardsForSet(set, newPairCount, language, createSeededRandom(nextSeed)));
       setFlippedCards([]);
       setMovesCount(0);
       setTimerSeconds(0);

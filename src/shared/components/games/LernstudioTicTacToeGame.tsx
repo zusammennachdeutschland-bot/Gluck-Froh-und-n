@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { LernstudioSet, LernstudioTheme, LernstudioItem, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
+import { LernstudioSet, LernstudioTheme, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
 import {
   getSetVocabularyItems,
+  AdaptedVocabItem,
   getDistractorChoices,
   createSeededRandom
 } from '../../../utils/lernstudioVocabularyAdapter';
@@ -68,7 +69,7 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
   const [board, setBoard] = useState<(Player | null)[]>(Array(9).fill(null));
   const [currentPlayer, setCurrentPlayer] = useState<Player>('X');
   const [opponentMode, setOpponentMode] = useState<GameOpponent>(
-    gameConfig?.gameMode === 'solo' ? 'ai' : 'pvp'
+    gameConfig?.gameMode === 'single' ? 'ai' : 'pvp'
   );
   const [teamXName, setTeamXName] = useState(
     gameConfig?.teamNames?.[0] || (isRtl ? 'الفريق ❌ (الأزرق)' : 'Team ❌ (Blue)')
@@ -81,8 +82,8 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
   // In-turn question modal state
   const [activeCellIndex, setActiveCellIndex] = useState<number | null>(null);
   const [activeQuestion, setActiveQuestion] = useState<{
-    targetItem: LernstudioItem;
-    choices: LernstudioItem[];
+    targetItem: AdaptedVocabItem;
+    choices: AdaptedVocabItem[];
   } | null>(null);
   const [questionFeedback, setQuestionFeedback] = useState<{ correct: boolean; msg: string } | null>(null);
 
@@ -230,7 +231,7 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
   };
 
   // Submit answer for the active cell challenge
-  const handleAnswerQuestion = (selectedItem: LernstudioItem) => {
+  const handleAnswerQuestion = (selectedItem: AdaptedVocabItem) => {
     if (!activeQuestion || activeCellIndex === null || questionFeedback) return;
 
     const isCorrect = selectedItem.id === activeQuestion.targetItem.id;

@@ -6,6 +6,7 @@ import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
 import {
   getSetVocabularyItems,
+  AdaptedVocabItem,
   createSeededRandom,
   seededShuffle
 } from '../../../utils/lernstudioVocabularyAdapter';
@@ -501,7 +502,7 @@ export const LernstudioUltimateTicTacToeGame: React.FC<Props> = ({
 
   // Start Screen vs Active Match State
   const [showStartScreen, setShowStartScreen] = useState<boolean>(!gameConfig);
-  const [opponentMode, setOpponentMode] = useState<OpponentMode>(gameConfig?.gameMode === 'solo' ? 'ai' : 'pvp');
+  const [opponentMode, setOpponentMode] = useState<OpponentMode>(gameConfig?.gameMode === 'single' ? 'ai' : 'pvp');
   const [aiDifficulty, setAiDifficulty] = useState<AIDifficulty>(gameConfig?.difficulty || 'medium');
   const [starterChoice, setStarterChoice] = useState<StarterChoice>('X');
   const [vocabGateEnabled, setVocabGateEnabled] = useState<boolean>(true);
@@ -546,7 +547,7 @@ export const LernstudioUltimateTicTacToeGame: React.FC<Props> = ({
   const [conqueredVocabBanner, setConqueredVocabBanner] = useState<{
     boardIdx: number;
     player: Player;
-    item: LernstudioItem;
+    item: AdaptedVocabItem;
   } | null>(null);
 
   // Vocabulary Gate Modal State (Active on every cell click by default)
@@ -804,10 +805,11 @@ export const LernstudioUltimateTicTacToeGame: React.FC<Props> = ({
 
       moveCounterRef.current += 1;
       const rng = createSeededRandom(sessionSeed + boardIdx * 37 + cellIdx * 13 + moveCounterRef.current * 29);
-      const sourcePool = items.length > 0 ? items : fallbackVocabulary;
+      const sourcePool: LernstudioItem[] =
+        items.length > 0 ? items.map((it) => it.originalItem) : fallbackVocabulary;
       const target = sourcePool[(boardIdx * 3 + cellIdx + moveCounterRef.current) % sourcePool.length];
 
-      const combinedDistractorPool = [...items, ...fallbackVocabulary].filter(
+      const combinedDistractorPool = [...sourcePool, ...fallbackVocabulary].filter(
         (it) => it.id !== target.id && it.german.toLowerCase() !== target.german.toLowerCase()
       );
 

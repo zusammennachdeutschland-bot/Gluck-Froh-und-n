@@ -62,7 +62,7 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
 
   // Game Settings
   const [gameMode, setGameMode] = useState<'teams' | 'vs_bot'>(
-    gameConfig?.gameMode === 'solo' ? 'vs_bot' : 'teams'
+    gameConfig?.gameMode === 'single' ? 'vs_bot' : 'teams'
   );
   const [team1Name, setTeam1Name] = useState<string>(
     () => gameConfig?.teamNames?.[0] || getLocalizedTeamName('teamRed', language, 'الفريق الأحمر 🔴')
@@ -152,7 +152,10 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
     const rng = createSeededRandom(sessionSeed);
 
     return items.map((item, idx) => {
-      const canDoArticle = Boolean(item.article) && gameConfig?.questionType !== 'translation';
+      const canDoArticle =
+        Boolean(item.article) &&
+        gameConfig?.questionType !== 'de_to_ar' &&
+        gameConfig?.questionType !== 'ar_to_de';
       const wantArticleOnly = gameConfig?.questionType === 'article';
       const isArticleQ = canDoArticle && (wantArticleOnly || rng() > 0.6);
 
@@ -166,7 +169,7 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
             : `ما هي أداة التعريف الصحيحة لـ "${cleanNoun}"؟`;
 
         return {
-          item,
+          item: item.originalItem,
           prompt: articlePrompt,
           options: seededShuffle(['der', 'die', 'das'], createSeededRandom(sessionSeed + idx * 17)),
           correctAnswer: item.article || 'der',
@@ -175,9 +178,9 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
       }
 
       const distItems = getDistractorChoices(item, items, 3, createSeededRandom(sessionSeed + idx * 31));
-      const targetTrans = getItemTranslation(item, language);
+      const targetTrans = getItemTranslation(item.originalItem, language);
       const wrongTrans = distItems
-        .map((it) => getItemTranslation(it, language))
+        .map((it) => getItemTranslation(it.originalItem, language))
         .filter((tr) => tr && tr.toLowerCase() !== targetTrans.toLowerCase());
       const options = seededShuffle(Array.from(new Set([targetTrans, ...wrongTrans])), rng);
 
@@ -189,7 +192,7 @@ export const LernstudioTugOfWarGame: React.FC<Props> = ({
           : `ما هو المعنى العربي لكلمة "${item.german}"؟`;
 
       return {
-        item,
+        item: item.originalItem,
         prompt: qPrompt,
         options,
         correctAnswer: targetTrans,
