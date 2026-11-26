@@ -1,4 +1,4 @@
-import { LernstudioSet } from '../../types/lernstudio';
+import { LernstudioSet } from '../../types/lernstudio.js';
 
 export const BATCH_02_SETS: LernstudioSet[] = [
   // 31. Animals: Pets (روضة / جريد 1)

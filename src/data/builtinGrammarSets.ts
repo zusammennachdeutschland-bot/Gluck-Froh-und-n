@@ -1,4 +1,4 @@
-import { LernstudioSet } from '../types/lernstudio';
+import { LernstudioSet } from '../types/lernstudio.js';
 
 const BUILTIN_CREATED_AT = '2026-02-01T00:00:00.000Z';
 const BUILTIN_UPDATED_AT = 1769904000000;
