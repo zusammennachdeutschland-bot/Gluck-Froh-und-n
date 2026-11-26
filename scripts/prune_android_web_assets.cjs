@@ -25,6 +25,7 @@ const PRUNABLE_FILES = [
   'bg.png',
   'apple-touch-icon.png',
   'pwa-512x512.png',
+  'pwa-192x192.png',
   'pwa-maskable-512x512.png',
   path.join('assets', 'brand', 'teacher-crest-logo.png'),
 ];

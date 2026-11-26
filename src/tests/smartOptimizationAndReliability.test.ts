@@ -41,7 +41,7 @@ import {
   saveLocalAssignment,
   __setHomeworkSyncTransportForTests
 } from '../shared/homeworkStorageSync';
-import { DEFAULT_LERNSTUDIO_SETS } from '../shared/defaultLernstudioSets';
+import { DEFAULT_LERNSTUDIO_SETS } from '../data/defaultLernstudioSets';
 import type { HomeworkAssignment, HomeworkSubmission } from '../shared/homeworkTypes';
 import type { LernstudioSet } from '../types/lernstudio';
 

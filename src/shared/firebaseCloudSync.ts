@@ -56,7 +56,7 @@ import {
   HomeworkShortLinkResolutionResult
 } from './homeworkTypes';
 import { LernstudioSet } from '../types/lernstudio';
-import { DEFAULT_LERNSTUDIO_SETS } from './defaultLernstudioSets';
+import { DEFAULT_LERNSTUDIO_SETS } from '../data/defaultLernstudioSets';
 import { scrambleOrderingTokensDeterministic } from './grammarEngine';
 
 const BUILTIN_CURRICULUM_SET_ID_SET = new Set<string>(DEFAULT_LERNSTUDIO_SETS.map((s) => s.id));

@@ -68,7 +68,7 @@ import {
   normalizeGrammarContent
 } from '../shared/grammarEngine';
 import type { GrammarExample, GrammarExerciseType, GrammarRule } from '../types/lernstudio';
-import { DEFAULT_LERNSTUDIO_SETS } from '../shared/defaultLernstudioSets';
+import { DEFAULT_LERNSTUDIO_SETS } from '../data/defaultLernstudioSets';
 import {
   getLocalAssignments,
   getStudentLocalSubmissions,
