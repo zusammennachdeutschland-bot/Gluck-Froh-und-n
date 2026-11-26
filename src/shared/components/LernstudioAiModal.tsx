@@ -862,6 +862,23 @@ export const LernstudioAiModal: React.FC<Props> = ({
                     />
                   </label>
 
+                  <label className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary/10 hover:bg-primary/20 border border-primary/50 text-xs font-bold text-primary cursor-pointer transition-colors">
+                    <Camera className="w-4 h-4" />
+                    <span>
+                      {isRtl
+                        ? `تصوير بالكاميرا (${uploadedPages.length}/6)`
+                        : `Take Photo (${uploadedPages.length}/6)`}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      disabled={uploadedPages.length >= 6 || isPreparingImages}
+                      onChange={handlePageFilesSelected}
+                      className="hidden"
+                    />
+                  </label>
+
                   <button
                     type="button"
                     onClick={handleExtractGrammarFromImages}
