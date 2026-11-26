@@ -109,8 +109,6 @@ export function detectCurrentScheduledGroup(
   // 1. Find exact current time match (within -20 mins to +75 mins)
   const todayGroups = activeGroups.filter((g) => groupHasDay(g, currentDayKey));
 
-  let closestActive: { group: Group; diff: number } | null = null;
-
   for (const group of todayGroups) {
     const timeMins = getGroupDayTimeMinutes(group, currentDayKey);
     if (timeMins >= 0) {
@@ -125,35 +123,19 @@ export function detectCurrentScheduledGroup(
           isExactTime: true
         };
       }
-
-      const diff = Math.abs(currentMinutes - timeMins);
-      if (!closestActive || diff < closestActive.diff) {
-        closestActive = { group, diff };
-      }
     }
   }
 
-  // 2. Fallback to closest group scheduled today
-  if (closestActive) {
-    return {
-      group: closestActive.group,
-      reason: `أقرب جروب مسجل لليوم (${closestActive.group.name})`,
-      isExactTime: false
-    };
-  }
-
-  // 3. Fallback if no today match: return first active group
-  if (todayGroups.length > 0) {
-    return {
-      group: todayGroups[0],
-      reason: `جروب مسجل اليوم (${todayGroups[0].name})`,
-      isExactTime: false
-    };
-  }
-
+  // No group is scheduled at the current time: report the slot as free
+  // instead of guessing. The old fallbacks (closest group today / first
+  // group today / first active group) wrongly presented a group that is
+  // not on now as the "current" group — e.g. Kinda and Judy at 08:38 on a
+  // Thursday when their lesson is at another time. Both callers already
+  // handle group === null by showing "no class scheduled right now" and
+  // selecting nothing.
   return {
-    group: activeGroups[0],
-    reason: `أول جروب في القائمة (${activeGroups[0].name})`,
+    group: null,
+    reason: 'no_current_group',
     isExactTime: false
   };
 }
