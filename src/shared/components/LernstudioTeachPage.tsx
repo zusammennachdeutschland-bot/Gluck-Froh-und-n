@@ -132,6 +132,18 @@ const GERMAN_DISTRACTOR_LETTERS = [
   'A', 'B', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'O', 'P', 'R', 'S', 'T', 'U', 'W', 'Z', 'Ä', 'Ö', 'Ü', 'ß'
 ];
 
+// Digit keycap emoji (e.g. '2️⃣0️⃣' for "zwanzig") renders as broken "2≡0≡"
+// glyphs in the Android WebView font: U+20E3 (combining enclosing keycap)
+// has no colour-emoji glyph there and shows as horizontal bars. Render the
+// plain digits in bold text instead — same meaning, readable everywhere.
+const KEYCAP_SEQUENCE_RE = /([0-9#*])\uFE0F?\u20E3/g;
+export function renderTeachEmoji(emoji: string | undefined): React.ReactNode {
+  const value = emoji || '🇩🇪';
+  if (!/[0-9#*]\uFE0F?\u20E3/.test(value)) return value;
+  const digits = value.replace(KEYCAP_SEQUENCE_RE, '$1');
+  return <span className="font-black tracking-wide">{digits}</span>;
+}
+
 interface MissingLetterQuestion {
   targetItem: LernstudioItem;
   article: string;
@@ -1105,29 +1117,33 @@ export const LernstudioTeachPage: React.FC<Props> = ({
 
   return (
     <div
-      className="w-full max-w-4xl mx-auto min-h-[100dvh] flex flex-col bg-surface"
+      // No min-h-[100dvh]: this page renders INSIDE App's mobile shell
+      // (Header + scroll area + floating BottomNav) and inside the desktop
+      // scroll canvas, both of which already size the viewport. Forcing a
+      // full viewport height here made the page taller than the screen, so
+      // the question card was centred in an oversized box (huge empty gap
+      // above it) and the footer/feedback banner fell below the fold behind
+      // the BottomNav + FAB. Height = content; the outer shell scrolls.
+      className="w-full max-w-4xl mx-auto flex flex-col bg-surface min-h-0 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]"
       dir={isRtl ? 'rtl' : 'ltr'}
     >
         {/* Header */}
         <div className="px-4 py-3 border-b border-surface-border flex items-center justify-between bg-surface shrink-0 gap-2">
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
             <div className="p-2 bg-primary/10 text-primary rounded-lg shrink-0">
               <BookOpen className="w-4 h-4" />
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <h2 className="text-sm sm:text-base font-bold text-text-main truncate">
                   {t.teachModeTitle} - {displaySetTitle}
                 </h2>
-                <span className="text-xs font-bold text-amber-500 inline-flex items-center gap-1 shrink-0">
-                  <span>💰 {stars}</span>
-                  <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
-                </span>
               </div>
               <p className="text-xs text-text-muted truncate">
                 {set.topic}
                 {vocabAvailable ? ` · ${items.length} ${t.vocabularyCount}` : ''}
                 {grammarAvailable ? ` · ${grammarRules.length} ${t.grammarRulesCount} · ${grammarExercises.length} ${t.grammarExercisesCount}` : ''}
+                <span className="font-bold text-amber-500 inline-flex items-center gap-1 shrink-0"> · 💰 {stars}<Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" /></span>
               </p>
             </div>
           </div>
@@ -1676,7 +1692,7 @@ export const LernstudioTeachPage: React.FC<Props> = ({
                     resetAnswerState();
                     setShuffleKey((k) => k + 1);
                   }}
-                  className={`flex items-center justify-center h-9 w-9 sm:w-auto sm:flex-1 rounded-xl text-sm font-bold transition-all cursor-pointer border ${
+                  className={`flex items-center justify-center h-8 w-8 sm:h-9 sm:w-auto sm:flex-1 rounded-xl text-sm font-bold transition-all cursor-pointer border ${
                     isActive
                       ? 'bg-primary text-white border-primary shadow-xs scale-[1.03]'
                       : isDone
@@ -1693,8 +1709,12 @@ export const LernstudioTeachPage: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Content Body */}
-        <div className="p-4 sm:p-6 overflow-y-auto flex-1 flex flex-col items-center justify-between text-center space-y-4">
+        {/* Content Body — no nested scroll and no justify-between: the outer
+            shell (PullToRefresh on mobile / main canvas on desktop) is the
+            only scroller, and extra height here used to push the card down
+            and the feedback banner below the fold. Content flows top to
+            bottom with compact spacing on phones. */}
+        <div className="p-4 sm:p-6 flex flex-col items-center justify-start text-center space-y-4 w-full">
           {/* ================= STAGE 1: Word Showcase & Auto Speech ================= */}
           {currentStage === 1 && (
             <div className="w-full space-y-4 flex-1 flex flex-col items-center justify-center">
@@ -1705,7 +1725,7 @@ export const LernstudioTeachPage: React.FC<Props> = ({
 
                 {/* Emoji Display */}
                 <div className="text-7xl sm:text-8xl pt-2 select-none">
-                  {items[stageQuestionIndex].emoji || '🇩🇪'}
+                  {renderTeachEmoji(items[stageQuestionIndex].emoji)}
                 </div>
 
                 {/* German Word */}
@@ -1830,7 +1850,7 @@ export const LernstudioTeachPage: React.FC<Props> = ({
                 {/* Question Prompt */}
                 <div className="space-y-3 py-2">
                   <div className="text-5xl sm:text-6xl select-none">
-                    {stage2Questions[stageQuestionIndex].targetItem.emoji || '🇩🇪'}
+                    {renderTeachEmoji(stage2Questions[stageQuestionIndex].targetItem.emoji)}
                   </div>
 
                   <p className="text-xs sm:text-sm font-bold text-text-muted">
@@ -1939,7 +1959,7 @@ export const LernstudioTeachPage: React.FC<Props> = ({
                 {/* Target Item Display */}
                 <div className="space-y-2 py-2">
                   <div className="text-6xl sm:text-7xl select-none">
-                    {stage3Questions[stageQuestionIndex].targetItem.emoji || '🇩🇪'}
+                    {renderTeachEmoji(stage3Questions[stageQuestionIndex].targetItem.emoji)}
                   </div>
                   <h3 className="text-xl sm:text-2xl font-black text-text-main">
                     {getItemTranslation(stage3Questions[stageQuestionIndex].targetItem, language)}
@@ -2044,7 +2064,7 @@ export const LernstudioTeachPage: React.FC<Props> = ({
                 {/* Target Item Display */}
                 <div className="space-y-1 py-1">
                   <div className="text-5xl sm:text-6xl select-none">
-                    {stage4Questions[stageQuestionIndex].targetItem.emoji || '🇩🇪'}
+                    {renderTeachEmoji(stage4Questions[stageQuestionIndex].targetItem.emoji)}
                   </div>
                   <h3 className="text-lg sm:text-xl font-black text-text-main">
                     {getItemTranslation(stage4Questions[stageQuestionIndex].targetItem, language)}
@@ -2140,7 +2160,7 @@ export const LernstudioTeachPage: React.FC<Props> = ({
                 {/* Question Info */}
                 <div className="space-y-2 py-1 text-center">
                   <div className="text-5xl sm:text-6xl select-none">
-                    {syllableQuestions[stageQuestionIndex].targetItem.emoji || '🇩🇪'}
+                    {renderTeachEmoji(syllableQuestions[stageQuestionIndex].targetItem.emoji)}
                   </div>
                   <h3 className="text-lg sm:text-xl font-black text-text-main">
                     {getItemTranslation(syllableQuestions[stageQuestionIndex].targetItem, language)}
@@ -2246,7 +2266,7 @@ export const LernstudioTeachPage: React.FC<Props> = ({
                 {/* Question Info */}
                 <div className="space-y-2 py-1 text-center">
                   <div className="text-5xl sm:text-6xl select-none">
-                    {stage5Questions[stageQuestionIndex].targetItem.emoji || '🇩🇪'}
+                    {renderTeachEmoji(stage5Questions[stageQuestionIndex].targetItem.emoji)}
                   </div>
                   <h3 className="text-lg sm:text-xl font-black text-text-main">
                     {getItemTranslation(stage5Questions[stageQuestionIndex].targetItem, language)}
@@ -2375,7 +2395,7 @@ export const LernstudioTeachPage: React.FC<Props> = ({
                 {/* Question Info */}
                 <div className="space-y-2 py-1 text-center">
                   <div className="text-5xl sm:text-6xl select-none">
-                    {stage6Questions[stageQuestionIndex].targetItem.emoji || '🇩🇪'}
+                    {renderTeachEmoji(stage6Questions[stageQuestionIndex].targetItem.emoji)}
                   </div>
                   <h3 className="text-lg sm:text-xl font-black text-text-main">
                     {getItemTranslation(stage6Questions[stageQuestionIndex].targetItem, language)}
@@ -2492,7 +2512,7 @@ export const LernstudioTeachPage: React.FC<Props> = ({
                 {/* Question Info */}
                 <div className="space-y-2 py-1 text-center">
                   <div className="text-5xl sm:text-6xl select-none">
-                    {stage7Questions[stageQuestionIndex].targetItem.emoji || '🇩🇪'}
+                    {renderTeachEmoji(stage7Questions[stageQuestionIndex].targetItem.emoji)}
                   </div>
                   <h3 className="text-lg sm:text-xl font-black text-text-main">
                     {getItemTranslation(stage7Questions[stageQuestionIndex].targetItem, language)}
@@ -2763,8 +2783,10 @@ export const LernstudioTeachPage: React.FC<Props> = ({
           )}
         </div>
 
-        {/* Footer Navigation Controls */}
-        <div className="px-5 py-3.5 border-t border-surface-border bg-surface flex items-center justify-between shrink-0">
+        {/* Footer Navigation Controls — bottom padding includes the Android
+            safe-area inset so the buttons never sit under the floating
+            BottomNav / system gesture bar. */}
+        <div className="px-5 pt-3.5 pb-[calc(0.875rem+env(safe-area-inset-bottom,0px))] border-t border-surface-border bg-surface flex items-center justify-between shrink-0">
           {currentStage === 1 && (
             <>
               <button
