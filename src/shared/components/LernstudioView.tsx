@@ -1381,7 +1381,7 @@ export const LernstudioView: React.FC<Props> = ({
               <Bot className="w-4 h-4 shrink-0 text-primary" />
             </button>
 
-            {/* 3b. Grammar Set from Book / Textbook Images */}
+            {/* 3b. Learning Set from Book / Textbook Images (camera or upload) */}
             <button
               type="button"
               onClick={() => {

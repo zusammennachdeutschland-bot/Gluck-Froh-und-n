@@ -33,7 +33,7 @@ import {
   Schema,
   type GenerativeModel
 } from 'firebase/ai';
-import type { LernstudioDifficulty, LernstudioLevel, LernstudioSet } from '../types/lernstudio';
+import type { LernstudioDifficulty, LernstudioLevel, LernstudioSet, LernstudioSetKind } from '../types/lernstudio';
 import { validateAndParseLernstudioJson } from '../shared/lernstudioAiUtils';
 import { normalizeLernstudioSet, stripHeavyGrammarMediaForSync } from '../shared/grammarEngine';
 
@@ -355,7 +355,12 @@ export interface AiExtractionContext {
   topic?: string;
   level?: LernstudioLevel;
   difficulty?: LernstudioDifficulty;
-  setKind?: 'grammar' | 'mixed';
+  /**
+   * Requested set kind. `undefined` = auto-detect the best kind from the
+   * photos (vocab / verb_group / grammar / mixed) — the default, matching
+   * the universal smart prompt's auto-detection.
+   */
+  setKind?: LernstudioSetKind;
   teacherName?: string;
   exerciseMode?: 'original_only' | 'original_and_similar';
 }
@@ -413,6 +418,26 @@ async function callModelOnce(
  *   with the fallback model. 429/403 errors are never retried — they are
  *   surfaced as AiLogicQuotaError / AiLogicAppCheckError.
  */
+/**
+ * Per-kind instruction sent to the model. `undefined` = auto-detect the
+ * best set kind from the photos. Vocab / verb sets need items only —
+ * no grammarContent, no grammar exercises.
+ */
+function kindInstruction(setKind?: LernstudioSetKind): string {
+  switch (setKind) {
+    case 'vocab':
+      return 'نوع المجموعة المطلوبة: vocab — استخرج الكلمات والمفردات من الصور واملأ items فقط (الكلمة الألمانية، الأداة der/die/das إن وجدت، الجمع، المعنى العربي، نوع الكلمة، مثال). لا حاجة إلى grammarContent.';
+    case 'verb_group':
+      return 'نوع المجموعة المطلوبة: verb_group — استخرج الأفعال من الصور واملأ items مع التصريف (ich / du / er, sie, es / wir / ihr / sie, Sie) والمعنى العربي. لا حاجة إلى grammarContent.';
+    case 'grammar':
+      return 'نوع المجموعة المطلوبة: grammar — استخرج شرح القواعد والقواعد والأمثلة والتمارين من الصور واملأ grammarContent.';
+    case 'mixed':
+      return 'نوع المجموعة المطلوبة: mixed — استخرج الكلمات في items وشرح القواعد والتمارين في grammarContent معاً.';
+    default:
+      return 'حدّد نوع المجموعة الأنسب لمحتوى الصور تلقائياً: vocab إذا كانت الصفحة كلمات ومفردات (املأ items: الكلمة الألمانية مع الأداة والجمع والمعنى العربي ونوع الكلمة ومثال)، verb_group إذا كانت أفعالاً وتصريفها (املأ items مع التصريف)، grammar إذا كانت شرح قواعد (املأ grammarContent: الشرح والقواعد والأمثلة والتمارين)، mixed إذا كانت مختلطة (املأ items و grammarContent معاً).';
+  }
+}
+
 export async function extractLernstudioSetFromImages(
   pages: AiExtractionPageInput[],
   promptText: string,
@@ -427,14 +452,18 @@ export async function extractLernstudioSetFromImages(
     throw new AiLogicParseError();
   }
 
+  const wantsGrammarExercises =
+    context.setKind === undefined || context.setKind === 'grammar' || context.setKind === 'mixed';
   const contextLine = [
-    context.title ? `عنوان الدرس: ${context.title}` : '',
+    context.title ? `عنوان المجموعة: ${context.title}` : '',
     context.topic ? `الموضوع: ${context.topic}` : '',
     context.level ? `المستوى: ${context.level}` : '',
-    context.setKind ? `نوع المجموعة المطلوبة: ${context.setKind}` : '',
-    context.exerciseMode === 'original_only'
-      ? 'استخرج تمارين الصفحة الأصلية فقط، بدون تمارين مولّدة إضافية.'
-      : 'استخرج تمارين الصفحة الأصلية، ويمكنك إضافة تمارين مشابهة مولّدة مع تمييزها بـ source="generated".',
+    kindInstruction(context.setKind),
+    !wantsGrammarExercises
+      ? ''
+      : context.exerciseMode === 'original_only'
+        ? 'استخرج تمارين الصفحة الأصلية فقط، بدون تمارين مولّدة إضافية.'
+        : 'استخرج تمارين الصفحة الأصلية، ويمكنك إضافة تمارين مشابهة مولّدة مع تمييزها بـ source="generated".',
     'أعد JSON فقط مطابقاً للمخطط المطلوب، من غير أي نص خارج JSON.'
   ]
     .filter(Boolean)
@@ -494,11 +523,13 @@ export async function extractLernstudioSetFromImages(
   const draft = stripHeavyGrammarMediaForSync(
     normalizeLernstudioSet({
       id: `set_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      title: parsed.data.title || context.title || 'درس مستخرج من الصور',
+      title: parsed.data.title || context.title || 'مجموعة مستخرجة من الصور',
       topic: parsed.data.topic || context.topic || parsed.data.title || context.title || 'ألماني',
       level: parsed.data.level || context.level || 'A1',
       difficulty: parsed.data.difficulty || context.difficulty || 'medium',
-      setKind: parsed.data.setKind || context.setKind || 'grammar',
+      // An explicit teacher choice wins; auto-detect falls back to what
+      // the model/validator resolved from the photos.
+      setKind: context.setKind || parsed.data.setKind || 'grammar',
       contentOrigin: 'teacher_created',
       hasArticles: parsed.data.hasArticles,
       sentenceBuilderSupported: parsed.data.sentenceBuilderSupported,
@@ -506,7 +537,11 @@ export async function extractLernstudioSetFromImages(
       description: parsed.data.description || undefined,
       items: parsed.data.items || [],
       customExercises: parsed.data.customExercises,
-      grammarContent: parsed.data.grammarContent,
+      // Vocab / verb sets carry items only — never a grammarContent.
+      grammarContent:
+        context.setKind === 'vocab' || context.setKind === 'verb_group'
+          ? undefined
+          : parsed.data.grammarContent,
       createdAt: new Date().toISOString(),
       updatedAt: Date.now()
     })

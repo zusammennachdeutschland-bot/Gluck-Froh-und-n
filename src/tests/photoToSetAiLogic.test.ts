@@ -17,6 +17,11 @@
  *     a set anywhere. Import happens only via the modal's
  *     handleSaveExtractedDraft after the teacher reviews/edits the draft.
  *  6. Missing App Check config fails gracefully (Arabic, no crash).
+ *  7. General set creation (not grammar-only): a vocab photo with
+ *     context { setKind: 'vocab' } yields a vocab draft with items and
+ *     NO grammarContent; auto-detect (no setKind) infers vocab from a
+ *     vocab photo and sends the auto-detect instruction (no forced
+ *     grammar); a grammar photo still yields a grammar draft (regression).
  */
 
 import {
@@ -135,6 +140,81 @@ export async function runPhotoToSetAiLogicTests(): Promise<{
     // at all — it only returns the draft. Nothing was imported by the call.
     assert(imported === false, 'Extraction alone imports nothing (no import callback invoked)');
     void onImportSet;
+  }
+
+  // 7a. Vocab photo with explicit { setKind: 'vocab' } -> vocab draft,
+  // items with article + plural, and NO grammarContent attached.
+  const vocabModelJson = JSON.stringify({
+    title: 'Wortschatz – Familie',
+    topic: 'Familie',
+    level: 'A1',
+    difficulty: 'easy',
+    setKind: 'vocab',
+    items: [
+      { german: 'Haus', arabic: 'بيت', article: 'das', plural: 'Häuser', wordType: 'noun' },
+      { german: 'Mutter', arabic: 'أم', article: 'die', plural: 'Mütter', wordType: 'noun' }
+    ]
+  });
+  {
+    const { model, calls } = makeMockModel(vocabModelJson);
+    const result = await extractLernstudioSetFromImages(twoPages, prompt, {
+      title: 'Wortschatz – Familie',
+      level: 'A1',
+      setKind: 'vocab'
+    }, { model: model as never });
+    assert(calls.count === 1, 'Vocab extraction calls the model once');
+    assert(result.draft.setKind === 'vocab', `Vocab draft setKind is 'vocab' (got ${result.draft.setKind})`);
+    assert(result.draft.items.length === 2, `Vocab draft carries both words (got ${result.draft.items.length})`);
+    assert(result.draft.items[0].article === 'das', 'Vocab item keeps its article (das)');
+    assert(result.draft.items[0].plural === 'Häuser', 'Vocab item keeps its plural');
+    assert(result.draft.grammarContent === undefined, 'Vocab draft has NO grammarContent (no phantom grammar)');
+    const parts = calls.lastParts as Array<{ text?: string }>;
+    const textPart = parts.find((p) => typeof p.text === 'string');
+    assert(
+      Boolean(textPart?.text?.includes('نوع المجموعة المطلوبة: vocab')),
+      'Vocab instruction sent to the model'
+    );
+    assert(
+      !Boolean(textPart?.text?.includes('استخرج تمارين الصفحة')),
+      'No grammar-exercise instruction sent for a vocab set'
+    );
+  }
+
+  // 7b. Auto-detect (no setKind in context): a vocab photo infers vocab,
+  // and the sent text carries the auto-detect instruction, not forced grammar.
+  {
+    const { model, calls } = makeMockModel(vocabModelJson);
+    const result = await extractLernstudioSetFromImages(twoPages, prompt, {
+      title: 'Wortschatz – Familie',
+      level: 'A1'
+    }, { model: model as never });
+    assert(result.draft.setKind === 'vocab', `Auto-detect infers 'vocab' from a vocab photo (got ${result.draft.setKind})`);
+    assert(result.draft.items.length === 2, 'Auto-detect vocab draft carries the words');
+    assert(result.draft.grammarContent === undefined, 'Auto-detect vocab draft has no grammarContent');
+    const parts = calls.lastParts as Array<{ text?: string }>;
+    const textPart = parts.find((p) => typeof p.text === 'string');
+    assert(
+      Boolean(textPart?.text?.includes('تلقائياً')),
+      'Auto-detect instruction sent to the model'
+    );
+    assert(
+      !Boolean(textPart?.text?.includes('نوع المجموعة المطلوبة: grammar')),
+      'Auto-detect does not force grammar on the model'
+    );
+  }
+
+  // 7c. Grammar regression: the existing grammar JSON still yields a
+  // grammar draft with grammarContent (the general flow keeps grammar).
+  {
+    const { model } = makeMockModel(validModelJson);
+    const result = await extractLernstudioSetFromImages(twoPages, prompt, {
+      title: 'Präsens',
+      level: 'A1',
+      setKind: 'grammar'
+    }, { model: model as never });
+    assert(result.draft.setKind === 'grammar', `Grammar draft setKind stays 'grammar' (got ${result.draft.setKind})`);
+    assert(Boolean(result.draft.grammarContent), 'Grammar draft still carries grammarContent');
+    assert(result.draft.grammarContent?.exercises.length === 1, 'Grammar draft still carries its exercise');
   }
 
   // 2. 429 -> Arabic quota message, classified as quota (modal shows the

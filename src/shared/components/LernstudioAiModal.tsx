@@ -3,8 +3,11 @@ import {
   GrammarExercise,
   GrammarExerciseType,
   LernstudioDifficulty,
+  LernstudioItem,
   LernstudioLevel,
-  LernstudioSet
+  LernstudioSet,
+  LernstudioSetKind,
+  LernstudioWordType
 } from '../../types/lernstudio';
 import {
   generateLernstudioPrompt,
@@ -119,14 +122,16 @@ export const LernstudioAiModal: React.FC<Props> = ({
   const [parsedPreview, setParsedPreview] = useState<Partial<LernstudioSet> | null>(null);
   const [validationInfo, setValidationInfo] = useState<{ warnings: string[]; repairedCount: number } | null>(null);
 
-  // Image-to-Grammar Extractor State (kept for direct camera button)
+  // Image-to-Set Extractor State — general set creation from photos:
+  // camera capture or gallery upload (1–6 pages), any set kind.
   const [level, setLevel] = useState<LernstudioLevel>('A1');
   const [difficulty] = useState<LernstudioDifficulty>('medium');
   const [uploadedPages, setUploadedPages] = useState<ExtractionPageInput[]>([]);
   const [grammarTitleInput, setGrammarTitleInput] = useState('');
   const [grammarTopicInput, setGrammarTopicInput] = useState('');
   const [exerciseMode, setExerciseMode] = useState<GrammarExtractionExerciseMode>('original_and_similar');
-  const [targetImageSetKind, setTargetImageSetKind] = useState<'grammar' | 'mixed'>('grammar');
+  // 'auto' = detect the best set kind from the photos (default).
+  const [targetImageSetKind, setTargetImageSetKind] = useState<'auto' | LernstudioSetKind>('auto');
   const [isPreparingImages, setIsPreparingImages] = useState(false);
   const [isExtractingImages, setIsExtractingImages] = useState(false);
   const [extractionError, setExtractionError] = useState<string | null>(null);
@@ -283,7 +288,7 @@ export const LernstudioAiModal: React.FC<Props> = ({
     );
   };
 
-  const handleExtractGrammarFromImages = async () => {
+  const handleExtractSetFromImages = async () => {
     if (uploadedPages.length === 0 || isExtractingImages) return;
     setIsExtractingImages(true);
     setExtractionError(null);
@@ -308,9 +313,14 @@ export const LernstudioAiModal: React.FC<Props> = ({
           topic: grammarTopicInput.trim() || undefined,
           level,
           difficulty,
-          setKind: targetImageSetKind,
+          // 'auto' = let the model detect the kind from the photos.
+          setKind: targetImageSetKind === 'auto' ? undefined : targetImageSetKind,
           teacherName: creatorTeacherName.trim() || defaultCreatorName || undefined,
-          exerciseMode
+          // Grammar exercises only make sense for grammar-bearing sets.
+          exerciseMode:
+            targetImageSetKind === 'vocab' || targetImageSetKind === 'verb_group'
+              ? undefined
+              : exerciseMode
         }
       );
 
@@ -362,7 +372,7 @@ export const LernstudioAiModal: React.FC<Props> = ({
       topic:
         grammarTopicInput.trim() ||
         grammarTitleInput.trim() ||
-        'استخراج درس القواعد والتمارين من صور صفحات الكتاب المرفقة',
+        'استخراج مجموعة تعلّم من صور صفحات الكتاب المرفقة',
       level,
       difficulty,
       itemCount: 'auto',
@@ -491,6 +501,34 @@ export const LernstudioAiModal: React.FC<Props> = ({
     });
   };
 
+  // Editable extracted items (vocab / verb sets): add / edit / remove words.
+  const handleAddDraftItem = () => {
+    if (!extractedDraft) return;
+    const newItem: LernstudioItem = {
+      id: `item_manual_${Date.now()}`,
+      german: '',
+      arabic: '',
+      wordType: 'noun'
+    };
+    setExtractedDraft({ ...extractedDraft, items: [...(extractedDraft.items || []), newItem] });
+  };
+
+  const handleUpdateDraftItem = (idx: number, patch: Partial<LernstudioItem>) => {
+    if (!extractedDraft) return;
+    setExtractedDraft({
+      ...extractedDraft,
+      items: (extractedDraft.items || []).map((it, i) => (i === idx ? { ...it, ...patch } : it))
+    });
+  };
+
+  const handleRemoveDraftItem = (idx: number) => {
+    if (!extractedDraft) return;
+    setExtractedDraft({
+      ...extractedDraft,
+      items: (extractedDraft.items || []).filter((_, i) => i !== idx)
+    });
+  };
+
   const handleSaveExtractedDraft = () => {
     if (!extractedDraft) return;
     const resolvedTeacherName =
@@ -500,25 +538,33 @@ export const LernstudioAiModal: React.FC<Props> = ({
       auth?.currentUser?.displayName?.trim() ||
       undefined;
 
+    const validItems = (extractedDraft.items || []).filter((it) => it.german?.trim());
+
     const validExercises = (extractedDraft.grammarContent?.exercises || []).filter(
       (ex) => ex.question.trim() && ex.correctAnswer.trim()
     );
 
-    const normalizedGrammar = normalizeGrammarContent(
-      {
-        ...(extractedDraft.grammarContent || {}),
-        exercises: validExercises,
-        origin: 'teacher_created'
-      },
-      extractedDraft.title,
-      extractedDraft.topic,
-      'teacher_created'
-    );
+    // Grammar is normalised only when the draft actually has grammar
+    // content — a pure vocab/verb set keeps grammarContent undefined
+    // (no phantom empty grammar object attached to it).
+    const normalizedGrammar = extractedDraft.grammarContent
+      ? normalizeGrammarContent(
+          {
+            ...extractedDraft.grammarContent,
+            exercises: validExercises,
+            origin: 'teacher_created'
+          },
+          extractedDraft.title,
+          extractedDraft.topic,
+          'teacher_created'
+        )
+      : undefined;
 
     const finalSet = stripHeavyGrammarMediaForSync(
       normalizeLernstudioSet({
         ...extractedDraft,
         ...(resolvedTeacherName ? { createdByTeacherName: resolvedTeacherName } : {}),
+        items: validItems,
         grammarContent: normalizedGrammar,
         contentOrigin: 'teacher_created',
         updatedAt: Date.now()
@@ -547,7 +593,7 @@ export const LernstudioAiModal: React.FC<Props> = ({
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-primary shrink-0" />
             <h2 className="text-sm sm:text-base font-bold text-text-main">
-              {isRtl ? 'إضافة درس بالذكاء الاصطناعي (برومبت شامل)' : 'Smart AI Lesson Set'}
+              {isRtl ? 'إضافة مجموعة بالذكاء الاصطناعي (برومبت شامل)' : 'Smart AI Learning Set'}
             </h2>
           </div>
           <button
@@ -710,14 +756,14 @@ export const LernstudioAiModal: React.FC<Props> = ({
                   <Camera className="w-4 h-4" />
                   <span>
                     {isRtl
-                      ? 'تحويل صور صفحات الكتاب / كراسة التدريبات إلى درس قواعد متكامل'
-                      : 'Extract Grammar Lesson & Exercises from Textbook Images'}
+                      ? 'تحويل صور صفحات الكتاب إلى مجموعة تعلّم'
+                      : 'Turn Textbook Page Photos into a Learning Set'}
                   </span>
                 </h3>
                 <p className="text-[11px] text-text-muted leading-relaxed">
                   {isRtl
-                    ? 'ارفع من 1 إلى 6 صور لصفحات الدرس والتمارين. يتم تحليل الصور واستخراج الشرح والأمثلة والتمارين الأصلية بتمييز واضح عن التمارين المولّدة، مع إمكانية المراجعة والتعديل قبل الحفظ.'
-                    : 'Upload 1–6 workbook pages. Original exercises and optional AI-generated practice are clearly separated and editable before saving.'}
+                    ? 'صوّر أو ارفع من 1 إلى 6 صور لصفحات الكتاب — مفردات أو أفعال أو قواعد أو تمارين. يتم تحليل الصور واستخراج المجموعة، مع إمكانية المراجعة والتعديل قبل الحفظ.'
+                    : 'Photograph or upload 1–6 textbook pages — vocabulary, verbs, grammar or exercises. The set is extracted for review and editing before saving.'}
                 </p>
               </div>
 
@@ -725,25 +771,25 @@ export const LernstudioAiModal: React.FC<Props> = ({
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="text-xs font-bold text-text-muted block mb-1">
-                    {isRtl ? 'عنوان درس القواعد (اختياري):' : 'Lesson Title (optional):'}
+                    {isRtl ? 'عنوان المجموعة (اختياري):' : 'Set Title (optional):'}
                   </label>
                   <input
                     type="text"
                     value={grammarTitleInput}
                     onChange={(e) => setGrammarTitleInput(e.target.value)}
-                    placeholder="مثال: Präsens – الأفعال المنتظمة"
+                    placeholder="مثال: Wortschatz – Familie"
                     className="w-full px-3 py-2 rounded-lg border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
                   />
                 </div>
                 <div>
                   <label className="text-xs font-bold text-text-muted block mb-1">
-                    {isRtl ? 'الموضوع النحوي (اختياري):' : 'Grammar Topic (optional):'}
+                    {isRtl ? 'الموضوع (اختياري):' : 'Topic (optional):'}
                   </label>
                   <input
                     type="text"
                     value={grammarTopicInput}
                     onChange={(e) => setGrammarTopicInput(e.target.value)}
-                    placeholder="مثال: Akkusativ / Modalverben"
+                    placeholder="مثال: Familie / Akkusativ"
                     className="w-full px-3 py-2 rounded-lg border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary"
                   />
                 </div>
@@ -767,7 +813,11 @@ export const LernstudioAiModal: React.FC<Props> = ({
 
               {/* Extraction Options */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="p-3 bg-surface-hover border border-surface-border rounded-xl space-y-2">
+                {/* Grammar exercises only apply to grammar-bearing sets. */}
+                {(targetImageSetKind === 'auto' ||
+                  targetImageSetKind === 'grammar' ||
+                  targetImageSetKind === 'mixed') && (
+                  <div className="p-3 bg-surface-hover border border-surface-border rounded-xl space-y-2">
                   <span className="text-[11px] font-black text-text-main block">
                     {isRtl ? 'نطاق استخراج التمارين:' : 'Exercise Extraction Mode:'}
                   </span>
@@ -803,42 +853,68 @@ export const LernstudioAiModal: React.FC<Props> = ({
                       </span>
                     </span>
                   </label>
-                </div>
+                  </div>
+                )}
 
                 <div className="p-3 bg-surface-hover border border-surface-border rounded-xl space-y-2">
                   <span className="text-[11px] font-black text-text-main block">
-                    {isRtl ? 'نوع المجموعة الناتجة:' : 'Result Set Format:'}
+                    {isRtl ? 'نوع المجموعة الناتجة:' : 'Result Set Type:'}
                   </span>
-                  <label className="flex items-start gap-2 text-xs cursor-pointer">
-                    <input
-                      type="radio"
-                      name="targetImageSetKind"
-                      checked={targetImageSetKind === 'grammar'}
-                      onChange={() => setTargetImageSetKind('grammar')}
-                      className="mt-0.5"
-                    />
-                    <span>
-                      <strong className="block">{isRtl ? 'مجموعة قواعد خالصة (Grammar Set)' : 'Pure Grammar Set'}</strong>
-                      <span className="text-[10.5px] text-text-muted">
-                        {isRtl ? 'تعمل بدون اشتراط كلمات مفردات (items: [])' : 'Works directly without vocab list'}
+                  {(
+                    [
+                      {
+                        value: 'auto',
+                        arTitle: 'تلقائي حسب الصورة (افتراضي)',
+                        arDesc: 'يحدد النوع الأنسب من الصورة',
+                        enTitle: 'Auto-detect from Photo (default)',
+                        enDesc: 'Best kind for the photo'
+                      },
+                      {
+                        value: 'vocab',
+                        arTitle: 'مفردات (Vocab)',
+                        arDesc: 'كلمات ومعانيها بالأداة والجمع',
+                        enTitle: 'Vocabulary (Vocab)',
+                        enDesc: 'Words with article, plural, meaning'
+                      },
+                      {
+                        value: 'verb_group',
+                        arTitle: 'أفعال (Verbs)',
+                        arDesc: 'أفعال وتصريفها',
+                        enTitle: 'Verbs',
+                        enDesc: 'Verbs with conjugation'
+                      },
+                      {
+                        value: 'grammar',
+                        arTitle: 'قواعد (Grammar)',
+                        arDesc: 'شرح قواعد وأمثلة وتمارين',
+                        enTitle: 'Grammar',
+                        enDesc: 'Explanation, examples, exercises'
+                      },
+                      {
+                        value: 'mixed',
+                        arTitle: 'مختلط (Mixed)',
+                        arDesc: 'كلمات + قواعد معاً',
+                        enTitle: 'Mixed',
+                        enDesc: 'Words + grammar together'
+                      }
+                    ] as const
+                  ).map((opt) => (
+                    <label key={opt.value} className="flex items-start gap-2 text-xs cursor-pointer">
+                      <input
+                        type="radio"
+                        name="targetImageSetKind"
+                        checked={targetImageSetKind === opt.value}
+                        onChange={() => setTargetImageSetKind(opt.value)}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        <strong className="block">{isRtl ? opt.arTitle : opt.enTitle}</strong>
+                        <span className="text-[10.5px] text-text-muted">
+                          {isRtl ? opt.arDesc : opt.enDesc}
+                        </span>
                       </span>
-                    </span>
-                  </label>
-                  <label className="flex items-start gap-2 text-xs cursor-pointer">
-                    <input
-                      type="radio"
-                      name="targetImageSetKind"
-                      checked={targetImageSetKind === 'mixed'}
-                      onChange={() => setTargetImageSetKind('mixed')}
-                      className="mt-0.5"
-                    />
-                    <span>
-                      <strong className="block">{isRtl ? 'مجموعة مختلطة (قواعد + مفردات)' : 'Mixed (Grammar + Vocab)'}</strong>
-                      <span className="text-[10.5px] text-text-muted">
-                        {isRtl ? 'تستخرج كلمات الصفحة أيضاً إن وجدت' : 'Also extracts printed vocabulary items'}
-                      </span>
-                    </span>
-                  </label>
+                    </label>
+                  ))}
                 </div>
               </div>
 
@@ -881,7 +957,7 @@ export const LernstudioAiModal: React.FC<Props> = ({
 
                   <button
                     type="button"
-                    onClick={handleExtractGrammarFromImages}
+                    onClick={handleExtractSetFromImages}
                     disabled={uploadedPages.length === 0 || isExtractingImages}
                     className="px-5 py-2 bg-primary hover:bg-primary-hover disabled:opacity-50 text-white rounded-xl text-xs font-black shadow-xs cursor-pointer inline-flex items-center gap-1.5 transition-colors"
                   >
@@ -896,8 +972,8 @@ export const LernstudioAiModal: React.FC<Props> = ({
                           ? 'جارٍ تحليل الصفحات...'
                           : 'Analyzing Pages...'
                         : isRtl
-                        ? 'استخراج الشرح والتمارين'
-                        : 'Extract Lesson & Exercises'}
+                        ? 'استخراج المجموعة'
+                        : 'Extract Set'}
                     </span>
                   </button>
                 </div>
@@ -975,11 +1051,11 @@ export const LernstudioAiModal: React.FC<Props> = ({
                       <span>
                         {copiedVisionFallbackPrompt
                           ? isRtl
-                            ? 'تم نسخ برومبت القواعد'
+                            ? 'تم نسخ البرومبت'
                             : 'Copied Prompt'
                           : isRtl
-                          ? 'نسخ برومبت لاستخدامه مع Gemini خارجياً'
-                          : 'Copy Grammar Prompt for External AI'}
+                          ? 'نسخ برومبت لاستخدامه مع ذكاء اصطناعي خارجي'
+                          : 'Copy Prompt for External AI'}
                       </span>
                     </button>
                     {quotaFallback && (
@@ -1007,18 +1083,34 @@ export const LernstudioAiModal: React.FC<Props> = ({
                 </div>
               )}
 
-              {/* Editable Extracted Grammar Preview */}
-              {extractedDraft && extractedDraft.grammarContent && (
+              {/* Editable Extracted Set Preview — any set kind, not grammar-only */}
+              {extractedDraft && (
                 <div className="p-4 bg-emerald-500/5 border border-emerald-500/30 rounded-2xl space-y-4">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <div>
                       <span className="text-xs font-black text-emerald-700 dark:text-emerald-300 block">
-                        ✓ {isRtl ? 'تم استخراج درس القواعد — راجع وعدّل قبل الحفظ:' : 'Extracted Grammar Draft — Review & Edit:'}
+                        ✓ {isRtl ? 'تم استخراج المجموعة — راجع وعدّل قبل الحفظ:' : 'Extracted Set Draft — Review & Edit:'}
                       </span>
                       <span className="text-[11px] text-text-muted">
-                        {isRtl
-                          ? `${extractedDraft.grammarContent.rules.length} قواعد · ${extractedDraft.grammarContent.examples.length} أمثلة · ${extractedDraft.grammarContent.exercises.length} تمرين`
-                          : `${extractedDraft.grammarContent.rules.length} rules · ${extractedDraft.grammarContent.examples.length} examples · ${extractedDraft.grammarContent.exercises.length} exercises`}
+                        {[
+                          isRtl
+                            ? setKindLabelAr(extractedDraft.setKind)
+                            : extractedDraft.setKind,
+                          ...(extractedDraft.items?.length
+                            ? [
+                                isRtl
+                                  ? `${extractedDraft.items.length} كلمة`
+                                  : `${extractedDraft.items.length} words`
+                              ]
+                            : []),
+                          ...(extractedDraft.grammarContent
+                            ? [
+                                isRtl
+                                  ? `${extractedDraft.grammarContent.rules.length} قواعد · ${extractedDraft.grammarContent.examples.length} أمثلة · ${extractedDraft.grammarContent.exercises.length} تمرين`
+                                  : `${extractedDraft.grammarContent.rules.length} rules · ${extractedDraft.grammarContent.examples.length} examples · ${extractedDraft.grammarContent.exercises.length} exercises`
+                              ]
+                            : [])
+                        ].join(' · ')}
                       </span>
                     </div>
                     <button
@@ -1027,7 +1119,7 @@ export const LernstudioAiModal: React.FC<Props> = ({
                       className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-xs cursor-pointer inline-flex items-center gap-1.5"
                     >
                       <Download className="w-3.5 h-3.5" />
-                      <span>{isRtl ? 'حفظ واعتماد مجموعة القواعد' : 'Save Grammar Set'}</span>
+                      <span>{isRtl ? 'حفظ واعتماد المجموعة' : 'Save Set'}</span>
                     </button>
                   </div>
 
@@ -1058,48 +1150,154 @@ export const LernstudioAiModal: React.FC<Props> = ({
                         className="w-full px-2.5 py-1.5 rounded-lg border border-surface-border bg-surface text-xs font-bold text-text-main"
                       />
                     </div>
-                    <div>
-                      <label className="text-[10.5px] font-bold text-text-muted block mb-1">
-                        {isRtl ? 'موضوع القاعدة:' : 'Grammar Topic:'}
-                      </label>
-                      <input
-                        type="text"
-                        value={extractedDraft.grammarContent.grammarTopic}
-                        onChange={(e) =>
-                          setExtractedDraft({
-                            ...extractedDraft,
-                            topic: e.target.value,
-                            grammarContent: {
-                              ...extractedDraft.grammarContent!,
-                              grammarTopic: e.target.value
-                            }
-                          })
-                        }
-                        className="w-full px-2.5 py-1.5 rounded-lg border border-surface-border bg-surface text-xs font-bold text-text-main"
-                      />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className="text-[10.5px] font-bold text-text-muted block mb-1">
-                        {isRtl ? 'ملخص الشرح بالعربية:' : 'Arabic Explanation:'}
-                      </label>
-                      <textarea
-                        rows={2}
-                        value={extractedDraft.grammarContent.explanationAr}
-                        onChange={(e) =>
-                          setExtractedDraft({
-                            ...extractedDraft,
-                            grammarContent: {
-                              ...extractedDraft.grammarContent!,
-                              explanationAr: e.target.value
-                            }
-                          })
-                        }
-                        className="w-full px-2.5 py-1.5 rounded-lg border border-surface-border bg-surface text-xs text-text-main"
-                      />
-                    </div>
+                    {extractedDraft.grammarContent ? (
+                      <div>
+                        <label className="text-[10.5px] font-bold text-text-muted block mb-1">
+                          {isRtl ? 'موضوع القاعدة:' : 'Grammar Topic:'}
+                        </label>
+                        <input
+                          type="text"
+                          value={extractedDraft.grammarContent.grammarTopic}
+                          onChange={(e) =>
+                            setExtractedDraft({
+                              ...extractedDraft,
+                              topic: e.target.value,
+                              grammarContent: {
+                                ...extractedDraft.grammarContent!,
+                                grammarTopic: e.target.value
+                              }
+                            })
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-surface-border bg-surface text-xs font-bold text-text-main"
+                        />
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="text-[10.5px] font-bold text-text-muted block mb-1">
+                          {isRtl ? 'الموضوع:' : 'Topic:'}
+                        </label>
+                        <input
+                          type="text"
+                          value={extractedDraft.topic}
+                          onChange={(e) => setExtractedDraft({ ...extractedDraft, topic: e.target.value })}
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-surface-border bg-surface text-xs font-bold text-text-main"
+                        />
+                      </div>
+                    )}
+                    {extractedDraft.grammarContent && (
+                      <div className="sm:col-span-2">
+                        <label className="text-[10.5px] font-bold text-text-muted block mb-1">
+                          {isRtl ? 'ملخص الشرح بالعربية:' : 'Arabic Explanation:'}
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={extractedDraft.grammarContent.explanationAr}
+                          onChange={(e) =>
+                            setExtractedDraft({
+                              ...extractedDraft,
+                              grammarContent: {
+                                ...extractedDraft.grammarContent!,
+                                explanationAr: e.target.value
+                              }
+                            })
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-surface-border bg-surface text-xs text-text-main"
+                        />
+                      </div>
+                    )}
                   </div>
 
-                  {/* Extracted Rules Editable List */}
+                  {/* Editable Extracted Items (vocab / verb sets) */}
+                  {(extractedDraft.items.length > 0 ||
+                    extractedDraft.setKind === 'vocab' ||
+                    extractedDraft.setKind === 'verb_group') && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-text-main">
+                          {isRtl
+                            ? `الكلمات المستخرجة (${extractedDraft.items.length}):`
+                            : `Extracted Words (${extractedDraft.items.length}):`}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleAddDraftItem}
+                          className="px-2.5 py-1 rounded-lg bg-surface border border-surface-border text-primary text-[11px] font-bold cursor-pointer inline-flex items-center gap-1"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>{isRtl ? 'إضافة كلمة' : 'Add Word'}</span>
+                        </button>
+                      </div>
+                      {extractedDraft.items.map((item, iIdx) => (
+                        <div
+                          key={item.id || iIdx}
+                          className="p-2 rounded-xl bg-surface border border-surface-border grid grid-cols-1 sm:grid-cols-12 gap-2 items-center"
+                        >
+                          <input
+                            type="text"
+                            value={item.german}
+                            onChange={(e) => handleUpdateDraftItem(iIdx, { german: e.target.value })}
+                            placeholder="Haus"
+                            dir="ltr"
+                            className="sm:col-span-3 px-2 py-1 rounded-lg border border-surface-border bg-surface-hover text-xs font-bold"
+                          />
+                          <input
+                            type="text"
+                            value={item.arabic}
+                            onChange={(e) => handleUpdateDraftItem(iIdx, { arabic: e.target.value })}
+                            placeholder="بيت"
+                            className="sm:col-span-3 px-2 py-1 rounded-lg border border-surface-border bg-surface-hover text-xs"
+                          />
+                          <select
+                            value={item.article || ''}
+                            onChange={(e) =>
+                              handleUpdateDraftItem(iIdx, {
+                                article: e.target.value
+                                  ? (e.target.value as 'der' | 'die' | 'das')
+                                  : undefined
+                              })
+                            }
+                            className="sm:col-span-2 px-2 py-1 rounded-lg border border-surface-border bg-surface-hover text-xs font-bold"
+                          >
+                            <option value="">—</option>
+                            <option value="der">der</option>
+                            <option value="die">die</option>
+                            <option value="das">das</option>
+                          </select>
+                          <input
+                            type="text"
+                            value={item.plural || ''}
+                            onChange={(e) => handleUpdateDraftItem(iIdx, { plural: e.target.value })}
+                            placeholder="Häuser"
+                            dir="ltr"
+                            className="sm:col-span-2 px-2 py-1 rounded-lg border border-surface-border bg-surface-hover text-xs"
+                          />
+                          <select
+                            value={item.wordType || 'other'}
+                            onChange={(e) =>
+                              handleUpdateDraftItem(iIdx, { wordType: e.target.value as LernstudioWordType })
+                            }
+                            className="sm:col-span-1 px-1 py-1 rounded-lg border border-surface-border bg-surface-hover text-xs font-bold"
+                          >
+                            {(['noun', 'verb', 'adjective', 'phrase', 'other'] as const).map((wt) => (
+                              <option key={wt} value={wt}>
+                                {wt}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveDraftItem(iIdx)}
+                            className="sm:col-span-1 p-1 text-text-muted hover:text-red-500 justify-self-end cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Extracted Rules Editable List — grammar sets only */}
+                  {extractedDraft.grammarContent && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-black text-text-main">
@@ -1153,8 +1351,10 @@ export const LernstudioAiModal: React.FC<Props> = ({
                       </div>
                     ))}
                   </div>
+                  )}
 
-                  {/* Extracted Examples Editable List */}
+                  {/* Extracted Examples Editable List — grammar sets only */}
+                  {extractedDraft.grammarContent && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-black text-text-main">
@@ -1201,8 +1401,10 @@ export const LernstudioAiModal: React.FC<Props> = ({
                       </div>
                     ))}
                   </div>
+                  )}
 
-                  {/* Extracted Exercises Editable List */}
+                  {/* Extracted Exercises Editable List — grammar sets only */}
+                  {extractedDraft.grammarContent && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-black text-text-main">
@@ -1409,6 +1611,7 @@ export const LernstudioAiModal: React.FC<Props> = ({
                       ))}
                     </div>
                   </div>
+                  )}
                 </div>
               )}
             </div>
