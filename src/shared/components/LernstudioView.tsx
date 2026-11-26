@@ -64,12 +64,13 @@ import {
   subscribeTeacherAuth,
   getCurrentHomeworkOwnerUid,
   migrateLegacyHomeworkForAccount,
-  getHomeworkSummaryStats,
-  publishCustomLernstudioSetOnce,
-  fetchPublishedCustomLernstudioSetsFromFirestore
+  getHomeworkSummaryStats
 } from '../homeworkStorageSync';
 import { RandomStudentPickerModal } from '../RandomStudentPickerModal';
 import { speakGermanText } from '../../utils/audioSpeechUtils';
+import { buildSeededSessionDeck } from '../lernstudioVocabularyAdapter';
+import { recordLernstudioGameResult, loadLernstudioGameResults, buildSetGameStatsMap, LernstudioSetGameStats } from '../lernstudioGameResults';
+import type { LernstudioGameCompletionPayload } from '../../types/lernstudio';
 import {
   ALL_VERBS,
   ALL_VERB_CLASSIFICATIONS,
@@ -148,16 +149,20 @@ export const LernstudioView: React.FC<Props> = ({
   onDeleteSet,
   language = 'ar'
 }) => {
-  const { students } = useApp();
+  const { students, syncAllPeers, syncState } = useApp();
   const t = getLernstudioTranslations(language);
 
-  // Local CRUD + 1-shot deduplicated custom set publish to Firestore for Vercel homework generation & cross-teacher sharing
-  const pendingCustomPublishIdsRef = React.useRef<Set<string>>(new Set());
-  const [loadingSharedSets, setLoadingSharedSets] = useState(false);
-  const [sharedSetsCursor, setSharedSetsCursor] = useState<string | null>(null);
-  const [sharedSetsHasMore, setSharedSetsHasMore] = useState(false);
+  // Local-only game result stats (IndexedDB / storageService)
+  const [gameStatsMap, setGameStatsMap] = useState<Map<string, LernstudioSetGameStats>>(new Map());
+  const [isP2pSyncing, setIsP2pSyncing] = useState(false);
 
-  const handleSaveSetWithCloud = (set: LernstudioSet) => {
+  React.useEffect(() => {
+    loadLernstudioGameResults().then(res => {
+      setGameStatsMap(buildSetGameStatsMap(res));
+    }).catch(() => {});
+  }, []);
+
+  const handleSaveSetLocal = (set: LernstudioSet) => {
     const isBuiltin = isBuiltinLernstudioSet(set);
     const fallbackTeacherName =
       teacherName?.trim() || auth?.currentUser?.displayName?.trim() || undefined;
@@ -165,32 +170,26 @@ export const LernstudioView: React.FC<Props> = ({
       ? set
       : {
           ...set,
-          published: set.published !== false,
-          publishedAt: set.publishedAt || new Date().toISOString(),
           createdByTeacherName: set.createdByTeacherName?.trim() || fallbackTeacherName,
           createdByUid: set.createdByUid?.trim() || activeAuthUid || undefined
         };
     onSaveSet(enrichedSet);
-
-    // Built-in curriculum sets and archived/deleted sets never write to Firestore
-    if (!isBuiltin && !enrichedSet.isArchived && !enrichedSet.deleted && enrichedSet.published !== false) {
-      publishCustomLernstudioSetOnce(enrichedSet, activeAuthUid || undefined)
-        .then((res) => {
-          if (res.synced) {
-            pendingCustomPublishIdsRef.current.delete(enrichedSet.id);
-          } else {
-            pendingCustomPublishIdsRef.current.add(enrichedSet.id);
-          }
-        })
-        .catch(() => {
-          pendingCustomPublishIdsRef.current.add(enrichedSet.id);
-        });
-    }
   };
 
-  const handleDeleteSetWithCloud = (setId: string) => {
-    pendingCustomPublishIdsRef.current.delete(setId);
+  const handleDeleteSetLocal = (setId: string) => {
     onDeleteSet(setId);
+  };
+
+  const handleTriggerP2pSync = async () => {
+    if (isP2pSyncing) return;
+    setIsP2pSyncing(true);
+    try {
+      if (syncAllPeers) {
+        await syncAllPeers();
+      }
+    } finally {
+      setIsP2pSyncing(false);
+    }
   };
 
   const [activeAuthUid, setActiveAuthUid] = useState<string | null>(() => getCurrentHomeworkOwnerUid());
@@ -289,53 +288,6 @@ export const LernstudioView: React.FC<Props> = ({
     });
     return () => unsubAuth();
   }, []);
-
-  // Retry any offline-created custom set publishes once internet returns (0 automatic Firestore reads)
-  React.useEffect(() => {
-    const flushPendingCustomSets = () => {
-      if (pendingCustomPublishIdsRef.current.size === 0) return;
-      const ids = Array.from(pendingCustomPublishIdsRef.current);
-      for (const sid of ids) {
-        const found = setsRef.current.find((s) => s.id === sid);
-        if (!found || found.isArchived || found.deleted || isBuiltinLernstudioSet(found)) {
-          pendingCustomPublishIdsRef.current.delete(sid);
-          continue;
-        }
-        publishCustomLernstudioSetOnce(found, activeAuthUid || undefined)
-          .then((res) => {
-            if (res.synced) {
-              pendingCustomPublishIdsRef.current.delete(sid);
-            }
-          })
-          .catch(() => {});
-      }
-    };
-    window.addEventListener('online', flushPendingCustomSets);
-    return () => window.removeEventListener('online', flushPendingCustomSets);
-  }, [activeAuthUid]);
-
-  const handleRefreshSharedCustomSets = async (loadMore = false) => {
-    if (loadingSharedSets) return;
-    setLoadingSharedSets(true);
-    try {
-      const page = await fetchPublishedCustomLernstudioSetsFromFirestore({
-        limit: 25,
-        cursor: loadMore && sharedSetsCursor ? sharedSetsCursor : undefined
-      });
-      const existingMap = new Map(setsRef.current.map((s) => [s.id, s]));
-      for (const sharedSet of page.sets) {
-        if (!sharedSet?.id || isBuiltinLernstudioSet(sharedSet)) continue;
-        const existing = existingMap.get(sharedSet.id);
-        if (!existing || (sharedSet.updatedAt || 0) >= (existing.updatedAt || 0)) {
-          onSaveSet(sharedSet);
-        }
-      }
-      setSharedSetsCursor(page.nextCursor);
-      setSharedSetsHasMore(page.hasMore);
-    } finally {
-      setLoadingSharedSets(false);
-    }
-  };
 
   // Local event listeners for Homework Monitoring inside Lernstudio (cloud reads happen on-demand inside LernstudioHomeworkModal)
   React.useEffect(() => {
@@ -638,7 +590,7 @@ export const LernstudioView: React.FC<Props> = ({
 
     if (gameSetupConfig?.questionCount && workingSet.items.length > gameSetupConfig.questionCount) {
       const cap = Math.max(4, gameSetupConfig.questionCount);
-      const sampled = [...workingSet.items].sort(() => 0.5 - Math.random()).slice(0, cap);
+      const sampled = buildSeededSessionDeck(workingSet.items, cap, `${workingSet.id}_12345`);
       workingSet = {
         ...workingSet,
         items: sampled
@@ -731,6 +683,43 @@ export const LernstudioView: React.FC<Props> = ({
     window.open(waUrl, '_blank');
   };
 
+  const handleGameCompletion = React.useCallback(async (payload: LernstudioGameCompletionPayload) => {
+    try {
+      const activeGameSet = effectiveSetForMode || hydratedSelectedSet || selectedSetForMode;
+      const finalPayload = {
+        ...payload,
+        setId: payload.setId || activeGameSet?.id || 'unknown_set'
+      };
+      await recordLernstudioGameResult(finalPayload);
+      const results = await loadLernstudioGameResults();
+      setGameStatsMap(buildSetGameStatsMap(results));
+    } catch (e) {
+      console.warn('[LernstudioView] Failed to record game completion:', e);
+    }
+  }, [effectiveSetForMode, hydratedSelectedSet, selectedSetForMode]);
+
+  const handleDuplicateToEdit = (set: LernstudioSet) => {
+    const copySuffix = language === 'ar' ? ' (نسخة)' : ' (Copy)';
+    const forked: LernstudioSet = {
+      ...set,
+      id: `set_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      title: `${set.title}${copySuffix}`,
+      titleTranslations: set.titleTranslations
+        ? {
+            ...set.titleTranslations,
+            de: `${set.titleTranslations.de || set.title}${copySuffix}`,
+            ar: `${set.titleTranslations.ar || set.title}${copySuffix}`
+          }
+        : undefined,
+      createdByUid: activeAuthUid || undefined,
+      createdByTeacherName: resolvedCreatorName,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    setSetToEdit(forked);
+    setIsSetEditorOpen(true);
+  };
+
   const renderContent = () => {
     const activeGameSet = effectiveSetForMode || hydratedSelectedSet || selectedSetForMode;
 
@@ -785,6 +774,8 @@ export const LernstudioView: React.FC<Props> = ({
           activeTheme={activeTheme}
           language={language}
           initialMode="team"
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -797,6 +788,8 @@ export const LernstudioView: React.FC<Props> = ({
           activeTheme={activeTheme}
           language={language}
           initialMode="solo"
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -809,6 +802,7 @@ export const LernstudioView: React.FC<Props> = ({
           activeTheme={activeTheme}
           language={language}
           gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -833,6 +827,7 @@ export const LernstudioView: React.FC<Props> = ({
           activeTheme={activeTheme}
           language={language}
           gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -845,6 +840,7 @@ export const LernstudioView: React.FC<Props> = ({
           activeTheme={activeTheme}
           language={language}
           gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -856,6 +852,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -867,6 +865,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -878,6 +878,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -889,6 +891,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -900,6 +904,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -911,6 +917,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -922,6 +930,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -933,6 +943,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -944,6 +956,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -955,6 +969,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -966,6 +982,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -977,6 +995,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -988,6 +1008,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -999,6 +1021,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -1010,6 +1034,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -1021,6 +1047,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -1032,6 +1060,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -1043,6 +1073,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -1054,6 +1086,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -1065,6 +1099,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -1076,6 +1112,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -1087,6 +1125,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -1098,6 +1138,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -1109,6 +1151,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -1120,6 +1164,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -1131,6 +1177,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -1143,6 +1191,7 @@ export const LernstudioView: React.FC<Props> = ({
           activeTheme={activeTheme}
           language={language}
           gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => {
             setGameSetupConfig(null);
             setActiveMode('games_portal');
@@ -1157,6 +1206,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -1168,6 +1219,8 @@ export const LernstudioView: React.FC<Props> = ({
           set={activeGameSet}
           activeTheme={activeTheme}
           language={language}
+          gameConfig={gameSetupConfig || undefined}
+          onGameComplete={handleGameCompletion}
           onBack={() => setActiveMode('games_portal')}
         />
       );
@@ -1551,31 +1604,20 @@ export const LernstudioView: React.FC<Props> = ({
                 )}
               </div>
               <div className="flex items-center gap-3 flex-wrap">
-                {activeAuthUid && (
-                  <button
-                    type="button"
-                    onClick={() => handleRefreshSharedCustomSets(false)}
-                    disabled={loadingSharedSets}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline cursor-pointer disabled:opacity-50"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${loadingSharedSets ? 'animate-spin' : ''}`} />
-                    <span>
-                      {loadingSharedSets
-                        ? (language === 'ar' ? 'جاري التحديث...' : 'Updating...')
-                        : (language === 'ar' ? 'تحديث مجموعات المعلمين' : 'Refresh Teacher Sets')}
-                    </span>
-                  </button>
-                )}
-                {activeAuthUid && sharedSetsHasMore && (
-                  <button
-                    type="button"
-                    onClick={() => handleRefreshSharedCustomSets(true)}
-                    disabled={loadingSharedSets}
-                    className="text-xs font-bold text-text-main hover:text-primary cursor-pointer"
-                  >
-                    {language === 'ar' ? 'تحميل المزيد' : 'Load More'}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={handleTriggerP2pSync}
+                  disabled={isP2pSyncing}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline cursor-pointer disabled:opacity-50"
+                  title={language === 'ar' ? 'مزامنة المجموعات مباشرة بين أجهزتك المتصلة (P2P)' : 'Sync sets directly between paired devices (P2P)'}
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isP2pSyncing ? 'animate-spin' : ''}`} />
+                  <span>
+                    {isP2pSyncing
+                      ? (language === 'ar' ? 'جاري المزامنة P2P...' : 'Syncing P2P...')
+                      : (language === 'ar' ? 'مزامنة P2P للأجهزة' : 'P2P Sync Devices')}
+                  </span>
+                </button>
                 {(selectedSourceFilter !== 'all' || selectedSetKindFilter !== 'all' || selectedTeacherFilter !== 'all' || selectedGradeFilter !== 'all' || selectedCategoryFilter !== 'all' || searchTerm || selectedGroupFilter !== 'all') && (
                   <button
                     onClick={() => {
@@ -1627,6 +1669,9 @@ export const LernstudioView: React.FC<Props> = ({
                 const assignedGroup = groups.find((g) => g.id === set.assignedGroupId);
                 const isCustom = !isBuiltinLernstudioSet(set);
                 const creatorTeacher = getEffectiveSetTeacherName(set);
+                const isNonOwned = isCustom && Boolean(set.createdByUid && activeAuthUid && set.createdByUid !== activeAuthUid);
+                const canEdit = !isNonOwned;
+                const stats = gameStatsMap.get(set.id);
                 const kindLabel =
                   setKind === 'grammar'
                     ? t.setKindGrammar
@@ -1673,10 +1718,20 @@ export const LernstudioView: React.FC<Props> = ({
                           <span className="font-medium text-text-muted">
                             {isCustom
                               ? creatorTeacher
-                                ? `👨‍🏫 أ. ${creatorTeacher}`
+                                ? (isNonOwned ? `مشاركة P2P • أ. ${creatorTeacher}` : `👨‍🏫 أ. ${creatorTeacher}`)
                                 : (language === 'ar' ? 'مجموعتي الخاصة' : language === 'de' ? 'Mein Set' : 'Custom')
                               : (language === 'ar' ? 'منهاج جاهز' : language === 'de' ? 'Lehrplan' : 'Curriculum')}
                           </span>
+                          {stats && stats.attempts > 0 && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span className="font-bold text-amber-500 inline-flex items-center gap-1">
+                                <Trophy className="w-3 h-3" />
+                                <span>{stats.bestScore} {language === 'ar' ? 'نقطة' : 'pts'}</span>
+                                <span className="opacity-75">({stats.attempts} {language === 'ar' ? 'جولة' : 'plays'})</span>
+                              </span>
+                            </>
+                          )}
                         </div>
 
                         {assignedGroup && (
@@ -1789,30 +1844,43 @@ export const LernstudioView: React.FC<Props> = ({
                             )}
                           </button>
 
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSetToEdit(set);
-                              setIsSetEditorOpen(true);
-                            }}
-                            className="p-1.5 text-text-muted hover:text-primary hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
-                            title={t.editSet}
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
+                          {canEdit ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSetToEdit(set);
+                                  setIsSetEditorOpen(true);
+                                }}
+                                className="p-1.5 text-text-muted hover:text-primary hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
+                                title={t.editSet}
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
 
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (window.confirm(language === 'ar' ? `هل أنت متأكد من حذف مجموعة (${set.title})؟` : `Delete set (${set.title})?`)) {
-                                handleDeleteSetWithCloud(set.id);
-                              }
-                            }}
-                            className="p-1.5 text-text-muted hover:text-red-500 hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
-                            title={t.deleteSet}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (window.confirm(language === 'ar' ? `هل أنت متأكد من حذف مجموعة (${set.title})؟` : `Delete set (${set.title})?`)) {
+                                    handleDeleteSetLocal(set.id);
+                                  }
+                                }}
+                                className="p-1.5 text-text-muted hover:text-red-500 hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
+                                title={t.deleteSet}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleDuplicateToEdit(set)}
+                              className="p-1.5 text-text-muted hover:text-primary hover:bg-surface-hover rounded-lg transition-colors cursor-pointer"
+                              title={language === 'ar' ? 'نسخ للتعديل (المجموعة تابعة لمعلم آخر)' : 'Duplicate to Edit (Owned by another teacher)'}
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -2497,7 +2565,7 @@ export const LernstudioView: React.FC<Props> = ({
                               type="button"
                               onClick={() => {
                                 if (window.confirm(language === 'ar' ? `حذف مجموعة الأفعال (${grp.titleAr})؟` : `Delete (${grp.titleDe})?`)) {
-                                  handleDeleteSetWithCloud(grp.id);
+                                  handleDeleteSetLocal(grp.id);
                                 }
                               }}
                               className="p-1.5 bg-surface hover:bg-surface-hover border border-surface-border text-text-muted hover:text-rose-500 rounded-lg cursor-pointer"
@@ -2524,7 +2592,7 @@ export const LernstudioView: React.FC<Props> = ({
             groups={groups}
             teacherName={teacherName}
             onClose={() => setIsSetEditorOpen(false)}
-            onSaveSet={handleSaveSetWithCloud}
+            onSaveSet={handleSaveSetLocal}
           />
         )}
 
@@ -2535,7 +2603,7 @@ export const LernstudioView: React.FC<Props> = ({
             teacherName={teacherName}
             language={language}
             onClose={() => setIsAiModalOpen(false)}
-            onImportSet={handleSaveSetWithCloud}
+            onImportSet={handleSaveSetLocal}
           />
         )}
 
@@ -2793,7 +2861,7 @@ export const LernstudioView: React.FC<Props> = ({
                       });
                     }
                     const syncSet = verbGroupToLernstudioSet(nextGroup, undefined, { compactForSync: true });
-                    handleSaveSetWithCloud(syncSet);
+                    handleSaveSetLocal(syncSet);
                     setVerbGroupEditor(null);
                   }}
                   className="px-5 py-2 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-black cursor-pointer disabled:opacity-40"

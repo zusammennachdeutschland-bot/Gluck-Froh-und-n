@@ -74,7 +74,6 @@ import {
   saveLocalSubmission,
   getQuestionTypeMeta,
   fetchAssignmentFromFirestore,
-  fetchLernstudioSetFromFirestore,
   buildDeterministicSubmissionId,
   getOrCreateStudentAttemptSecret,
   isHomeworkAssignmentOpenForStudents,
@@ -496,9 +495,6 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             } catch {
               // Ignore local parse errors
             }
-          }
-          if (!foundSet && setId) {
-            foundSet = await fetchLernstudioSetFromFirestore(setId).catch(() => null);
           }
           if (!foundSet && compactWordsParam) {
             const parsedItems = compactWordsParam

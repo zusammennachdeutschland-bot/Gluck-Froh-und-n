@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../types/lernstudio';
+import { LernstudioSet, LernstudioTheme, LernstudioItem, LernstudioGameCompletionPayload } from '../../types/lernstudio';
 import { useApp } from '../../context/AppContext';
 import { getLernstudioTranslations, LernstudioTranslations, getItemTranslation } from '../../utils/lernstudioTranslations';
 import {
@@ -19,7 +19,11 @@ import {
   evaluateGameQuestionAnswer
 } from '../lernstudioQuestionAdapter';
 import { hasGrammarContent } from '../grammarEngine';
-import { getSetPlayableItems } from '../lernstudioVocabularyAdapter';
+import {
+  getSetPlayableItems,
+  createSeededRandom,
+  seededShuffle
+} from '../lernstudioVocabularyAdapter';
 import {
   ALL_VERBS,
   SUBJECT_PROMPTS,
@@ -62,6 +66,7 @@ interface Props {
   activeTheme: LernstudioTheme;
   language?: string;
   gameConfig?: GameSetupConfig;
+  onGameComplete?: (result: LernstudioGameCompletionPayload) => void;
   onBack: () => void;
 }
 
@@ -180,12 +185,14 @@ function buildChoicesForItem(
   targetItem: LernstudioItem,
   allItems: LernstudioItem[],
   promptType: ClassroomPromptMode,
-  activeLanguage: string
+  activeLanguage: string,
+  rng: () => number
 ): MagicChoiceOption[] {
   if (promptType === 'article') {
     const parsed = extractArticle(targetItem.german);
     if (parsed.article) {
-      return (['der', 'die', 'das'] as const).map((art) => ({
+      const shuffledArticles = seededShuffle(['der', 'die', 'das'] as const, rng);
+      return shuffledArticles.map((art) => ({
         id: `art_${art}`,
         label: `${art} ${parsed.noun}`,
         subLabel: art === 'der' ? 'Maskulin' : art === 'die' ? 'Feminin' : 'Neutrum',
@@ -203,7 +210,7 @@ function buildChoicesForItem(
   const distractorsPool = allItems.filter(
     (it) => it.id !== targetItem.id && it.german.toLowerCase() !== targetItem.german.toLowerCase()
   );
-  const shuffledDistractors = [...distractorsPool].sort(() => 0.5 - Math.random()).slice(0, 3);
+  const shuffledDistractors = seededShuffle(distractorsPool, rng).slice(0, 3);
 
   const fallbackGermanWords = ['der Hund', 'die Katze', 'das Buch', 'der Apfel', 'die Schule', 'das Haus'];
   const fallbackTranslations =
@@ -252,7 +259,7 @@ function buildChoicesForItem(
     fallbackIdx++;
   }
 
-  return options.sort(() => 0.5 - Math.random());
+  return seededShuffle(options, rng);
 }
 
 export const LernstudioClassroomBoard: React.FC<Props> = ({
@@ -260,6 +267,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
   activeTheme,
   language: propLanguage,
   gameConfig,
+  onGameComplete,
   onBack
 }) => {
   const { groups = [], students = [], language: appLanguage = 'ar' } = useApp();
@@ -353,6 +361,20 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
   const [historyStack, setHistoryStack] = useState<
     { tiles: BaamboozleTile[]; teams: BaamboozleTeam[]; activeIndex: number }[]
   >([]);
+
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const correctRef = useRef(0);
+  const totalRef = useRef(0);
+  const reportedRef = useRef(false);
+  const startedAtRef = useRef(Date.now());
+  const sessionSeedRef = useRef<number>(Date.now());
+
+  useEffect(() => {
+    return () => {
+      timeoutsRef.current.forEach(clearTimeout);
+      timeoutsRef.current = [];
+    };
+  }, []);
 
   // Default welcome speech for Professor Nano Bear
   const getDefaultBearSpeech = useCallback(
@@ -450,13 +472,15 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
     }
   }, [selectedGroupId, rosterMode, teamCount, groups, students, language, gameConfig]);
 
-  // Generate tiles helper
+  // Generate seeded non-repeating tiles helper
   const buildGameTiles = useCallback(
     (tileCountToBuild: number, modeToBuild: GameMode, promptModeToUse: typeof questionPromptMode) => {
+      const seed = sessionSeedRef.current;
+      const rng = createSeededRandom(seed);
       const rawItems = [...(set.items || [])];
       const items = rawItems.length > 0 ? rawItems : getSetPlayableItems(set);
       const grammarPool = hasGrammar
-        ? buildDynamicQuestionPool(set, activeLanguage, { questionModeFilter: 'grammar' }).filter(
+        ? buildDynamicQuestionPool(set, activeLanguage, { questionModeFilter: 'grammar', seed }).filter(
             (q) => q.type === 'grammar_exercise'
           )
         : [];
@@ -475,21 +499,23 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
         'skip_turn'
       ];
 
-      // Grammar tile builder helper
       const buildGrammarTile = (idx: number, isPower: boolean, randomPower: PowerCardType, points: number): BaamboozleTile | null => {
         if (grammarPool.length === 0) return null;
         const gq = grammarPool[idx % grammarPool.length];
         const opts = gq.options && gq.options.length >= 2
-          ? gq.options
-          : Array.from(
-              new Set([
-                gq.correctAnswer,
-                ...grammarPool
-                  .filter((o) => o.id !== gq.id)
-                  .map((o) => o.correctAnswer)
-                  .slice(0, 3)
-              ])
-            ).sort(() => 0.5 - Math.random());
+          ? seededShuffle(gq.options, createSeededRandom(seed + idx * 17))
+          : seededShuffle(
+              Array.from(
+                new Set([
+                  gq.correctAnswer,
+                  ...grammarPool
+                    .filter((o) => o.id !== gq.id)
+                    .map((o) => o.correctAnswer)
+                    .slice(0, 3)
+                ])
+              ),
+              createSeededRandom(seed + idx * 17)
+            );
 
         const choices: MagicChoiceOption[] = opts.map((opt, optIdx) => ({
           id: `gram_ch_${idx}_${optIdx}`,
@@ -515,17 +541,19 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
       if ((promptModeToUse === 'grammar' || rawItems.length === 0) && grammarPool.length > 0) {
         return Array.from({ length: tileCountToBuild }).map((_, idx) => {
           const isPower =
-            modeToBuild === 'power_only' ? true : modeToBuild === 'classic' ? idx % 4 === 3 && Math.random() < 0.75 : false;
-          const randomPower = powerTypesList[Math.floor(Math.random() * powerTypesList.length)];
+            modeToBuild === 'power_only' ? true : modeToBuild === 'classic' ? idx % 4 === 3 && rng() < 0.75 : false;
+          const randomPower = powerTypesList[Math.floor(rng() * powerTypesList.length)];
           const points = ((idx % 4) + 1) * 10 + 5;
           return buildGrammarTile(idx, isPower, randomPower, points)!;
         });
       }
 
+      // Build deck without replacement until exhausted, reshuffle with distinct seed only when needed
       const pool: LernstudioItem[] = [];
+      let roundPass = 0;
       while (pool.length < tileCountToBuild) {
-        const shuffled = [...items].sort(() => 0.5 - Math.random());
-        pool.push(...shuffled);
+        roundPass += 1;
+        pool.push(...seededShuffle(items, createSeededRandom(seed + roundPass * 97)));
       }
       const finalItems = pool.slice(0, tileCountToBuild);
 
@@ -543,16 +571,17 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
         .map((it) => (isItemVerb(it) || set.setKind === 'verb_group' ? resolveVerbFromLernstudioItem(it) : null))
         .filter((v): v is NonNullable<typeof v> => Boolean(v));
 
+      let grammarIdx = 0;
       return finalItems.map((item, idx) => {
+        const tileRng = createSeededRandom(seed + idx * 53);
         const isPower =
-          modeToBuild === 'power_only' ? true : modeToBuild === 'classic' ? idx % 4 === 3 && Math.random() < 0.75 : false;
-        const randomPower = powerTypesList[Math.floor(Math.random() * powerTypesList.length)];
-        const points = ((idx % 4) + 1) * 10 + 5; // 15, 25, 35, 45
+          modeToBuild === 'power_only' ? true : modeToBuild === 'classic' ? idx % 4 === 3 && tileRng() < 0.75 : false;
+        const randomPower = powerTypesList[Math.floor(tileRng() * powerTypesList.length)];
+        const points = ((idx % 4) + 1) * 10 + 5;
 
-        // In mixed mode with grammar exercises available, interleave grammar challenges on even tiles
-        if (promptModeToUse === 'mixed' && grammarPool.length > 0 && idx % 2 === 0) {
-          const gTile = buildGrammarTile(Math.floor(idx / 2), isPower, randomPower, points);
-          if (gTile) return gTile;
+        if (promptModeToUse === 'mixed' && grammarPool.length > 0 && idx % 2 === 0 && grammarIdx < grammarPool.length) {
+          const gTile = buildGrammarTile(grammarIdx++, isPower, randomPower, points);
+          if (gTile) return { ...gTile, id: idx + 1 };
         }
 
         const itemIsVerb = isItemVerb(item) || set.setKind === 'verb_group';
@@ -583,7 +612,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
           item.german;
 
         if (resolvedPrompt === 'verb_conjugation' && verbEntry) {
-          const subjectPrompt = SUBJECT_PROMPTS[(idx * 5 + Math.floor(Math.random() * SUBJECT_PROMPTS.length)) % SUBJECT_PROMPTS.length];
+          const subjectPrompt = SUBJECT_PROMPTS[(idx * 5 + Math.floor(tileRng() * SUBJECT_PROMPTS.length)) % SUBJECT_PROMPTS.length];
           const conjEx = buildVerbConjugationExercise(verbEntry, subjectPrompt, 4);
           const choices: MagicChoiceOption[] = conjEx.options.map((opt, optIdx) => ({
             id: `vconj_${idx}_${optIdx}`,
@@ -653,7 +682,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
               : `Listen carefully and choose the German word: (${translationText})`;
         }
 
-        const choices = buildChoicesForItem(item, items, resolvedPrompt, activeLanguage);
+        const choices = buildChoicesForItem(item, items, resolvedPrompt, activeLanguage, tileRng);
 
         return {
           id: idx + 1,
@@ -705,6 +734,13 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
   // Start / Restart Game
   const handleStartGame = () => {
     if (teams.length === 0) return;
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current = [];
+    sessionSeedRef.current = Date.now();
+    correctRef.current = 0;
+    totalRef.current = 0;
+    reportedRef.current = false;
+    startedAtRef.current = Date.now();
 
     const generatedTiles = buildGameTiles(selectedTileCount, gameMode, questionPromptMode);
     if (generatedTiles.length === 0) return;
@@ -729,10 +765,11 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
     const nextIdx = (activeTeamIndex + 1) % Math.max(1, list.length);
     setActiveTeamIndex(nextIdx);
     const nextTeam = list[nextIdx];
-    setTimeout(() => {
+    const tid = setTimeout(() => {
       setBearMood('idle');
       setBearMessage(getDefaultBearSpeech(nextTeam?.name));
     }, 1400);
+    timeoutsRef.current.push(tid);
   };
 
   const saveHistory = () => {
@@ -763,28 +800,35 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
     );
   };
 
-  // Timer Effect
+  // Timer Effect: enforce real turn timeout consequence
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | null = null;
     if (isTimerRunning && timerSeconds !== null && timerSeconds > 0) {
       interval = setInterval(() => {
         setTimerSeconds((prev) => (prev !== null && prev > 1 ? prev - 1 : 0));
       }, 1000);
-    } else if (timerSeconds === 0 && isTimerRunning) {
+    } else if (timerSeconds === 0 && isTimerRunning && activeTile) {
       setIsTimerRunning(false);
+      setChoiceFeedback('wrong');
+      setShowAnswer(true);
+      playLernstudioSound('wrong');
       setBearMood('encouraging');
       setBearMessage(
         language === 'ar'
-          ? 'انتهى الوقت! لا تقلقوا، اختاروا الإجابة أو اكشفوا الحل معاً!'
+          ? 'انتهى الوقت! تم احتساب الدور ⏱️'
           : language === 'de'
-          ? 'Die Zeit ist um! Wählt jetzt gemeinsam die richtige Rune!'
-          : "Time's up! Pick your best answer rune together!"
+          ? 'Die Zeit ist um! Zug beendet ⏱️'
+          : "Time's up! Turn ended ⏱️"
       );
+      const tid = setTimeout(() => {
+        handleAwardQuestion(false);
+      }, 1400);
+      timeoutsRef.current.push(tid);
     }
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isTimerRunning, timerSeconds, language]);
+  }, [isTimerRunning, timerSeconds, language, activeTile]);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -798,13 +842,32 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
     }
   };
 
-  const checkGameOver = (allDone: boolean) => {
+  const checkGameOver = (allDone: boolean, finalTeams?: BaamboozleTeam[]) => {
     if (allDone) {
       setIsGameOver(true);
       setBearMood('champion');
       playLernstudioSound('fanfare_victory');
       playGermanVoiceFeedback('gewonnen');
       triggerConfetti();
+      if (!reportedRef.current && onGameComplete) {
+        reportedRef.current = true;
+        const usedTeams = finalTeams || teams;
+        const bestScore = usedTeams.reduce((max, tm) => Math.max(max, tm.score), 0);
+        const teamScores: Record<string, number> = {};
+        usedTeams.forEach((tm) => {
+          teamScores[cleanTeamDisplayName(tm.name) || tm.name] = tm.score;
+        });
+        onGameComplete({
+          gameMode: 'classroom',
+          score: bestScore,
+          maxScore: Math.max(1, tiles.length) * 45,
+          accuracy: totalRef.current > 0 ? Math.min(100, Math.round((correctRef.current / totalRef.current) * 100)) : 100,
+          passed: true,
+          durationSeconds: Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)),
+          teamScores,
+          difficulty: gameConfig?.difficulty || set.difficulty
+        });
+      }
     }
   };
 
@@ -885,7 +948,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
 
     const remainingCount = tiles.filter((tItem) => tItem.id !== tile.id && !tItem.isAnswered).length;
     if (remainingCount === 0) {
-      checkGameOver(true);
+      checkGameOver(true, updatedTeams);
     } else {
       advanceTurn(updatedTeams);
     }
@@ -896,6 +959,8 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
     if (!activeTile) return;
     saveHistory();
     setIsTimerRunning(false);
+    totalRef.current += 1;
+    if (isCorrect) correctRef.current += 1;
 
     const activeTeam = teams[activeTeamIndex];
     const newStreak = isCorrect ? (activeTeam?.streak || 0) + 1 : 0;
@@ -918,7 +983,8 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
       playLernstudioSound('correct');
       playGermanVoiceFeedback('richtig');
       if (activeTile.item?.german) {
-        setTimeout(() => speakGermanText(activeTile.item!.german, 0.9), 350);
+        const sTid = setTimeout(() => speakGermanText(activeTile.item!.german, 0.9), 350);
+        timeoutsRef.current.push(sTid);
       }
       triggerSparkles(50, 50, '#10b981');
       triggerFloatingText(
@@ -941,7 +1007,8 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
       playLernstudioSound('wrong');
       playGermanVoiceFeedback('noch_einmal');
       if (activeTile.item?.german) {
-        setTimeout(() => speakGermanText(activeTile.item!.german, 0.85), 350);
+        const sTid = setTimeout(() => speakGermanText(activeTile.item!.german, 0.85), 350);
+        timeoutsRef.current.push(sTid);
       }
       setBearMood('encouraging');
       setBearMessage(
@@ -969,7 +1036,7 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
     setChoiceFeedback(null);
 
     if (remainingTiles.length === 0) {
-      checkGameOver(true);
+      checkGameOver(true, updatedTeams);
     } else {
       advanceTurn(updatedTeams);
     }

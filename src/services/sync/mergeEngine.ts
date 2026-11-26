@@ -116,7 +116,9 @@ export function mergePurgedTombstones(
     'hodVisits',
     'goldHoldings',
     'goldHolding',
-    'customAiBackgrounds'
+    'customAiBackgrounds',
+    'lernstudioSet',
+    'lernstudioSets'
   ]);
   const map = new Map<string, PurgedRecordTombstone>();
   for (const t of [...localArr, ...incomingArr]) {
@@ -864,10 +866,29 @@ export function mergeEntities<T extends SyncableRecord>(
         shouldAcceptIncoming = false;
       }
 
+      // Owner-Wins Protection for Lernstudio Sets:
+      // If a set has an owner (createdByUid), only the owner (matching createdByUid or lastModifiedBy) can mutate or delete it.
+      // Non-owner edits or deletions are rejected and the owner's version always wins!
+      const isLernstudioSet = (entityTypeName || '').toLowerCase() === 'lernstudiosets' || (entityTypeName || '').toLowerCase() === 'lernstudioset';
+      if (isLernstudioSet) {
+        const localOwnerUid = String((localItem as any)?.createdByUid || '').trim();
+        const incomingModifierUid = String((incomingItem as any)?.lastModifiedBy || (incomingItem as any)?.createdByUid || '').trim();
+        if (localOwnerUid && incomingModifierUid && incomingModifierUid !== localOwnerUid) {
+          shouldAcceptIncoming = false;
+        }
+        // Built-in curriculum sets must never be deleted by incoming deletion tombstones
+        if (incomingItem.deleted && (id.startsWith('curric_') || id.startsWith('set_def_'))) {
+          shouldAcceptIncoming = false;
+        }
+      }
+
       const baseItem = baseMap.get(id);
 
       if (shouldAcceptIncoming) {
         let finalItem = incomingItem;
+        if (isLernstudioSet && (incomingItem as any).assignedGroupId === undefined && (localItem as any).assignedGroupId) {
+          finalItem = { ...finalItem, assignedGroupId: (localItem as any).assignedGroupId };
+        }
         if (!incomingItem.deleted && !localItem.deleted) {
           const fieldMergeRes = mergeConcurrentEntityFields(localItem, incomingItem, 'remote', baseItem);
           finalItem = fieldMergeRes.merged;
@@ -1366,6 +1387,7 @@ export interface WorkspaceMutableState {
   hodVisits?: any[];
   goldHoldings?: any[];
   customAiBackgrounds?: any[];
+  lernstudioSets?: any[];
   financeTransactions?: any[];
   schoolNotes?: SchoolNote[];
   homeworkAssignments?: any[];
@@ -1582,6 +1604,13 @@ export function enforcePurgedTombstonesOnWorkspace<T extends WorkspaceMutableSta
   }
   if (Array.isArray(workspace.customAiBackgrounds)) {
     workspace.customAiBackgrounds = workspace.customAiBackgrounds.filter((b: any) => b && b.id && !allPurgedIds.has(String(b.id).trim()));
+  }
+  if (Array.isArray(workspace.lernstudioSets)) {
+    workspace.lernstudioSets = workspace.lernstudioSets.filter((s: any) => {
+      if (!s || !s.id) return false;
+      const sid = String(s.id).trim();
+      return !allPurgedIds.has(sid);
+    });
   }
   if (Array.isArray(workspace.groupWeeklySessions)) {
     workspace.groupWeeklySessions = workspace.groupWeeklySessions.filter((s: any) => {

@@ -1149,10 +1149,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         stripHeavyGrammarMediaForSync({
           ...newSet,
           contentOrigin: isBuiltin ? 'builtin' : newSet.contentOrigin || existing?.contentOrigin || 'teacher_created',
+          version: ((existing?.version || (newSet as any).version || 0) + 1),
           ...(resolvedCreatorName ? { createdByTeacherName: resolvedCreatorName } : {}),
-          ...(resolvedCreatorUid ? { createdByUid: resolvedCreatorUid } : {})
+          ...(resolvedCreatorUid ? { createdByUid: resolvedCreatorUid, lastModifiedBy: resolvedCreatorUid } : {})
         })
       );
+
+      // If this set ID was previously marked as purged, clear the tombstone on intentional user save
+      if (recentlyDeletedRef.current?.purgedRecords?.some(p => p.id === newSet.id)) {
+        const nextPurged = (recentlyDeletedRef.current.purgedRecords || []).filter(p => p.id !== newSet.id);
+        const nextRec = { ...recentlyDeletedRef.current, purgedRecords: nextPurged };
+        recentlyDeletedRef.current = nextRec;
+        setRecentlyDeleted(nextRec);
+        storage.setItem('dl_recently_deleted', nextRec);
+      }
 
       const mutated = wrapMutation(cleanedNewSet);
 
@@ -1173,6 +1183,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const target = prev.find(s => s.id === setId);
       if (target) {
         wrapDeletion(target);
+        const nowMs = Date.now();
+        const nowStr = new Date(nowMs).toISOString();
+        const purgeTombstone: PurgedRecordTombstone = {
+          id: setId,
+          type: 'lernstudioSet',
+          purgedAt: nowStr,
+          updatedAt: nowMs,
+          originRevision: (target.originRevision || 1) + 1
+        };
+        applyCascadePurgeTombstonesToAppState([purgeTombstone]);
       }
       const updated = prev.filter(s => s.id !== setId);
       storage.setItem('dl_lernstudio_sets', updated);

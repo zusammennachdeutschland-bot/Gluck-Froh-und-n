@@ -40,20 +40,20 @@ export async function recordLernstudioGameResult(
 
 export function buildSetGameStatsMap(
   results: LernstudioGameResult[]
-): Record<string, LernstudioSetGameStats> {
-  const map: Record<string, LernstudioSetGameStats> = {};
+): Map<string, LernstudioSetGameStats> {
+  const map = new Map<string, LernstudioSetGameStats>();
   for (const r of results) {
     if (!r || !r.setId) continue;
-    const prev = map[r.setId];
+    const prev = map.get(r.setId);
     if (!prev) {
-      map[r.setId] = {
+      map.set(r.setId, {
         attempts: 1,
         bestScore: r.score,
         lastScore: r.score,
         lastAccuracy: r.accuracy,
         lastPlayedAt: r.playedAt,
         lastMode: r.gameMode
-      };
+      });
     } else {
       prev.attempts += 1;
       if (r.score > prev.bestScore) prev.bestScore = r.score;

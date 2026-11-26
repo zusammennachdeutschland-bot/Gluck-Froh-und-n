@@ -1,55 +1,148 @@
-import React, { useState, useEffect } from 'react';
-import { LernstudioSet, LernstudioTheme } from '../../../types/lernstudio';
-import { getSetVocabularyItems, AdaptedVocabItem, getDistractorChoices } from '../../../utils/lernstudioVocabularyAdapter';
-import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
-import { speakGermanText, stopGermanSpeech } from '../../../utils/audioSpeechUtils';
-import { getLernstudioTranslations } from '../../../utils/lernstudioTranslations';
-import { ArrowLeft, Volume2, RotateCcw, Building2 } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { LernstudioSet, LernstudioTheme, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
+import { getLernstudioTranslations, getLocalizedSetTitle } from '../../../utils/lernstudioTranslations';
+import { ArrowLeft, Volume2, RotateCcw, Building2, Clock } from 'lucide-react';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
+import { GameSetupConfig } from '../LernstudioGameSetupScreen';
+import { TemplateChoice, useTemplateGameSession } from './useTemplateGameQuestions';
 
 interface Props {
   set: LernstudioSet;
   activeTheme: LernstudioTheme;
   language?: string;
+  gameConfig?: GameSetupConfig;
+  onGameComplete?: (result: LernstudioGameCompletionPayload) => void;
   onBack: () => void;
 }
 
+const TOWER_COLORS = [
+  { badge: 'bg-red-500 text-white border-red-500 ring-red-400', text: 'text-red-400', bar: 'bg-red-500/30 border-red-500/60', pill: 'bg-red-500', icon: '🔴' },
+  { badge: 'bg-blue-500 text-white border-blue-500 ring-blue-400', text: 'text-blue-400', bar: 'bg-blue-500/30 border-blue-500/60', pill: 'bg-blue-500', icon: '🔵' },
+  { badge: 'bg-emerald-500 text-white border-emerald-500 ring-emerald-400', text: 'text-emerald-400', bar: 'bg-emerald-500/30 border-emerald-500/60', pill: 'bg-emerald-500', icon: '🟢' },
+  { badge: 'bg-amber-500 text-white border-amber-500 ring-amber-400', text: 'text-amber-400', bar: 'bg-amber-500/30 border-amber-500/60', pill: 'bg-amber-500', icon: '🟡' }
+];
+
 export const LernstudioTowerArchitectsGame: React.FC<Props> = ({
   set,
-  activeTheme,
   language = 'ar',
+  gameConfig,
+  onGameComplete,
   onBack
 }) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
+  const displayTitle = getLocalizedSetTitle(set, language);
   const { triggerSparkles, triggerScorePopup, triggerCelebration, EffectsOverlay, SettingsBar } = useGameEffects(language);
 
-  const vocabItems = getSetVocabularyItems(set, language);
+  const teamNames = useMemo(() => {
+    const count =
+      gameConfig?.gameMode === 'pvp_4teams'
+        ? 4
+        : gameConfig?.gameMode === 'pvp_3teams'
+        ? 3
+        : 2;
+    return Array.from({ length: count }, (_, idx) => {
+      const provided = gameConfig?.teamNames?.[idx]?.trim();
+      return provided || (language === 'ar' ? `برج ${idx + 1}` : `Tower ${idx + 1}`);
+    });
+  }, [gameConfig?.gameMode, gameConfig?.teamNames, language]);
+
+  const {
+    effectiveTimerSeconds,
+    questions,
+    scheduleTimeout,
+    safePlaySound,
+    safePlayVoiceFeedback,
+    safeSpeak,
+    recordAttempt,
+    reportCompletion,
+    resetSession
+  } = useTemplateGameSession('tower_architects', set, language, gameConfig, onGameComplete);
+
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [activeTeam, setActiveTeam] = useState<0 | 1>(0);
-  const [towerFloors, setTowerFloors] = useState<[number, number]>([0, 0]);
+  const [activeTeam, setActiveTeam] = useState(0);
+  const [towerFloors, setTowerFloors] = useState<number[]>(() => teamNames.map(() => 0));
+  const [timeLeft, setTimeLeft] = useState<number>(effectiveTimerSeconds);
   const [selectedChoice, setSelectedChoice] = useState<string | null>(null);
   const [isAnswerSubmitted, setIsAnswerSubmitted] = useState(false);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
   const [isVictory, setIsVictory] = useState(false);
 
-  const currentItem = vocabItems[currentIndex];
-  const choices = currentItem ? getDistractorChoices(currentItem, vocabItems) : [];
+  const totalQuestions = questions.length;
+  const currentQuestion = questions[currentIndex];
 
   useEffect(() => {
-    if (currentItem && !isVictory) {
-      const timer = setTimeout(() => {
-        speakGermanText(currentItem.german);
-      }, 300);
-      return () => {
-        clearTimeout(timer);
-        stopGermanSpeech();
-      };
-    }
-  }, [currentIndex, isVictory]);
+    setTowerFloors(teamNames.map(() => 0));
+    setActiveTeam(0);
+  }, [teamNames.length]);
 
-  if (!currentItem || vocabItems.length === 0) {
+  useEffect(() => {
+    if (currentQuestion && !isVictory) {
+      const timer = scheduleTimeout(() => {
+        safeSpeak(currentQuestion.speakText);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [currentIndex, isVictory, currentQuestion, scheduleTimeout, safeSpeak]);
+
+  useEffect(() => {
+    if (!effectiveTimerSeconds || isVictory || isAnswerSubmitted || !currentQuestion) return;
+    setTimeLeft(effectiveTimerSeconds);
+    const interval = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          handleAdvanceWrong(towerFloors);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [currentIndex, effectiveTimerSeconds, isVictory, isAnswerSubmitted]);
+
+  const finishMatch = (finalFloors: number[]) => {
+    setIsVictory(true);
+    safePlaySound('victory');
+    safePlayVoiceFeedback('victory');
+    triggerCelebration('اكتمل بناء الأبراج الشاهقة! 🏙️', 'هندسة معمارية مبدعة!');
+    const teamScoresMap: Record<string, number> = {};
+    teamNames.forEach((name, idx) => {
+      teamScoresMap[name] = (finalFloors[idx] || 0) * 100;
+    });
+    const best = Math.max(0, ...finalFloors) * 100;
+    reportCompletion({
+      score: best,
+      maxScore: Math.max(100, Math.ceil(totalQuestions / teamNames.length) * 100),
+      passed: best > 0,
+      teamScores: teamScoresMap
+    });
+  };
+
+  const handleAdvanceWrong = (currentFloors: number[]) => {
+    if (isAnswerSubmitted || isVictory) return;
+    setIsAnswerSubmitted(true);
+    setIsCorrect(false);
+    recordAttempt(false);
+    safePlaySound('wrong');
+    safePlayVoiceFeedback('wrong');
+
+    scheduleTimeout(() => {
+      if (currentIndex + 1 >= totalQuestions) {
+        finishMatch(currentFloors);
+      } else {
+        setCurrentIndex((prev) => prev + 1);
+        setActiveTeam((prev) => (prev + 1) % teamNames.length);
+        setIsAnswerSubmitted(false);
+        setSelectedChoice(null);
+        setIsCorrect(null);
+        setTimeLeft(effectiveTimerSeconds);
+      }
+    }, 1400);
+  };
+
+  if (!currentQuestion || totalQuestions === 0) {
     return (
       <div className="p-6 text-center space-y-4">
         <p className="text-text-muted">{t.notEnoughWords}</p>
@@ -58,74 +151,55 @@ export const LernstudioTowerArchitectsGame: React.FC<Props> = ({
     );
   }
 
-  const handleSelectChoice = (choice: AdaptedVocabItem) => {
-    if (isAnswerSubmitted) return;
+  const handleSelectChoice = (choice: TemplateChoice) => {
+    if (isAnswerSubmitted || isVictory) return;
     setSelectedChoice(choice.id);
     setIsAnswerSubmitted(true);
+    recordAttempt(choice.isCorrect);
 
-    if (choice.id === currentItem.id) {
+    if (choice.isCorrect) {
       setIsCorrect(true);
-      playLernstudioSound('correct');
-      playGermanVoiceFeedback('correct');
+      safePlaySound('correct');
+      safePlayVoiceFeedback('correct');
       triggerSparkles(50, 45, '#f59e0b');
       triggerScorePopup('+1 🏙️', 50, 35, 'positive');
-      setTowerFloors((prev) => {
-        const next = [...prev] as [number, number];
-        next[activeTeam] += 1;
-        return next;
-      });
+      const nextFloors = [...towerFloors];
+      nextFloors[activeTeam] = (nextFloors[activeTeam] || 0) + 1;
+      setTowerFloors(nextFloors);
 
-      setTimeout(() => {
-        if (currentIndex + 1 >= vocabItems.length) {
-          setIsVictory(true);
-          playLernstudioSound('victory');
-          playGermanVoiceFeedback('victory');
-          triggerCelebration('اكتمل بناء الأبراج الشاهقة! 🏙️', 'هندسة معمارية مبدعة!');
+      scheduleTimeout(() => {
+        if (currentIndex + 1 >= totalQuestions) {
+          finishMatch(nextFloors);
         } else {
           setCurrentIndex((prev) => prev + 1);
-          setActiveTeam((prev) => (prev === 0 ? 1 : 0));
+          setActiveTeam((prev) => (prev + 1) % teamNames.length);
           setIsAnswerSubmitted(false);
           setSelectedChoice(null);
           setIsCorrect(null);
+          setTimeLeft(effectiveTimerSeconds);
         }
-      }, 2000);
+      }, 1200);
     } else {
-      setIsCorrect(false);
-      playLernstudioSound('wrong');
-      playGermanVoiceFeedback('wrong');
-
-      setTimeout(() => {
-        if (currentIndex + 1 >= vocabItems.length) {
-          setIsVictory(true);
-          playLernstudioSound('victory');
-          triggerCelebration('انتهى بناء الأبراج! 🏙️');
-        } else {
-          setCurrentIndex((prev) => prev + 1);
-          setActiveTeam((prev) => (prev === 0 ? 1 : 0));
-          setIsAnswerSubmitted(false);
-          setSelectedChoice(null);
-          setIsCorrect(null);
-        }
-      }, 2800);
+      handleAdvanceWrong(towerFloors);
     }
   };
 
   const handleRestart = () => {
+    resetSession();
     setCurrentIndex(0);
     setActiveTeam(0);
-    setTowerFloors([0, 0]);
+    setTowerFloors(teamNames.map(() => 0));
+    setTimeLeft(effectiveTimerSeconds);
     setIsAnswerSubmitted(false);
     setSelectedChoice(null);
     setIsCorrect(null);
     setIsVictory(false);
   };
 
-  const winningTeamName =
-    towerFloors[0] > towerFloors[1]
-      ? (language === 'ar' ? 'الفريق الأوّل (🔴)' : 'Team 1 (🔴)')
-      : towerFloors[1] > towerFloors[0]
-      ? (language === 'ar' ? 'الفريق الثاني (🔵)' : 'Team 2 (🔵)')
-      : t.tieGame;
+  const bestFloors = Math.max(0, ...towerFloors);
+  const leaders = teamNames.filter((_, idx) => towerFloors[idx] === bestFloors);
+  const winningTeamName = leaders.length > 1 ? t.tieGame : `${leaders[0]}`;
+  const floorLabel = language === 'ar' ? 'طوابق' : language === 'de' ? 'Stockwerke' : 'floors';
 
   return (
     <div className="p-4 sm:p-6 rounded-3xl min-h-[85vh] flex flex-col justify-between bg-background text-text-main relative overflow-hidden" dir={isRtl ? 'rtl' : 'ltr'}>
@@ -144,12 +218,23 @@ export const LernstudioTowerArchitectsGame: React.FC<Props> = ({
 
         <div className="flex items-center gap-2 flex-wrap">
           <SettingsBar />
-          <div className={`px-3 py-1.5 rounded-xl border font-black text-xs ${activeTeam === 0 ? 'bg-red-500 text-white border-red-500 shadow-md ring-2 ring-red-400' : 'bg-surface text-text-muted border-surface-border'}`}>
-            🔴 {language === 'ar' ? 'برج 1' : 'Tower 1'}: {towerFloors[0]} {language === 'ar' ? 'طوابق' : language === 'de' ? 'Stockwerke' : 'floors'}
-          </div>
-          <div className={`px-3 py-1.5 rounded-xl border font-black text-xs ${activeTeam === 1 ? 'bg-blue-500 text-white border-blue-500 shadow-md ring-2 ring-blue-400' : 'bg-surface text-text-muted border-surface-border'}`}>
-            🔵 {language === 'ar' ? 'برج 2' : 'Tower 2'}: {towerFloors[1]} {language === 'ar' ? 'طوابق' : language === 'de' ? 'Stockwerke' : 'floors'}
-          </div>
+          {effectiveTimerSeconds > 0 && !isVictory && (
+            <span className={`px-3 py-1.5 rounded-xl font-black text-xs flex items-center gap-1 ${timeLeft <= 4 ? 'bg-red-500/20 text-red-500 animate-pulse' : 'bg-surface-hover text-text-main'}`}>
+              <Clock className="w-3.5 h-3.5" /> {timeLeft}s
+            </span>
+          )}
+          {teamNames.map((name, idx) => {
+            const theme = TOWER_COLORS[idx % TOWER_COLORS.length];
+            const isActive = activeTeam === idx;
+            return (
+              <div
+                key={idx}
+                className={`px-3 py-1.5 rounded-xl border font-black text-xs ${isActive ? `${theme.badge} shadow-md ring-2` : 'bg-surface text-text-muted border-surface-border'}`}
+              >
+                {theme.icon} {name}: {towerFloors[idx] || 0} {floorLabel}
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -159,42 +244,51 @@ export const LernstudioTowerArchitectsGame: React.FC<Props> = ({
           <GameStageBanner
             mode="tower_architects"
             title="مهندسو الأبراج (Tower Architects)"
-            subtitle={language === 'ar' ? 'ارفع طوابق ناطحة السحاب عالياً عبر الإجابات الصحيحة!' : language === 'de' ? 'Baue deinen Wolkenkratzer mit richtigen Antworten!' : 'Build the skyscraper higher with correct answers!'}
-            badgeText={`🏙️ ${towerFloors[0]} : ${towerFloors[1]}`}
+            subtitle={`${displayTitle} • ${language === 'ar' ? 'ارفع طوابق ناطحة السحاب عالياً عبر الإجابات الصحيحة!' : language === 'de' ? 'Baue deinen Wolkenkratzer mit richtigen Antworten!' : 'Build the skyscraper higher with correct answers!'}`}
+            badgeText={`🏙️ ${towerFloors.join(' : ')}`}
           />
           <div className="bg-surface border border-surface-border p-6 rounded-3xl text-center space-y-4 shadow-sm relative">
             <div className="flex items-center justify-between">
-              <span className={`px-3 py-1 rounded-full text-xs font-black text-white ${activeTeam === 0 ? 'bg-red-500' : 'bg-blue-500'}`}>
-                {t.currentTurnLabel}: {activeTeam === 0 ? (language === 'ar' ? 'الفريق الأوّل (🔴)' : 'Team 1 (🔴)') : (language === 'ar' ? 'الفريق الثاني (🔵)' : 'Team 2 (🔵)')}
+              <span className={`px-3 py-1 rounded-full text-xs font-black text-white ${TOWER_COLORS[activeTeam % TOWER_COLORS.length].pill}`}>
+                {t.currentTurnLabel}: {teamNames[activeTeam]} ({TOWER_COLORS[activeTeam % TOWER_COLORS.length].icon})
               </span>
-              <span className="text-xs font-bold text-text-muted">{language === 'ar' ? 'الكلمة' : language === 'de' ? 'Wort' : 'Word'} {currentIndex + 1} / {vocabItems.length}</span>
+              <span className="text-xs font-bold text-text-muted">{language === 'ar' ? 'الكلمة' : language === 'de' ? 'Wort' : 'Word'} {currentIndex + 1} / {totalQuestions}</span>
             </div>
 
             {/* Towers Side-by-Side Graphic */}
-            <div className="grid grid-cols-2 gap-4 p-4 bg-slate-900 rounded-2xl border border-slate-800 text-white">
-              <div className="flex flex-col items-center justify-end h-32 border-r border-slate-800 space-y-1">
-                <span className="text-xs text-red-400 font-bold">🔴 برج 1 ({towerFloors[0]})</span>
-                <div className="w-16 bg-red-500/30 border border-red-500/60 rounded-t-lg transition-all duration-500 flex flex-col justify-end" style={{ height: `${Math.max(15, towerFloors[0] * 20)}px` }}>
-                  <Building2 className="w-6 h-6 mx-auto text-red-400" />
-                </div>
-              </div>
-
-              <div className="flex flex-col items-center justify-end h-32 space-y-1">
-                <span className="text-xs text-blue-400 font-bold">🔵 برج 2 ({towerFloors[1]})</span>
-                <div className="w-16 bg-blue-500/30 border border-blue-500/60 rounded-t-lg transition-all duration-500 flex flex-col justify-end" style={{ height: `${Math.max(15, towerFloors[1] * 20)}px` }}>
-                  <Building2 className="w-6 h-6 mx-auto text-blue-400" />
-                </div>
-              </div>
+            <div className={`grid ${teamNames.length === 2 ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-4'} gap-4 p-4 bg-slate-900 rounded-2xl border border-slate-800 text-white`}>
+              {teamNames.map((name, idx) => {
+                const theme = TOWER_COLORS[idx % TOWER_COLORS.length];
+                const floors = towerFloors[idx] || 0;
+                return (
+                  <div key={idx} className="flex flex-col items-center justify-end h-32 space-y-1">
+                    <span className={`text-xs ${theme.text} font-bold truncate max-w-full`}>
+                      {theme.icon} {name} ({floors})
+                    </span>
+                    <div
+                      className={`w-16 ${theme.bar} border rounded-t-lg transition-all duration-500 flex flex-col justify-end`}
+                      style={{ height: `${Math.min(96, Math.max(18, floors * 18))}px` }}
+                    >
+                      <Building2 className={`w-6 h-6 mx-auto ${theme.text}`} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
-            {/* Target German Word */}
+            {/* Target Prompt */}
             <div className="p-4 bg-primary-soft/40 border border-primary-border/30 rounded-2xl inline-flex items-center gap-3 justify-center w-full">
-              <h2 className="text-2xl sm:text-3xl font-black text-text-main font-mono" dir="ltr">
-                {currentItem.german}
-              </h2>
+              <div className="space-y-1">
+                <h2 className="text-xl sm:text-2xl font-black text-text-main font-mono" dir="auto">
+                  {currentQuestion.prompt}
+                </h2>
+                {currentQuestion.subPrompt && (
+                  <p className="text-xs text-text-muted font-bold">{currentQuestion.subPrompt}</p>
+                )}
+              </div>
               <button
-                onClick={() => speakGermanText(currentItem.german)}
-                className="p-2 rounded-xl bg-primary text-white hover:bg-primary-hover transition-colors cursor-pointer"
+                onClick={() => safeSpeak(currentQuestion.speakText)}
+                className="p-2 rounded-xl bg-primary text-white hover:bg-primary-hover transition-colors cursor-pointer shrink-0"
               >
                 <Volume2 className="w-4 h-4" />
               </button>
@@ -203,12 +297,12 @@ export const LernstudioTowerArchitectsGame: React.FC<Props> = ({
 
           {/* Choices Grid */}
           <div className="grid grid-cols-2 gap-3">
-            {choices.map((choice) => {
+            {currentQuestion.choices.map((choice) => {
               const isSelected = selectedChoice === choice.id;
               let btnStyle = 'bg-surface hover:bg-surface-hover text-text-main border-surface-border';
 
               if (isAnswerSubmitted) {
-                if (choice.id === currentItem.id) {
+                if (choice.isCorrect) {
                   btnStyle = 'bg-emerald-500 text-white border-emerald-500 scale-105 shadow-md';
                 } else if (isSelected && !isCorrect) {
                   btnStyle = 'bg-red-500 text-white border-red-500';
@@ -222,8 +316,8 @@ export const LernstudioTowerArchitectsGame: React.FC<Props> = ({
                   onClick={() => handleSelectChoice(choice)}
                   className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col items-center justify-center gap-2 text-center shadow-xs ${btnStyle}`}
                 >
-                  <span className="text-3xl">{choice.emoji}</span>
-                  <span className="text-sm font-bold">{choice.translation}</span>
+                  {choice.emoji && <span className="text-3xl">{choice.emoji}</span>}
+                  <span className="text-sm font-bold">{choice.label}</span>
                 </button>
               );
             })}
@@ -238,8 +332,9 @@ export const LernstudioTowerArchitectsGame: React.FC<Props> = ({
           <div className="space-y-2">
             <h2 className="text-2xl font-black text-text-main">{language === 'ar' ? `فوز ${winningTeamName}! 🏙️🎉` : `${winningTeamName} Victory! 🏙️🎉`}</h2>
             <div className="text-xs font-bold text-text-muted space-y-1">
-              <p>{language === 'ar' ? 'طوابق برج 1' : 'Tower 1 Floors'}: {towerFloors[0]}</p>
-              <p>{language === 'ar' ? 'طوابق برج 2' : 'Tower 2 Floors'}: {towerFloors[1]}</p>
+              {teamNames.map((name, idx) => (
+                <p key={idx}>{name}: {towerFloors[idx] || 0} {floorLabel}</p>
+              ))}
             </div>
           </div>
           <div className="flex gap-3 justify-center">
@@ -255,4 +350,3 @@ export const LernstudioTowerArchitectsGame: React.FC<Props> = ({
     </div>
   );
 };
-

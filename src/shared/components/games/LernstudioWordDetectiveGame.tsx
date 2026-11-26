@@ -1,23 +1,19 @@
-import React, { useState, useMemo } from 'react';
-import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { LernstudioSet, LernstudioTheme, LernstudioItem, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
-import { getSetPlayableItems } from '../../../utils/lernstudioVocabularyAdapter';
+import { getSetVocabularyItems, createSeededRandom } from '../../../utils/lernstudioVocabularyAdapter';
+import { GameSetupConfig } from '../LernstudioGameSetupScreen';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
 import { GameEffectsOverlay, GameSettingsControls } from '../effects/GameEffectsOverlay';
 import {
   ArrowLeft,
   RotateCcw,
-  Trophy,
   Volume2,
-  Sparkles,
   Search,
   Key,
-  HelpCircle,
-  CheckCircle2,
-  XCircle,
   Lightbulb
 } from 'lucide-react';
 
@@ -25,6 +21,8 @@ interface Props {
   set: LernstudioSet;
   activeTheme: LernstudioTheme;
   language?: string;
+  gameConfig?: GameSetupConfig;
+  onGameComplete?: (result: LernstudioGameCompletionPayload) => void;
   onBack: () => void;
 }
 
@@ -34,26 +32,65 @@ const GERMAN_LETTERS_ROW3 = ['U', 'V', 'W', 'X', 'Y', 'Z', 'Ä', 'Ö', 'Ü', 'ß
 
 export const LernstudioWordDetectiveGame: React.FC<Props> = ({
   set,
-  activeTheme,
   language = 'ar',
+  gameConfig,
+  onGameComplete,
   onBack
 }) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const displayTitle = getLocalizedSetTitle(set, language);
-  const items = useMemo(() => getSetPlayableItems(set), [set]);
+  const difficulty = gameConfig?.difficulty || set.difficulty || 'medium';
+  const maxMistakes = difficulty === 'easy' ? 8 : difficulty === 'hard' ? 4 : 6;
+  const enableAudio = gameConfig?.enableAudio ?? true;
+  const enableSoundFx = gameConfig?.enableSoundFx ?? true;
+
+  const [sessionSeed, setSessionSeed] = useState<number>(() => Date.now());
+  const items = useMemo(
+    () => getSetVocabularyItems(set, language, gameConfig?.questionCount, sessionSeed),
+    [set, language, gameConfig?.questionCount, sessionSeed]
+  );
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [guessedLetters, setGuessedLetters] = useState<Set<string>>(new Set());
   const [mistakes, setMistakes] = useState(0);
-  const maxMistakes = 6;
   const [score, setScore] = useState(0);
   const [hintsUsed, setHintsUsed] = useState(0);
   const [isVictory, setIsVictory] = useState(false);
   const [isGameOver, setIsGameOver] = useState(false);
   const { particles, popups, triggerCorrect, triggerWrong, triggerVictory } = useGameEffects();
 
-  const currentItem: LernstudioItem | undefined = items[currentIndex % items.length];
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const solvedCountRef = useRef(0);
+  const reportedRef = useRef(false);
+  const startedAtRef = useRef(Date.now());
+
+  useEffect(() => {
+    return () => {
+      timeoutsRef.current.forEach(clearTimeout);
+      timeoutsRef.current = [];
+    };
+  }, []);
+
+  const reportCompletion = useCallback(
+    (passed: boolean, finalScore: number) => {
+      if (reportedRef.current || !onGameComplete) return;
+      reportedRef.current = true;
+      const total = Math.max(1, items.length);
+      onGameComplete({
+        gameMode: 'word_detective',
+        score: finalScore,
+        maxScore: total * 100,
+        accuracy: Math.min(100, Math.round((solvedCountRef.current / total) * 100)),
+        passed,
+        durationSeconds: Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)),
+        difficulty
+      });
+    },
+    [onGameComplete, items.length, difficulty]
+  );
+
+  const currentItem: LernstudioItem | undefined = items[currentIndex % Math.max(1, items.length)];
   const targetWord = (currentItem?.german || '').trim();
 
   // Normalize target characters (ignoring spaces and punctuation in guess requirements)
@@ -70,6 +107,12 @@ export const LernstudioWordDetectiveGame: React.FC<Props> = ({
     return requiredChars.every((char) => guessedLetters.has(char));
   }, [requiredChars, guessedLetters]);
 
+  const handleNextWord = () => {
+    setCurrentIndex((prev) => prev + 1);
+    setGuessedLetters(new Set());
+    setMistakes(0);
+  };
+
   // Handle letter guess
   const handleGuessLetter = (letter: string) => {
     if (guessedLetters.has(letter) || isGameOver || isWordSolved) return;
@@ -81,57 +124,62 @@ export const LernstudioWordDetectiveGame: React.FC<Props> = ({
     const isInWord = requiredChars.includes(letter);
 
     if (isInWord) {
-      playLernstudioSound('correct');
+      if (enableSoundFx) playLernstudioSound('correct');
 
-      // Check if this guess completed the word
       const allDone = requiredChars.every((ch) => nextGuessed.has(ch));
       if (allDone) {
-        speakGermanText(targetWord);
-        setScore((s) => s + 100);
+        solvedCountRef.current += 1;
+        if (enableAudio) speakGermanText(targetWord);
+        const nextScore = score + 100;
+        setScore(nextScore);
         triggerCorrect(100, 'Gelöst!');
-        playGermanVoiceFeedback('correct');
+        if (enableSoundFx) playGermanVoiceFeedback('correct');
 
         if (currentIndex + 1 >= items.length) {
           setIsVictory(true);
           triggerVictory();
-          playGermanVoiceFeedback('victory');
+          if (enableSoundFx) playGermanVoiceFeedback('victory');
+          reportCompletion(true, nextScore);
         } else {
-          setTimeout(() => {
+          const tid = setTimeout(() => {
             handleNextWord();
-          }, 2400);
+          }, 1800);
+          timeoutsRef.current.push(tid);
         }
       }
     } else {
-      playLernstudioSound('wrong');
+      if (enableSoundFx) playLernstudioSound('wrong');
       triggerWrong();
       const nextMistakes = mistakes + 1;
       setMistakes(nextMistakes);
 
       if (nextMistakes >= maxMistakes) {
         setIsGameOver(true);
-        playGermanVoiceFeedback('try_again');
+        if (enableSoundFx) playGermanVoiceFeedback('try_again');
+        reportCompletion(false, score);
       }
     }
   };
 
-  // Provide a hint: reveals an unguessed letter
+  // Provide a hint: reveals an unguessed letter deterministically via seed
   const handleUseHint = () => {
     if (isWordSolved || isGameOver) return;
     const remaining = requiredChars.filter((c) => !guessedLetters.has(c));
     if (remaining.length === 0) return;
 
-    const randomLetter = remaining[Math.floor(Math.random() * remaining.length)];
+    const rng = createSeededRandom(sessionSeed + currentIndex * 29 + hintsUsed * 13);
+    const randomLetter = remaining[Math.floor(rng() * remaining.length)];
     handleGuessLetter(randomLetter);
     setHintsUsed((h) => h + 1);
   };
 
-  const handleNextWord = () => {
-    setCurrentIndex((prev) => prev + 1);
-    setGuessedLetters(new Set());
-    setMistakes(0);
-  };
-
   const handleRestart = () => {
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current = [];
+    solvedCountRef.current = 0;
+    reportedRef.current = false;
+    startedAtRef.current = Date.now();
+    setSessionSeed(Date.now());
     setCurrentIndex(0);
     setGuessedLetters(new Set());
     setMistakes(0);

@@ -180,7 +180,8 @@ async function ingestAndSweepPurgedTombstonesOnDataSource(
       'goldHoldings',
       'customAiBackgrounds',
       'homeworkAssignments',
-      'homeworkSubmissions'
+      'homeworkSubmissions',
+      'lernstudioSets'
     ];
     for (const colKey of collectionsToSweep) {
       const currentLocalRecords = Array.isArray(localData[colKey]) ? localData[colKey] : [];

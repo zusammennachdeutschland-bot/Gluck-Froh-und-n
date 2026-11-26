@@ -1,14 +1,14 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { LernstudioSet, LernstudioTheme } from '../../../types/lernstudio';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { LernstudioSet, LernstudioTheme, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
 import { generateMemoryCardsForSet, MemoryCard } from '../../../utils/lernstudioQuestionAdapter';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
+import { GameSetupConfig } from '../LernstudioGameSetupScreen';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
 import { GameEffectsOverlay, GameSettingsControls } from '../effects/GameEffectsOverlay';
 import {
   ArrowRight,
   RotateCcw,
-  Trophy,
   Clock,
   Sparkles,
   Volume2,
@@ -16,30 +16,59 @@ import {
   Star,
   CheckCircle2
 } from 'lucide-react';
+import { getLernstudioTranslations, getLocalizedSetTitle } from '../../../utils/lernstudioTranslations';
 
 interface Props {
   set: LernstudioSet;
   activeTheme: LernstudioTheme;
   language?: string;
+  gameConfig?: GameSetupConfig;
+  onGameComplete?: (result: LernstudioGameCompletionPayload) => void;
   onBack: () => void;
 }
 
-import { getLernstudioTranslations, getLocalizedSetTitle } from '../../../utils/lernstudioTranslations';
-
-export const LernstudioMemoryGame: React.FC<Props> = ({ set, activeTheme, language = 'ar', onBack }) => {
+export const LernstudioMemoryGame: React.FC<Props> = ({
+  set,
+  language = 'ar',
+  gameConfig,
+  onGameComplete,
+  onBack
+}) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const displaySetTitle = getLocalizedSetTitle(set, language);
+  const difficulty = gameConfig?.difficulty || set.difficulty || 'medium';
+  const initialPairs =
+    gameConfig?.questionCount && gameConfig.questionCount <= 4
+      ? 4
+      : difficulty === 'easy'
+      ? 4
+      : difficulty === 'hard'
+      ? 8
+      : 6;
 
-  const [cardsCount, setCardsCount] = useState<number>(6); // 6 pairs = 12 cards
-  const [cards, setCards] = useState<MemoryCard[]>(() => generateMemoryCardsForSet(set, 6, language));
+  const [sessionSeed, setSessionSeed] = useState<number>(() => Date.now());
+  const [cardsCount, setCardsCount] = useState<number>(initialPairs);
+  const [cards, setCards] = useState<MemoryCard[]>(() =>
+    generateMemoryCardsForSet(set, initialPairs, language, sessionSeed)
+  );
   const [flippedCards, setFlippedCards] = useState<MemoryCard[]>([]);
   const [movesCount, setMovesCount] = useState(0);
   const [timerSeconds, setTimerSeconds] = useState(0);
   const [isTimerRunning, setIsTimerRunning] = useState(true);
   const [isGameCompleted, setIsGameCompleted] = useState(false);
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(gameConfig?.enableSoundFx ?? true);
   const { particles, popups, triggerCorrect, triggerWrong, triggerVictory } = useGameEffects();
+
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const reportedRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      timeoutsRef.current.forEach(clearTimeout);
+      timeoutsRef.current = [];
+    };
+  }, []);
 
   // Timer effect
   useEffect(() => {
@@ -64,16 +93,28 @@ export const LernstudioMemoryGame: React.FC<Props> = ({ set, activeTheme, langua
         playLernstudioSound('powerup_star');
         playGermanVoiceFeedback('victory');
       }
+      if (!reportedRef.current && onGameComplete) {
+        reportedRef.current = true;
+        const pairs = Math.max(1, cards.length / 2);
+        const accuracy = Math.min(100, Math.round((pairs / Math.max(pairs, movesCount)) * 100));
+        onGameComplete({
+          gameMode: 'memory',
+          score: pairs * 100,
+          maxScore: pairs * 100,
+          accuracy,
+          passed: true,
+          durationSeconds: Math.max(1, timerSeconds),
+          difficulty
+        });
+      }
     }
-  }, [cards, soundEnabled, triggerVictory]);
+  }, [cards, soundEnabled, triggerVictory, onGameComplete, movesCount, timerSeconds, difficulty]);
 
   const handleCardClick = (card: MemoryCard) => {
-    // Prevent clicking already flipped or matched cards or if two cards are already being checked
     if (card.isFlipped || card.isMatched || flippedCards.length >= 2) return;
 
     if (soundEnabled) playLernstudioSound('card_flip');
 
-    // Flip this card
     const updatedCards = cards.map((c) => (c.id === card.id ? { ...c, isFlipped: true } : c));
     setCards(updatedCards);
 
@@ -85,23 +126,22 @@ export const LernstudioMemoryGame: React.FC<Props> = ({ set, activeTheme, langua
       const [first, second] = newFlipped;
 
       if (first.pairId === second.pairId) {
-        // Match found!
         if (soundEnabled) {
           playLernstudioSound('card_match');
           playGermanVoiceFeedback('correct');
         }
         triggerCorrect(100, 'Paar gefunden!');
-        setTimeout(() => {
+        const tid = setTimeout(() => {
           setCards((prev) =>
             prev.map((c) =>
               c.pairId === first.pairId ? { ...c, isMatched: true, isFlipped: true } : c
             )
           );
           setFlippedCards([]);
-        }, 500);
+        }, 450);
+        timeoutsRef.current.push(tid);
       } else {
-        // No match: flip back
-        setTimeout(() => {
+        const tid = setTimeout(() => {
           if (soundEnabled) playLernstudioSound('wrong');
           triggerWrong();
           setCards((prev) =>
@@ -110,20 +150,29 @@ export const LernstudioMemoryGame: React.FC<Props> = ({ set, activeTheme, langua
             )
           );
           setFlippedCards([]);
-        }, 1100);
+        }, 950);
+        timeoutsRef.current.push(tid);
       }
     }
   };
 
-  const handleRestart = (newPairCount: number = cardsCount) => {
-    setCardsCount(newPairCount);
-    setCards(generateMemoryCardsForSet(set, newPairCount, language));
-    setFlippedCards([]);
-    setMovesCount(0);
-    setTimerSeconds(0);
-    setIsTimerRunning(true);
-    setIsGameCompleted(false);
-  };
+  const handleRestart = useCallback(
+    (newPairCount: number = cardsCount) => {
+      timeoutsRef.current.forEach(clearTimeout);
+      timeoutsRef.current = [];
+      reportedRef.current = false;
+      const nextSeed = Date.now();
+      setSessionSeed(nextSeed);
+      setCardsCount(newPairCount);
+      setCards(generateMemoryCardsForSet(set, newPairCount, language, nextSeed));
+      setFlippedCards([]);
+      setMovesCount(0);
+      setTimerSeconds(0);
+      setIsTimerRunning(true);
+      setIsGameCompleted(false);
+    },
+    [cardsCount, set, language]
+  );
 
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -131,8 +180,8 @@ export const LernstudioMemoryGame: React.FC<Props> = ({ set, activeTheme, langua
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // Calculate star rating
-  const starsEarned = movesCount <= cardsCount + 2 ? 3 : movesCount <= cardsCount * 2 ? 2 : 1;
+  // Meaningful star rating: 3 stars <= pairs*1.5, 2 stars <= pairs*2.5
+  const starsEarned = movesCount <= Math.ceil(cardsCount * 1.5) ? 3 : movesCount <= Math.ceil(cardsCount * 2.5) ? 2 : 1;
 
   return (
     <div className="min-h-screen bg-slate-950 text-white flex flex-col font-sans select-none" dir={isRtl ? 'rtl' : 'ltr'}>

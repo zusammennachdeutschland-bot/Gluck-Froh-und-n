@@ -218,7 +218,7 @@ export interface GrammarContent {
 
 export interface LernstudioGameResult {
   id: string;
-  setId: string;
+  setId?: string;
   gameMode: LernstudioGameMode;
   score: number;
   maxScore?: number;
@@ -231,7 +231,7 @@ export interface LernstudioGameResult {
   difficulty?: LernstudioDifficulty;
 }
 
-export type LernstudioGameCompletionPayload = Omit<LernstudioGameResult, 'id' | 'setId' | 'playedAt'> & {
+export type LernstudioGameCompletionPayload = Omit<LernstudioGameResult, 'id' | 'playedAt'> & {
   setId?: string;
 };
 
@@ -267,7 +267,7 @@ export interface LernstudioSet {
   version?: number;
   originDeviceId?: string;
   originRevision?: number;
-  originPlatform?: 'web' | 'android' | 'desktop';
+  originPlatform?: 'android' | 'web';
   lastSyncedAt?: number;
   lastModifiedBy?: string;
   createdAt: string;

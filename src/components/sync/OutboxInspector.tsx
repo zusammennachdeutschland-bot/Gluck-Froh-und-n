@@ -39,7 +39,8 @@ export const OutboxInspector: React.FC<OutboxInspectorProps> = ({
     { key: 'hodStudents', label: _t('طلاب القسم الألماني (HOD)', 'HOD German Department Students', 'HOD Schüler'), icon: GraduationCap },
     { key: 'hodComplaints', label: _t('شكاوى وملاحظات القسم (HOD)', 'HOD Complaints & Feedback', 'HOD Beschwerden'), icon: AlertCircle },
     { key: 'hodActionPlans', label: _t('خطط تحسين الطلاب (HOD)', 'HOD Student Action Plans', 'HOD Förderpläne'), icon: FileCheck },
-    { key: 'hodVisits', label: _t('زيارات وتقييم المعلمين (HOD)', 'HOD Teacher Observation Visits', 'HOD Unterrichtsbesuche'), icon: ClipboardList }
+    { key: 'hodVisits', label: _t('زيارات وتقييم المعلمين (HOD)', 'HOD Teacher Observation Visits', 'HOD Unterrichtsbesuche'), icon: ClipboardList },
+    { key: 'lernstudioSets', label: _t('المجموعات التعليمية (Lernstudio)', 'Lernstudio Learning Sets', 'Lernstudio-Lernsets'), icon: BookOpen }
   ];
 
   const totalPending = outbox?.totalCount ?? 0;

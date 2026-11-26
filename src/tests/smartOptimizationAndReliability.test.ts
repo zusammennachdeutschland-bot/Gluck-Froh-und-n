@@ -199,7 +199,9 @@ async function runTests(): Promise<void> {
       const openEffectMatch = modalSrc.match(/useEffect\(\(\) => \{\s*if \(!isOpen\) return;\s*loadAllAssignments\(([^)]+)\)/);
       assert.ok(openEffectMatch && openEffectMatch[1].trim() === 'false', 'Opening LernstudioHomeworkModal must load from local cache ONLY (loadAllAssignments(false))');
       assert.equal(lernstudioSrc.includes('backfillLegacyCloudHomeworkForAccount'), false, 'LernstudioView must NOT auto-backfill from cloud on mount');
-      assert.ok(lernstudioSrc.includes('publishCustomLernstudioSetOnce'), 'LernstudioView publishes custom sets once');
+      assert.equal(lernstudioSrc.includes('publishCustomLernstudioSetOnce'), false, 'LernstudioView must NOT publish sets to Firestore (P2P only)');
+      assert.equal(lernstudioSrc.includes('fetchPublishedCustomLernstudioSetsFromFirestore'), false, 'LernstudioView must NOT poll Firestore for shared sets');
+      assert.equal(modalSrc.includes('publishCustomLernstudioSetOnce'), false, 'LernstudioHomeworkModal must NOT publish sets to Firestore');
 
       pass('1. Static audit confirms single final submit path, final-question auto-completion guard, 10Q checkpoint + exit keepalive, and zero auto teacher reads');
     }

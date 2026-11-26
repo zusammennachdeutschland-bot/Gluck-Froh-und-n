@@ -268,7 +268,7 @@ export async function loadPageImagesByIds(ids: string[]): Promise<StoredPageImag
 }
 
 /**
- * Splits a compressed StoredPageImageRecord into bounded chunks safe for PeerJS DataChannel transport.
+ * Splits a compressed StoredPageImageRecord into bounded chunks safe for Relay / WebRTC P2P transport.
  */
 export function splitPageImageIntoChunks(
   record: StoredPageImageRecord,

@@ -1,29 +1,32 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { LernstudioSet, LernstudioTheme, LernstudioItem } from '../../../types/lernstudio';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { LernstudioSet, LernstudioTheme, LernstudioItem, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
-import { getSetPlayableItems } from '../../../utils/lernstudioVocabularyAdapter';
+import {
+  getSetVocabularyItems,
+  getDistractorChoices,
+  createSeededRandom,
+  seededShuffle
+} from '../../../utils/lernstudioVocabularyAdapter';
+import { GameSetupConfig } from '../LernstudioGameSetupScreen';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
 import { useGameEffects } from '../effects/useGameEffects';
 import {
   ArrowLeft,
   RotateCcw,
-  Trophy,
   Shield,
-  Rocket,
-  Flame,
   Volume2,
   Users,
-  User,
-  Sparkles,
-  Zap
+  User
 } from 'lucide-react';
 
 interface Props {
   set: LernstudioSet;
   activeTheme: LernstudioTheme;
   language?: string;
+  gameConfig?: GameSetupConfig;
+  onGameComplete?: (result: LernstudioGameCompletionPayload) => void;
   onBack: () => void;
 }
 
@@ -47,20 +50,34 @@ const SHIP_COLORS = [
 
 export const LernstudioSpaceDefenseGame: React.FC<Props> = ({
   set,
-  activeTheme,
   language = 'ar',
+  gameConfig,
+  onGameComplete,
   onBack
 }) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
   const displayTitle = getLocalizedSetTitle(set, language);
-  const items = useMemo(() => getSetPlayableItems(set), [set]);
+  const difficulty = gameConfig?.difficulty || set.difficulty || 'medium';
+  const damagePerHit = difficulty === 'easy' ? 15 : difficulty === 'hard' ? 35 : 25;
+  const enableAudio = gameConfig?.enableAudio ?? true;
+  const enableSoundFx = gameConfig?.enableSoundFx ?? true;
+
+  const [sessionSeed, setSessionSeed] = useState<number>(() => Date.now());
+  const items = useMemo(
+    () => getSetVocabularyItems(set, language, gameConfig?.questionCount, sessionSeed),
+    [set, language, gameConfig?.questionCount, sessionSeed]
+  );
   const { triggerSparkles, triggerScorePopup, triggerCelebration, EffectsOverlay, SettingsBar } = useGameEffects(language);
 
   // Game Settings
-  const [playMode, setPlayMode] = useState<'solo' | 'teams'>('solo');
+  const [playMode, setPlayMode] = useState<'solo' | 'teams'>(
+    gameConfig?.gameMode && gameConfig.gameMode !== 'solo' ? 'teams' : 'solo'
+  );
   const [currentTeamTurn, setCurrentTeamTurn] = useState<1 | 2>(1);
   const [teamScores, setTeamScores] = useState({ team1: 0, team2: 0 });
+  const team1Label = gameConfig?.teamNames?.[0] || (language === 'ar' ? 'الفريق الأزرق 🔵' : 'Team Blue 🔵');
+  const team2Label = gameConfig?.teamNames?.[1] || (language === 'ar' ? 'الفريق الأحمر 🔴' : 'Team Red 🔴');
 
   // Game Play State
   const [targetIndex, setTargetIndex] = useState(0);
@@ -72,98 +89,139 @@ export const LernstudioSpaceDefenseGame: React.FC<Props> = ({
   const [isGameOver, setIsGameOver] = useState(false);
   const [isVictory, setIsVictory] = useState(false);
 
-  const targetItem: LernstudioItem | undefined = items[targetIndex % items.length];
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const correctRef = useRef(0);
+  const totalRef = useRef(0);
+  const reportedRef = useRef(false);
+  const startedAtRef = useRef(Date.now());
 
-  // Spawn Alien Squad
+  useEffect(() => {
+    return () => {
+      timeoutsRef.current.forEach(clearTimeout);
+      timeoutsRef.current = [];
+    };
+  }, []);
+
+  const reportCompletion = useCallback(
+    (passed: boolean, nextTeamScores: { team1: number; team2: number }) => {
+      if (reportedRef.current || !onGameComplete) return;
+      reportedRef.current = true;
+      const total = Math.max(1, items.length);
+      onGameComplete({
+        gameMode: 'space_defense',
+        score: Math.max(nextTeamScores.team1, nextTeamScores.team2),
+        maxScore: total * 150,
+        accuracy: totalRef.current > 0 ? Math.min(100, Math.round((correctRef.current / totalRef.current) * 100)) : 0,
+        passed,
+        durationSeconds: Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)),
+        teamScores: playMode === 'teams' ? { [team1Label]: nextTeamScores.team1, [team2Label]: nextTeamScores.team2 } : undefined,
+        difficulty
+      });
+    },
+    [onGameComplete, items.length, playMode, team1Label, team2Label, difficulty]
+  );
+
+  const targetItem: LernstudioItem | undefined = items[targetIndex % Math.max(1, items.length)];
+
+  // Spawn Seeded Alien Squad
   useEffect(() => {
     if (!targetItem || isGameOver || isVictory || items.length === 0) return;
 
-    const distractors = items
-      .filter((it) => it.id !== targetItem.id)
-      .sort(() => 0.5 - Math.random())
-      .slice(0, 3);
-
-    const candidates = [targetItem, ...distractors].sort(() => 0.5 - Math.random());
+    const rng = createSeededRandom(sessionSeed + targetIndex * 71);
+    const distractors = getDistractorChoices(targetItem, items, 3, rng);
+    const candidates = seededShuffle([targetItem, ...distractors], rng);
 
     const initialShips: AlienShip[] = candidates.map((it, idx) => ({
-      id: `${it.id}_${Date.now()}_${idx}`,
+      id: `${it.id}_${targetIndex}_${idx}`,
       item: it,
-      xPercent: 12 + idx * 24 + (Math.random() * 6 - 3),
-      yPercent: 22 + (idx % 2 === 0 ? 0 : 18) + (Math.random() * 8 - 4),
+      xPercent: Math.min(88, Math.max(12, 14 + idx * 24 + (rng() * 6 - 3))),
+      yPercent: 22 + (idx % 2 === 0 ? 0 : 18) + (rng() * 8 - 4),
       color: SHIP_COLORS[idx % SHIP_COLORS.length],
       isTarget: it.id === targetItem.id,
       destroyed: false
     }));
 
     setShips(initialShips);
-  }, [targetIndex, isGameOver, isVictory, items]);
+  }, [targetIndex, isGameOver, isVictory, items, sessionSeed, targetItem]);
 
   // Target Click / Shoot
   const handleShootShip = (ship: AlienShip) => {
     if (ship.destroyed || isGameOver || isVictory || !targetItem) return;
 
-    // Fire laser beam effect
+    totalRef.current += 1;
     setLaserBeam({ targetX: ship.xPercent, targetY: ship.yPercent });
-    setTimeout(() => setLaserBeam(null), 300);
+    const lTid = setTimeout(() => setLaserBeam(null), 300);
+    timeoutsRef.current.push(lTid);
 
     const isCorrect = ship.item.id === targetItem.id;
 
-    // Trigger Explosion
     setExplosion({
       x: ship.xPercent,
       y: ship.yPercent,
       text: ship.item.german,
       correct: isCorrect
     });
-    setTimeout(() => setExplosion(null), 900);
+    const eTid = setTimeout(() => setExplosion(null), 900);
+    timeoutsRef.current.push(eTid);
 
-    // Mark ship destroyed
     setShips((prev) =>
       prev.map((s) => (s.id === ship.id ? { ...s, destroyed: true } : s))
     );
 
     if (isCorrect) {
-      playLernstudioSound('laser');
-      playGermanVoiceFeedback('correct');
+      correctRef.current += 1;
+      if (enableSoundFx) {
+        playLernstudioSound('laser');
+        playGermanVoiceFeedback('correct');
+      }
       triggerSparkles(ship.xPercent, ship.yPercent, '#06b6d4');
-      speakGermanText(ship.item.german);
+      if (enableAudio) speakGermanText(ship.item.german);
 
       const nextStreak = streak + 1;
       setStreak(nextStreak);
       const points = 100 + nextStreak * 30;
       triggerScorePopup(`+${points} 🚀`, ship.xPercent, Math.max(10, ship.yPercent - 8), 'positive');
 
+      const nextScores =
+        playMode === 'teams'
+          ? {
+              ...teamScores,
+              [currentTeamTurn === 1 ? 'team1' : 'team2']:
+                teamScores[currentTeamTurn === 1 ? 'team1' : 'team2'] + points
+            }
+          : { ...teamScores, team1: teamScores.team1 + points };
+
+      setTeamScores(nextScores);
       if (playMode === 'teams') {
-        setTeamScores((s) => ({
-          ...s,
-          [currentTeamTurn === 1 ? 'team1' : 'team2']:
-            s[currentTeamTurn === 1 ? 'team1' : 'team2'] + points
-        }));
-        // Switch turn to team 2
         setCurrentTeamTurn((cur) => (cur === 1 ? 2 : 1));
-      } else {
-        setTeamScores((s) => ({ ...s, team1: s.team1 + points }));
       }
 
       if (targetIndex + 1 >= items.length) {
         setIsVictory(true);
-        playLernstudioSound('victory');
-        playGermanVoiceFeedback('victory');
+        if (enableSoundFx) {
+          playLernstudioSound('victory');
+          playGermanVoiceFeedback('victory');
+        }
         triggerCelebration('انتصار أسطوري! تم تدمير جميع الأهداف الفضائية! 🚀');
+        reportCompletion(true, nextScores);
       } else {
-        setTimeout(() => {
+        const tid = setTimeout(() => {
           setTargetIndex((prev) => prev + 1);
         }, 500);
+        timeoutsRef.current.push(tid);
       }
     } else {
-      playLernstudioSound('powerup_boom');
-      playGermanVoiceFeedback('wrong');
+      if (enableSoundFx) {
+        playLernstudioSound('powerup_boom');
+        playGermanVoiceFeedback('wrong');
+      }
       setStreak(0);
-      setShields((prev) => {
-        const next = prev - 25;
-        if (next <= 0) setIsGameOver(true);
-        return Math.max(0, next);
-      });
+      const nextShields = Math.max(0, shields - damagePerHit);
+      setShields(nextShields);
+      if (nextShields <= 0) {
+        setIsGameOver(true);
+        reportCompletion(false, teamScores);
+      }
 
       if (playMode === 'teams') {
         setCurrentTeamTurn((cur) => (cur === 1 ? 2 : 1));
@@ -172,6 +230,13 @@ export const LernstudioSpaceDefenseGame: React.FC<Props> = ({
   };
 
   const handleRestart = () => {
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current = [];
+    correctRef.current = 0;
+    totalRef.current = 0;
+    reportedRef.current = false;
+    startedAtRef.current = Date.now();
+    setSessionSeed(Date.now());
     setTargetIndex(0);
     setShields(100);
     setStreak(0);

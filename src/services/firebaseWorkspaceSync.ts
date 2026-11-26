@@ -573,48 +573,9 @@ function invalidateSharedLernstudioSetsCache(): void {
   cachedSharedLernstudioSetsAtMs = 0;
 }
 
-async function readSharedLernstudioSets(options?: { forceRefresh?: boolean }): Promise<any[]> {
-  if (
-    !options?.forceRefresh &&
-    cachedSharedLernstudioSets !== null &&
-    Date.now() - cachedSharedLernstudioSetsAtMs < SHARED_SETS_CACHE_TTL_MS
-  ) {
-    return cachedSharedLernstudioSets;
-  }
-  if (isFirestoreReadQuotaExhausted()) {
-    return cachedSharedLernstudioSets || [];
-  }
-  if (inFlightSharedSetsPromise) {
-    return inFlightSharedSetsPromise;
-  }
-
-  inFlightSharedSetsPromise = (async () => {
-    const snap = await getDocs(collection(db, 'lernstudio_sets'));
-    const byId = new Map<string, any>();
-    snap.forEach((docSnap: any) => {
-      const data = docSnap.data();
-      if (!data || typeof data.payloadJson !== 'string') return;
-      try {
-        const parsed = JSON.parse(data.payloadJson);
-        if (!parsed || typeof parsed !== 'object' || !parsed.id) return;
-        if (data.deleted === true || parsed.deleted === true) {
-          byId.set(String(parsed.id), { ...parsed, deleted: true });
-          return;
-        }
-        byId.set(String(parsed.id), parsed);
-      } catch {
-        // Ignore malformed shared set documents without affecting the teacher workspace.
-      }
-    });
-    const list = Array.from(byId.values());
-    cachedSharedLernstudioSets = list;
-    cachedSharedLernstudioSetsAtMs = Date.now();
-    return list;
-  })().finally(() => {
-    inFlightSharedSetsPromise = null;
-  });
-
-  return inFlightSharedSetsPromise;
+async function readSharedLernstudioSets(_options?: { forceRefresh?: boolean }): Promise<any[]> {
+  // Lernstudio sets are synchronized strictly via P2P. Zero Firestore reads.
+  return [];
 }
 
 function mergeSharedLernstudioSets(localSets: any[], sharedSets: any[]): any[] {
@@ -624,100 +585,14 @@ function mergeSharedLernstudioSets(localSets: any[], sharedSets: any[]): any[] {
   }
   for (const set of Array.isArray(sharedSets) ? sharedSets : []) {
     if (!set || !set.id || BUILTIN_LERNSTUDIO_MAP.has(set.id)) continue;
-    const id = String(set.id);
-    const local = byId.get(id);
-    const localTime = Number(local?.updatedAt) || Date.parse(local?.updatedAtIso || '') || 0;
-    const sharedTime = Number(set.updatedAt) || Date.parse(set.updatedAtIso || '') || 0;
-    const creatorName = set.createdByTeacherName?.trim() || local?.createdByTeacherName?.trim() || undefined;
-    const creatorUid = set.createdByUid?.trim() || local?.createdByUid?.trim() || undefined;
-    if (!local || sharedTime >= localTime) {
-      byId.set(id, {
-        ...set,
-        ...(creatorName ? { createdByTeacherName: creatorName } : {}),
-        ...(creatorUid ? { createdByUid: creatorUid } : {})
-      });
-    } else if (local && (creatorName || creatorUid)) {
-      byId.set(id, {
-        ...local,
-        ...(creatorName ? { createdByTeacherName: creatorName } : {}),
-        ...(creatorUid ? { createdByUid: creatorUid } : {})
-      });
-    }
+    byId.set(String(set.id), set);
   }
   return Array.from(byId.values()).filter((set) => !set.deleted);
 }
 
-async function writeSharedLernstudioSetChanges(changedSets: any[]): Promise<void> {
-  const unique = new Map<string, any>();
-  for (const set of Array.isArray(changedSets) ? changedSets : []) {
-    if (set && typeof set.id === 'string' && set.id.trim()) unique.set(set.id, set);
-  }
-  for (const [id, set] of unique) {
-    if (BUILTIN_LERNSTUDIO_MAP.has(id)) continue;
-    const target = doc(db, 'lernstudio_sets', id);
-    const localTime = Number(set.updatedAt) || Date.parse(set.updatedAtIso || '') || Date.now();
-    const deleted = set.deleted === true;
-
-    // Transactional read/compare/write prevents a slower device from overwriting a newer shared edit
-    // and guarantees createdByTeacherName / createdByUid remain permanently fixed on the set.
-    await executeSafeFirestoreWrite(() => runTransaction(db, async (transaction) => {
-      const existingSnap = await transaction.get(target);
-      let existingSet: any = null;
-      let existingData: any = null;
-      if (existingSnap.exists()) {
-        existingData = existingSnap.data();
-        try {
-          existingSet = existingData?.payloadJson ? JSON.parse(existingData.payloadJson) : null;
-        } catch {
-          existingSet = null;
-        }
-        const remoteTime = Number(existingSet?.updatedAt) || Date.parse(existingData?.updatedAtIso || '') || 0;
-        if (remoteTime > localTime) return;
-      }
-
-      const rawPayloadSet: any = { ...set };
-      delete rawPayloadSet.ownerUid;
-      delete rawPayloadSet.ownerEmail;
-      if (!rawPayloadSet.createdByTeacherName && existingSet?.createdByTeacherName) {
-        rawPayloadSet.createdByTeacherName = existingSet.createdByTeacherName;
-      }
-      if (!rawPayloadSet.createdByUid && existingSet?.createdByUid) {
-        rawPayloadSet.createdByUid = existingSet.createdByUid;
-      }
-      if (rawPayloadSet.grammarContent && typeof rawPayloadSet.grammarContent === 'object') {
-        const gc = { ...rawPayloadSet.grammarContent };
-        delete gc.rawImages;
-        if (Array.isArray(gc.pageImageRefs)) {
-          gc.pageImageRefs = gc.pageImageRefs.map((ref: any) => {
-            if (!ref || typeof ref !== 'object') return ref;
-            const { base64Data: _b64, dataUrl: _du, ...rest } = ref;
-            return rest;
-          });
-        }
-        rawPayloadSet.grammarContent = gc;
-      }
-      const payloadSet = rawPayloadSet;
-
-      const payload = JSON.stringify(payloadSet);
-      if (payload.length > 500000) {
-        throw new Error(`Lernstudio set "${id}" exceeds the shared Firestore document size limit.`);
-      }
-      if (existingData && existingData.payloadJson === payload && Boolean(existingData.deleted) === deleted) {
-        return;
-      }
-
-      const docData: any = {
-        id,
-        title: String(set.title || (deleted ? 'Deleted set' : 'Untitled set')).slice(0, 120),
-        payloadJson: payload,
-        updatedAtIso: new Date(localTime).toISOString(),
-        ...(typeof set.category === 'string' ? { category: set.category.slice(0, 45) } : {}),
-        ...(deleted ? { deleted: true } : {})
-      };
-      transaction.set(target, docData);
-    }));
-  }
-  invalidateSharedLernstudioSetsCache();
+async function writeSharedLernstudioSetChanges(_changedSets: any[]): Promise<void> {
+  // Lernstudio sets are synchronized strictly via P2P. Zero Firestore writes.
+  return;
 }
 
 function sanitizeHeavyInlineMedia(data: any): any {
@@ -1853,27 +1728,6 @@ export async function uploadWorkspaceToGoogleCloud(
     // Keep the shared Lernstudio library independent from each teacher's private workspace.
     // Only write when Lernstudio sets actually changed (or on initial baseline seed), and never allow
     // a shared-collection read/write error to block private lesson/workspace synchronization.
-    const changedLernstudioSets = Array.isArray(changedEntities.lernstudioSets)
-      ? changedEntities.lernstudioSets
-      : [];
-    const sharedSetChanges =
-      !hasBaselineSeeded || options?.forceFullBaseline
-        ? [
-            ...filterCustomOrModifiedLernstudioSets(parsed.lernstudioSets || []),
-            ...changedLernstudioSets.filter((s: any) => s?.deleted)
-          ]
-        : [
-            ...filterCustomOrModifiedLernstudioSets(changedLernstudioSets),
-            ...changedLernstudioSets.filter((s: any) => s?.deleted)
-          ];
-    if (sharedSetChanges.length > 0 && !isFirestoreReadQuotaExhausted()) {
-      try {
-        await writeSharedLernstudioSetChanges(sharedSetChanges);
-      } catch (sharedErr) {
-        console.warn('Non-fatal shared Lernstudio sync warning:', sharedErr);
-      }
-    }
-
     // If nothing changed at all since last sync, perform 0 network writes!
     if (hasBaselineSeeded && !options?.forceFullBaseline && totalChangedCount === 0) {
       setLastCloudSyncTime(nowIso);
@@ -2610,16 +2464,6 @@ export async function downloadWorkspaceFromGoogleCloud(options?: {
       }
     }
 
-    // Read the global Lernstudio library independently of this account's private workspace (cached 5 min TTL).
-    let sharedLernstudioSets: any[] = [];
-    if (!isFirestoreReadQuotaExhausted()) {
-      try {
-        sharedLernstudioSets = await readSharedLernstudioSets();
-      } catch {
-        sharedLernstudioSets = [];
-      }
-    }
-
     // Merge any newer chunks/deltas from fast relay server (excluding control docs)
     const relayDocs = await fetchChunksFromRelayServer(resolvedWorkspaceId);
     for (const rDoc of relayDocs) {
@@ -2630,7 +2474,7 @@ export async function downloadWorkspaceFromGoogleCloud(options?: {
       }
     }
 
-    if (rawDocsMap.size === 0 && sharedLernstudioSets.length === 0) {
+    if (rawDocsMap.size === 0) {
       return {
         hasRemoteData: false,
         backupJsonStr: null,
@@ -2663,7 +2507,7 @@ export async function downloadWorkspaceFromGoogleCloud(options?: {
       }
     });
 
-    if (docsByCategory.size === 0 && sharedLernstudioSets.length === 0) {
+    if (docsByCategory.size === 0) {
       return {
         hasRemoteData: false,
         backupJsonStr: null,
@@ -2677,9 +2521,7 @@ export async function downloadWorkspaceFromGoogleCloud(options?: {
       primaryId,
       maxUpdatedAtIso
     });
-    reassembled.lernstudioSets = mergeWithBuiltinLernstudioSets(
-      mergeSharedLernstudioSets(reassembled.lernstudioSets || [], sharedLernstudioSets)
-    );
+    reassembled.lernstudioSets = mergeWithBuiltinLernstudioSets(reassembled.lernstudioSets || []);
 
     // Attach downloaded revision tokens and workspaceId inside the snapshot envelope
     // so downstream import coordinators can acknowledge the exact revisions ONLY after durable import succeeds.

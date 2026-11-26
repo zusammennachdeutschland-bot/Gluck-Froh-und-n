@@ -77,6 +77,15 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
   const [autoFillHint, setAutoFillHint] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
 
+  const activeUid = auth?.currentUser?.uid?.trim() || null;
+  const isNonOwned = Boolean(
+    setToEdit &&
+    setToEdit.createdByUid &&
+    activeUid &&
+    setToEdit.createdByUid !== activeUid &&
+    !setToEdit.id.startsWith('curric_')
+  );
+
   const [items, setItems] = useState<LernstudioItem[]>(
     setToEdit?.items ||
       (initialKind === 'grammar'
@@ -312,18 +321,28 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
     else if (setKind === 'vocab' && hasAnyVerbs) finalKind = 'mixed';
     else if (setKind === 'vocab' && nextGrammarContent) finalKind = validItems.length > 0 ? 'mixed' : 'grammar';
 
+    const finalSetId = isNonOwned
+      ? `set_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+      : setToEdit?.id || `set_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const finalTitle = isNonOwned && !title.includes('(')
+      ? `${title.trim()} (${isRtl ? 'نسختي' : 'Copy'})`
+      : title.trim();
+    const finalOwnerUid = isNonOwned
+      ? activeUid || undefined
+      : setToEdit?.createdByUid || activeUid || undefined;
+
     const updatedSet: LernstudioSet = stripHeavyGrammarMediaForSync(
       normalizeLernstudioSet({
         ...(setToEdit ? setToEdit : {}),
-        id: setToEdit?.id || `set_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        title: title.trim(),
+        id: finalSetId,
+        title: finalTitle,
         topic: topic.trim() || grammarTopic.trim() || title.trim(),
         grade: grade.trim() || undefined,
         level,
         difficulty,
         assignedGroupId: assignedGroupId || undefined,
         ...(resolvedTeacherName ? { createdByTeacherName: resolvedTeacherName } : {}),
-        ...(setToEdit?.createdByUid ? { createdByUid: setToEdit.createdByUid } : {}),
+        ...(finalOwnerUid ? { createdByUid: finalOwnerUid } : {}),
         description: description.trim() || explanationAr.trim() || undefined,
         hasArticles: allAreVerbs ? false : hasAnyNounsWithArticles || setToEdit?.hasArticles,
         setKind: finalKind,
@@ -331,7 +350,7 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
         ...(derivedVerbIds.length > 0 ? { verbIds: derivedVerbIds } : {}),
         items: validItems,
         ...(nextGrammarContent ? { grammarContent: nextGrammarContent } : {}),
-        createdAt: setToEdit?.createdAt || new Date().toISOString(),
+        createdAt: isNonOwned ? new Date().toISOString() : setToEdit?.createdAt || new Date().toISOString(),
         updatedAt: Date.now()
       })
     );
@@ -375,6 +394,17 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+          {isNonOwned && (
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-bold flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>
+                {isRtl
+                  ? `هذه المجموعة مشتركة ومملوكة للمعلم (أ. ${setToEdit?.createdByTeacherName || 'زميل'}). سيتم حفظ تعديلاتك كنسخة جديدة باسمك دون تعديل الأصل.`
+                  : `This set is owned by another teacher. Saving will create your own editable copy without modifying the original.`}
+              </span>
+            </div>
+          )}
+
           {validationError && (
             <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-700 dark:text-red-300 text-xs font-bold flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />

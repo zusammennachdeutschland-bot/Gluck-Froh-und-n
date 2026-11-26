@@ -46,7 +46,6 @@ import {
   isHomeworkAutoClosedByDeadline,
   getHomeworkLastRefreshTimestamp,
   ArchivedAssignmentMeta,
-  publishCustomLernstudioSetOnce,
   isBuiltinCurriculumSetId
 } from '../homeworkStorageSync';
 import {
@@ -1053,11 +1052,6 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         createdAt: new Date().toISOString(),
         createdBy: 'Teacher'
       };
-
-      // If created from a custom Lernstudio set, publish once (content-hash deduplicated) so Vercel resolves sets safely
-      if (contentSource !== 'verb' && currentSet?.id && !isBuiltinCurriculumSetId(currentSet.id)) {
-        publishCustomLernstudioSetOnce(stripHeavyGrammarMediaForSync(currentSet), resolvedOwnerUid).catch(() => {});
-      }
 
       // Persist assignment directly to Firestore (with Vercel API fallback)
       const confirmRes = await saveAssignmentWithConfirmation(payload);
