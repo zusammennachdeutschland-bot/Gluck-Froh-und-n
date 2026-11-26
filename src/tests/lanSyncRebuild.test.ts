@@ -1,8 +1,5 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import fs from 'node:fs';
-import net from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
 
 (globalThis as any).__TEST_ENV__ = true;
@@ -27,29 +24,29 @@ if (typeof (globalThis as any).localStorage === 'undefined') {
 }
 
 import {
-  DEFAULT_LAN_SYNC_PORT,
+  CURRENT_SYNC_PROTOCOL_VERSION,
+  PAIRING_PIN_TTL_MS,
   PairedPeer,
-  SyncDeltaPayload,
   SyncStateMetadata,
   SyncableRecord
 } from '../types';
 import {
-  __setCustomLanTransportForTests,
-  discoverLanHosts,
-  getLastLanAttempts,
-  isValidIpv4OrHost
-} from '../services/sync/lanTransport';
+  __resetPeerNetworkForTests,
+  __setPeerConstructorForTests,
+  formatDevicePeerId,
+  formatPairingPinId,
+  getLastP2pAttempts,
+  peerNetwork
+} from '../services/sync/peerNetwork';
 import {
-  clearEphemeralLanVault,
-  isLegacyUnmigratedPeer,
-  revokeStoredLanCredentials,
-  sanitizeSyncStateForStorage
-} from '../services/sync/lanVault';
+  getLocalHostStatus,
+  startLocalServer,
+  stopLocalServer
+} from '../services/sync/localServer';
 import {
   exchangeDeltas,
   pairWithPeer,
-  sendHeartbeat,
-  testHostConnection
+  sendHeartbeat
 } from '../services/sync/syncClient';
 import {
   handleInboundExchange,
@@ -57,21 +54,226 @@ import {
   syncMissingPageImagesWithPeer,
   SyncDataSource
 } from '../services/sync/syncOrchestrator';
-import { migrateLegacyPeerRecords } from '../services/sync/syncMigration';
 import {
-  computePageImageChecksum,
-  getPageImageRecord,
-  savePageImageRecord,
-  splitPageImageIntoChunks
-} from '../shared/lernstudioPageImageStore';
+  isLegacyLanOnlyPeer,
+  migrateLegacyPeerRecords,
+  redactSyncStateForDiagnostics,
+  sanitizeSyncStateForStorage
+} from '../services/sync/syncMigration';
+import { connectivityEngine } from '../services/sync/connectivityEngine';
+import { getPageImageRecord } from '../shared/lernstudioPageImageStore';
 
-const require = createRequire(import.meta.url);
-const lanServerCjs = require('../../electron/lanSyncServer.cjs');
-const {
-  LanSyncHostController,
-  performPinnedLanRequest,
-  formatVerificationCode
-} = lanServerCjs;
+// --- In-memory PeerJS Broker & Duplex DataConnection Harness ---
+class MockDataConnection {
+  public peer: string;
+  public open = false;
+  public peerConnection: any;
+  private listeners = new Map<string, Set<(...args: any[]) => void>>();
+  public remote: MockDataConnection | null = null;
+
+  constructor(remotePeerId: string, iceCandidateType: string = 'srflx') {
+    this.peer = remotePeerId;
+    this.peerConnection = {
+      getStats: async () =>
+        new Map<string, any>([
+          ['pair_1', { type: 'candidate-pair', state: 'succeeded', remoteCandidateId: 'cand_1' }],
+          ['cand_1', { candidateType: iceCandidateType }]
+        ])
+    };
+  }
+
+  on(event: string, fn: (...args: any[]) => void) {
+    if (!this.listeners.has(event)) this.listeners.set(event, new Set());
+    this.listeners.get(event)!.add(fn);
+  }
+
+  emit(event: string, ...args: any[]) {
+    const set = this.listeners.get(event);
+    if (!set) return;
+    for (const fn of Array.from(set)) {
+      fn(...args);
+    }
+  }
+
+  send(data: any) {
+    if (!this.open || !this.remote || !this.remote.open) {
+      throw new Error('DataConnection is not open');
+    }
+    const copy = JSON.parse(JSON.stringify(data));
+    const target = this.remote;
+    setTimeout(() => {
+      if (target.open) {
+        target.emit('data', copy);
+      }
+    }, 1);
+  }
+
+  close() {
+    const wasOpen = this.open;
+    this.open = false;
+    if (wasOpen) {
+      this.emit('close');
+    }
+    if (this.remote && this.remote.open) {
+      this.remote.open = false;
+      this.remote.emit('close');
+    }
+  }
+}
+
+interface MockBrokerState {
+  online: boolean;
+  peers: Map<string, MockPeer>;
+}
+
+const broker: MockBrokerState = {
+  online: true,
+  peers: new Map()
+};
+
+class MockPeer {
+  public id: string;
+  public open = false;
+  public destroyed = false;
+  public disconnected = false;
+  private listeners = new Map<string, Set<(...args: any[]) => void>>();
+  private activeConns = new Set<MockDataConnection>();
+
+  constructor(id?: string) {
+    this.id = id || `anon_${Math.random().toString(36).slice(2, 9)}`;
+    setTimeout(() => {
+      if (this.destroyed) return;
+      if (!broker.online) {
+        this.emit('error', { type: 'network', message: 'Signalling server unreachable' });
+        return;
+      }
+      if (broker.peers.has(this.id)) {
+        this.emit('error', { type: 'unavailable-id', message: `ID "${this.id}" is taken.` });
+        return;
+      }
+      this.open = true;
+      broker.peers.set(this.id, this);
+      this.emit('open', this.id);
+    }, 2);
+  }
+
+  on(event: string, fn: (...args: any[]) => void) {
+    if (!this.listeners.has(event)) this.listeners.set(event, new Set());
+    this.listeners.get(event)!.add(fn);
+  }
+
+  once(event: string, fn: (...args: any[]) => void) {
+    const wrapper = (...args: any[]) => {
+      this.listeners.get(event)?.delete(wrapper);
+      fn(...args);
+    };
+    this.on(event, wrapper);
+  }
+
+  emit(event: string, ...args: any[]) {
+    const set = this.listeners.get(event);
+    if (!set) return;
+    for (const fn of Array.from(set)) {
+      fn(...args);
+    }
+  }
+
+  connect(targetId: string): any {
+    const clientConn = new MockDataConnection(targetId, 'srflx');
+    this.activeConns.add(clientConn);
+
+    setTimeout(() => {
+      if (this.destroyed) return;
+      if (!broker.online) {
+        this.emit('error', { type: 'network', message: 'Signalling server unreachable' });
+        return;
+      }
+      const targetPeer = broker.peers.get(targetId);
+      if (!targetPeer || targetPeer.destroyed || !targetPeer.open) {
+        this.emit('error', { type: 'peer-unavailable', message: `Could not connect to peer ${targetId}` });
+        return;
+      }
+
+      const serverConn = new MockDataConnection(this.id, 'srflx');
+      clientConn.remote = serverConn;
+      serverConn.remote = clientConn;
+      targetPeer.activeConns.add(serverConn);
+
+      targetPeer.emit('connection', serverConn);
+      setTimeout(() => {
+        if (this.destroyed || targetPeer.destroyed) return;
+        clientConn.open = true;
+        serverConn.open = true;
+        serverConn.emit('open');
+        clientConn.emit('open');
+      }, 2);
+    }, 2);
+
+    return clientConn;
+  }
+
+  reconnect() {
+    if (this.destroyed || !broker.online) return;
+    this.disconnected = false;
+    this.open = true;
+    broker.peers.set(this.id, this);
+    this.emit('open', this.id);
+  }
+
+  destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.open = false;
+    if (broker.peers.get(this.id) === this) {
+      broker.peers.delete(this.id);
+    }
+    for (const c of Array.from(this.activeConns)) {
+      c.close();
+    }
+    this.activeConns.clear();
+    this.emit('close');
+  }
+}
+
+function sendRemoteRpc(
+  fromPeerId: string,
+  targetPeerId: string,
+  route: string,
+  data: any
+): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const client = new MockPeer(fromPeerId);
+    const reqId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    let settled = false;
+    const finish = (err: any, val?: any) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      client.destroy();
+      if (err) reject(err);
+      else resolve(val);
+    };
+    const timer = setTimeout(() => finish(new Error('Remote RPC timeout')), 4000);
+
+    client.on('error', (err: any) => {
+      finish(err);
+    });
+    client.on('open', () => {
+      const conn = client.connect(targetPeerId);
+      conn.on('open', () => {
+        conn.send({ type: 'request', id: reqId, route, data });
+      });
+      conn.on('data', (msg: any) => {
+        if (msg?.id !== reqId) return;
+        if (msg.type === 'error') {
+          finish(Object.assign(new Error(msg.error), { errorCode: msg.errorCode }));
+        } else if (msg.type === 'response') {
+          finish(null, msg.data);
+        }
+      });
+    });
+  });
+}
 
 function createInMemorySyncDataSource(
   deviceId: string,
@@ -89,8 +291,7 @@ function createInMemorySyncDataSource(
     localDeviceName: deviceName,
     localRevisionCounter: 1,
     peerWatermarkTable: {},
-    protocolVersion: 2,
-    hostPort: DEFAULT_LAN_SYNC_PORT,
+    protocolVersion: CURRENT_SYNC_PROTOCOL_VERSION,
     pairedPeers: JSON.parse(JSON.stringify(initialPeers))
   };
 
@@ -106,31 +307,34 @@ function createInMemorySyncDataSource(
   };
 }
 
-async function runLanSyncRebuildTests() {
-  const tmpDirA = fs.mkdtempSync(path.join(os.tmpdir(), 'glueck-lan-host-a-'));
-  const tmpDirB = fs.mkdtempSync(path.join(os.tmpdir(), 'glueck-lan-host-b-'));
-
-  let host: any = null;
-  let hostB: any = null;
-  let occupantServer: net.Server | null = null;
-
+async function runP2pRebuildRegressionTests() {
+  const repoRoot = process.cwd();
   try {
-    console.log('--- Running LAN Sync Complete Rebuild Test Suite ---');
+    console.log('--- Running P2P WebRTC Architecture & Migration Verification Suite ---');
+    broker.online = true;
+    broker.peers.clear();
+    connectivityEngine.destroy();
+    __resetPeerNetworkForTests({ brokerConnectTimeoutMs: 500, unavailableIdRetryDelaysMs: [10, 10, 10] });
+    __setPeerConstructorForTests(MockPeer as any);
 
-    // 1. IP/Host Input Validation Guards (PIN must NEVER pass as IP)
-    assert.equal(isValidIpv4OrHost('192.168.1.25'), true);
-    assert.equal(isValidIpv4OrHost('482193'), false, '6-digit PIN must never be accepted as IP');
-    assert.equal(isValidIpv4OrHost('P2P (WebRTC)'), false, 'Legacy P2P placeholder must be rejected');
-    assert.equal(isValidIpv4OrHost(''), false);
-    console.log('[PASS] Host/IP validator rejects 6-digit PINs and WebRTC placeholders');
+    // 1. Verify Legacy LAN Stack Files Are Removed
+    const removedPaths = [
+      'electron/lanSyncServer.cjs',
+      'android/app/src/main/java/com/glueck/app/LanSyncPlugin.java',
+      'src/services/sync/lanTransport.ts',
+      'src/services/sync/lanVault.ts'
+    ];
+    for (const relPath of removedPaths) {
+      assert.equal(
+        fs.existsSync(path.join(repoRoot, relPath)),
+        false,
+        `Legacy LAN file must be removed: ${relPath}`
+      );
+    }
+    console.log('[PASS] Legacy LAN sync server, Android native LAN plugin, and TLS vault files are removed');
 
-    // 2. Real HTTPS LAN Host Startup, Enumerated IPv4, Cert Generation, Duplicate Start Guard
-    host = new LanSyncHostController({
-      storageDir: tmpDirA,
-      useTls: true
-    });
-
-    const hostDataSource = createInMemorySyncDataSource('pc_host_01', 'Glück Desktop PC', {
+    // 2. Host Startup (startLocalServer), Deterministic Peer IDs, PIN Persistence Across Duplicate Starts
+    const pcDataSource = createInMemorySyncDataSource('pc_host_01', 'Glück Desktop PC', {
       students: [
         {
           id: 'stu_pc_1',
@@ -144,263 +348,242 @@ async function runLanSyncRebuildTests() {
       ]
     });
 
-    host.setRpcHandlers({
-      onExchangeRequest: async (inboundDelta: SyncDeltaPayload) => {
-        return handleInboundExchange(inboundDelta, hostDataSource);
-      },
-      onPageImageManifest: async (req: any) => {
-        const requested = Array.isArray(req?.requestedImageIds) ? req.requestedImageIds : [];
-        const existing = new Set(Array.isArray(req?.existingImageIds) ? req.existingImageIds : []);
-        const availableImages = [];
-        for (const id of requested) {
-          if (existing.has(id)) continue;
-          const rec = await getPageImageRecord(id);
-          if (!rec) continue;
-          const chunks = splitPageImageIntoChunks(rec, 1024);
-          availableImages.push({
-            id: rec.id,
-            fileName: rec.fileName,
-            mimeType: rec.mimeType,
-            sizeBytes: rec.sizeBytes,
-            createdAt: rec.createdAt,
-            checksum: rec.checksum || computePageImageChecksum(rec.base64Data),
-            totalChunks: chunks.length
-          });
-        }
-        return { availableImages };
-      },
-      onPageImageChunk: async (req: any) => {
-        const rec = await getPageImageRecord(String(req?.imageId || ''));
-        if (!rec) throw new Error('Image not found');
-        const chunks = splitPageImageIntoChunks(rec, req?.chunkSizeChars || 1024);
-        return chunks[Number(req?.chunkIndex || 0)];
-      }
-    });
+    const hostStatus1 = await startLocalServer(
+      'Glück Desktop PC',
+      'pc_host_01',
+      pcDataSource.getSyncState(),
+      pcDataSource
+    );
 
-    const startedStatus = await host.start({
-      localDeviceId: 'pc_host_01',
-      localDeviceName: 'Glück Desktop PC',
-      port: 0, // Ephemeral free port for test isolation
-      enableDiscovery: false
-    });
+    assert.equal(hostStatus1.brokerConnected, true);
+    assert.equal(hostStatus1.listening, true);
+    assert.equal(hostStatus1.peerId, formatDevicePeerId('pc_host_01'));
+    assert.match(hostStatus1.pin, /^\d{6}$/);
+    assert.notEqual(hostStatus1.pin, '842915', 'Never issue hardcoded PIN 842915');
+    assert.ok(hostStatus1.pinExpiresAt >= Date.now() + PAIRING_PIN_TTL_MS - 5000);
 
-    assert.equal(startedStatus.listening, true, 'Host server must genuinely bind and listen');
-    assert.ok(startedStatus.port > 0, 'Ephemeral listening port must be resolved (> 0)');
-    assert.ok(startedStatus.certFingerprintSha256 && startedStatus.certFingerprintSha256.length === 64, 'ECDSA P-256 cert fingerprint required');
-    assert.ok(startedStatus.pairingCode && /^\d{6}$/.test(startedStatus.pairingCode), 'Initial 6-digit pairing code required');
-    assert.equal(startedStatus.verificationCode, formatVerificationCode(startedStatus.certFingerprintSha256));
+    // Duplicate startLocalServer call must keep exact same PIN and expiry
+    const hostStatus2 = await startLocalServer(
+      'Glück Desktop PC',
+      'pc_host_01',
+      pcDataSource.getSyncState(),
+      pcDataSource
+    );
+    assert.equal(hostStatus2.pin, hostStatus1.pin, 'Repeated startLocalServer must NOT regenerate active PIN');
+    assert.equal(hostStatus2.pinExpiresAt, hostStatus1.pinExpiresAt);
+    console.log('[PASS] P2P Host starts with deterministic Peer ID, persistent 10-min PIN, and no duplicate PIN rotation');
 
-    // Duplicate start guard: calling start on same port must NOT throw EADDRINUSE
-    const secondCallStatus = await host.start({
-      localDeviceId: 'pc_host_01',
-      localDeviceName: 'Glück Desktop PC',
-      port: startedStatus.port,
-      enableDiscovery: false
-    });
-    assert.equal(secondCallStatus.listening, true);
-    assert.equal(secondCallStatus.port, startedStatus.port);
-    console.log('[PASS] Real HTTPS LAN Host starts on valid port, generates pinned ECDSA cert, and avoids duplicate instance crash');
+    // 3. Health Ping & Unauthenticated Route Blocking
+    const pingRes = await sendRemoteRpc('probe_client', hostStatus1.peerId, '/api/sync/ping', {});
+    assert.equal(pingRes.ok, true);
+    assert.equal(pingRes.deviceId, 'pc_host_01');
+    assert.equal((pingRes as any).pin, undefined, 'Ping must never expose pairing PIN');
 
-    // 3. Port In Use (EADDRINUSE -> PORT_IN_USE) error mapping
-    occupantServer = net.createServer();
-    const occupiedPort: number = await new Promise((resolve, reject) => {
-      occupantServer!.once('error', reject);
-      occupantServer!.listen(0, '0.0.0.0', () => {
-        const addr = occupantServer!.address();
-        resolve(typeof addr === 'object' && addr ? addr.port : 0);
-      });
-    });
-
-    hostB = new LanSyncHostController({ storageDir: tmpDirB, useTls: true });
-    let portErr: any = null;
+    let unauthHbErr: any = null;
     try {
-      await hostB.start({
-        localDeviceId: 'pc_host_02',
-        localDeviceName: 'Conflict Host',
-        port: occupiedPort,
-        enableDiscovery: false
+      await sendRemoteRpc('rogue_client', hostStatus1.peerId, '/api/sync/heartbeat', {
+        deviceId: 'rogue_client',
+        token: 'fake_tok'
       });
     } catch (e) {
-      portErr = e;
+      unauthHbErr = e;
     }
-    assert.ok(portErr, 'Binding an already occupied port must fail cleanly');
-    assert.equal(portErr.errorCode, 'PORT_IN_USE');
-    assert.equal(hostB.getStatus().listening, false);
-    console.log('[PASS] Host reports clear PORT_IN_USE error instead of faking readiness');
+    assert.equal(unauthHbErr?.errorCode, 'UNAUTHORIZED_DEVICE');
 
-    // Wire TypeScript client transport directly to real Node performPinnedLanRequest
-    __setCustomLanTransportForTests({
-      request: async (params) => {
-        return performPinnedLanRequest({
-          host: params.host,
-          port: params.port,
-          method: params.method,
-          endpointPath: params.path,
-          body: params.body,
-          authToken: params.authToken,
-          expectedFingerprintSha256: params.expectedFingerprint,
-          useTls: true,
-          timeoutMs: params.timeoutMs
-        });
+    let unauthExchangeErr: any = null;
+    try {
+      await sendRemoteRpc('rogue_client', hostStatus1.peerId, '/api/sync/exchange', {
+        delta: { senderDeviceId: 'rogue_client', senderDeviceName: 'Rogue', peerWatermarks: {}, records: {} },
+        token: 'fake_tok'
+      });
+    } catch (e) {
+      unauthExchangeErr = e;
+    }
+    assert.equal(unauthExchangeErr?.errorCode, 'UNAUTHORIZED_DEVICE');
+    console.log('[PASS] /api/sync/ping succeeds without leaking PIN and unauthenticated RPCs fail with UNAUTHORIZED_DEVICE');
+
+    // 4. Pairing Security: Expired PIN -> PIN_EXPIRED, Wrong PIN -> PIN_INVALID, Protocol Mismatch, Valid Pair + Single-Use Rotation
+    const wrongPin = hostStatus1.pin === '000000' ? '111111' : '000000';
+    let wrongPinErr: any = null;
+    try {
+      await sendRemoteRpc('android_probe', hostStatus1.peerId, '/api/sync/pair', {
+        deviceId: 'android_01',
+        deviceName: 'Pixel Android',
+        pairingPin: wrongPin
+      });
+    } catch (e) {
+      wrongPinErr = e;
+    }
+    assert.equal(wrongPinErr?.errorCode, 'PIN_INVALID');
+
+    let protoMismatchErr: any = null;
+    try {
+      await sendRemoteRpc('android_future', hostStatus1.peerId, '/api/sync/pair', {
+        deviceId: 'android_future',
+        deviceName: 'Future App',
+        pairingPin: hostStatus1.pin,
+        header: { protocolVersion: 99, minSupportedVersion: 99, appVersion: '9.9.9', capabilities: [] }
+      });
+    } catch (e) {
+      protoMismatchErr = e;
+    }
+    assert.equal(protoMismatchErr?.errorCode, 'PROTOCOL_VERSION_MISMATCH');
+
+    // Test PIN_EXPIRED
+    const savedPin = hostStatus1.pin;
+    peerNetwork.currentPairingPinExpiresAt = Date.now() - 1000;
+    peerNetwork.lastIssuedPin = savedPin;
+    peerNetwork.lastIssuedPinExpiresAt = Date.now() - 1000;
+    let expiredErr: any = null;
+    try {
+      await sendRemoteRpc('android_probe', hostStatus1.peerId, '/api/sync/pair', {
+        deviceId: 'android_01',
+        deviceName: 'Pixel Android',
+        pairingPin: savedPin
+      });
+    } catch (e) {
+      expiredErr = e;
+    }
+    assert.equal(expiredErr?.errorCode, 'PIN_EXPIRED');
+
+    // Restore expiry for valid pairing
+    const validRes = await startLocalServer(
+      'Glück Desktop PC',
+      'pc_host_01',
+      {
+        ...pcDataSource.getSyncState(),
+        pairingPin: savedPin,
+        pairingPinExpiresAt: Date.now() + 600_000
       },
-      discoverHosts: async () => [
-        {
-          deviceId: startedStatus.deviceId,
-          deviceName: startedStatus.deviceName,
-          primaryIp: '127.0.0.1',
-          addresses: ['127.0.0.1'],
-          port: startedStatus.port,
-          protocolVersion: 2,
-          tlsEnabled: true,
-          certFingerprintSha256: startedStatus.certFingerprintSha256,
-          verificationCode: startedStatus.verificationCode,
-          pairingActive: true,
-          discoverySource: 'udp'
+      pcDataSource
+    );
+    const activePin = validRes.pin;
+
+    const pairResponse = await sendRemoteRpc('android_01_rpc', hostStatus1.peerId, '/api/sync/pair', {
+      deviceId: 'android_01',
+      deviceName: 'Pixel Android',
+      pairingPin: activePin
+    });
+    assert.equal(pairResponse.ok, true);
+    assert.equal(pairResponse.deviceId, 'pc_host_01');
+    assert.ok(pairResponse.authToken && pairResponse.authToken.startsWith('glk_'));
+
+    // Host must have immediately rotated away from used PIN -> reusing activePin fails!
+    const postPairHostStatus = getLocalHostStatus();
+    assert.notEqual(postPairHostStatus.pin, activePin, 'Single-use PIN must rotate after pairing persists');
+
+    let reuseErr: any = null;
+    try {
+      await sendRemoteRpc('attacker', hostStatus1.peerId, '/api/sync/pair', {
+        deviceId: 'android_attacker',
+        deviceName: 'Attacker',
+        pairingPin: activePin
+      });
+    } catch (e) {
+      reuseErr = e;
+    }
+    assert.equal(reuseErr?.errorCode, 'PIN_INVALID');
+    console.log('[PASS] Pairing validates PIN_EXPIRED vs PIN_INVALID, checks protocol, and rotates single-use PIN');
+
+    // 5. Bidirectional Delta Sync & Page Image Chunk Sync via P2P WebRTC
+    const remoteHostPeer: PairedPeer = {
+      deviceId: 'pc_host_01',
+      deviceName: 'Glück Desktop PC',
+      lastKnownIp: 'P2P (WebRTC)',
+      port: 0,
+      pairingToken: pairResponse.authToken,
+      hasStoredAuthToken: true,
+      requiresRePairing: false,
+      lastSyncedTimestamp: Date.now(),
+      isOnline: true,
+      protocolVersion: CURRENT_SYNC_PROTOCOL_VERSION
+    };
+
+    const androidPeerId = formatDevicePeerId('android_01');
+    const pcHostPairedEntry = pcDataSource
+      .getSyncState()
+      .pairedPeers?.find((p) => p.deviceId === 'android_01');
+    assert.ok(pcHostPairedEntry);
+    assert.equal(pcHostPairedEntry!.lastKnownIp, 'P2P (WebRTC)');
+    assert.equal(pcHostPairedEntry!.port, 0);
+
+    // Switch local peerNetwork identity to android_01 while keeping mock remote handler for pc_host_01
+    stopLocalServer();
+    connectivityEngine.destroy();
+    __resetPeerNetworkForTests({ brokerConnectTimeoutMs: 500, unavailableIdRetryDelaysMs: [10, 10, 10] });
+
+    // Register remote PC host responder on broker
+    const remotePcPeer = new MockPeer(formatDevicePeerId('pc_host_01'));
+    await new Promise<void>((resolve) => remotePcPeer.on('open', () => resolve()));
+    let simulateStorageFailure = false;
+    let hostRevokedAndroid = false;
+
+    remotePcPeer.on('connection', (conn: any) => {
+      conn.on('data', async (payload: any) => {
+        if (payload?.type !== 'request') return;
+        try {
+          if (hostRevokedAndroid) {
+            throw Object.assign(new Error('Device revoked'), { errorCode: 'UNAUTHORIZED_DEVICE' });
+          }
+          if (payload.route === '/api/sync/heartbeat') {
+            conn.send({ type: 'response', id: payload.id, data: { ok: true, deviceId: 'pc_host_01' } });
+          } else if (payload.route === '/api/sync/exchange') {
+            if (simulateStorageFailure) {
+              throw Object.assign(new Error('Simulated IndexedDB write failure'), { errorCode: 'STORAGE_SAVE_FAILED' });
+            }
+            const outDelta = await handleInboundExchange(payload.data.delta, pcDataSource);
+            conn.send({ type: 'response', id: payload.id, data: { ok: true, delta: outDelta } });
+          } else if (payload.route === '/api/sync/page-images/manifest') {
+            const { computePageImageChecksum } = await import('../shared/lernstudioPageImageStore');
+            const remoteImgBase64 = 'data:image/jpeg;base64,' + 'R'.repeat(2600);
+            conn.send({
+              type: 'response',
+              id: payload.id,
+              data: {
+                availableImages: [
+                  {
+                    id: 'page_img_remote_only',
+                    fileName: 'remote_page.jpg',
+                    mimeType: 'image/jpeg',
+                    sizeBytes: remoteImgBase64.length,
+                    createdAt: Date.now(),
+                    checksum: computePageImageChecksum(remoteImgBase64),
+                    totalChunks: 3
+                  }
+                ]
+              }
+            });
+          } else if (payload.route === '/api/sync/page-images/chunk') {
+            const { computePageImageChecksum, splitPageImageIntoChunks } = await import('../shared/lernstudioPageImageStore');
+            const remoteImgBase64 = 'data:image/jpeg;base64,' + 'R'.repeat(2600);
+            const chunks = splitPageImageIntoChunks(
+              {
+                id: 'page_img_remote_only',
+                fileName: 'remote_page.jpg',
+                mimeType: 'image/jpeg',
+                sizeBytes: remoteImgBase64.length,
+                base64Data: remoteImgBase64,
+                checksum: computePageImageChecksum(remoteImgBase64),
+                createdAt: Date.now()
+              },
+              1024
+            );
+            conn.send({
+              type: 'response',
+              id: payload.id,
+              data: { chunk: chunks[Number(payload.data?.chunkIndex || 0)] }
+            });
+          }
+        } catch (err: any) {
+          conn.send({
+            type: 'error',
+            id: payload.id,
+            errorCode: err?.errorCode || 'STORAGE_SAVE_FAILED',
+            error: err?.message || 'Remote error'
+          });
         }
-      ],
-      getNetworkStatus: async () => ({
-        wifiConnected: true,
-        lanConnected: true,
-        hasInternet: false, // Proves zero internet dependency!
-        localIpv4Addresses: ['127.0.0.1'],
-        platform: 'android'
-      })
+      });
     });
-
-    // 4. Health check never leaks pairing code; Connection test succeeds offline (no internet)
-    const healthProbe = await testHostConnection('127.0.0.1', startedStatus.port);
-    assert.equal(healthProbe.ok, true);
-    assert.equal(healthProbe.deviceId, 'pc_host_01');
-    assert.equal(healthProbe.tlsEnabled, true);
-    assert.equal(healthProbe.certFingerprintSha256, startedStatus.certFingerprintSha256);
-    assert.equal((healthProbe as any).pairingCode, undefined, 'Health check must NEVER expose active pairing code');
-
-    const discoveryRes = await discoverLanHosts(500);
-    assert.equal(discoveryRes.wifiConnected, true);
-    assert.equal(discoveryRes.hosts.length, 1);
-    assert.equal(discoveryRes.hosts[0].deviceName, 'Glück Desktop PC');
-    console.log('[PASS] Offline Wi-Fi discovery & /api/sync/health check succeed without leaking PIN');
-
-    // 5. Certificate Pinning Mismatch Protection (MITM / Wrong Cert)
-    const badPinProbe = await testHostConnection('127.0.0.1', startedStatus.port, 'f'.repeat(64));
-    assert.equal(badPinProbe.ok, false);
-    assert.equal(badPinProbe.errorCode, 'CERTIFICATE_MISMATCH');
-    console.log('[PASS] Pinned TLS verification rejects mismatched server certificate (CERTIFICATE_MISMATCH)');
-
-    // 6. Unauthenticated endpoints blocked (401 UNAUTHORIZED_DEVICE)
-    const unauthStatus = await performPinnedLanRequest({
-      host: '127.0.0.1',
-      port: startedStatus.port,
-      method: 'GET',
-      endpointPath: '/api/sync/status',
-      useTls: true
-    });
-    assert.equal(unauthStatus.ok, false);
-    assert.equal(unauthStatus.httpStatus, 401);
-    assert.equal(unauthStatus.errorCode, 'UNAUTHORIZED_DEVICE');
-
-    const unauthExchange = await performPinnedLanRequest({
-      host: '127.0.0.1',
-      port: startedStatus.port,
-      method: 'POST',
-      endpointPath: '/api/sync/exchange',
-      body: { delta: { senderDeviceId: 'rogue', records: {} } },
-      useTls: true
-    });
-    assert.equal(unauthExchange.ok, false);
-    assert.equal(unauthExchange.httpStatus, 401);
-    assert.equal(unauthExchange.errorCode, 'UNAUTHORIZED_DEVICE');
-    console.log('[PASS] Unauthenticated /status and /exchange endpoints strictly rejected with UNAUTHORIZED_DEVICE');
-
-    // 7. Pairing Security: Expired code, Wrong codes + 5-attempt Lockout, Protocol Version Mismatch
-    host.generatePairingCode();
-    host.pairingExpiresAt = Date.now() - 1000; // Simulate expiration
-    const expiredPair = await pairWithPeer(
-      '127.0.0.1',
-      startedStatus.port,
-      host.activePairingPin || '000000',
-      { deviceId: 'android_01', deviceName: 'Galaxy Phone' },
-      startedStatus.certFingerprintSha256
-    );
-    assert.equal(expiredPair.ok, false);
-    assert.equal(expiredPair.errorCode, 'PAIRING_CODE_EXPIRED');
-
-    // Generate valid fresh code & test 5 bad attempts -> PAIRING_LOCKED_OUT
-    const freshPinInfo = host.generatePairingCode(120_000);
-    const wrongCode = freshPinInfo.pairingCode === '000000' ? '111111' : '000000';
-    for (let attempt = 1; attempt <= 4; attempt++) {
-      const badRes = await pairWithPeer(
-        '127.0.0.1',
-        startedStatus.port,
-        wrongCode,
-        { deviceId: 'android_01', deviceName: 'Galaxy Phone' },
-        startedStatus.certFingerprintSha256
-      );
-      assert.equal(badRes.ok, false);
-      assert.equal(badRes.errorCode, 'PAIRING_CODE_INVALID');
-    }
-    const fifthAttempt = await pairWithPeer(
-      '127.0.0.1',
-      startedStatus.port,
-      wrongCode,
-      { deviceId: 'android_01', deviceName: 'Galaxy Phone' },
-      startedStatus.certFingerprintSha256
-    );
-    assert.equal(fifthAttempt.ok, false);
-    assert.equal(fifthAttempt.errorCode, 'PAIRING_LOCKED_OUT');
-
-    // Reset lockout for protocol mismatch + valid pairing test
-    host.lockoutUntil = 0;
-    host.failedPairingAttempts = 0;
-    const validPin = host.generatePairingCode(120_000).pairingCode;
-
-    // Protocol version mismatch direct request
-    const protoMismatchRes = await performPinnedLanRequest({
-      host: '127.0.0.1',
-      port: startedStatus.port,
-      method: 'POST',
-      endpointPath: '/api/sync/pair',
-      body: {
-        pairingCode: validPin,
-        clientDeviceId: 'android_future',
-        header: { protocolVersion: 99, minSupportedVersion: 99 }
-      },
-      useTls: true
-    });
-    assert.equal(protoMismatchRes.ok, false);
-    assert.equal(protoMismatchRes.httpStatus, 426);
-    assert.equal(protoMismatchRes.errorCode, 'PROTOCOL_VERSION_MISMATCH');
-
-    // Valid Pairing Succeeds
-    const pairOk = await pairWithPeer(
-      '127.0.0.1',
-      startedStatus.port,
-      validPin,
-      { deviceId: 'android_01', deviceName: 'Pixel Android' },
-      startedStatus.certFingerprintSha256
-    );
-    assert.equal(pairOk.ok, true, 'Valid 6-digit code must succeed');
-    assert.ok(pairOk.peer);
-    assert.equal(pairOk.peer!.deviceId, 'pc_host_01');
-    assert.equal(pairOk.peer!.port, startedStatus.port);
-    assert.equal(pairOk.peer!.hasStoredAuthToken, true);
-    assert.equal((pairOk.peer as any).pairingToken, undefined, 'Peer metadata must never store raw token in localStorage shape');
-
-    // Single-use guarantee: reusing same pairing code must FAIL
-    const reuseRes = await pairWithPeer(
-      '127.0.0.1',
-      startedStatus.port,
-      validPin,
-      { deviceId: 'android_attacker', deviceName: 'Attacker' },
-      startedStatus.certFingerprintSha256
-    );
-    assert.equal(reuseRes.ok, false);
-    assert.equal(reuseRes.errorCode, 'PAIRING_CODE_INVALID');
-    console.log('[PASS] Pairing expiry, 5-attempt lockout, protocol check, single-use code, and secure token isolation verified');
-
-    // 8. Authenticated Heartbeat & Bidirectional Delta Sync over Real LAN HTTPS
-    const hb = await sendHeartbeat(pairOk.peer!);
-    assert.equal(hb.ok, true);
 
     const androidDataSource = createInMemorySyncDataSource(
       'android_01',
@@ -418,159 +601,157 @@ async function runLanSyncRebuildTests() {
           } as any
         ]
       },
-      [pairOk.peer!]
+      [remoteHostPeer]
     );
 
-    const cycleRes = await runSyncCycle('pc_host_01', androidDataSource, 'Manual Sync');
-    assert.equal(cycleRes.success, true, 'Full LAN delta exchange via runSyncCycle must succeed');
-    const androidStudents = androidDataSource.getLocalData()['students'] || [];
-    const pcStudents = hostDataSource.getLocalData()['students'] || [];
-    assert.ok(androidStudents.some((s: any) => s.id === 'stu_pc_1'), 'Android must receive PC student');
-    assert.ok(pcStudents.some((s: any) => s.id === 'stu_android_1'), 'PC Host must receive Android student');
-    console.log('[PASS] Authenticated bidirectional LAN delta sync merged students between PC Host and Android Client');
+    const androidHost = await startLocalServer('Pixel Android', 'android_01', androidDataSource.getSyncState(), androidDataSource);
+    assert.equal(androidHost.peerId, androidPeerId);
 
-    // 9. Server-Side Persistence Failure returns STORAGE_SAVE_FAILED (HTTP 500) without false client success
-    const origExchangeHandler = host.rpcHandlers.onExchangeRequest;
-    host.rpcHandlers.onExchangeRequest = async () => {
-      throw Object.assign(new Error('Simulated IndexedDB write error on PC'), { errorCode: 'STORAGE_SAVE_FAILED' });
-    };
-    const failedCommitExchange = await exchangeDeltas(pairOk.peer!, {
+    const hbRes = await sendHeartbeat(remoteHostPeer);
+    assert.equal(hbRes.ok, true);
+    assert.equal(peerNetwork.lastIceCandidateType, 'srflx');
+
+    const cycleRes = await runSyncCycle('pc_host_01', androidDataSource, 'Manual Sync');
+    assert.equal(cycleRes.success, true);
+    assert.ok(androidDataSource.getLocalData()['students']?.some((s) => s.id === 'stu_pc_1'));
+    assert.ok(pcDataSource.getLocalData()['students']?.some((s) => s.id === 'stu_android_1'));
+    console.log('[PASS] Bidirectional P2P WebRTC delta sync exchanged records and captured srflx ICE path');
+
+    // 6. STORAGE_SAVE_FAILED Propagation
+    simulateStorageFailure = true;
+    const failedExchange = await exchangeDeltas(remoteHostPeer, {
       senderDeviceId: 'android_01',
       senderDeviceName: 'Pixel Android',
       peerWatermarks: {},
       records: {}
     });
-    assert.equal(failedCommitExchange.ok, false);
-    assert.equal(failedCommitExchange.errorCode, 'STORAGE_SAVE_FAILED');
-    host.rpcHandlers.onExchangeRequest = origExchangeHandler;
-    console.log('[PASS] Host storage failure cleanly propagates STORAGE_SAVE_FAILED without false sync success');
+    assert.equal(failedExchange.ok, false);
+    assert.equal(failedExchange.errorCode, 'STORAGE_SAVE_FAILED');
+    simulateStorageFailure = false;
+    console.log('[PASS] Remote STORAGE_SAVE_FAILED propagates cleanly without false success');
 
-    // 10. Authenticated Chunks Transfer for Lernstudio Textbook Page Images
-    const fakeBase64 = 'data:image/jpeg;base64,' + 'A'.repeat(2500);
-    await savePageImageRecord({
-      id: 'page_img_lan_test',
-      fileName: 'seite1.jpg',
-      mimeType: 'image/jpeg',
-      sizeBytes: fakeBase64.length,
-      base64Data: fakeBase64,
-      createdAt: Date.now()
-    });
-    // Temporarily wire manifest/chunk test by pointing android local data reference to missing page image:
+    // 7. Page Images Chunk Transfer Verification (multi-chunk reassembly over P2P)
     const imgSyncDataSource = createInMemorySyncDataSource(
-      'android_02',
-      'Tablet Client',
+      'android_01',
+      'Pixel Android',
       {
         lernstudioSets: [
-          {
-            id: 'set_1',
-            grammarContent: {
-              pageImageRefs: [{ id: 'page_img_lan_test' }]
-            }
-          } as any
+          { id: 'set_1', grammarContent: { pageImageRefs: [{ id: 'page_img_remote_only' }] } } as any
         ]
       },
-      [pairOk.peer!]
+      [remoteHostPeer]
     );
-    // Clear local image cache only by passing custom transport reading from host LAN endpoints?
-    // Verify live HTTP endpoints directly via exchange helper:
-    const manifestCall = await performPinnedLanRequest({
-      host: '127.0.0.1',
-      port: startedStatus.port,
-      method: 'POST',
-      endpointPath: '/api/sync/page-images/manifest',
-      body: { requestedImageIds: ['page_img_lan_test'], existingImageIds: [] },
-      authToken: (await import('../services/sync/lanVault')).getEphemeralLanCredential('pc_host_01')?.authToken,
-      expectedFingerprintSha256: startedStatus.certFingerprintSha256,
-      useTls: true
-    });
-    assert.equal(manifestCall.ok, true);
-    assert.equal(manifestCall.data.availableImages.length, 1);
-    assert.ok(manifestCall.data.availableImages[0].totalChunks >= 2);
     const imgRes = await syncMissingPageImagesWithPeer({
-      peer: pairOk.peer!,
+      peer: remoteHostPeer,
+      chunkSizeChars: 1024,
       dataSource: imgSyncDataSource
     });
-    assert.ok(imgRes.skippedExistingIds.includes('page_img_lan_test') || imgRes.transferredIds.includes('page_img_lan_test'));
-    console.log('[PASS] Authenticated page-image manifest & chunk endpoints verified over LAN TLS');
+    assert.deepEqual(imgRes.transferredIds, ['page_img_remote_only']);
+    assert.equal((await getPageImageRecord('page_img_remote_only'))?.base64Data, 'data:image/jpeg;base64,' + 'R'.repeat(2600));
+    console.log('[PASS] Authenticated page-image manifest & multi-chunk reassembly verified over WebRTC P2P');
 
-    // 11. Device Revocation Immediately Blocks Future Requests
-    assert.equal(host.revokePairedPeer('android_01'), true);
-    const postRevokeHb = await sendHeartbeat(pairOk.peer!);
-    assert.equal(postRevokeHb.ok, false);
-    assert.equal(postRevokeHb.errorCode, 'UNAUTHORIZED_DEVICE');
-    await revokeStoredLanCredentials('pc_host_01');
-    console.log('[PASS] Revoking paired device on host immediately returns UNAUTHORIZED_DEVICE');
+    // 8. Revoked Device Returns UNAUTHORIZED_DEVICE
+    hostRevokedAndroid = true;
+    const revokedHb = await sendHeartbeat(remoteHostPeer);
+    assert.equal(revokedHb.ok, false);
+    assert.equal(revokedHb.errorCode, 'UNAUTHORIZED_DEVICE');
+    remotePcPeer.destroy();
+    console.log('[PASS] Revoking peer immediately rejects subsequent requests with UNAUTHORIZED_DEVICE');
 
-    // 12. Connection Refused Error Mapping on Closed Port
-    await host.stop();
-    const closedProbe = await testHostConnection('127.0.0.1', startedStatus.port);
-    assert.equal(closedProbe.ok, false);
-    assert.equal(closedProbe.errorCode, 'CONNECTION_REFUSED');
-    console.log('[PASS] Closed host port maps cleanly to CONNECTION_REFUSED');
-
-    // 13. Legacy Peer Record Migration & Zero Plaintext Token Serialization
-    const legacyState: SyncStateMetadata = {
-      localDeviceId: 'dev_mobile_old',
+    // 9. Legacy LAN & Existing P2P Peer Migration + Diagnostic Redaction
+    const mixedState: SyncStateMetadata = {
+      localDeviceId: 'dev_mobile_1',
       localDeviceName: 'Samsung Phone',
       localRevisionCounter: 12,
-      peerWatermarkTable: { legacy_pc_1: { students: 1700000000000 } },
+      peerWatermarkTable: { p2p_pc_1: { students: 1700000000000 } },
+      pairingPin: '654321',
+      pairingPinExpiresAt: Date.now() + PAIRING_PIN_TTL_MS,
       pairedPeers: [
+        // Valid P2P peer accidentally flagged requiresRePairing while token is intact -> restored!
         {
-          deviceId: 'legacy_pc_1',
-          deviceName: 'Office PC',
+          deviceId: 'p2p_pc_1',
+          deviceName: 'Office PC (P2P)',
           lastKnownIp: 'P2P (WebRTC)',
           port: 0,
-          pairingToken: 'secret_legacy_token_1',
+          pairingToken: 'glk_valid_secret_token',
+          requiresRePairing: true,
           lastSyncedTimestamp: 1700000000000,
-          isOnline: true
-        } as any,
+          isOnline: false
+        },
+        // P2P peer whose token was stripped -> must require re-pairing
         {
-          deviceId: 'legacy_pc_2',
-          deviceName: 'Home Laptop',
-          lastKnownIp: '482193',
+          deviceId: 'p2p_pc_wiped',
+          deviceName: 'Wiped Token PC',
+          lastKnownIp: 'P2P (WebRTC)',
           port: 0,
-          pairingToken: 'secret_legacy_token_2',
+          hasStoredAuthToken: false,
+          lastSyncedTimestamp: 1700000000000,
+          isOnline: false
+        },
+        // Legacy LAN IPv4 peer -> flagged requiresRePairing
+        {
+          deviceId: 'lan_pc_1',
+          deviceName: 'Old LAN Desktop',
+          lastKnownIp: '192.168.1.50',
+          port: 8765,
+          pairingToken: 'old_lan_tok',
           lastSyncedTimestamp: 1700000050000,
           isOnline: false
-        } as any
+        },
+        // Corrupted PIN-as-IP peer -> flagged requiresRePairing
+        {
+          deviceId: 'pin_ip_pc',
+          deviceName: 'Corrupt PIN Peer',
+          lastKnownIp: '482193',
+          port: 0,
+          lastSyncedTimestamp: 1700000060000,
+          isOnline: false
+        }
       ]
     };
 
-    const { migratedState, didChange } = migrateLegacyPeerRecords(legacyState);
+    const { migratedState, didChange } = migrateLegacyPeerRecords(mixedState);
     assert.equal(didChange, true);
-    assert.equal(migratedState.hostPort, DEFAULT_LAN_SYNC_PORT);
-    assert.equal(migratedState.pairedPeers?.length, 2);
-    assert.deepEqual(migratedState.peerWatermarkTable, { legacy_pc_1: { students: 1700000000000 } });
+    assert.deepEqual(migratedState.peerWatermarkTable, { p2p_pc_1: { students: 1700000000000 } });
 
-    for (const mp of migratedState.pairedPeers || []) {
-      assert.equal(mp.requiresRePairing, true, 'Legacy peers must be flagged requiresRePairing');
-      assert.equal(mp.hasStoredAuthToken, false);
-      assert.equal(mp.lastKnownIp, '', 'PIN or WebRTC string must be wiped from lastKnownIp');
-      assert.equal((mp as any).pairingToken, undefined, 'Plaintext pairingToken must never survive migration');
-      assert.equal(isLegacyUnmigratedPeer(mp), true);
-    }
+    const restoredP2p = migratedState.pairedPeers!.find((p) => p.deviceId === 'p2p_pc_1')!;
+    assert.equal(restoredP2p.requiresRePairing, false);
+    assert.equal(restoredP2p.lastKnownIp, 'P2P (WebRTC)');
+    assert.equal(restoredP2p.port, 0);
+    assert.equal(restoredP2p.pairingToken, 'glk_valid_secret_token');
+    assert.equal(isLegacyLanOnlyPeer(restoredP2p), false);
 
-    const serialized = JSON.stringify(sanitizeSyncStateForStorage(migratedState));
-    assert.equal(serialized.includes('secret_legacy_token'), false);
-    assert.equal(serialized.includes('authToken'), false);
-    assert.ok(getLastLanAttempts().length > 0, 'Diagnostics log captures recent LAN attempts');
-    console.log('[PASS] Legacy P2P/PIN peer migration preserves data/watermarks, strips plaintext tokens, and flags re-pairing');
+    const wipedP2p = migratedState.pairedPeers!.find((p) => p.deviceId === 'p2p_pc_wiped')!;
+    assert.equal(wipedP2p.requiresRePairing, true);
+    assert.equal(isLegacyLanOnlyPeer(wipedP2p), true);
 
-    console.log('ALL LAN SYNC REBUILD TESTS PASSED!');
+    const lanPeer = migratedState.pairedPeers!.find((p) => p.deviceId === 'lan_pc_1')!;
+    assert.equal(lanPeer.requiresRePairing, true);
+    assert.equal(isLegacyLanOnlyPeer(lanPeer), true);
+
+    const pinIpPeer = migratedState.pairedPeers!.find((p) => p.deviceId === 'pin_ip_pc')!;
+    assert.equal(pinIpPeer.requiresRePairing, true);
+    assert.equal(isLegacyLanOnlyPeer(pinIpPeer), true);
+
+    // Diagnostic export redacts tokens and PINs
+    const redactedJson = JSON.stringify(redactSyncStateForDiagnostics(migratedState));
+    assert.equal(redactedJson.includes('glk_valid_secret_token'), false, 'Diagnostics must redact pairingToken');
+    assert.equal(redactedJson.includes('654321'), false, 'Diagnostics must redact pairingPin');
+    assert.ok(getLastP2pAttempts().length > 0, 'Diagnostics captures P2P operation attempts');
+    assert.equal(formatPairingPinId('123456'), 'glueck-123456');
+    console.log('[PASS] Legacy/P2P peer migration & secret-free diagnostic redaction verified');
+
+    console.log('ALL P2P ARCHITECTURE & MIGRATION TESTS PASSED!');
   } finally {
-    __setCustomLanTransportForTests(null);
-    clearEphemeralLanVault();
-    if (host) await host.stop().catch(() => {});
-    if (hostB) await hostB.stop().catch(() => {});
-    if (occupantServer) {
-      await new Promise<void>((res) => occupantServer!.close(() => res()));
-    }
-    fs.rmSync(tmpDirA, { recursive: true, force: true });
-    fs.rmSync(tmpDirB, { recursive: true, force: true });
+    stopLocalServer();
+    __setPeerConstructorForTests(null);
+    __resetPeerNetworkForTests();
+    connectivityEngine.destroy();
+    broker.peers.clear();
   }
 }
 
-runLanSyncRebuildTests().catch((err) => {
-  console.error('LAN SYNC REBUILD TEST FAILED:', err);
+runP2pRebuildRegressionTests().catch((err) => {
+  console.error('P2P REBUILD TEST FAILED:', err);
   process.exit(1);
 });

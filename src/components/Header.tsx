@@ -13,7 +13,6 @@ import { SyncCenterModal } from './sync/SyncCenterModal';
 import { pairWithPeer } from '../services/sync/syncClient';
 import { getCairoHour } from '../utils/greetingUtils';
 import { TeacherCrestLogo } from '../shared/components/TeacherCrestLogo';
-import { getActiveCloudUser, isAutoCloudSyncEnabled, subscribeTeacherAuth } from '../services/firebaseWorkspaceSync';
 
 export const Header: React.FC = () => {
   const { 
@@ -48,6 +47,9 @@ export const Header: React.FC = () => {
     updateSyncState,
     unpairPeer,
     startHosting,
+    regeneratePin,
+    rediscoverPeers,
+    roomState,
     setIsReorderBottomNavOpen,
     bottomNavOrder
   } = useApp();
@@ -61,44 +63,20 @@ export const Header: React.FC = () => {
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [activityLogs, setActivityLogs] = useState<{ id: string, message: string, time: string }[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [cloudUserActive, setCloudUserActive] = useState<boolean>(() => Boolean(getActiveCloudUser()));
-  const [cloudAutoEnabled, setCloudAutoEnabled] = useState<boolean>(() => isAutoCloudSyncEnabled());
-  const [cloudSyncState, setCloudSyncState] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
   const [isBrowserOnline, setIsBrowserOnline] = useState<boolean>(() =>
     typeof navigator !== 'undefined' ? navigator.onLine !== false : true
   );
 
   useEffect(() => {
-    const unsub = subscribeTeacherAuth((u) => {
-      setCloudUserActive(Boolean(u));
-      setCloudAutoEnabled(isAutoCloudSyncEnabled());
-    });
-    const handleCloudStatus = (e: Event) => {
-      const detail = (e as CustomEvent)?.detail;
-      if (detail?.status) {
-        setCloudSyncState(detail.status);
-      }
-      setCloudUserActive(Boolean(getActiveCloudUser()));
-      setCloudAutoEnabled(isAutoCloudSyncEnabled());
-    };
-    const handleConfigChange = () => {
-      setCloudUserActive(Boolean(getActiveCloudUser()));
-      setCloudAutoEnabled(isAutoCloudSyncEnabled());
-    };
     const handleOnline = () => setIsBrowserOnline(true);
     const handleOffline = () => setIsBrowserOnline(false);
 
     if (typeof window !== 'undefined') {
-      window.addEventListener('gluck-cloud-sync-status', handleCloudStatus);
-      window.addEventListener('gluck-cloud-sync-config-changed', handleConfigChange);
       window.addEventListener('online', handleOnline);
       window.addEventListener('offline', handleOffline);
     }
     return () => {
-      unsub();
       if (typeof window !== 'undefined') {
-        window.removeEventListener('gluck-cloud-sync-status', handleCloudStatus);
-        window.removeEventListener('gluck-cloud-sync-config-changed', handleConfigChange);
         window.removeEventListener('online', handleOnline);
         window.removeEventListener('offline', handleOffline);
       }
@@ -108,7 +86,7 @@ export const Header: React.FC = () => {
   const unreadCount = notifications.filter(n => !n.read).length;
   const deletedCount = recentlyDeleted.students.length + recentlyDeleted.groups.length + recentlyDeleted.lessons.length;
 
-  // Derived sync values
+  // Derived P2P sync values
   const onlineCount = useMemo(() => {
     if (!syncState?.pairedPeers) return 0;
     return syncState.pairedPeers.filter(p => {
@@ -117,11 +95,12 @@ export const Header: React.FC = () => {
     }).length;
   }, [syncState?.pairedPeers, devicePresences]);
 
-  const isCloudConnected = cloudUserActive && cloudAutoEnabled && isBrowserOnline;
-  const syncStatus: 'online' | 'syncing' | 'offline' =
-    isSyncing || cloudSyncState === 'syncing'
+  const syncStatus: 'offline' | 'online' | 'connected' | 'syncing' =
+    isSyncing || connectionState === 'SYNCING'
       ? 'syncing'
-      : onlineCount > 0 || isCloudConnected
+      : onlineCount > 0
+      ? 'connected'
+      : isBrowserOnline
       ? 'online'
       : 'offline';
 
@@ -129,18 +108,13 @@ export const Header: React.FC = () => {
     setActivityLogs(prev => [{ id: Date.now().toString(), message: msg, time: new Date().toLocaleTimeString() }, ...prev].slice(0, 50));
   };
 
-  const onPair = async (
-    hostIp: string,
-    port: number,
-    pairingCode: string,
-    expectedFingerprint?: string
-  ) => {
+  const onPair = async (targetDeviceId: string, pairingPin: string) => {
     if (!syncState) return;
     const localDevice = { deviceId: syncState.localDeviceId, deviceName: syncState.localDeviceName };
-    const res = await pairWithPeer(hostIp, port, pairingCode, localDevice, expectedFingerprint);
+    const res = await pairWithPeer(targetDeviceId, pairingPin, localDevice);
     if (!res.ok || !res.peer) {
-      const msg = res.message || res.errorCode || `Could not pair with ${hostIp}:${port}`;
-      addLog(`Pairing failed (${hostIp}:${port}): ${msg}`);
+      const msg = res.message || res.errorCode || 'Could not pair with peer device.';
+      addLog(`P2P pairing failed: ${msg}`);
       throw new Error(msg);
     }
     const pairedPeer = res.peer;
@@ -149,7 +123,7 @@ export const Header: React.FC = () => {
       pairedPeer
     ];
     await updateSyncState({ ...syncState, pairedPeers: updatedPeers });
-    addLog(`Paired with ${pairedPeer.deviceName} (${pairedPeer.lastKnownIp}:${pairedPeer.port})`);
+    addLog(`Paired with ${pairedPeer.deviceName} via P2P (WebRTC)`);
   };
 
   const onForceSync = async (peerId?: string) => {
@@ -621,6 +595,9 @@ export const Header: React.FC = () => {
           onRenamePeer={onRenamePeer}
           activityLogs={activityLogs}
           onStartHosting={startHosting}
+          onRegeneratePin={regeneratePin}
+          onRediscoverPeers={rediscoverPeers}
+          roomState={roomState}
           connectionState={connectionState}
           devicePresences={devicePresences}
           syncState={syncState}

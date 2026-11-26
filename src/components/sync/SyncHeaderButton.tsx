@@ -53,10 +53,10 @@ export const SyncHeaderButton: React.FC<SyncHeaderButtonProps> = ({
   const p2pLabel = isSyncing
     ? _t('جاري المزامنة...', 'Synchronizing...', 'Synchronisation läuft')
     : isP2PConnected
-    ? _t('LAN متصل', 'LAN Connected', 'LAN Verbunden')
+    ? _t('P2P متصل', 'P2P Connected', 'P2P Verbunden')
     : pendingP2PChanges > 0
-    ? _t(`LAN (${pendingP2PChanges} معلق)`, `Pending local changes (${pendingP2PChanges})`, `Ausstehende Änderungen (${pendingP2PChanges})`)
-    : _t('LAN جاهز', 'LAN Ready', 'LAN Bereit');
+    ? _t(`P2P (${pendingP2PChanges} معلق)`, `Pending local changes (${pendingP2PChanges})`, `Ausstehende Änderungen (${pendingP2PChanges})`)
+    : _t('P2P جاهز', 'P2P Ready', 'P2P Bereit');
 
   const hwCloudLabel = hwCloudOnline
     ? pendingHwCount > 0

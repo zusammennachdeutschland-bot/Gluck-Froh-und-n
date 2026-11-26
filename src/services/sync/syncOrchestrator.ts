@@ -15,14 +15,13 @@ import {
   TeacherSettingsRecord
 } from '../../types';
 import { exchangeDeltas, fetchPeerPageImageManifest, fetchPeerPageImageChunk } from './syncClient';
-import { resolvePeerEndpoint } from './discoveryService';
 import { buildOutboundDelta, updateWatermarks, resetWatermarksForPeer } from './deltaBuilder';
 import { mergeEntities, mergePurgedTombstones, mergeRecentlyDeleted } from './mergeEngine';
 import { syncHistoryService } from './syncHistoryService';
 import { negotiateProtocol, adaptOutboundPayloadForPeer } from './protocolNegotiator';
 import { syncEventQueue } from './syncEventQueue';
 import { recalculateAllAccountBalances } from '../financeService';
-import { isLegacyUnmigratedPeer, sanitizeSyncStateForStorage } from './lanVault';
+import { isLegacyLanOnlyPeer, sanitizeSyncStateForStorage } from './syncMigration';
 import {
   DEFAULT_PAGE_IMAGE_CHUNK_SIZE,
   GrammarPageImageChunk,
@@ -252,11 +251,11 @@ export async function runSyncCycle(
     const peer = pairedPeers[peerIndex];
     emptyReport.peerName = peer.deviceName || 'Peer Device';
 
-    if (isLegacyUnmigratedPeer(peer) && !customExchangeDeltasFn) {
+    if (isLegacyLanOnlyPeer(peer) && !customExchangeDeltasFn) {
       peer.isOnline = false;
       peer.requiresRePairing = true;
       peer.lastErrorCode = 'UNAUTHORIZED_DEVICE';
-      peer.lastErrorMessage = 'Legacy pairing requires re-pairing over direct local Wi-Fi.';
+      peer.lastErrorMessage = 'Legacy LAN pairing requires re-pairing over P2P WebRTC.';
       pairedPeers[peerIndex] = peer;
       await dataSource.updateSyncState(sanitizeSyncStateForStorage({ ...syncState, pairedPeers }));
       emptyReport.errorMessage = peer.lastErrorMessage;
@@ -264,28 +263,13 @@ export async function runSyncCycle(
       return { success: false, report: emptyReport };
     }
 
-    // 2. Resolve peer's current LAN endpoint dynamically (unless custom transport is injected)
-    let workingPeer: PairedPeer = { ...peer };
-    if (!customExchangeDeltasFn) {
-      const endpoint = await resolvePeerEndpoint(peer);
-      if (!endpoint) {
-        const msg = 'PC Sync Host is offline or unreachable on your local Wi-Fi network.';
-        workingPeer.isOnline = false;
-        workingPeer.lastErrorCode = 'HOST_OFFLINE';
-        workingPeer.lastErrorMessage = msg;
-        pairedPeers[peerIndex] = workingPeer;
-        await dataSource.updateSyncState(sanitizeSyncStateForStorage({ ...syncState, pairedPeers }));
-        emptyReport.errorMessage = msg;
-        await recordSyncHistory(emptyReport, trigger, 0, 0);
-        return { success: false, report: emptyReport };
-      }
-      workingPeer = {
-        ...workingPeer,
-        lastKnownIp: endpoint.ip,
-        port: endpoint.port,
-        knownAddresses: endpoint.addresses
-      };
-    }
+    const workingPeer: PairedPeer = customExchangeDeltasFn
+      ? { ...peer }
+      : {
+          ...peer,
+          lastKnownIp: 'P2P (WebRTC)',
+          port: 0
+        };
 
     // 3. Negotiate capabilities and build the outbound delta payload
     const localData = dataSource.getLocalData();
@@ -316,7 +300,7 @@ export async function runSyncCycle(
     sentCount = Object.values(outboundDelta.records).reduce((acc, curr) => acc + (curr ? curr.length : 0), 0);
     totalTransferred += sentCount;
 
-    // 4. Exchange deltas with the peer over direct LAN HTTPS
+    // 4. Exchange deltas with the peer over direct WebRTC P2P
     let inboundDelta: SyncDeltaPayload | null = null;
     if (customExchangeDeltasFn) {
       inboundDelta = await customExchangeDeltasFn(outboundDelta);
@@ -328,11 +312,16 @@ export async function runSyncCycle(
     } else {
       const exchangeRes = await exchangeDeltas(workingPeer, outboundDelta);
       if (!exchangeRes.ok || !exchangeRes.delta || !exchangeRes.delta.records) {
-        const errMsg = exchangeRes.message || `LAN exchange failed (${exchangeRes.errorCode || 'HOST_OFFLINE'})`;
-        workingPeer.isOnline = exchangeRes.errorCode !== 'HOST_OFFLINE' && exchangeRes.errorCode !== 'CONNECTION_REFUSED' && exchangeRes.errorCode !== 'CONNECTION_TIMEOUT';
-        workingPeer.lastErrorCode = exchangeRes.errorCode;
+        const errCode = exchangeRes.errorCode || 'PEER_OFFLINE';
+        const errMsg = exchangeRes.message || `P2P exchange failed (${errCode})`;
+        workingPeer.isOnline =
+          errCode !== 'PEER_OFFLINE' &&
+          errCode !== 'BROKER_DOWN' &&
+          errCode !== 'ICE_FAILED' &&
+          errCode !== 'TIMEOUT';
+        workingPeer.lastErrorCode = errCode;
         workingPeer.lastErrorMessage = errMsg;
-        if (exchangeRes.errorCode === 'UNAUTHORIZED_DEVICE') {
+        if (errCode === 'UNAUTHORIZED_DEVICE') {
           workingPeer.requiresRePairing = true;
         }
         pairedPeers[peerIndex] = workingPeer;
@@ -342,8 +331,9 @@ export async function runSyncCycle(
         return { success: false, report: emptyReport };
       }
       inboundDelta = exchangeRes.delta;
-      if (exchangeRes.resolvedIp) workingPeer.lastKnownIp = exchangeRes.resolvedIp;
-      if (exchangeRes.resolvedPort) workingPeer.port = exchangeRes.resolvedPort;
+      workingPeer.lastKnownIp = 'P2P (WebRTC)';
+      workingPeer.port = 0;
+      if (exchangeRes.iceCandidateType) workingPeer.iceCandidateType = exchangeRes.iceCandidateType;
       if (typeof exchangeRes.latencyMs === 'number') workingPeer.latencyMs = exchangeRes.latencyMs;
     }
 
@@ -792,12 +782,12 @@ export async function syncMissingPageImagesWithPeer(params: {
     const fullPeer: PairedPeer = {
       deviceId: params.peer.deviceId,
       deviceName: params.peer.deviceName || 'Peer Device',
-      lastKnownIp: params.peer.lastKnownIp || '',
-      port: params.peer.port || 8765,
+      lastKnownIp: params.peer.lastKnownIp || 'P2P (WebRTC)',
+      port: typeof params.peer.port === 'number' ? params.peer.port : 0,
+      pairingToken: params.peer.pairingToken,
+      hasStoredAuthToken: params.peer.hasStoredAuthToken,
       lastSyncedTimestamp: params.peer.lastSyncedTimestamp || 0,
-      isOnline: params.peer.isOnline ?? true,
-      tlsFingerprintSha256: params.peer.tlsFingerprintSha256,
-      knownAddresses: params.peer.knownAddresses
+      isOnline: params.peer.isOnline ?? true
     };
 
     const transport: PageImageSyncTransport = params.transport || {

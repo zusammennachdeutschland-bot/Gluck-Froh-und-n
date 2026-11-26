@@ -12,7 +12,9 @@ import {
   Cloud,
   CloudOff,
   Laptop,
-  Plus
+  Plus,
+  Radio,
+  LogIn
 } from 'lucide-react';
 import {
   SyncConnectionState,
@@ -21,7 +23,8 @@ import {
   PendingOutboxSummary,
   SyncHistoryEntry,
   SyncStateMetadata,
-  LanHostStatus
+  P2pHostStartResult,
+  PresenceRoomState
 } from '../../types';
 import { LinkedDevicesHub } from './LinkedDevicesHub';
 import { PairingWizard } from './PairingWizard';
@@ -32,10 +35,12 @@ import { RecoveryTools } from './RecoveryTools';
 import { useApp } from '../../context/AppContext';
 import {
   getLocalHostStatus,
-  regenerateLanPairingCode,
-  subscribeLanHostStatus
+  regeneratePairingPin,
+  subscribeP2pHostStatus
 } from '../../services/sync/localServer';
-import { isLegacyUnmigratedPeer } from '../../services/sync/lanVault';
+import { connectivityEngine } from '../../services/sync/connectivityEngine';
+import { discoverNewDevices } from '../../services/sync/discoveryService';
+import { isLegacyLanOnlyPeer } from '../../services/sync/syncMigration';
 import {
   getPendingHomeworkSyncCount,
   flushPendingHomeworkSyncQueue,
@@ -52,12 +57,15 @@ export interface SyncCenterModalProps {
   localDevice: { name: string; id: string };
   onRenameLocalDevice: (newName: string) => void;
   pairedPeers: PairedPeer[];
-  onPair: (hostIp: string, port: number, pairingCode: string, expectedFingerprint?: string) => Promise<void>;
+  onPair: (targetDeviceId: string, pairingPin: string) => Promise<void>;
   onForceSync: (peerId?: string) => void;
   onUnpair: (peerId: string) => void;
   onRenamePeer: (peerId: string, newName: string) => void;
   activityLogs?: any[];
-  onStartHosting?: (portOverride?: number) => Promise<LanHostStatus & { ip: string; pin: string }>;
+  onStartHosting?: () => Promise<P2pHostStartResult>;
+  onRegeneratePin?: () => Promise<P2pHostStartResult>;
+  onRediscoverPeers?: () => Promise<any>;
+  roomState?: PresenceRoomState | null;
   connectionState?: SyncConnectionState;
   devicePresences?: Map<string, DevicePresenceState>;
   syncState?: SyncStateMetadata | null;
@@ -82,6 +90,9 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
   onUnpair,
   onRenamePeer,
   onStartHosting,
+  onRegeneratePin,
+  onRediscoverPeers,
+  roomState,
   connectionState = 'NETWORK_CONNECTED',
   devicePresences = new Map(),
   syncState,
@@ -94,8 +105,8 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
   const { _t, updateSyncState } = useApp();
   const [activeTab, setActiveTab] = useState<'overview' | 'devices' | 'outbox' | 'history' | 'diagnostics' | 'recovery'>('overview');
   const [isPairingOpen, setIsPairingOpen] = useState(false);
-  const [pairingPrefill, setPairingPrefill] = useState<{ ip?: string; port?: number }>({});
-  const [hostStatus, setHostStatus] = useState<LanHostStatus | null>(null);
+  const [pairingPrefillDeviceId, setPairingPrefillDeviceId] = useState<string>('');
+  const [hostStatus, setHostStatus] = useState<P2pHostStartResult | null>(() => getLocalHostStatus());
   const [outbox, setOutbox] = useState<PendingOutboxSummary>({
     totalCount: 0,
     byEntity: {},
@@ -127,22 +138,27 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
         setHistoryList(hist);
       } catch {}
     }
-    try {
-      const st = await getLocalHostStatus();
-      setHostStatus(st);
-      if (!st.listening && st.isSupported && onStartHosting) {
+
+    const st = getLocalHostStatus();
+    setHostStatus(st);
+    // Only initialize host when signalling isn't connected yet (never regenerate an active PIN on tab switch/modal open)
+    if (!st.brokerConnected && onStartHosting) {
+      try {
         const started = await onStartHosting();
         setHostStatus(started);
-      }
-    } catch {}
-  }, [getPendingOutbox, getSyncHistory, onStartHosting]);
+      } catch {}
+    }
+    if (onRediscoverPeers) {
+      void onRediscoverPeers().catch(() => {});
+    }
+  }, [getPendingOutbox, getSyncHistory, onStartHosting, onRediscoverPeers]);
 
   useEffect(() => {
     if (!isOpen) return;
     void refreshData();
-    const unsub = subscribeLanHostStatus((st) => setHostStatus(st));
+    const unsub = subscribeP2pHostStatus((st) => setHostStatus(st));
     return unsub;
-  }, [isOpen, activeTab, refreshData]);
+  }, [isOpen, refreshData]);
 
   const handleSyncAllOutbox = async () => {
     setIsSyncingAll(true);
@@ -165,6 +181,11 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
     }
   };
 
+  const handleRegenerateCode = async () => {
+    const res = onRegeneratePin ? await onRegeneratePin() : await regeneratePairingPin();
+    if (res) setHostStatus(res);
+  };
+
   if (!isOpen) return null;
 
   const tabs = [
@@ -178,7 +199,7 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
 
   const typedPeers: PairedPeer[] = (pairedPeers || []).map((p) => {
     const livePresence = devicePresences ? devicePresences.get(p.deviceId) : null;
-    const legacy = isLegacyUnmigratedPeer(p);
+    const legacy = isLegacyLanOnlyPeer(p);
     return {
       ...p,
       isOnline: !legacy && (livePresence ? livePresence.isOnline : false),
@@ -187,7 +208,13 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
   });
 
   const onlineCount = typedPeers.filter((p) => p.isOnline).length;
-  const legacyPeersCount = typedPeers.filter((p) => isLegacyUnmigratedPeer(p)).length;
+  const legacyPeersCount = typedPeers.filter((p) => legacyOrRequired(p)).length;
+  const nearbyNewDevices = discoverNewDevices(typedPeers);
+  const statusSummary = connectivityEngine.getStatusSummary();
+
+  function legacyOrRequired(peer: PairedPeer) {
+    return isLegacyLanOnlyPeer(peer);
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 sm:p-4 backdrop-blur-xs">
@@ -200,15 +227,9 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
             </div>
             <div className="min-w-0">
               <h2 className="text-sm sm:text-base font-bold tracking-tight text-text-main truncate">
-                {_t('المزامنة المباشرة عبر شبكة Wi-Fi', 'Direct LAN Sync', 'Direkte WLAN-Synchronisation')}
+                {_t('المزامنة المباشرة WebRTC P2P', 'Direct WebRTC P2P Sync', 'Direkte WebRTC-P2P-Synchronisation')}
               </h2>
-              <p className="text-[11px] text-text-muted truncate">
-                {hostStatus?.isSupported
-                  ? hostStatus.listening && hostStatus.primaryIp
-                    ? `${_t('خادم الكمبيوتر:', 'PC Host:', 'PC Host:')} ${hostStatus.primaryIp}:${hostStatus.port}`
-                    : _t('خادم الكمبيوتر جاهز للتهيئة', 'PC Sync Host initializing', 'PC Host wird vorbereitet')
-                  : _t('اتصال مباشر بالكمبيوتر على نفس شبكة Wi-Fi دون إنترنت', 'Direct Wi-Fi sync with your PC Host (no internet needed)', 'Direkte WLAN-Verbindung zum PC')}
-              </p>
+              <p className="text-[11px] text-text-muted truncate">{statusSummary.label}</p>
             </div>
           </div>
 
@@ -219,7 +240,7 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
                 onClick={async () => {
                   try {
                     await onClearSyncHistory();
-                    if (refreshData) await refreshData();
+                    await refreshData();
                   } catch {}
                 }}
                 className="min-h-[36px] px-3 rounded-xl border border-surface-border bg-surface hover:bg-surface-hover text-xs font-semibold text-text-main flex items-center gap-1.5 cursor-pointer"
@@ -274,7 +295,7 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
                 type="button"
                 onClick={() => {
                   setIsPairingOpen(false);
-                  setPairingPrefill({});
+                  setPairingPrefillDeviceId('');
                 }}
                 className="text-xs font-bold text-primary hover:underline cursor-pointer"
               >
@@ -284,30 +305,17 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
               <PairingWizard
                 localDevice={localDevice}
                 hostStatus={hostStatus}
+                roomState={roomState}
+                pairedPeers={typedPeers}
                 onRefreshHostStatus={refreshData}
-                onRegenerateCode={async () => {
-                  const res = await regenerateLanPairingCode();
-                  if (res?.status) setHostStatus(res.status);
-                }}
-                onUpdateHostPort={
-                  onStartHosting
-                    ? async (newPort) => {
-                        const st = await onStartHosting(newPort);
-                        setHostStatus(st);
-                        if (syncState) {
-                          await updateSyncState({ ...syncState, hostPort: st.port });
-                        }
-                      }
-                    : undefined
-                }
-                onPair={async (hostIp, port, code, fp) => {
-                  await onPair(hostIp, port, code, fp);
+                onRegenerateCode={handleRegenerateCode}
+                onPair={async (targetDeviceId, pin) => {
+                  await onPair(targetDeviceId, pin);
                   setIsPairingOpen(false);
-                  setPairingPrefill({});
+                  setPairingPrefillDeviceId('');
                   await refreshData();
                 }}
-                initialHostIp={pairingPrefill.ip}
-                initialPort={pairingPrefill.port}
+                prefillDeviceId={pairingPrefillDeviceId}
               />
             </div>
           ) : (
@@ -321,10 +329,12 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
                         {syncStatus === 'syncing'
                           ? _t('جاري المزامنة الآن...', 'Synchronizing...', 'Synchronisation läuft...')
                           : onlineCount > 0
-                          ? _t(`متصل بـ ${onlineCount} جهاز عبر Wi-Fi`, `Connected to ${onlineCount} LAN device(s)`, `${onlineCount} Gerät(e) im WLAN verbunden`)
-                          : hostStatus?.listening
-                          ? _t('خادم الكمبيوتر نشط وبانتظار الأجهزة', 'PC Sync Host waiting for devices', 'PC Sync Host wartet auf Geräte')
-                          : _t('غير متصل بجهاز كمبيوتر حالياً', 'Disconnected — Ready to search Wi-Fi', 'Getrennt — bereit für WLAN-Suche')}
+                          ? _t(
+                              `متصل مباشرة بـ ${onlineCount} جهاز عبر WebRTC P2P`,
+                              `Connected to ${onlineCount} peer device(s) via WebRTC P2P`,
+                              `Verbunden mit ${onlineCount} Gerät(en) per P2P`
+                            )
+                          : statusSummary.label}
                       </h3>
                       <p className="text-xs opacity-90 mt-0.5 tabular-nums">
                         {_t('آخر مزامنة:', 'Last sync:', 'Letzte Sync:')} <strong>{lastSyncTime}</strong>
@@ -335,13 +345,13 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
                       <button
                         type="button"
                         onClick={() => {
-                          setPairingPrefill({});
+                          setPairingPrefillDeviceId('');
                           setIsPairingOpen(true);
                         }}
                         className="px-3.5 py-2 rounded-xl bg-surface/15 hover:bg-surface/25 text-primary-fg text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        <span>{_t('ربط / بحث Wi-Fi', 'Search / Pair', 'Koppeln / Suchen')}</span>
+                        <span>{_t('ربط جهاز (QR / PIN)', 'Pair Device', 'Gerät koppeln')}</span>
                       </button>
 
                       <button
@@ -356,42 +366,89 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Inline PC Sync Host Summary (Electron Desktop Only) */}
-                  {hostStatus?.isSupported && (
-                    <div className="p-4 rounded-2xl border border-surface-border bg-surface flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div className="flex items-start gap-3">
-                        <Laptop className="w-5 h-5 text-primary shrink-0 mt-0.5" />
-                        <div className="text-xs space-y-0.5">
-                          <div className="font-bold text-text-main">
-                            {_t('PC Sync Host:', 'PC Sync Host:', 'PC Sync Host:')} {hostStatus.deviceName}
-                          </div>
-                          <div className="font-mono text-text-muted tabular-nums">
-                            {hostStatus.primaryIp ? `${hostStatus.primaryIp}:${hostStatus.port}` : _t('لا توجد شبكة', 'No LAN IP', 'Keine LAN-IP')}
-                            {hostStatus.pairingCode ? ` · Code: ${hostStatus.pairingCode}` : ''}
-                            {hostStatus.verificationCode ? ` · TLS: ${hostStatus.verificationCode}` : ''}
-                          </div>
+                  {/* Active P2P Pairing PIN Card (only displays when brokerConnected & valid PIN exists) */}
+                  <div className="p-4 rounded-2xl border border-surface-border bg-surface flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <Laptop className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                      <div className="text-xs space-y-0.5">
+                        <div className="font-bold text-text-main">{localDevice.name}</div>
+                        <div className="font-mono text-text-muted tabular-nums">
+                          {hostStatus?.brokerConnected
+                            ? hostStatus.pin
+                              ? `${_t('رمز الاقتران:', 'Pairing PIN:', 'Kopplungs-PIN:')} ${hostStatus.pin}`
+                              : _t('جاهز لإنشاء رمز', 'Ready to generate PIN', 'Bereit')
+                            : statusSummary.label}
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const res = await regenerateLanPairingCode();
-                          if (res?.status) setHostStatus(res.status);
-                        }}
-                        className="px-3 py-1.5 rounded-xl border border-surface-border bg-background hover:bg-surface-hover text-xs font-bold text-text-main cursor-pointer shrink-0"
-                      >
-                        {_t('تحديث رمز الاقتران', 'New Code', 'Neuer Code')}
-                      </button>
                     </div>
-                  )}
+                    <button
+                      type="button"
+                      onClick={handleRegenerateCode}
+                      className="px-3 py-1.5 rounded-xl border border-surface-border bg-background hover:bg-surface-hover text-xs font-bold text-text-main cursor-pointer shrink-0"
+                    >
+                      {_t('رمز جديد', 'New Code', 'Neuer Code')}
+                    </button>
+                  </div>
+
+                  {/* Account-Scoped Nearby Devices Discovery */}
+                  {roomState?.status === 'signed_out' ? (
+                    <div className="p-3.5 rounded-xl border border-surface-border bg-surface text-xs text-text-muted flex items-center gap-2.5">
+                      <LogIn className="w-4 h-4 text-primary shrink-0" />
+                      <span>
+                        {_t(
+                          'سجّل الدخول بحساب Google من الإعدادات لاكتشاف أجهزتك الأخرى تلقائياً في نفس الحساب.',
+                          'Sign in with Google in Settings to auto-discover your devices on the same account.',
+                          'Mit Google anmelden für automatische Geräteerkennung im selben Konto.'
+                        )}
+                      </span>
+                    </div>
+                  ) : nearbyNewDevices.length > 0 ? (
+                    <div className="p-4 rounded-2xl border border-primary/25 bg-primary-soft/50 space-y-2.5">
+                      <div className="text-xs font-bold text-primary flex items-center gap-1.5">
+                        <Radio className="w-4 h-4" />
+                        <span>
+                          {_t(
+                            `تم اكتشاف ${nearbyNewDevices.length} جهاز على حسابك`,
+                            `${nearbyNewDevices.length} nearby device(s) on your account`,
+                            `${nearbyNewDevices.length} Gerät(e) im Konto entdeckt`
+                          )}
+                        </span>
+                      </div>
+                      <div className="space-y-2">
+                        {nearbyNewDevices.map((dev) => (
+                          <div
+                            key={dev.deviceId}
+                            className="p-2.5 rounded-xl bg-surface border border-surface-border flex items-center justify-between gap-2 text-xs"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-bold text-text-main truncate">{dev.deviceName}</div>
+                              <div className="text-[11px] text-text-muted">
+                                {dev.platform === 'android' ? 'Android' : 'Web Browser'}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPairingPrefillDeviceId(dev.deviceId);
+                                setIsPairingOpen(true);
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-primary text-primary-fg font-bold cursor-pointer shrink-0"
+                            >
+                              {_t('ربط', 'Pair', 'Koppeln')}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
 
                   {legacyPeersCount > 0 && (
                     <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300 text-xs flex items-center justify-between gap-2">
                       <span>
                         {_t(
-                          `يوجد ${legacyPeersCount} جهاز قديم يتطلب إعادة اقتران بنظام الشبكة المحلية الجديد (لن يتم حذف أي بيانات).`,
-                          `${legacyPeersCount} legacy device record(s) require quick LAN re-pairing (your data and history are preserved).`,
-                          `${legacyPeersCount} älteres Gerät muss neu per WLAN gekoppelt werden.`
+                          `يوجد ${legacyPeersCount} جهاز قديم يتطلب إعادة اقتران عبر WebRTC P2P (جميع بياناتك محفوظة).`,
+                          `${legacyPeersCount} legacy device record(s) require quick P2P re-pairing (your data and history are preserved).`,
+                          `${legacyPeersCount} älteres Gerät muss neu per P2P gekoppelt werden.`
                         )}
                       </span>
                       <button
@@ -476,11 +533,7 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
                     await refreshData();
                   }}
                   onOpenPairing={(prefill) => {
-                    setPairingPrefill(
-                      prefill && prefill.lastKnownIp && !isLegacyUnmigratedPeer(prefill)
-                        ? { ip: prefill.lastKnownIp, port: prefill.port }
-                        : {}
-                    );
+                    setPairingPrefillDeviceId(prefill?.deviceId || '');
                     setIsPairingOpen(true);
                   }}
                 />
@@ -512,6 +565,7 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
                   devicePresences={devicePresences}
                   pendingCount={outbox.totalCount}
                   hostStatus={hostStatus}
+                  roomState={roomState}
                 />
               )}
 

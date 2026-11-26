@@ -1,6 +1,6 @@
 import { DevicePresenceState, PairedPeer } from '../../types';
 import { sendHeartbeat } from './syncClient';
-import { isLegacyUnmigratedPeer } from './lanVault';
+import { isLegacyLanOnlyPeer } from './syncMigration';
 
 type PresenceListener = (presences: Map<string, DevicePresenceState>) => void;
 
@@ -12,6 +12,7 @@ class PresenceService {
   private listeners: Set<PresenceListener> = new Set();
   private heartbeatTimer: any = null;
   private isRunning = false;
+  private currentGetPeers: (() => PairedPeer[]) | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -26,13 +27,16 @@ class PresenceService {
   }
 
   public start(getPeers: () => PairedPeer[]) {
+    this.currentGetPeers = getPeers;
     if (this.isRunning) return;
     this.isRunning = true;
 
-    this.pulse(getPeers);
+    void this.pulse(getPeers);
 
     this.heartbeatTimer = setInterval(() => {
-      this.pulse(getPeers);
+      if (this.currentGetPeers) {
+        void this.pulse(this.currentGetPeers);
+      }
     }, HEARTBEAT_INTERVAL_MS);
   }
 
@@ -61,15 +65,26 @@ class PresenceService {
   }
 
   public updatePresenceManually(deviceId: string, isOnline: boolean, latencyMs?: number) {
+    if (!deviceId) return;
     const existing = this.activePresences.get(deviceId);
     if (existing) {
       existing.isOnline = isOnline;
-      existing.lastHeartbeat = Date.now();
+      existing.lastHeartbeat = isOnline ? Date.now() : existing.lastHeartbeat;
       if (typeof latencyMs === 'number') {
         existing.latencyMs = latencyMs;
+      } else if (!isOnline) {
+        existing.latencyMs = undefined;
       }
-      this.notify();
+    } else {
+      this.activePresences.set(deviceId, {
+        deviceId,
+        deviceName: 'Companion Device',
+        isOnline,
+        lastHeartbeat: isOnline ? Date.now() : 0,
+        latencyMs
+      });
     }
+    this.notify();
   }
 
   private async pulse(getPeers: () => PairedPeer[]) {
@@ -87,7 +102,7 @@ class PresenceService {
 
     await Promise.all(
       peers.map(async (peer) => {
-        if (!peer.deviceId || isLegacyUnmigratedPeer(peer)) {
+        if (!peer.deviceId || isLegacyLanOnlyPeer(peer)) {
           const offlineState: DevicePresenceState = {
             deviceId: peer.deviceId,
             deviceName: peer.deviceName,
@@ -97,6 +112,7 @@ class PresenceService {
             supportedFeatures: peer.capabilities
           };
           this.activePresences.set(peer.deviceId, offlineState);
+          changed = true;
           return;
         }
 
@@ -141,7 +157,9 @@ class PresenceService {
   }
 
   public pulseHeartbeats() {
-    if (this.isRunning) {
+    if (this.isRunning && this.currentGetPeers) {
+      void this.pulse(this.currentGetPeers);
+    } else if (this.isRunning) {
       this.notify();
     }
   }

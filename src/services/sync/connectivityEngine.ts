@@ -1,19 +1,31 @@
-import { SyncConnectionState } from '../../types';
-import { getLanNetworkStatus } from './lanTransport';
+import { SyncConnectionState, P2pSyncErrorCode } from '../../types';
 
-type StateListener = (state: SyncConnectionState, details?: { reason?: string; lastChecked?: number }) => void;
+type ConnectionListener = (state: SyncConnectionState) => void;
+
+export interface ConnectivityDetails {
+  state: SyncConnectionState;
+  brokerConnected: boolean;
+  isSyncing: boolean;
+  hasPeersReady: boolean;
+  discoveredCount: number;
+  lastBrokerErrorCode: P2pSyncErrorCode | null;
+  lastErrorMessage: string | null;
+  lastIceCandidateType: string | null;
+}
 
 class ConnectivityEngine {
-  private currentState: SyncConnectionState = 'OFFLINE';
-  private listeners: Set<StateListener> = new Set();
-  private checkInterval: any = null;
+  private currentState: SyncConnectionState = 'NETWORK_CONNECTED';
+  private listeners: Set<ConnectionListener> = new Set();
+  private checkInterval: ReturnType<typeof setInterval> | null = null;
   private isChecking = false;
-  private hostListening = false;
-  private lanConnected = false;
+
+  private brokerConnected = false;
   private isSyncing = false;
   private hasPeersReady = false;
+  private discoveredCount = 0;
+  private lastBrokerErrorCode: P2pSyncErrorCode | null = null;
   private lastErrorMessage: string | null = null;
-  private lastCheckedTimestamp: number = Date.now();
+  private lastIceCandidateType: string | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -21,18 +33,19 @@ class ConnectivityEngine {
       window.addEventListener('offline', () => this.handleNetworkChange(false));
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
-          this.checkConnectivity();
+          void this.checkConnectivity();
         }
       });
     }
   }
 
   public init() {
-    this.checkConnectivity();
-    if (!this.checkInterval && typeof window !== 'undefined') {
+    if (this.checkInterval) return;
+    void this.checkConnectivity();
+    if (typeof window !== 'undefined') {
       this.checkInterval = setInterval(() => {
-        this.checkConnectivity();
-      }, 15000);
+        void this.checkConnectivity();
+      }, 30000);
     }
   }
 
@@ -40,30 +53,80 @@ class ConnectivityEngine {
     return this.currentState;
   }
 
-  public getDetails(): { state: SyncConnectionState; lastChecked: number; error: string | null } {
+  public getLastError(): string | null {
+    return this.lastErrorMessage;
+  }
+
+  public getDetails(): ConnectivityDetails {
     return {
       state: this.currentState,
-      lastChecked: this.lastCheckedTimestamp,
-      error: this.lastErrorMessage
+      brokerConnected: this.brokerConnected,
+      isSyncing: this.isSyncing,
+      hasPeersReady: this.hasPeersReady,
+      discoveredCount: this.discoveredCount,
+      lastBrokerErrorCode: this.lastBrokerErrorCode,
+      lastErrorMessage: this.lastErrorMessage,
+      lastIceCandidateType: this.lastIceCandidateType
     };
   }
 
-  public subscribe(listener: StateListener): () => void {
+  public getStatusSummary(): {
+    code:
+      | 'offline'
+      | 'connecting'
+      | 'signalling_unreachable'
+      | 'id_in_use'
+      | 'syncing'
+      | 'discovered'
+      | 'ready'
+      | 'error';
+    label: string;
+  } {
+    if (this.currentState === 'OFFLINE' || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
+      return { code: 'offline', label: 'Offline — will sync when back online' };
+    }
+    if (this.currentState === 'SYNCING' || this.isSyncing) {
+      return { code: 'syncing', label: 'Syncing…' };
+    }
+    if (this.currentState === 'SYNC_ERROR') {
+      return {
+        code: 'error',
+        label: `Error: ${this.lastErrorMessage || 'Sync failed'}`
+      };
+    }
+    if (!this.brokerConnected) {
+      if (this.lastBrokerErrorCode === 'ID_IN_USE') {
+        return {
+          code: 'id_in_use',
+          label: 'Error: Device ID already in use on another session'
+        };
+      }
+      if (this.lastBrokerErrorCode === 'BROKER_DOWN') {
+        return { code: 'signalling_unreachable', label: 'Signalling unreachable' };
+      }
+      return { code: 'connecting', label: 'Connecting to signalling…' };
+    }
+    if (this.discoveredCount > 0 && !this.hasPeersReady) {
+      return {
+        code: 'discovered',
+        label: `Discovered ${this.discoveredCount} device${this.discoveredCount === 1 ? '' : 's'}`
+      };
+    }
+    return { code: 'ready', label: 'P2P ready' };
+  }
+
+  public subscribe(listener: ConnectionListener): () => void {
     this.listeners.add(listener);
-    listener(this.currentState, { lastChecked: this.lastCheckedTimestamp });
+    listener(this.currentState);
     return () => {
       this.listeners.delete(listener);
     };
   }
 
   private notify() {
-    this.lastCheckedTimestamp = Date.now();
     for (const listener of this.listeners) {
       try {
-        listener(this.currentState, {
-          reason: this.lastErrorMessage || undefined,
-          lastChecked: this.lastCheckedTimestamp
-        });
+        listener(this.currentState);
       } catch (err) {
         console.warn('[ConnectivityEngine] Listener error:', err);
       }
@@ -73,24 +136,28 @@ class ConnectivityEngine {
   private setState(newState: SyncConnectionState, errorMsg?: string) {
     if (errorMsg) {
       this.lastErrorMessage = errorMsg;
-    } else if (newState !== 'SYNC_ERROR') {
+    } else if (newState !== 'SYNC_ERROR' && newState !== 'INTERNET_AVAILABLE') {
       this.lastErrorMessage = null;
     }
 
     if (this.currentState !== newState) {
       this.currentState = newState;
-      this.notify();
     }
+    this.notify();
   }
 
-  public setHostListening(listening: boolean) {
-    this.hostListening = listening;
+  public setBrokerStatus(connected: boolean, errorCode?: P2pSyncErrorCode | null, errorMessage?: string | null) {
+    this.brokerConnected = connected;
+    if (connected) {
+      this.lastBrokerErrorCode = null;
+      this.lastErrorMessage = null;
+    } else if (errorCode) {
+      this.lastBrokerErrorCode = errorCode;
+      if (errorMessage) {
+        this.lastErrorMessage = errorMessage;
+      }
+    }
     this.evaluateState();
-  }
-
-  /** Compatibility alias kept for callers checking host/listener status. */
-  public setBrokerStatus(connected: boolean) {
-    this.setHostListening(connected);
   }
 
   public setSyncing(syncing: boolean) {
@@ -103,30 +170,48 @@ class ConnectivityEngine {
     this.evaluateState();
   }
 
+  public setDiscoveredCount(count: number) {
+    const clean = Math.max(0, Math.floor(count || 0));
+    if (this.discoveredCount !== clean) {
+      this.discoveredCount = clean;
+      this.notify();
+    }
+  }
+
+  public setLastIceCandidateType(candidateType: string | null) {
+    this.lastIceCandidateType = candidateType ? String(candidateType) : null;
+  }
+
   public setSyncError(error: string) {
     this.setState('SYNC_ERROR', error);
   }
 
   private handleNetworkChange(isOnline: boolean) {
     if (!isOnline) {
-      this.lanConnected = false;
-      this.evaluateState();
+      this.brokerConnected = false;
+      this.setState('OFFLINE');
     } else {
-      this.checkConnectivity();
+      void this.checkConnectivity();
     }
   }
 
-  /**
-   * Validates local Wi-Fi / LAN interface readiness without requiring internet access.
-   */
   public async checkConnectivity(): Promise<SyncConnectionState> {
     if (this.isChecking) return this.currentState;
     this.isChecking = true;
 
     try {
-      const netStatus = await getLanNetworkStatus();
-      this.lanConnected = Boolean(netStatus.lanConnected || netStatus.wifiConnected || netStatus.localIpv4Addresses.length > 0);
-      this.evaluateState();
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        this.setState('OFFLINE');
+        return 'OFFLINE';
+      }
+
+      const hasInternet = await this.probeInternetReachability();
+      if (!hasInternet) {
+        this.setState('NETWORK_CONNECTED');
+        return 'NETWORK_CONNECTED';
+      }
+
+      this.evaluateState(true);
       return this.currentState;
     } catch (err: any) {
       this.setState('NETWORK_CONNECTED', err?.message);
@@ -136,30 +221,45 @@ class ConnectivityEngine {
     }
   }
 
-  private evaluateState() {
+  private evaluateState(internetConfirmed: boolean = true) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      this.setState('OFFLINE');
+      return;
+    }
     if (this.isSyncing) {
       this.setState('SYNCING');
       return;
     }
-
-    if (!this.lanConnected && !this.hostListening && !this.hasPeersReady) {
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-        this.setState('OFFLINE');
-        return;
-      }
-    }
-
-    if (this.hasPeersReady || this.hostListening) {
-      this.setState('SYNC_READY');
-      return;
-    }
-
-    if (this.lanConnected) {
+    if (!internetConfirmed && this.currentState === 'OFFLINE') {
       this.setState('NETWORK_CONNECTED');
       return;
     }
+    if (!this.brokerConnected) {
+      this.setState('INTERNET_AVAILABLE', this.lastErrorMessage || undefined);
+      return;
+    }
+    if (this.hasPeersReady) {
+      this.setState('SYNC_READY');
+      return;
+    }
+    this.setState('BROKER_CONNECTED');
+  }
 
-    this.setState('OFFLINE');
+  private async probeInternetReachability(): Promise<boolean> {
+    if (typeof window === 'undefined' || typeof fetch !== 'function') return true;
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      const response = await fetch(`/favicon.ico?_probe=${Date.now()}`, {
+        method: 'HEAD',
+        cache: 'no-store',
+        signal: controller.signal
+      }).catch(() => null);
+      clearTimeout(timeout);
+      return response !== null;
+    } catch {
+      return false;
+    }
   }
 
   public destroy() {
@@ -167,6 +267,14 @@ class ConnectivityEngine {
       clearInterval(this.checkInterval);
       this.checkInterval = null;
     }
+    this.brokerConnected = false;
+    this.isSyncing = false;
+    this.hasPeersReady = false;
+    this.discoveredCount = 0;
+    this.lastBrokerErrorCode = null;
+    this.lastErrorMessage = null;
+    this.lastIceCandidateType = null;
+    this.currentState = 'NETWORK_CONNECTED';
     this.listeners.clear();
   }
 }

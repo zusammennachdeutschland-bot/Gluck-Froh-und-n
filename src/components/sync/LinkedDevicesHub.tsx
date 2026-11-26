@@ -12,12 +12,11 @@ import {
   ShieldCheck,
   AlertTriangle,
   Plus,
-  X,
-  Lock
+  X
 } from 'lucide-react';
 import { PairedPeer, DevicePresenceState } from '../../types';
 import { CopyableBlock } from './CopyableBlock';
-import { isLegacyUnmigratedPeer } from '../../services/sync/lanVault';
+import { isLegacyLanOnlyPeer } from '../../services/sync/syncMigration';
 import { useApp } from '../../context/AppContext';
 
 interface LinkedDevicesHubProps {
@@ -92,6 +91,14 @@ export const LinkedDevicesHub: React.FC<LinkedDevicesHubProps> = ({
     }
   };
 
+  const redactPeer = (peer: PairedPeer) => {
+    const { pairingToken, ...rest } = peer;
+    return {
+      ...rest,
+      ...(pairingToken ? { pairingToken: '[REDACTED]' } : {})
+    };
+  };
+
   return (
     <div id={id} className="space-y-5">
       {/* This Device Identity Bar */}
@@ -147,7 +154,7 @@ export const LinkedDevicesHub: React.FC<LinkedDevicesHubProps> = ({
       <div className="space-y-2.5">
         <div className="flex items-center justify-between">
           <span className="text-xs font-bold text-text-muted uppercase tracking-wider">
-            {_t('الأجهزة المقترنة عبر Wi-Fi', 'Paired LAN Devices', 'Gekoppelte LAN-Geräte')} ({pairedPeers.length})
+            {_t('الأجهزة المقترنة عبر P2P', 'Paired P2P Devices', 'Gekoppelte P2P-Geräte')} ({pairedPeers.length})
           </span>
           <button
             type="button"
@@ -165,7 +172,7 @@ export const LinkedDevicesHub: React.FC<LinkedDevicesHubProps> = ({
             <div>
               <p className="text-sm font-bold text-text-main">{_t('لا توجد أجهزة مقترنة بعد', 'No paired devices yet', 'Keine gekoppelten Geräte')}</p>
               <p className="text-xs text-text-muted mt-0.5">
-                {_t('ابحث على شبكة Wi-Fi أو أدخل عنوان IP والمنفذ للاتصال.', 'Search over Wi-Fi or enter host IP & pairing code manually.', 'Im WLAN suchen oder manuell verbinden.')}
+                {_t('اقرن أجهزة Android والويب مباشرة عبر رمز QR أو الرمز السداسي.', 'Pair mobile and web devices directly using QR code or 6-digit PIN.', 'Geräte direkt per QR-Code oder 6-stelliger PIN koppeln.')}
               </p>
             </div>
             <button
@@ -173,14 +180,14 @@ export const LinkedDevicesHub: React.FC<LinkedDevicesHubProps> = ({
               onClick={() => onOpenPairing()}
               className="px-4 py-2 rounded-xl bg-primary hover:bg-primary-hover text-primary-fg text-xs font-bold cursor-pointer"
             >
-              {_t('بحث وربط جهاز', 'Find & Pair Device', 'Gerät suchen & koppeln')}
+              {_t('إقران جهاز الآن', 'Pair Device Now', 'Jetzt Gerät koppeln')}
             </button>
           </div>
         ) : (
           <div className="space-y-2.5">
             {pairedPeers.map((peer) => {
               const presence = devicePresences.get(peer.deviceId);
-              const needsRePair = isLegacyUnmigratedPeer(peer);
+              const needsRePair = isLegacyLanOnlyPeer(peer);
               const isOnline = !needsRePair && (presence ? presence.isOnline : false);
               const latency = presence?.latencyMs ?? peer.latencyMs;
               const isSyncing = syncingPeerId === peer.deviceId;
@@ -236,25 +243,20 @@ export const LinkedDevicesHub: React.FC<LinkedDevicesHubProps> = ({
                         {needsRePair ? (
                           <span className="text-amber-600 dark:text-amber-400 font-sans font-bold flex items-center gap-1">
                             <AlertTriangle className="w-3 h-3" />
-                            {_t('يتطلب إعادة اقتران على Wi-Fi', 'Re-pair required (Legacy record)', 'Neu kopplung erforderlich')}
+                            {_t('يتطلب إعادة اقتران عبر P2P', 'Re-pair required', 'Erneute Kopplung erforderlich')}
                           </span>
                         ) : (
                           <>
-                            <span>
-                              {peer.lastKnownIp ? `${peer.lastKnownIp}:${peer.port}` : _t('بانتظار IP', 'Pending IP', 'IP ausstehend')}
-                            </span>
-                            {peer.verificationCode && (
-                              <span className="flex items-center gap-1 text-primary">
-                                <Lock className="w-3 h-3" />
-                                {peer.verificationCode}
-                              </span>
+                            <span>P2P (WebRTC)</span>
+                            {peer.iceCandidateType && (
+                              <span className="text-primary">ICE: {peer.iceCandidateType}</span>
                             )}
                             <span className={isOnline ? 'text-emerald-600 dark:text-emerald-400 font-sans font-semibold' : 'font-sans'}>
                               {isOnline
                                 ? typeof latency === 'number'
                                   ? `${_t('متصل', 'Connected', 'Verbunden')} · ${latency}ms`
                                   : _t('متصل', 'Connected', 'Verbunden')
-                                : _t('غير متصل', 'Disconnected', 'Getrennt')}
+                                : _t('غير متصل', 'Offline', 'Offline')}
                             </span>
                           </>
                         )}
@@ -322,7 +324,7 @@ export const LinkedDevicesHub: React.FC<LinkedDevicesHubProps> = ({
                             className="w-full px-3.5 py-2 text-left rtl:text-right text-text-main hover:bg-surface-hover flex items-center gap-2 cursor-pointer"
                           >
                             <Shield className="w-3.5 h-3.5 text-text-muted" />
-                            <span>{_t('تفاصيل الأمان', 'Security Details', 'Sicherheitsdetails')}</span>
+                            <span>{_t('تفاصيل الاتصال', 'Connection Details', 'Verbindungsdetails')}</span>
                           </button>
                           <div className="h-px bg-surface-border my-1" />
                           <button
@@ -334,7 +336,7 @@ export const LinkedDevicesHub: React.FC<LinkedDevicesHubProps> = ({
                             className="w-full px-3.5 py-2 text-left rtl:text-right text-red-600 dark:text-red-400 hover:bg-red-500/10 flex items-center gap-2 font-bold cursor-pointer"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
-                            <span>{_t('إلغاء الاقتران وحذف المفتاح', 'Revoke & Remove', 'Entkoppeln')}</span>
+                            <span>{_t('إلغاء الاقتران', 'Revoke & Remove', 'Entkoppeln')}</span>
                           </button>
                         </div>
                       )}
@@ -354,7 +356,7 @@ export const LinkedDevicesHub: React.FC<LinkedDevicesHubProps> = ({
             <div className="flex items-center justify-between border-b border-surface-border pb-3">
               <h4 className="text-sm font-bold text-text-main flex items-center gap-2">
                 <Shield className="w-4 h-4 text-primary" />
-                {_t('بيانات التشفير والشبكة', 'LAN Security Profile', 'LAN-Sicherheitsprofil')}
+                {_t('بيانات اتصال P2P', 'P2P Connection Profile', 'P2P-Verbindungsprofil')}
               </h4>
               <button
                 type="button"
@@ -371,30 +373,28 @@ export const LinkedDevicesHub: React.FC<LinkedDevicesHubProps> = ({
                 <span className="font-bold text-text-main">{selectedPeerDetails.deviceName}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-surface-border">
-                <span>{_t('العنوان والمنفذ', 'LAN Endpoint', 'LAN-Adresse')}</span>
-                <span className="font-mono text-text-main tabular-nums">
-                  {selectedPeerDetails.lastKnownIp || '—'}:{selectedPeerDetails.port}
-                </span>
+                <span>{_t('البروتوكول', 'Transport', 'Protokoll')}</span>
+                <span className="font-mono text-text-main">P2P (WebRTC)</span>
               </div>
               <div className="flex justify-between py-1 border-b border-surface-border">
-                <span>{_t('رمز التحقق للشهادة', 'TLS Pin Code', 'TLS-Prüfcode')}</span>
+                <span>{_t('نوع مسار ICE', 'ICE Candidate Type', 'ICE-Typ')}</span>
                 <span className="font-mono text-primary font-bold">
-                  {selectedPeerDetails.verificationCode || '—'}
+                  {selectedPeerDetails.iceCandidateType || '—'}
                 </span>
               </div>
               <div className="flex justify-between py-1 border-b border-surface-border">
-                <span>{_t('تخزين المفتاح', 'Token Storage', 'Schlüsselspeicher')}</span>
+                <span>{_t('حالة الاقتران', 'Pairing Status', 'Status')}</span>
                 <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                  {selectedPeerDetails.hasStoredAuthToken
-                    ? _t('محفوظ في المخزن المشفر للنظام', 'Protected OS Vault (Not in localStorage)', 'System-Tresor')
-                    : _t('يتطلب إعادة اقتران', 'Re-pair required', 'Nicht gekoppelt')}
+                  {isLegacyLanOnlyPeer(selectedPeerDetails)
+                    ? _t('يتطلب إعادة اقتران', 'Re-pair required', 'Neu koppeln')
+                    : _t('مفعل (DTLS مشفر)', 'Active (Encrypted DTLS)', 'Aktiv (DTLS verschlüsselt)')}
                 </span>
               </div>
             </div>
 
             <CopyableBlock
-              title={_t('بيانات الجهاز (بدون مفاتيح سرية)', 'Sanitized Peer Metadata', 'Bereinigte Metadaten')}
-              content={JSON.stringify(selectedPeerDetails, null, 2)}
+              title={_t('بيانات الجهاز (منقحة)', 'Redacted Peer Metadata', 'Bereinigte Metadaten')}
+              content={JSON.stringify(redactPeer(selectedPeerDetails), null, 2)}
             />
 
             <button

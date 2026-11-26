@@ -12,7 +12,7 @@ import {
   FinanceAccount, FinanceCategory, FinanceTransaction, FinanceRecurring, FinanceInstallment, FinanceNotification,
   TodoItem, PaymentPlanType, AICertificateBackground,
   GroupWeeklySession, ZoomMeetingRecord, ZoomMeetingHistory, GrainRecordingMatch,
-  LanHostStatus
+  P2pHostStartResult, PresenceRoomState
 } from '../types';
 import { recalculateAllAccountBalances, computeAccountBalance, shouldSettlePendingCycleRecord, splitPaymentAcrossLessons } from '../services/financeService';
 import { 
@@ -44,14 +44,17 @@ import {
 } from '../services/sync/mergeEngine';
 import { runSyncCycle, forceFullSync, SyncDataSource } from '../services/sync/syncOrchestrator';
 import { calculatePendingOutbox } from '../services/sync/deltaBuilder';
-import { startLocalServer } from '../services/sync/localServer';
-import { sanitizeSyncStateForStorage, revokeStoredLanCredentials } from '../services/sync/lanVault';
+import { startLocalServer, regeneratePairingPin } from '../services/sync/localServer';
+import { sanitizeSyncStateForStorage } from '../services/sync/syncMigration';
 import { connectivityEngine } from '../services/sync/connectivityEngine';
 import { presenceService } from '../services/sync/presenceService';
+import { presenceRoom } from '../services/sync/presenceRoom';
+import { rediscoverPairedPeers, startRediscoveryLoop } from '../services/sync/discoveryService';
 import { autoSyncEngine } from '../services/sync/autoSyncEngine';
 import { syncHistoryService } from '../services/sync/syncHistoryService';
 import { syncEventQueue } from '../services/sync/syncEventQueue';
 import { applyRestoreSyncSafeguards } from '../services/sync/backupSafetyService';
+import { getActiveCloudUser, subscribeTeacherAuth } from '../shared/firebaseCloudSync';
 import {
   isAssignmentDeletedLocally,
   markAssignmentDeletedLocally,
@@ -475,7 +478,10 @@ interface AppContextType {
   clearSyncHistory: () => Promise<void>;
   updateSyncState: (newState: SyncStateMetadata) => Promise<void>;
   unpairPeer: (peerId: string) => Promise<void>;
-  startHosting: (portOverride?: number) => Promise<LanHostStatus & { ip: string; pin: string }>;
+  startHosting: () => Promise<P2pHostStartResult>;
+  regeneratePin: () => Promise<P2pHostStartResult>;
+  rediscoverPeers: () => Promise<{ onlinePeerIds: string[]; checkedCount: number }>;
+  roomState: PresenceRoomState;
   externalDataVersion: number;
   bumpExternalDataVersion: () => void;
 
@@ -623,6 +629,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   // Connectivity and Presence States
   const [connectionState, setConnectionState] = useState<SyncConnectionState>(() => connectivityEngine.getState());
   const [devicePresences, setDevicePresences] = useState<Map<string, DevicePresenceState>>(() => presenceService.getPresences());
+  const [roomState, setRoomState] = useState<PresenceRoomState>(() => presenceRoom.getState());
   const [autoSyncEnabled, setAutoSyncEnabledState] = useState<boolean>(true);
 
   const setAutoSyncEnabled = (enabled: boolean) => {
@@ -631,6 +638,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   useEffect(() => {
+    let cleanupFns: Array<() => void> = [];
     async function initSync() {
       try {
         await runSyncMigration();
@@ -638,38 +646,64 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         if (state) {
           setSyncState(state);
           syncRevisionRef.current = state.localRevisionCounter;
-          // Auto-start local host node with deterministic deviceId on startup
           startLocalServer(state.localDeviceName, state.localDeviceId, state, syncDataSource).catch(err => {
-            console.warn('[AppContext] Initial host start notice:', err);
+            console.warn('[AppContext] Initial P2P host start notice:', err);
           });
         }
 
-        // Initialize Connectivity Engine
         connectivityEngine.init();
         const unsubscribeConn = connectivityEngine.subscribe((newConnState) => {
           setConnectionState(newConnState);
         });
+        cleanupFns.push(unsubscribeConn);
 
-        // Initialize Presence Engine
         presenceService.start(() => syncStateRef.current?.pairedPeers || []);
         const unsubscribePresence = presenceService.subscribe((newPresences) => {
           setDevicePresences(newPresences);
-          // Also evaluate if any peer is ready in connectivity engine
           const anyOnline = Array.from(newPresences.values()).some(p => p.isOnline);
           connectivityEngine.setPeersReady(anyOnline);
         });
+        cleanupFns.push(unsubscribePresence);
 
-        return () => {
-          unsubscribeConn();
-          unsubscribePresence();
+        const unsubscribeRoom = presenceRoom.subscribe((nextRoomState) => {
+          setRoomState(nextRoomState);
+        });
+        cleanupFns.push(unsubscribeRoom);
+
+        const syncRoomForUser = (user: { uid?: string | null } | null) => {
+          const st = syncStateRef.current;
+          if (!st?.localDeviceId) return;
+          const platform = Capacitor.isNativePlatform() ? 'android' : 'web';
+          void presenceRoom.start({
+            uid: user?.uid || null,
+            deviceId: st.localDeviceId,
+            deviceName: st.localDeviceName,
+            platform
+          });
         };
+
+        syncRoomForUser(getActiveCloudUser());
+        const unsubAuth = subscribeTeacherAuth((u) => {
+          syncRoomForUser(u);
+        });
+        cleanupFns.push(unsubAuth);
+
+        const stopRediscovery = startRediscoveryLoop(() => syncStateRef.current?.pairedPeers || []);
+        cleanupFns.push(stopRediscovery);
       } catch (err) {
         console.error('Failed to initialize sync:', err);
       } finally {
         setIsSyncReady(true);
       }
     }
-    initSync();
+    void initSync();
+    return () => {
+      cleanupFns.forEach((fn) => {
+        try {
+          fn();
+        } catch {}
+      });
+    };
   }, []);
 
   const [externalDataVersion, setExternalDataVersion] = useState<number>(0);
@@ -9258,16 +9292,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     await syncHistoryService.clearHistory();
   };
 
-  const startHosting = async (portOverride?: number) => {
-    if (!syncState) throw new Error('Sync not initialized');
-    return await startLocalServer(syncState.localDeviceName, syncState.localDeviceId, syncState, syncDataSource, portOverride);
+  const startHosting = async (): Promise<P2pHostStartResult> => {
+    const current = syncStateRef.current || syncState;
+    if (!current) throw new Error('Sync not initialized');
+    return await startLocalServer(current.localDeviceName, current.localDeviceId, current, syncDataSource);
+  };
+
+  const regeneratePin = async (): Promise<P2pHostStartResult> => {
+    return await regeneratePairingPin(undefined, syncDataSource);
+  };
+
+  const rediscoverPeers = async () => {
+    const peers = syncStateRef.current?.pairedPeers || [];
+    return await rediscoverPairedPeers(peers);
   };
 
   const unpairPeer = async (peerId: string): Promise<void> => {
-    await revokeStoredLanCredentials(peerId);
     const current = syncStateRef.current;
     if (!current) return;
     const updatedPeers = (current.pairedPeers || []).filter((p) => p.deviceId !== peerId);
+    presenceService.updatePresenceManually(peerId, false);
     await syncDataSource.updateSyncState({ ...current, pairedPeers: updatedPeers });
   };
 
@@ -9544,6 +9588,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         updateSyncState: syncDataSource.updateSyncState,
         unpairPeer,
         startHosting,
+        regeneratePin,
+        rediscoverPeers,
+        roomState,
         externalDataVersion,
         bumpExternalDataVersion,
         groupWeeklySessions: activeGroupWeeklySessions,

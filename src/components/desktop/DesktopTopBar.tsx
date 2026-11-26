@@ -42,6 +42,9 @@ export const DesktopTopBar: React.FC<DesktopTopBarProps> = () => {
     updateSyncState,
     unpairPeer,
     startHosting,
+    regeneratePin,
+    rediscoverPeers,
+    roomState,
     refreshCalendarAndDashboard
   } = useApp();
 
@@ -74,17 +77,15 @@ export const DesktopTopBar: React.FC<DesktopTopBarProps> = () => {
   };
 
   const handlePair = async (
-    hostIp: string,
-    port: number,
-    pairingCode: string,
-    expectedFingerprint?: string
+    targetDeviceId: string,
+    pairingPin: string
   ) => {
     if (!syncState) return;
     const localDevice = { deviceId: syncState.localDeviceId, deviceName: syncState.localDeviceName };
-    const res = await pairWithPeer(hostIp, port, pairingCode, localDevice, expectedFingerprint);
+    const res = await pairWithPeer(targetDeviceId, pairingPin, localDevice);
     if (!res.ok || !res.peer) {
-      const msg = res.message || res.errorCode || `Could not pair with ${hostIp}:${port}`;
-      addLog(`Pairing failed (${hostIp}:${port}): ${msg}`);
+      const msg = res.message || res.errorCode || 'Could not pair with peer device.';
+      addLog(`P2P pairing failed: ${msg}`);
       throw new Error(msg);
     }
     const pairedPeer = res.peer;
@@ -93,7 +94,7 @@ export const DesktopTopBar: React.FC<DesktopTopBarProps> = () => {
       pairedPeer
     ];
     await updateSyncState({ ...syncState, pairedPeers: updatedPeers });
-    addLog(`Paired with ${pairedPeer.deviceName} (${pairedPeer.lastKnownIp}:${pairedPeer.port})`);
+    addLog(`Paired with ${pairedPeer.deviceName} via P2P (WebRTC)`);
   };
 
   const handleForceSync = async (peerId?: string) => {
@@ -365,6 +366,9 @@ export const DesktopTopBar: React.FC<DesktopTopBarProps> = () => {
           onRenamePeer={handleRenamePeer}
           activityLogs={activityLogs}
           onStartHosting={startHosting}
+          onRegeneratePin={regeneratePin}
+          onRediscoverPeers={rediscoverPeers}
+          roomState={roomState}
           connectionState={connectionState}
           devicePresences={devicePresences}
           syncState={syncState}

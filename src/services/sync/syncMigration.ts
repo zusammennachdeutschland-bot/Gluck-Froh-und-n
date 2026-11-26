@@ -4,10 +4,8 @@ import {
   TeacherSettingsRecord,
   TeacherProfile,
   CURRENT_SYNC_PROTOCOL_VERSION,
-  DEFAULT_LAN_SYNC_PORT,
   PairedPeer
 } from '../../types';
-import { isLegacyUnmigratedPeer, sanitizeSyncStateForStorage } from './lanVault';
 
 const MIGRATION_KEYS = [
   'dl_groups',
@@ -29,6 +27,78 @@ const MIGRATION_KEYS = [
   'dl_finance_installments'
 ];
 
+function isNumericIpv4(value?: string): boolean {
+  if (!value) return false;
+  return /^(\d{1,3}\.){3}\d{1,3}$/.test(value.trim());
+}
+
+/**
+ * Returns true if a paired peer is a legacy LAN-IP/PIN-as-IP record or was previously flagged as needing re-pairing.
+ * Valid WebRTC P2P peers (`lastKnownIp === 'P2P (WebRTC)'` or `'P2P'` with `port === 0` and a stored token) return false.
+ */
+export function isLegacyLanOnlyPeer(peer: PairedPeer | null | undefined): boolean {
+  if (!peer) return true;
+  if (peer.requiresRePairing) return true;
+
+  const ip = String(peer.lastKnownIp || '').trim();
+  const port = Number(peer.port || 0);
+  if (port > 0) return true;
+
+  const isP2pMarker = ip === 'P2P (WebRTC)' || ip === 'P2P';
+  if (!isP2pMarker) {
+    // Numeric PIN-as-IP, IPv4, or empty non-P2P host
+    if (/^\d{6}$/.test(ip) || isNumericIpv4(ip) || ip.length > 0) {
+      return true;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Normalizes SyncStateMetadata for local persistence.
+ * Keeps P2P peer auth tokens intact across restarts so Web + Android remain paired without Electron/KeyStore,
+ * while ensuring valid P2P peers are cleanly typed.
+ */
+export function sanitizeSyncStateForStorage(state: SyncStateMetadata): SyncStateMetadata {
+  if (!state) return state;
+  const cleanPeers: PairedPeer[] = Array.isArray(state.pairedPeers)
+    ? state.pairedPeers.map((p) => ({
+        ...p,
+        port: Number(p.port || 0),
+        hasStoredAuthToken: Boolean(p.pairingToken || p.hasStoredAuthToken)
+      }))
+    : [];
+
+  return {
+    ...state,
+    pairedPeers: cleanPeers
+  };
+}
+
+/**
+ * Strips sensitive pairing secrets (`pairingPin`, per-peer `pairingToken`) before displaying or exporting diagnostics.
+ */
+export function redactSyncStateForDiagnostics(state: SyncStateMetadata | null | undefined): any {
+  if (!state) return null;
+  const { pairingPin: _omitPin, ...restState } = state;
+  return {
+    ...restState,
+    ...(typeof state.pairingPin === 'string' && state.pairingPin ? { pairingPin: '[REDACTED]' } : {}),
+    pairedPeers: Array.isArray(state.pairedPeers)
+      ? state.pairedPeers.map((peer) => {
+          const { pairingToken, ...restPeer } = peer;
+          return {
+            ...restPeer,
+            ...(pairingToken ? { pairingToken: '[REDACTED]' } : {}),
+            hasStoredAuthToken: Boolean(pairingToken || peer.hasStoredAuthToken)
+          };
+        })
+      : []
+  };
+}
+
 /**
  * Generates a unique device ID for the local instance.
  */
@@ -41,11 +111,10 @@ function generateDeviceId(): string {
 
 /**
  * Extracts a deterministic baseline timestamp from an existing record.
- * Falls back to 0 if no parsable date field is found.
  */
 function extractTimestamp(item: any): number {
   if (!item) return 0;
-  
+
   let timeValue: string | number | undefined;
 
   if (item.updatedAt) {
@@ -76,7 +145,11 @@ function extractTimestamp(item: any): number {
  */
 export async function migrateTeacherSettings(localDeviceId: string): Promise<TeacherSettingsRecord> {
   const existingSettings = await storage.getItem<TeacherSettingsRecord[]>('dl_settings');
-  if (Array.isArray(existingSettings) && existingSettings.length > 0 && existingSettings[0].id === 'singleton_teacher_settings') {
+  if (
+    Array.isArray(existingSettings) &&
+    existingSettings.length > 0 &&
+    existingSettings[0].id === 'singleton_teacher_settings'
+  ) {
     return existingSettings[0];
   }
 
@@ -120,9 +193,9 @@ export async function migrateTeacherSettings(localDeviceId: string): Promise<Tea
 }
 
 /**
- * Safely migrates legacy PeerJS/WebRTC or PIN-as-IP paired peer records to the direct LAN schema.
- * Preserves deviceId, deviceName, lastSyncedTimestamp, and peerWatermarkTable, strips any plaintext
- * pairingToken from localStorage, and marks unmigrated peers as requiring re-pairing.
+ * Migrates paired peer records when transitioning back to WebRTC P2P sync:
+ * - Preserves valid `P2P (WebRTC)` / `P2P` peers with `port: 0` cleanly (clearing accidental `requiresRePairing` if a token is intact; keeping `requiresRePairing` if its token was wiped).
+ * - Flags legacy LAN-IP (`192.168.x.x` / `port > 0`) or PIN-as-IP peers with `requiresRePairing: true` without deleting watermarks or user data.
  */
 export function migrateLegacyPeerRecords(state: SyncStateMetadata): {
   migratedState: SyncStateMetadata;
@@ -134,23 +207,57 @@ export function migrateLegacyPeerRecords(state: SyncStateMetadata): {
 
   let didChange = false;
   const upgradedPeers: PairedPeer[] = state.pairedPeers.map((rawPeer) => {
-    const legacy = isLegacyUnmigratedPeer(rawPeer);
-    const hadPlaintextToken = Boolean((rawPeer as any).pairingToken);
-    if (!legacy && !hadPlaintextToken) {
-      return rawPeer;
+    const ip = String(rawPeer.lastKnownIp || '').trim();
+    const port = Number(rawPeer.port || 0);
+    const hasToken = Boolean(rawPeer.pairingToken);
+    const wasP2p =
+      (ip === 'P2P (WebRTC)' || ip === 'P2P' || rawPeer.legacyMigratedFrom === 'P2P (WebRTC)' || rawPeer.legacyMigratedFrom === 'P2P') &&
+      port === 0;
+
+    if (wasP2p) {
+      if (hasToken && rawPeer.requiresRePairing) {
+        didChange = true;
+        return {
+          ...rawPeer,
+          lastKnownIp: 'P2P (WebRTC)',
+          port: 0,
+          hasStoredAuthToken: true,
+          requiresRePairing: false
+        };
+      }
+      if (!hasToken && !rawPeer.requiresRePairing) {
+        didChange = true;
+        return {
+          ...rawPeer,
+          lastKnownIp: 'P2P (WebRTC)',
+          port: 0,
+          hasStoredAuthToken: false,
+          requiresRePairing: true,
+          isOnline: false
+        };
+      }
+      return {
+        ...rawPeer,
+        lastKnownIp: 'P2P (WebRTC)',
+        port: 0,
+        hasStoredAuthToken: hasToken || Boolean(rawPeer.hasStoredAuthToken)
+      };
     }
 
-    didChange = true;
-    const { pairingToken: _removedToken, ...rest } = rawPeer as PairedPeer & { pairingToken?: string };
-    return {
-      ...rest,
-      lastKnownIp: legacy ? '' : rawPeer.lastKnownIp,
-      port: legacy || !rawPeer.port || Number(rawPeer.port) <= 0 ? DEFAULT_LAN_SYNC_PORT : Number(rawPeer.port),
-      hasStoredAuthToken: legacy ? false : Boolean(rest.hasStoredAuthToken),
-      requiresRePairing: legacy ? true : Boolean(rest.requiresRePairing),
-      legacyMigratedFrom: rest.legacyMigratedFrom || (legacy ? String(rawPeer.lastKnownIp || 'legacy') : undefined),
-      isOnline: false
-    };
+    // Legacy LAN-only peer or PIN-as-IP
+    if (!rawPeer.requiresRePairing || port > 0 || isNumericIpv4(ip) || /^\d{6}$/.test(ip)) {
+      didChange = true;
+      return {
+        ...rawPeer,
+        lastKnownIp: ip,
+        port,
+        requiresRePairing: true,
+        isOnline: false,
+        legacyMigratedFrom: rawPeer.legacyMigratedFrom || (isNumericIpv4(ip) ? 'lan_ip' : ip || 'legacy')
+      };
+    }
+
+    return rawPeer;
   });
 
   if (!didChange) {
@@ -160,7 +267,6 @@ export function migrateLegacyPeerRecords(state: SyncStateMetadata): {
   return {
     migratedState: sanitizeSyncStateForStorage({
       ...state,
-      hostPort: state.hostPort || DEFAULT_LAN_SYNC_PORT,
       pairedPeers: upgradedPeers
     }),
     didChange: true
@@ -169,45 +275,41 @@ export function migrateLegacyPeerRecords(state: SyncStateMetadata): {
 
 /**
  * Executes Safe Multi-Version Sync Migration.
- * Migrates all existing local storage records and teacher settings to the SyncableRecord schema.
  */
 export async function runSyncMigration(): Promise<void> {
   try {
-    // 1. Check existing state
     const existingState = await storage.getItem<SyncStateMetadata>('dl_sync_state');
-    
+
     if (existingState && existingState.localDeviceId) {
-      // Incremental Migration: Ensure dl_settings exists
       await migrateTeacherSettings(existingState.localDeviceId);
 
       const { migratedState, didChange } = migrateLegacyPeerRecords(existingState);
-      const needsProtocolBump = !migratedState.protocolVersion || migratedState.protocolVersion < CURRENT_SYNC_PROTOCOL_VERSION;
-      const needsPortDefault = !migratedState.hostPort;
+      const needsProtocolBump =
+        !migratedState.protocolVersion || migratedState.protocolVersion < CURRENT_SYNC_PROTOCOL_VERSION;
 
-      if (didChange || needsProtocolBump || needsPortDefault) {
-        await storage.setItem('dl_sync_state', sanitizeSyncStateForStorage({
-          ...migratedState,
-          protocolVersion: Math.max(CURRENT_SYNC_PROTOCOL_VERSION, migratedState.protocolVersion || 0),
-          hostPort: migratedState.hostPort || DEFAULT_LAN_SYNC_PORT
-        }));
+      if (didChange || needsProtocolBump) {
+        await storage.setItem(
+          'dl_sync_state',
+          sanitizeSyncStateForStorage({
+            ...migratedState,
+            protocolVersion: Math.max(CURRENT_SYNC_PROTOCOL_VERSION, migratedState.protocolVersion || 0)
+          })
+        );
       }
       return;
     }
 
     const localDeviceId = generateDeviceId();
 
-    // 2. Backup Phase: Extract all targeted keys
     const snapshot: Record<string, any[]> = {};
     for (const key of MIGRATION_KEYS) {
       const data = await storage.getItem<any[]>(key);
       snapshot[key] = Array.isArray(data) ? data : [];
     }
 
-    // Serialize snapshot for recovery
     const serializedSnapshot = JSON.stringify(snapshot);
     await storage.setItem('dl_backup_premigration_snapshot', serializedSnapshot);
 
-    // 3. Verify Phase: Read back and parse to ensure integrity
     const readBackString = await storage.getItem<string>('dl_backup_premigration_snapshot');
     if (!readBackString) {
       throw new Error('Sync Migration Aborted: Snapshot verification failed (empty read).');
@@ -216,11 +318,10 @@ export async function runSyncMigration(): Promise<void> {
     let parsedSnapshot: Record<string, any[]>;
     try {
       parsedSnapshot = JSON.parse(readBackString);
-    } catch (parseError) {
+    } catch {
       throw new Error('Sync Migration Aborted: Snapshot verification failed (parse error).');
     }
 
-    // 4. Mutation Phase: Inject sync metadata into memory arrays with duplicate prevention
     const migratedData: Record<string, any[]> = {};
     for (const key of MIGRATION_KEYS) {
       const items = parsedSnapshot[key] || [];
@@ -246,15 +347,12 @@ export async function runSyncMigration(): Promise<void> {
       });
     }
 
-    // 5. Persistence Phase: Save migrated arrays back to storage
     for (const key of MIGRATION_KEYS) {
       await storage.setItem(key, migratedData[key]);
     }
 
-    // 6. Migrate Teacher Settings
     await migrateTeacherSettings(localDeviceId);
 
-    // 7. Initialization Phase: Create and store the foundational sync state
     const syncState: SyncStateMetadata = {
       localDeviceId,
       localDeviceName: 'My Device',
@@ -271,4 +369,3 @@ export async function runSyncMigration(): Promise<void> {
     throw error;
   }
 }
-
