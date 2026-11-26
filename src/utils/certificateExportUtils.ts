@@ -2,7 +2,6 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
-import { Share } from '@capacitor/share';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Toast } from '@capacitor/toast';
@@ -10,7 +9,7 @@ import { Dialog } from '@capacitor/dialog';
 import { CertificateRecord } from '../types';
 import { CertificateRenderer } from '../components/certificates/templates/CertificateRenderer';
 import { buildWhatsAppUrl } from './phoneUtils';
-import { saveToPhoneSubfolderAndRegister, APP_ROOT_FOLDER } from '../services/downloadedFilesService';
+import { saveToPhoneSubfolderAndRegister, shareFileNative, APP_ROOT_FOLDER } from '../services/downloadedFilesService';
 
 export const CERTIFICATES_FOLDER_NAME = `${APP_ROOT_FOLDER}/Certificates`;
 
@@ -1062,12 +1061,10 @@ export async function shareCertificate(
       });
 
       if (Capacitor.isNativePlatform() && reg.nativeUri) {
-        await Share.share({
-          title: safeFilename,
-          url: reg.nativeUri,
-          dialogTitle: 'مشاركة شهادة PDF'
-        });
-        return true;
+        const shareResult = await shareFileNative(reg.nativeUri, safeFilename, 'مشاركة شهادة PDF');
+        // 'failed': the helper already showed a clear error toast; the file
+        // stays saved in Documents/Gluck_Lernstudio/Certificates.
+        return shareResult !== 'failed';
       }
 
       // Direct Web download to phone internal Downloads folder
@@ -1090,12 +1087,10 @@ export async function shareCertificate(
       });
 
       if (Capacitor.isNativePlatform() && reg.nativeUri) {
-        await Share.share({
-          title: safeFilename,
-          url: reg.nativeUri,
-          dialogTitle: 'مشاركة صورة الشهادة'
-        });
-        return true;
+        const shareResult = await shareFileNative(reg.nativeUri, safeFilename, 'مشاركة صورة الشهادة');
+        // 'failed': the helper already showed a clear error toast; the file
+        // stays saved in Documents/Gluck_Lernstudio/Certificates.
+        return shareResult !== 'failed';
       }
 
       // Direct Web download to phone internal Downloads folder
@@ -1183,13 +1178,17 @@ export async function sendCertificateWhatsApp(
 
     // 3. Native Mobile Platform (Android / iOS via Capacitor)
     if (Capacitor.isNativePlatform() && reg.nativeUri) {
-      await Share.share({
-        title: `شهادة ${recipientName}`,
-        text: message,
-        url: reg.nativeUri,
-        dialogTitle: 'إرسال الشهادة عبر واتساب'
-      });
-      return true;
+      const shareResult = await shareFileNative(reg.nativeUri, safeFilename, 'إرسال الشهادة عبر واتساب');
+      if (shareResult === 'shared') {
+        // WhatsApp text is a SEPARATE step, after the file share succeeds —
+        // never in the same share call (text turns the share into text-only).
+        window.open(buildWhatsAppUrl(phoneNumber, message), '_blank');
+        return true;
+      }
+      // 'cancelled': the user dismissed the sheet — nothing more to do.
+      // 'failed': the helper already showed a clear error toast; do not fall
+      // back to a text-only WhatsApp share. The file stays saved in Certificates.
+      return shareResult === 'cancelled';
     }
 
     // 4. Web Share API with File (Mobile Chrome on Android, iOS Safari, etc.)

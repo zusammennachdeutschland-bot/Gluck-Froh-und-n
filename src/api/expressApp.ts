@@ -1,6 +1,5 @@
 import express from 'express';
 import crypto from 'crypto';
-import { GoogleGenAI, Type } from '@google/genai';
 import {
   evaluateNormalizedGrammarAnswer,
   normalizeGrammarContent,
@@ -106,155 +105,13 @@ async function saveServerSubmission(sub: any, targetHw: any): Promise<{ submissi
   return await saveAuthoritativeSubmission(sub, targetHw);
 }
 
-// Gold price cache
-let serverGoldCache: { data: any; timestamp: number } | null = null;
-const SERVER_GOLD_CACHE_TTL = 3 * 60 * 1000; // 3 minutes
-
 // 1. Health check
 app.all('/api/health', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.status(200).json({ status: 'ok' });
 });
 
-// 2. Gold price live API endpoint
-app.get('/api/gold-price', async (req, res) => {
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-
-  const now = Date.now();
-  if (serverGoldCache && now - serverGoldCache.timestamp < SERVER_GOLD_CACHE_TTL) {
-    return res.json(serverGoldCache.data);
-  }
-
-  const TROY_OUNCE_TO_GRAMS = 31.1034768;
-
-  try {
-    const timeout = 6000;
-    const fetchWithTimeout = (url: string) => {
-      const controller = new AbortController();
-      const id = setTimeout(() => controller.abort(), timeout);
-      return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(id));
-    };
-
-    let ozUsd = 0;
-    let usdToEgp = 51.5;
-
-    // FX Rate
-    try {
-      const fxRes = await fetchWithTimeout('https://open.er-api.com/v6/latest/USD');
-      if (fxRes.ok) {
-        const fxData = (await fxRes.json()) as any;
-        if (fxData?.rates?.EGP) {
-          usdToEgp = parseFloat(fxData.rates.EGP);
-        }
-      }
-    } catch (e) {
-      console.warn('FX fetch failed, using fallback exchange rate', e);
-    }
-
-    // Binance PAXG
-    try {
-      const paxgRes = await fetchWithTimeout(
-        'https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT'
-      );
-      if (paxgRes.ok) {
-        const pData = (await paxgRes.json()) as any;
-        if (pData?.price) {
-          ozUsd = parseFloat(pData.price);
-        }
-      }
-    } catch (e) {
-      console.warn('Binance PAXG fetch failed', e);
-    }
-
-    // Gold-API fallback
-    if (!ozUsd) {
-      try {
-        const gRes = await fetchWithTimeout('https://api.gold-api.com/price/XAU');
-        if (gRes.ok) {
-          const gData = (await gRes.json()) as any;
-          if (gData?.price) {
-            ozUsd = parseFloat(gData.price);
-          }
-        }
-      } catch (e) {
-        console.warn('Gold-API fetch failed', e);
-      }
-    }
-
-    if (ozUsd > 0 && usdToEgp > 0) {
-      const pricePerGram24K = Math.round((ozUsd / TROY_OUNCE_TO_GRAMS) * usdToEgp);
-      const result = {
-        pricePerGram24K,
-        currency: 'EGP',
-        source: 'مؤشر الذهب العالمي والصاغة (EGP)',
-        fetchedAt: new Date().toISOString(),
-        success: true,
-        status: 'live',
-        ozUsd: Math.round(ozUsd * 100) / 100,
-        usdToEgp: Math.round(usdToEgp * 100) / 100,
-        lastSuccessfulUpdateMs: now
-      };
-      serverGoldCache = { data: result, timestamp: now };
-      return res.json(result);
-    }
-
-    if (serverGoldCache) {
-      const isFresh = now - serverGoldCache.timestamp < SERVER_GOLD_CACHE_TTL;
-      return res.json({
-        ...serverGoldCache.data,
-        status: isFresh ? 'cached' : 'stale',
-      });
-    }
-
-    const fallbackResult = {
-      pricePerGram24K: 7090,
-      currency: 'EGP',
-      source: 'متوسط سوق الذهب المصري (تقديري)',
-      fetchedAt: new Date().toISOString(),
-      success: true,
-      status: 'estimated',
-    };
-    return res.json(fallbackResult);
-  } catch (err: any) {
-    console.error('Gold price route error:', err);
-    if (serverGoldCache) {
-      return res.json({
-        ...serverGoldCache.data,
-        status: 'stale'
-      });
-    }
-    return res.status(500).json({
-      pricePerGram24K: 0,
-      currency: 'EGP',
-      source: 'Error',
-      fetchedAt: new Date().toISOString(),
-      success: false,
-      status: 'unavailable',
-      error: err.message || 'Failed to fetch gold price',
-    });
-  }
-});
-
-// 3. HOD Dashboard Endpoints
-app.get('/api/hod/dashboard/timetable', (req, res) => {
-  res.json({
-    dayKey: new Date().getDay().toString(),
-    periodsCount: 8,
-    teachers: [
-      { id: 't-1', name: 'أ. أحمد علي', periods: { '1': '1A', '2': '2B', '3': '3C' } },
-      { id: 't-2', name: 'أ. سارة محمود', periods: { '2': '4A', '4': '5B', '5': '6C' } },
-      { id: 't-3', name: 'أ. عمر فاروق', periods: { '1': '7A', '3': '8B', '6': '9C' } },
-    ],
-    lastUpdated: new Date().toISOString(),
-  });
-});
-
-app.post('/api/hod/dashboard/action', (req, res) => {
-  const { actionType, payload } = req.body;
-  res.json({ success: true, actionType, id: Date.now().toString(), payload, timestamp: Date.now() });
-});
-
-// 4. TTS Proxy Endpoint
+// 3. TTS Proxy Endpoint
 app.get('/api/tts', async (req, res) => {
   const authHeader = String(req.headers.authorization || '');
   const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
@@ -318,13 +175,13 @@ function resolveServerAudienceMode(hw: any): 'open' | 'group' {
 function normalizeServerAssignment(hw: any): any {
   if (!hw || typeof hw !== 'object') return hw;
   const mode = resolveServerAudienceMode(hw);
-  const normalizedHideBranding =
-    hw.hideTeacherBranding !== undefined ? { hideTeacherBranding: Boolean(hw.hideTeacherBranding) } : {};
   if (mode === 'open') {
-    const copy = { ...hw, ...normalizedHideBranding, audienceMode: 'open' };
+    const copy = { ...hw, audienceMode: 'open' };
     delete copy.groupId;
     delete copy.groupName;
     delete copy.assignedStudents;
+    // Legacy field removed in the single-push cleanup: never expose it in the DTO.
+    delete copy.hideTeacherBranding;
     return copy;
   }
   const targetGroupId = String(hw.groupId || '').trim();
@@ -346,14 +203,16 @@ function normalizeServerAssignment(hw: any): any {
       }
     }
   }
-  return {
+  const grouped = {
     ...hw,
-    ...normalizedHideBranding,
     audienceMode: 'group',
     groupId: targetGroupId && targetGroupId !== 'all' ? targetGroupId : undefined,
     groupName: hw.groupName ? String(hw.groupName).trim() : undefined,
     assignedStudents: Array.from(byId.values())
   };
+  // Legacy field removed in the single-push cleanup: never expose it in the DTO.
+  delete grouped.hideTeacherBranding;
+  return grouped;
 }
 
 function isServerAssignmentOpen(hw: any): boolean {
@@ -583,7 +442,6 @@ export function toPublicAssignmentDto(hw: any): any {
     ...(normalized.blooketMode ? { blooketMode: String(normalized.blooketMode) } : {}),
     maxAttempts: typeof normalized.maxAttempts === 'number' ? normalized.maxAttempts : undefined,
     allowReplay: typeof normalized.allowReplay === 'boolean' ? normalized.allowReplay : true,
-    hideTeacherBranding: Boolean(normalized.hideTeacherBranding),
     setSnapshot: sanitizePublicSetSnapshot(normalized.setSnapshot),
     ...(normalized.status ? { status: String(normalized.status) } : {})
   };

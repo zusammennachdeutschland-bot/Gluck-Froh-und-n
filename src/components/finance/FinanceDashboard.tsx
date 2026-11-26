@@ -3,7 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { 
   Edit3, Plus, Target, Users, ArrowRightLeft, TrendingUp, TrendingDown, 
   ArrowDownLeft, ArrowUpRight, Tag, Landmark, CreditCard, ChevronLeft, 
-  CalendarDays, BarChart3, Sparkles
+  CalendarDays, BarChart3
 } from 'lucide-react';
 import { 
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid 
@@ -15,10 +15,7 @@ import { FinanceAccount } from '../../types';
 import { FinanceCategoryManagerModal } from './modals/FinanceCategoryManagerModal';
 import { calculateTodaysIncome, calculateStudentDueBannerTotals } from '../../services/financeService';
 import { calculateDuePaymentCycles } from '../../utils/paymentUtils';
-import { calculateHoldingMetrics } from '../../services/goldPrice/goldPriceTypes';
 import { BankCard } from './BankCard';
-import { GoldBullionCard } from './GoldBullionCard';
-import { AddGoldHoldingModal } from './investments/AddGoldHoldingModal';
 
 interface FinanceDashboardProps {
   onNavigateTab?: (tab: 'dashboard' | 'accounts' | 'investments' | 'transactions' | 'student-payments' | 'recurring' | 'installments') => void;
@@ -28,8 +25,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
   const { 
     _t, profile, updateProfile, financeAccounts, financeTransactions, 
     financeRecurring, financeInstallments, financeCategories,
-    students, groups, lessons, payments,
-    goldHoldings, latestGoldPrice
+    students, groups, lessons, payments
   } = useApp();
   
   const [isEditingGoal, setIsEditingGoal] = useState(false);
@@ -41,7 +37,6 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
 
   // Accounts Management
   const [isAddAccountModalOpen, setIsAddAccountModalOpen] = useState(false);
-  const [isAddGoldModalOpen, setIsAddGoldModalOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<FinanceAccount | undefined>();
   const [adjustingAccount, setAdjustingAccount] = useState<FinanceAccount | undefined>();
   const [viewingTxsAccountId, setViewingTxsAccountId] = useState<string | null>(null);
@@ -94,42 +89,10 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
 
   const activeAccounts = financeAccounts.filter(a => !a.deleted);
 
-  // Gold Holdings Summary for Dashboard
-  const activeGoldHoldings = useMemo(() => {
-    return (goldHoldings || []).filter(h => !(h as any).deleted);
-  }, [goldHoldings]);
-
-  const goldSummary = useMemo(() => {
-    const p24 = latestGoldPrice?.pricePerGram24K || 0;
-    let weight = 0;
-    let invested = 0;
-    let currentValue = 0;
-    activeGoldHoldings.forEach(h => {
-      weight += h.weightGrams;
-      invested += h.purchasePrice;
-      const m = calculateHoldingMetrics(h, p24);
-      currentValue += m.currentValue;
-    });
-    const profitLoss = currentValue - invested;
-    const roi = invested > 0 ? (profitLoss / invested) * 100 : 0;
-    return {
-      count: activeGoldHoldings.length,
-      weight,
-      invested,
-      currentValue,
-      profitLoss,
-      roi: Math.round(roi * 100) / 100,
-      price24K: p24,
-      status: latestGoldPrice?.status || 'cached',
-    };
-  }, [activeGoldHoldings, latestGoldPrice]);
-
   const totalCardsBalance = activeAccounts.reduce((sum, acc) => {
     if (acc.type === 'credit') return sum;
     return sum + (acc.currentBalance || 0);
   }, 0);
-
-  const totalCardsAndGold = totalCardsBalance + goldSummary.currentValue;
 
   const totalAssets = activeAccounts.reduce((sum, acc) => {
     if (acc.type === 'credit') return sum;
@@ -142,7 +105,7 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
       return sum + (init + contrib + ret);
     }
     return sum + (acc.currentBalance || 0);
-  }, 0) + goldSummary.currentValue;
+  }, 0);
 
   const totalDebt = activeAccounts
     .filter(a => a.type === 'credit')
@@ -376,11 +339,6 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
                 {netWorth.toLocaleString()}
               </span>
               <span className="text-xs font-bold text-text-muted">EGP</span>
-              {goldSummary.currentValue > 0 && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                  {_t('شامل الذهب', 'incl. gold', 'inkl. Gold')}
-                </span>
-              )}
             </div>
 
             {/* Asset Breakdown Badges */}
@@ -390,18 +348,6 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
                 <span>{_t('البطاقات والحسابات:', 'Cards & Accounts:', 'Konten:')}</span>
                 <strong className="text-text-main font-sans">{totalCardsBalance.toLocaleString()} EGP</strong>
               </div>
-              {goldSummary.currentValue > 0 && (
-                <div 
-                  onClick={() => onNavigateTab?.('investments')}
-                  className="inline-flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/15 px-2 py-0.5 rounded-md border border-amber-500/20 text-amber-700 dark:text-amber-300 cursor-pointer transition"
-                  title="عرض تفاصيل الذهب"
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                  <span>🪙 {_t('سبائك الذهب:', 'Gold Bullion:', 'Gold:')}</span>
-                  <strong className="font-sans font-black">+{goldSummary.currentValue.toLocaleString()} EGP</strong>
-                  <span className="text-[10px] opacity-75 font-sans">({goldSummary.weight}g)</span>
-                </div>
-              )}
               {totalDebt > 0 && (
                 <div className="inline-flex items-center gap-1 bg-rose-500/10 px-2 py-0.5 rounded-md border border-rose-500/20 text-rose-600 dark:text-rose-400">
                   <span>{_t('ائتمان:', 'Credit:', 'Kredit:')}</span>
@@ -480,26 +426,19 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
             <div className="flex items-center gap-1.5">
               <CreditCard className="w-3.5 h-3.5 text-primary" />
               <h3 className="text-xs font-black text-text-main uppercase tracking-wider">
-                {activeGoldHoldings.length > 0 
-                  ? _t('البطاقات والسبائك الذهبية', 'Cards & Gold Bullion', 'Konten & Gold')
-                  : _t('البطاقات والحسابات', 'Cards & Accounts', 'Konten')}
+                {_t('البطاقات والحسابات', 'Cards & Accounts', 'Konten')}
               </h3>
             </div>
-            {/* Total Balance Badge (Summing cards + gold bullion) */}
+            {/* Total Balance Badge */}
             <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-surface border border-surface-border rounded-full text-xs shadow-2xs">
               <span className="text-[10px] font-bold text-text-muted">{_t('الإجمالي:', 'Total:', 'Gesamt:')}</span>
               <span className="font-black text-text-main font-sans">
-                {totalCardsAndGold.toLocaleString()} EGP
+                {totalCardsBalance.toLocaleString()} EGP
               </span>
-              {goldSummary.currentValue > 0 && (
-                <span className="text-[9px] font-black text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.2 rounded-full">
-                  🪙 +{goldSummary.currentValue.toLocaleString()}
-                </span>
-              )}
             </div>
           </div>
 
-          {/* Quick Add Buttons for both Cards and Gold Bullion */}
+          {/* Quick Add Buttons */}
           <div className="flex items-center gap-1.5">
             <button 
               onClick={() => { setEditingAccount(undefined); setIsAddAccountModalOpen(true); }}
@@ -508,17 +447,10 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
               <Plus className="w-3.5 h-3.5" />
               <span>{_t('إضافة بطاقة', 'Add Card', 'Karte')}</span>
             </button>
-            <button 
-              onClick={() => setIsAddGoldModalOpen(true)}
-              className="flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-amber-500/15 to-yellow-500/15 hover:from-amber-500/25 hover:to-yellow-500/25 border border-amber-500/30 text-amber-700 dark:text-amber-300 rounded-lg text-xs font-bold transition cursor-pointer shadow-2xs active:scale-95"
-            >
-              <span>🪙</span>
-              <span>{_t('إضافة سبيكة', 'Add Bullion', 'Goldbarren')}</span>
-            </button>
           </div>
         </div>
 
-        {activeAccounts.length === 0 && activeGoldHoldings.length === 0 ? (
+        {activeAccounts.length === 0 ? (
           <div className="flex overflow-x-auto snap-x snap-mandatory gap-2.5 pb-2 pt-1 hide-scrollbar w-full scroll-smooth">
             <div className="w-[2vw] sm:hidden shrink-0" />
 
@@ -549,33 +481,6 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
               </div>
             </div>
 
-            {/* Quick Starter Card 2: Add Gold Bullion */}
-            <div 
-              onClick={() => setIsAddGoldModalOpen(true)}
-              className="snap-center shrink-0 w-[85vw] sm:w-[340px] aspect-[1.586/1] rounded-2xl border-2 border-dashed border-amber-500/40 hover:border-amber-500/80 bg-gradient-to-br from-amber-500/10 via-yellow-500/5 to-amber-900/10 p-5 flex flex-col justify-between cursor-pointer transition-all duration-200 group text-center select-none shadow-2xs"
-            >
-              <div className="flex justify-between items-start">
-                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center text-lg group-hover:scale-105 transition-transform">
-                  🪙
-                </div>
-                <span className="text-[10px] font-black text-amber-700 dark:text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded-md border border-amber-500/20">
-                  {_t('سبيكة ذهب', 'Gold Bullion', 'Goldbarren')}
-                </span>
-              </div>
-              <div className="space-y-1 my-auto">
-                <h4 className="font-black text-sm text-amber-800 dark:text-amber-300 group-hover:text-amber-600 transition-colors">
-                  {_t('+ إضافة سبيكة ذهب استثمارية', '+ Add Gold Bullion Bar', '+ Goldbarren hinzufügen')}
-                </h4>
-                <p className="text-[11px] text-text-muted">
-                  {_t('عيار 24 أو 21 - تُعرض بشكل واقعي وتُجمع على إجماليك', '24K or 21K - Minted bar added to total', '24K/21K Feingold')}
-                </p>
-              </div>
-              <div className="text-[11px] font-black text-amber-700 dark:text-amber-300 flex items-center justify-center gap-1">
-                <span>{_t('تدوين سبيكة جديدة', 'Register Bullion', 'Barren erfassen')}</span>
-                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              </div>
-            </div>
-
             <div className="w-[2vw] sm:hidden shrink-0" />
           </div>
         ) : (
@@ -594,83 +499,9 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
               </div>
             ))}
 
-            {/* Gold Bullion Bars (Only displayed if user added gold holdings) */}
-            {activeGoldHoldings.map(holding => (
-              <div key={holding.id} className="snap-center shrink-0 w-[85vw] sm:w-[340px]">
-                <GoldBullionCard
-                  holding={holding}
-                  current24KPrice={latestGoldPrice?.pricePerGram24K || 0}
-                  onClick={() => onNavigateTab?.('investments')}
-                />
-              </div>
-            ))}
-
-            {/* Quick Add Bullion Card at end of slider */}
-            <div 
-              onClick={() => setIsAddGoldModalOpen(true)}
-              className="snap-center shrink-0 w-[140px] sm:w-[160px] aspect-[1.586/1] rounded-2xl border-2 border-dashed border-amber-500/30 hover:border-amber-500/70 bg-amber-500/5 hover:bg-amber-500/10 p-3 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition select-none text-center group"
-              title="إضافة سبيكة ذهب جديدة"
-            >
-              <div className="w-8 h-8 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center text-sm group-hover:scale-110 transition-transform">
-                🪙
-              </div>
-              <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300 leading-tight">
-                {_t('+ سبيكة ذهب', '+ Add Bullion', '+ Goldbarren')}
-              </span>
-            </div>
-
             <div className="w-[2vw] sm:hidden shrink-0" />
           </div>
         )}
-      </div>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* 2.5 GOLD & INVESTMENTS SHORTCUT WIDGET                             */}
-      {/* ------------------------------------------------------------------ */}
-      <div 
-        onClick={() => onNavigateTab?.('investments')}
-        className="bg-surface hover:bg-surface-hover/80 border border-surface-border hover:border-amber-500/40 rounded-xl p-2.5 sm:p-3 flex items-center justify-between gap-3 cursor-pointer transition shadow-2xs group"
-      >
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-8 h-8 rounded-lg bg-amber-500/15 text-amber-500 flex items-center justify-center shrink-0">
-            <Sparkles className="w-4 h-4" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <h4 className="font-bold text-xs sm:text-sm text-text-main group-hover:text-amber-500 transition-colors">
-                {_t('استثمار الذهب (عيار 24)', 'Gold Investments (24K)', 'Gold-Investitionen')}
-              </h4>
-              <span className="text-[10px] font-black text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded">
-                {goldSummary.price24K > 0 ? `${goldSummary.price24K.toLocaleString()} EGP/g` : '---'}
-              </span>
-              {goldSummary.status === 'live' && (
-                <span className="text-[9px] font-bold text-emerald-500 flex items-center gap-0.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  Live
-                </span>
-              )}
-            </div>
-            <p className="text-[11px] text-text-muted mt-0.5 truncate">
-              {goldSummary.weight > 0 ? (
-                <>
-                  <strong className="text-text-main">{goldSummary.weight.toFixed(2)} g</strong>
-                  {' • '}
-                  <span>{_t('القيمة:', 'Value:', 'Wert:')} {goldSummary.currentValue.toLocaleString()} EGP</span>
-                  {' • '}
-                  <span className={`font-bold ${goldSummary.profitLoss >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                    {goldSummary.profitLoss >= 0 ? '+' : ''}{goldSummary.profitLoss.toLocaleString()} ({goldSummary.roi}%)
-                  </span>
-                </>
-              ) : (
-                _t('اضغط لمتابعة أسعار الذهب اليومية وتسجيل سبائكك', 'Click to track gold prices & holdings', 'Hier tippen für Goldübersicht')
-              )}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-1 text-[11px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 group-hover:bg-amber-500 group-hover:text-white px-2.5 py-1 rounded-lg shrink-0 transition shadow-2xs">
-          <span>{_t('المحفظة', 'Portfolio', 'Portfolio')}</span>
-          <ChevronLeft className="w-3.5 h-3.5 rtl:rotate-0 ltr:rotate-180" />
-        </div>
       </div>
 
       {/* ------------------------------------------------------------------ */}
@@ -737,7 +568,6 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
                 </h4>
                 <p className="text-[10px] text-text-muted">
                   {activeAccounts.length} {_t('حسابات نشطة', 'active accounts', 'aktive Konten')}
-                  {activeGoldHoldings.length > 0 && ` • ${activeGoldHoldings.length} ${_t('سبائك ذهب', 'gold bars', 'Goldbarren')} (+${goldSummary.currentValue.toLocaleString()} EGP)`}
                   {totalDebt > 0 && ` • ${_t('ائتمان', 'Credit', 'Kredit')}: ${totalDebt.toLocaleString()} EGP`}
                 </p>
               </div>
@@ -1056,12 +886,6 @@ export const FinanceDashboard: React.FC<FinanceDashboardProps> = ({ onNavigateTa
       {isCategoryManagerOpen && (
         <FinanceCategoryManagerModal
           onClose={() => setIsCategoryManagerOpen(false)}
-        />
-      )}
-
-      {isAddGoldModalOpen && (
-        <AddGoldHoldingModal
-          onClose={() => setIsAddGoldModalOpen(false)}
         />
       )}
     </div>

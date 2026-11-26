@@ -274,19 +274,7 @@ export function sanitizeInitialData(rawData: Record<string, any>): Record<string
   sanitized['hod_visit_records'] = ensureArray('hod_visit_records', []).filter(v => v && typeof v === 'object');
   sanitized['dl_school_notes'] = ensureArray('dl_school_notes', []).filter(n => n && typeof n === 'object');
 
-  // 16. Gold Holdings & Settings (Defaults to empty array for privacy)
-  sanitized['gluck_gold_holdings'] = ensureArray('gluck_gold_holdings', []).filter(g => g && typeof g === 'object' && g.id !== 'gold_btc_5g_init');
-  sanitized['gluck_gold_settings'] = ensureObject('gluck_gold_settings', {
-    enabled: true,
-    autoUpdateEnabled: true,
-    updateIntervalMinutes: 60,
-    preferredProviderId: 'backend_proxy',
-    fallbackProviderId: 'gold_api_direct',
-    useCachedPriceWhenOffline: true,
-    maxCacheAgeHours: 72,
-  });
-
-  // 17. Zoom Weekly Sessions, Meeting Records, History, and Grain Recording Matches (never store secrets)
+  // 16. Zoom Weekly Sessions, Meeting Records, History, and Grain Recording Matches (never store secrets)
   sanitized['glueck_group_weekly_sessions_v1'] = ensureArray('glueck_group_weekly_sessions_v1', []).filter((s: any) => s && typeof s === 'object');
   sanitized['glueck_zoom_meeting_records_v1'] = ensureArray('glueck_zoom_meeting_records_v1', []).filter((r: any) => r && typeof r === 'object');
   sanitized['glueck_zoom_meeting_history_v1'] = ensureArray('glueck_zoom_meeting_history_v1', []).filter((h: any) => h && typeof h === 'object');

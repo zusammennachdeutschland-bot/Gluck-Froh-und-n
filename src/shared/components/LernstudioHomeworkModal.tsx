@@ -263,7 +263,6 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [selectedGrammarExerciseIds, setSelectedGrammarExerciseIds] = useState<string[]>([]);
   const [includeGrammarStudy, setIncludeGrammarStudy] = useState<boolean>(true);
   const [maxAttempts, setMaxAttempts] = useState(0);
-  const [hideTeacherBranding, setHideTeacherBranding] = useState(false);
   const [hasDeadline] = useState(false);
   const [deadlineDate] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -391,7 +390,6 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         setQuestionTypes([...DEFAULT_HOMEWORK_QUESTION_TYPES]);
       }
       setIncludeGrammarStudy(true);
-      setHideTeacherBranding(false);
       setVocabSetSearchQuery('');
       setCreateError(null);
       setVerbGroupSaveSuccess(null);
@@ -450,7 +448,6 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [editingHw, setEditingHw] = useState<HomeworkAssignment | null>(null);
   const [editHwTitle, setEditHwTitle] = useState('');
   const [editHwMaxAttempts, setEditHwMaxAttempts] = useState<number>(0);
-  const [editHwHideBranding, setEditHwHideBranding] = useState<boolean>(false);
   const [isSavingHwEdit, setIsSavingHwEdit] = useState(false);
   const [togglingActiveId, setTogglingActiveId] = useState<string | null>(null);
 
@@ -924,7 +921,6 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         maxAttempts,
         flowMode,
         blooketMode,
-        hideTeacherBranding,
         deadline: hasDeadline && deadlineDate ? new Date(deadlineDate).toISOString() : '',
         ownerUid: resolvedOwnerUid || '',
         groupName: isGroupMode && targetGroup ? targetGroup.name : '',
@@ -1046,7 +1042,6 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         deadline: hasDeadline && deadlineDate ? new Date(deadlineDate).toISOString() : undefined,
         maxAttempts,
         allowReplay: maxAttempts !== 1,
-        hideTeacherBranding,
         isActive: true,
         status: 'active',
         createdAt: new Date().toISOString(),
@@ -1070,7 +1065,6 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
           ? { ownerUid: serverAssignment?.ownerUid || resolvedOwnerUid }
           : {}),
         audienceMode,
-        hideTeacherBranding,
         cloudSynced: isCloudSynced,
         cloudCreatePending: !isCloudSynced
       };
@@ -1307,7 +1301,6 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     setEditingHw(hw);
     setEditHwTitle(hw.title || '');
     setEditHwMaxAttempts(typeof hw.maxAttempts === 'number' ? hw.maxAttempts : 0);
-    setEditHwHideBranding(Boolean(hw.hideTeacherBranding));
   };
 
   const handleSaveEditAssignment = async (e: React.FormEvent) => {
@@ -1318,8 +1311,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       const res = await updateHomeworkAssignmentMetadata(editingHw.id, {
         title: editHwTitle.trim() || editingHw.title,
         maxAttempts: editHwMaxAttempts,
-        allowReplay: editHwMaxAttempts !== 1,
-        hideTeacherBranding: editHwHideBranding
+        allowReplay: editHwMaxAttempts !== 1
       });
       if (res.assignment) {
         setAssignmentsList((prev) =>
@@ -1990,32 +1982,6 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                   </div>
                 </div>
 
-                {/* Compact Per-Homework Hide Teacher Branding Toggle */}
-                <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-surface-hover/70 border border-surface-border">
-                  <label
-                    htmlFor="hw-hide-teacher-branding-toggle"
-                    className="text-xs font-bold text-text-main cursor-pointer select-none"
-                  >
-                    إخفاء اللوجو واسم المدرس
-                  </label>
-                  <button
-                    id="hw-hide-teacher-branding-toggle"
-                    type="button"
-                    role="switch"
-                    aria-checked={hideTeacherBranding}
-                    onClick={() => setHideTeacherBranding((prev) => !prev)}
-                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      hideTeacherBranding ? 'bg-primary' : 'bg-surface-border'
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition duration-200 ease-in-out ${
-                        hideTeacherBranding ? '-translate-x-4' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
-                </div>
-
                 {/* 3. Progressive Stages Grid */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -2550,7 +2516,6 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                     onClick={() => {
                       setCreatedShareLink(null);
                       setCreatedAssignment(null);
-                      setHideTeacherBranding(false);
                     }}
                     className="px-3 py-2 text-text-muted hover:text-text-main hover:bg-surface-hover text-xs font-medium rounded-xl cursor-pointer"
                   >
@@ -3645,27 +3610,6 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                   <option value={2}>2️⃣ محاولتان كحد أقصى</option>
                   <option value={3}>3️⃣ 3 محاولات كحد أقصى</option>
                 </select>
-              </div>
-
-              <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-surface-hover/70 border border-surface-border">
-                <label className="text-xs font-bold text-text-main select-none">
-                  إخفاء اللوجو واسم المدرس
-                </label>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={editHwHideBranding}
-                  onClick={() => setEditHwHideBranding((prev) => !prev)}
-                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
-                    editHwHideBranding ? 'bg-primary' : 'bg-surface-border'
-                  }`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition duration-200 ease-in-out ${
-                      editHwHideBranding ? '-translate-x-4' : 'translate-x-0'
-                    }`}
-                  />
-                </button>
               </div>
             </div>
 

@@ -208,7 +208,7 @@ export const FinanceView: React.FC = () => {
   const tabs = [
     { id: 'dashboard', label: _t('نظرة', 'Overview', 'Übersicht'), icon: PieChart },
     { id: 'accounts', label: _t('الحسابات', 'Accounts', 'Konten'), icon: Wallet },
-    { id: 'investments', label: _t('الاستثمار والذهب', 'Investments & Gold', 'Investitionen'), icon: TrendingUp },
+    { id: 'investments', label: _t('الاستثمار', 'Investments', 'Investitionen'), icon: TrendingUp },
     { id: 'transactions', label: _t('المعاملات', 'History', 'Historie'), icon: ArrowRightLeft },
     { id: 'student-payments', label: _t('الطلاب', 'Students', 'Schüler'), icon: Users, badge: dueCount > 0 ? dueCount : null },
     { id: 'recurring', label: _t('متكرر', 'Recurring', 'Wiederkehrend'), icon: Repeat },

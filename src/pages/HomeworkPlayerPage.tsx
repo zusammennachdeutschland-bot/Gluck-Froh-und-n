@@ -35,6 +35,7 @@ import { HomeworkBonusCardOverlay } from '../shared/components/HomeworkBonusCard
 import { TeacherCrestLogo } from '../shared/components/TeacherCrestLogo';
 import {
   HomeworkGamificationState,
+  ActiveHomeworkSessionState,
   PendingBonusRound,
   BonusCardInstance,
   STREAK_TRIGGER_THRESHOLD,
@@ -258,6 +259,18 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
   const [usedTileIds, setUsedTileIds] = useState<string[]>([]);
   const [errorTileId, setErrorTileId] = useState<string | null>(null);
   const [wrongStepsCount, setWrongStepsCount] = useState<number>(0);
+
+  // Multi-step tile progress persisted with the active session so a refresh
+  // mid-question cannot reset a partially-built (or failed) tile question.
+  // NOTE: ActiveHomeworkSessionState does not declare this field yet; it is
+  // stored alongside the session object and read back with a local cast.
+  type PersistedTileProgress = {
+    questionId: string;
+    multiStepIdx: number;
+    filledSlots: Record<number, string>;
+    usedTileIds: string[];
+    wrongStepsCount: number;
+  };
   // Grammar interactive state (short_answer / sentence_ordering)
   const [grammarTypedInput, setGrammarTypedInput] = useState<string>('');
   const [grammarOrderedTiles, setGrammarOrderedTiles] = useState<HomeworkTileChoice[]>([]);
@@ -292,6 +305,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
   } | null>(null);
   const advanceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasRestoredSessionRef = useRef<string>('');
+  // Set by the session-restore effect when it restores in-progress tile state,
+  // so the quiz effect below does not wipe it on the re-render that follows.
+  const restoredTileProgressRef = useRef<boolean>(false);
   const gameEffects = useGameEffects('de');
 
   const syncGamificationState = useCallback((nextState: HomeworkGamificationState) => {
@@ -347,8 +363,6 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
         const hasUrlQtc = Object.keys(urlQtc).length > 0;
         const shareToken = (searchParams.get('token') || '').trim();
         const urlOwnerUid = (searchParams.get('ou') || '').trim();
-        const urlHideBranding =
-          searchParams.get('htb') === '1' || searchParams.get('hideTeacherBranding') === 'true';
 
         const infoParams = new URLSearchParams({ id: routeAssignmentId });
         if (shareToken) infoParams.set('token', shareToken);
@@ -378,9 +392,6 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
             const mergedApi = {
               ...data,
               ...(!data.questionTypeCounts && hasUrlQtc ? { questionTypeCounts: urlQtc } : {}),
-              ...(data.hideTeacherBranding === undefined && urlHideBranding
-                ? { hideTeacherBranding: true }
-                : {}),
               ...(resolvedOwner ? { ownerUid: resolvedOwner } : {})
             };
             const normalized = normalizeHomeworkAssignment(mergedApi);
@@ -595,7 +606,6 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
               targetQuestionCount: resolvedTotalQ,
               maxAttempts: 3,
               allowReplay: true,
-              ...(urlHideBranding ? { hideTeacherBranding: true } : {}),
               isActive: true,
               status: 'active',
               createdAt: new Date().toISOString(),
@@ -1541,11 +1551,16 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
   useEffect(() => {
     if (phase === 'quiz' && currentQuestion) {
       setQuestionStartMs(Date.now());
-      setMultiStepIdx(0);
-      setFilledSlots({});
-      setUsedTileIds([]);
-      setErrorTileId(null);
-      setWrongStepsCount(0);
+      if (restoredTileProgressRef.current) {
+        // Keep tile progress restored from the saved session (see restore effect).
+        restoredTileProgressRef.current = false;
+      } else {
+        setMultiStepIdx(0);
+        setFilledSlots({});
+        setUsedTileIds([]);
+        setErrorTileId(null);
+        setWrongStepsCount(0);
+      }
       setGrammarTypedInput('');
       setGrammarOrderedTiles([]);
       if (currentQuestion.type === 'true_false') {
@@ -1760,11 +1775,31 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       completedStudyPhase?: boolean;
       responses?: HomeworkQuestionResponse[];
       gamification?: HomeworkGamificationState;
+      tileProgress?: PersistedTileProgress | null;
     }) => {
       if (!assignmentId || !studentName.trim()) return;
       const targetPhase = overrides?.phase ?? (phase === 'teacher_study' || phase === 'quiz' ? phase : null);
       if (!targetPhase) return;
-      saveActiveHomeworkSession({
+      // Persist the in-progress tile state with the session so a refresh cannot
+      // reset a partially-built tile question. Explicit null clears it (used
+      // when the question is completed or the player advances).
+      const isTileQuestion =
+        currentQuestion?.type === 'syllables' ||
+        currentQuestion?.type === 'missing_two_letters' ||
+        currentQuestion?.type === 'full_word';
+      const tileProgress: PersistedTileProgress | null =
+        overrides && 'tileProgress' in overrides
+          ? overrides.tileProgress
+          : isTileQuestion && currentQuestion && (multiStepIdx > 0 || Object.keys(filledSlots).length > 0)
+            ? {
+                questionId: currentQuestion.id,
+                multiStepIdx,
+                filledSlots,
+                usedTileIds,
+                wrongStepsCount
+              }
+            : null;
+      const session: ActiveHomeworkSessionState & { tileProgress?: PersistedTileProgress } = {
         version: 1,
         assignmentId,
         submissionId: activeSubmissionIdRef.current,
@@ -1779,8 +1814,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
         startTime: startTime || new Date().toISOString(),
         responses: overrides?.responses ?? latestResponsesRef.current,
         gamification: overrides?.gamification ?? gamificationRef.current,
-        updatedAtMs: Date.now()
-      });
+        updatedAtMs: Date.now(),
+        ...(tileProgress ? { tileProgress } : {})
+      };
+      saveActiveHomeworkSession(session);
     },
     [
       assignmentId,
@@ -1793,7 +1830,12 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       studyIndex,
       currentIdx,
       completedStudyPhase,
-      startTime
+      startTime,
+      currentQuestion,
+      multiStepIdx,
+      filledSlots,
+      usedTileIds,
+      wrongStepsCount
     ]
   );
 
@@ -1884,8 +1926,28 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       setPhase('quiz');
       handleFinishHomework(latestResponsesRef.current, restoredGam.points, restoredGam.maxStreak);
     } else {
-      setCurrentIdx(Math.min(targetIdx, Math.max(0, quizQuestions.length - 1)));
+      const restoredIdx = Math.min(targetIdx, Math.max(0, quizQuestions.length - 1));
+      setCurrentIdx(restoredIdx);
       setPhase('quiz');
+      // Restore in-progress tile state so a refresh mid-question cannot reset
+      // a partially-built tile question (a failed one is already recorded and
+      // skipped above via processedQuestionIds).
+      const savedTileProgress = (
+        saved as ActiveHomeworkSessionState & { tileProgress?: PersistedTileProgress }
+      ).tileProgress;
+      const restoredQuestion = quizQuestions[restoredIdx];
+      if (
+        savedTileProgress &&
+        restoredQuestion &&
+        savedTileProgress.questionId === restoredQuestion.id &&
+        !restoredGam.processedQuestionIds.includes(restoredQuestion.id)
+      ) {
+        setMultiStepIdx(savedTileProgress.multiStepIdx || 0);
+        setFilledSlots(savedTileProgress.filledSlots || {});
+        setUsedTileIds(savedTileProgress.usedTileIds || []);
+        setWrongStepsCount(savedTileProgress.wrongStepsCount || 0);
+        restoredTileProgressRef.current = true;
+      }
     }
   }, [assignmentId, assignment, quizQuestions, totalStudySteps, mergedSubmissionsForAssignment, phase, syncGamificationState]);
 
@@ -1949,7 +2011,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
         phase: 'quiz',
         currentIdx: nextIdx,
         responses: nextResponses,
-        gamification: gamificationRef.current
+        gamification: gamificationRef.current,
+        tileProgress: null
       });
     } else {
       handleFinishHomework(nextResponses, currentGold, currentMaxStreak);
@@ -2072,7 +2135,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       phase: 'quiz',
       currentIdx,
       responses: nextResponses,
-      gamification: nextGam
+      gamification: nextGam,
+      tileProgress: null
     });
 
     // Checkpoint every 10 newly answered questions (and NEVER on the final question)
@@ -2154,6 +2218,24 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     recordQuestionCompletion(chosenOption, isCorrect);
   };
 
+  // First wrong tile fails the tile question immediately, like the instant
+  // types: lock all tiles, record the actually-attempted tiles as wrong, and
+  // auto-advance (recordQuestionCompletion advances after 950 ms).
+  const failTileQuestion = (tile: HomeworkTileChoice) => {
+    if (!currentQuestion) return;
+    const attemptedTiles = [
+      ...Object.entries(filledSlots)
+        .sort((a, b) => Number(a[0]) - Number(b[0]))
+        .map(([, text]) => text),
+      tile.text
+    ].join('');
+    // wrongStepsCount is now diagnostic only; it no longer affects scoring.
+    setWrongStepsCount((c) => c + 1);
+    setErrorTileId(tile.id);
+    setSelectedChoice(currentQuestion.germanWord);
+    recordQuestionCompletion(attemptedTiles, false);
+  };
+
   const handleTileClick = (tile: HomeworkTileChoice) => {
     if (!currentQuestion || selectedChoice !== null || usedTileIds.includes(tile.id)) return;
 
@@ -2173,15 +2255,12 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
 
         if (nextStep >= expectedSyllables.length) {
           setSelectedChoice(currentQuestion.germanWord);
-          recordQuestionCompletion(currentQuestion.germanWord, wrongStepsCount === 0);
+          recordQuestionCompletion(currentQuestion.germanWord, true);
         } else {
           playLernstudioSound('correct');
         }
       } else {
-        setWrongStepsCount((c) => c + 1);
-        playLernstudioSound('wrong');
-        setErrorTileId(tile.id);
-        setTimeout(() => setErrorTileId(null), 550);
+        failTileQuestion(tile);
       }
       return;
     }
@@ -2204,15 +2283,12 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
 
         if (nextStep >= expectedChars.length) {
           setSelectedChoice(currentQuestion.germanWord);
-          recordQuestionCompletion(currentQuestion.germanWord, wrongStepsCount === 0);
+          recordQuestionCompletion(currentQuestion.germanWord, true);
         } else {
           playLernstudioSound('correct');
         }
       } else {
-        setWrongStepsCount((c) => c + 1);
-        playLernstudioSound('wrong');
-        setErrorTileId(tile.id);
-        setTimeout(() => setErrorTileId(null), 550);
+        failTileQuestion(tile);
       }
       return;
     }
@@ -2233,15 +2309,12 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
 
         if (nextStep >= expectedChars.length) {
           setSelectedChoice(currentQuestion.germanWord);
-          recordQuestionCompletion(currentQuestion.germanWord, wrongStepsCount === 0);
+          recordQuestionCompletion(currentQuestion.germanWord, true);
         } else {
           playLernstudioSound('correct');
         }
       } else {
-        setWrongStepsCount((c) => c + 1);
-        playLernstudioSound('wrong');
-        setErrorTileId(tile.id);
-        setTimeout(() => setErrorTileId(null), 550);
+        failTileQuestion(tile);
       }
     }
   };
@@ -2505,8 +2578,6 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     }
   };
 
-  const hideTeacherBranding = Boolean(assignment?.hideTeacherBranding);
-
   if (loading) {
     return (
       <div className="min-h-screen bg-background text-text-main flex items-center justify-center p-4 font-sans" dir="rtl">
@@ -2522,7 +2593,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     return (
       <div className="min-h-screen bg-background text-text-main flex items-center justify-center p-4 font-sans" dir="rtl">
         <div className="max-w-md w-full bg-surface border border-surface-border rounded-2xl overflow-hidden text-center shadow-xs">
-          {assignment && !hideTeacherBranding && (
+          {assignment && (
             <div className="bg-[radial-gradient(circle_at_50%_40%,#242E44_0%,#141A29_68%,#0C101B_100%)] px-6 py-4 flex items-center justify-center gap-3 relative">
               <TeacherCrestLogo size="sm" />
               <div className="text-left" dir="ltr">
@@ -2602,9 +2673,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       <div className="min-h-screen bg-background text-text-main flex flex-col justify-between p-4 sm:p-6 font-sans" dir="rtl">
         {/* Main Editorial Welcome Card */}
         <div className="max-w-lg w-full bg-surface border border-surface-border rounded-2xl shadow-sm overflow-hidden mx-auto my-auto">
-          {!hideTeacherBranding ? (
-            <>
-              {/* Dark Obsidian Academy Masthead */}
+          <>
+            {/* Dark Obsidian Academy Masthead */}
               <div className="relative bg-[radial-gradient(circle_at_50%_20%,#25324A_0%,#131A29_64%,#0A0E17_100%)] px-6 pt-6 pb-20 text-center overflow-hidden">
                 {/* Subtle Concentric Geometric Seal Hairlines */}
                 <div
@@ -2636,17 +2706,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
               <div className="-mt-16 sm:-mt-[72px] relative z-20 flex justify-center px-4">
                 <TeacherCrestLogo size="lg" className="ring-[5px] ring-surface" />
               </div>
-            </>
-          ) : (
-            <div className="grid grid-cols-3 h-[3px] w-full" aria-hidden="true">
-              <span className="bg-[#18181B]" />
-              <span className="bg-[#DC2626]" />
-              <span className="bg-[#EAB308]" />
-            </div>
-          )}
+          </>
 
           {/* Assignment Body */}
-          <div className={`px-5 ${hideTeacherBranding ? 'pt-6' : 'pt-4'} pb-6 sm:px-7 sm:pb-7 space-y-5`}>
+          <div className="px-5 pt-4 pb-6 sm:px-7 sm:pb-7 space-y-5">
             {/* Assignment Title & Unboxed Inline Metadata */}
             <div className="text-center space-y-1.5">
               <h1 className="text-xl sm:text-2xl font-bold text-text-main text-balance">
@@ -2816,11 +2879,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
         </div>
 
         {/* Teacher Signature Footer at the VERY BOTTOM of the page */}
-        {!hideTeacherBranding && (
-          <footer className="text-center text-[11px] text-text-muted font-medium py-3 select-none" dir="ltr">
-            von Herr Abdul-rahman · Glück Deutsch
-          </footer>
-        )}
+        <footer className="text-center text-[11px] text-text-muted font-medium py-3 select-none" dir="ltr">
+          von Herr Abdul-rahman · Glück Deutsch
+        </footer>
       </div>
     );
   }
@@ -2962,16 +3023,14 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
         {/* Slim Brand & Assignment Strip */}
         <div className="max-w-3xl w-full mx-auto flex items-center justify-between gap-2 mb-2.5 px-1">
           <div className="flex items-center gap-2.5 min-w-0">
-            {!hideTeacherBranding && <TeacherCrestLogo size="sm" />}
+            <TeacherCrestLogo size="sm" />
             <div className="min-w-0">
               <p className="text-xs sm:text-sm font-bold text-text-main truncate">
                 {assignment?.title || 'واجب Glück التفاعلي'}
               </p>
-              {!hideTeacherBranding && (
-                <p className="text-[11px] text-text-muted truncate" dir="ltr">
-                  Herr Abdul-rahman · Lernen
-                </p>
-              )}
+              <p className="text-[11px] text-text-muted truncate" dir="ltr">
+                Herr Abdul-rahman · Lernen
+              </p>
             </div>
           </div>
           {studentName && (
@@ -3343,31 +3402,20 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                 aria-hidden="true"
                 className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-56 h-56 rounded-full border border-white/[0.06]"
               />
-              {!hideTeacherBranding ? (
-                <div className="relative z-10 inline-flex flex-col items-center gap-2.5">
-                  <div className="relative">
-                    <TeacherCrestLogo size="md" />
-                    <span
-                      aria-hidden="true"
-                      className="w-8 h-8 rounded-full bg-[#121927] text-[#F3D078] border border-[#D4AF37]/70 shadow-md flex items-center justify-center absolute -bottom-1 -left-1"
-                    >
-                      <Trophy className="w-4 h-4" />
-                    </span>
-                  </div>
-                  <p className="font-cert-serif text-xs font-semibold tracking-wider text-[#F5E1A4]" dir="ltr">
-                    Herr Abdul-rahman · Zertifikat
-                  </p>
-                </div>
-              ) : (
-                <div className="relative z-10 inline-flex flex-col items-center">
+              <div className="relative z-10 inline-flex flex-col items-center gap-2.5">
+                <div className="relative">
+                  <TeacherCrestLogo size="md" />
                   <span
                     aria-hidden="true"
-                    className="w-12 h-12 rounded-full bg-[#121927] text-[#F3D078] border border-[#D4AF37]/70 shadow-md flex items-center justify-center"
+                    className="w-8 h-8 rounded-full bg-[#121927] text-[#F3D078] border border-[#D4AF37]/70 shadow-md flex items-center justify-center absolute -bottom-1 -left-1"
                   >
-                    <Trophy className="w-6 h-6" />
+                    <Trophy className="w-4 h-4" />
                   </span>
                 </div>
-              )}
+                <p className="font-cert-serif text-xs font-semibold tracking-wider text-[#F5E1A4]" dir="ltr">
+                  Herr Abdul-rahman · Zertifikat
+                </p>
+              </div>
             </div>
 
             <div className="grid grid-cols-3 h-[3px] w-full" aria-hidden="true">
@@ -3617,11 +3665,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                 </button>
               </div>
             )}
-            {!hideTeacherBranding && (
-              <p className="text-[11px] text-text-muted pt-1 select-none" dir="ltr">
-                Herr Abdul-rahman · Glück Deutschunterricht
-              </p>
-            )}
+            <p className="text-[11px] text-text-muted pt-1 select-none" dir="ltr">
+              Herr Abdul-rahman · Glück Deutschunterricht
+            </p>
             </div>
           </motion.div>
         </div>
@@ -3667,16 +3713,14 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       {/* Slim Brand & Assignment Strip */}
       <div className="max-w-3xl w-full mx-auto flex items-center justify-between gap-2 mb-2.5 px-1">
         <div className="flex items-center gap-2.5 min-w-0">
-          {!hideTeacherBranding && <TeacherCrestLogo size="sm" />}
+          <TeacherCrestLogo size="sm" />
           <div className="min-w-0">
             <p className="text-xs sm:text-sm font-bold text-text-main truncate">
               {assignment?.title || 'واجب Glück التفاعلي'}
             </p>
-            {!hideTeacherBranding && (
-              <p className="text-[11px] text-text-muted truncate" dir="ltr">
-                Herr Abdul-rahman · Glück
-              </p>
-            )}
+            <p className="text-[11px] text-text-muted truncate" dir="ltr">
+              Herr Abdul-rahman · Glück
+            </p>
           </div>
         </div>
         {studentName && (
@@ -4146,34 +4190,41 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
           ) : currentQuestion.type === 'syllables' ||
             currentQuestion.type === 'missing_two_letters' ||
             currentQuestion.type === 'full_word' ? (
-            <div className="flex flex-wrap items-center justify-center gap-2.5 max-w-md mx-auto">
-              {(currentQuestion.tileChoices || []).map((tile) => {
-                const isUsed = usedTileIds.includes(tile.id);
-                const isError = errorTileId === tile.id;
-                const isSyllable = currentQuestion.type === 'syllables';
+            <>
+              <div className="flex flex-wrap items-center justify-center gap-2.5 max-w-md mx-auto">
+                {(currentQuestion.tileChoices || []).map((tile) => {
+                  const isUsed = usedTileIds.includes(tile.id);
+                  const isError = errorTileId === tile.id;
+                  const isSyllable = currentQuestion.type === 'syllables';
 
-                return (
-                  <button
-                    key={tile.id}
-                    type="button"
-                    disabled={isUsed || selectedChoice !== null}
-                    onClick={() => handleTileClick(tile)}
-                    dir="ltr"
-                    className={`${
-                      isSyllable ? 'px-4 h-12 sm:h-14 text-lg sm:text-xl' : 'w-12 h-13 sm:w-14 sm:h-15 text-xl sm:text-2xl'
-                    } rounded-2xl font-black font-mono border transition-all cursor-pointer flex items-center justify-center shadow-2xs ${
-                      isUsed
-                        ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 opacity-40 cursor-not-allowed'
-                        : isError
-                        ? 'bg-rose-500 text-white border-rose-500 animate-bounce'
-                        : 'bg-surface hover:bg-surface-hover text-text-main border-surface-border hover:border-primary/40 active:scale-95'
-                    }`}
-                  >
-                    {tile.text}
-                  </button>
-                );
-              })}
-            </div>
+                  return (
+                    <button
+                      key={tile.id}
+                      type="button"
+                      disabled={isUsed || selectedChoice !== null}
+                      onClick={() => handleTileClick(tile)}
+                      dir="ltr"
+                      className={`${
+                        isSyllable ? 'px-4 h-12 sm:h-14 text-lg sm:text-xl' : 'w-12 h-13 sm:w-14 sm:h-15 text-xl sm:text-2xl'
+                      } rounded-2xl font-black font-mono border transition-all cursor-pointer flex items-center justify-center shadow-2xs ${
+                        isUsed
+                          ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 opacity-40 cursor-not-allowed'
+                          : isError
+                          ? 'bg-rose-500 text-white border-rose-500 animate-bounce'
+                          : 'bg-surface hover:bg-surface-hover text-text-main border-surface-border hover:border-primary/40 active:scale-95'
+                      }`}
+                    >
+                      {tile.text}
+                    </button>
+                  );
+                })}
+              </div>
+              {selectedChoice !== null && feedback === 'wrong' && (
+                <div className="text-xs font-bold text-center text-rose-600 dark:text-rose-400 pt-1">
+                  ✕ إجابة غير صحيحة — الكلمة الصحيحة: <span dir="ltr">{currentQuestion.germanWord}</span>
+                </div>
+              )}
+            </>
           ) : (
             <div
               className={`grid gap-2.5 ${

@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useCallback } from 'react';
 import { LernstudioSet, LernstudioTheme, TeamScore, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
 import { buildSentenceGameQuestions, SentenceGameQuestion } from '../../../utils/lernstudioQuestionAdapter';
+import { createSeededRandom } from '../../../utils/lernstudioVocabularyAdapter';
 import { evaluateNormalizedGrammarAnswer } from '../../grammarEngine';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { speakGermanText } from '../../../utils/audioSpeechUtils';
@@ -73,7 +74,7 @@ export const LernstudioSentenceGame: React.FC<Props> = ({
 
   const [sessionSeed, setSessionSeed] = useState<number>(() => Date.now());
   const questions = useMemo(() => {
-    const all = buildSentenceGameQuestions(set, language, sessionSeed);
+    const all = buildSentenceGameQuestions(set, language, createSeededRandom(sessionSeed));
     if (gameConfig?.questionCount && gameConfig.questionCount > 0) {
       return all.slice(0, gameConfig.questionCount);
     }

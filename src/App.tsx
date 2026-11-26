@@ -29,7 +29,7 @@ import { FreeTimeSlotsView } from './components/FreeTimeSlotsView';
 import { CertificateCenter } from './components/certificates/CertificateCenter';
 import { SchoolScheduleView } from './components/SchoolScheduleView';
 import { HodHubView } from './components/HodHubView';
-import { LernstudioView } from './components/lernstudio/LernstudioView';
+import { LernstudioView } from './shared/components/LernstudioView';
 import { GrainRecordingsLibraryView } from './components/GrainRecordingsLibraryView';
 import { BackupModal } from './components/BackupModal';
 import { AddFinanceTransactionModal } from './components/finance/modals/AddFinanceTransactionModal';
@@ -843,7 +843,7 @@ export default function App() {
         'hod_german_students', 'hod_complaints', 'hod_student_action_plans', 'hod_visit_records', 'hod_visit_records_migrated_v1',
         'dl_school_notes', 'dl_finance_accounts', 'dl_finance_categories', 'dl_finance_transactions',
         'dl_finance_recurring', 'dl_finance_installments', 'dl_finance_notifications',
-        'gluck_gold_holdings', 'gluck_gold_settings', 'dl_lernstudio_sets',
+        'dl_lernstudio_sets',
         'dl_settings', 'dl_sync_state',
         ...ZOOM_STORAGE_KEYS
       ];

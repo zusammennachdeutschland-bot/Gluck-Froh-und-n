@@ -481,7 +481,6 @@ export const ENTITY_COLLECTION_KEYS = [
   'financeRecurring',
   'financeInstallments',
   'financeNotifications',
-  'goldHoldings',
   'lernstudioSets',
   'homeworkAssignments',
   'homeworkSubmissions',
@@ -1297,8 +1296,7 @@ export function partitionBackupPayload(fullData: any, ownerUid?: string): Record
       financeTransactions: fullData.financeTransactions || [],
       financeRecurring: fullData.financeRecurring || [],
       financeInstallments: fullData.financeInstallments || [],
-      financeNotifications: fullData.financeNotifications || [],
-      goldHoldings: fullData.goldHoldings || []
+      financeNotifications: fullData.financeNotifications || []
     },
     school_hod: {
       hodStudents: fullData.hodStudents || [],

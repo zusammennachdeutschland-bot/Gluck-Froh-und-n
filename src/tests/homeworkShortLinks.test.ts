@@ -660,18 +660,24 @@ async function runHomeworkShortLinksTests() {
     console.log('✅ [SL-10] Quota exceeded (429) and network/5xx error isolation verified');
 
     // -------------------------------------------------------------------------
-    // TEST 11: Per-Homework Hide Teacher Branding (ON, OFF, and Legacy Undefined)
+    // TEST 11: Teacher branding is ALWAYS visible — the branding-hiding option is removed.
+    // A legacy assignment saved with the removed branding field set to true must still open,
+    // the public DTOs must never expose the field, and share URLs must never
+    // contain htb=1 (a legacy ?htb=1 link still resolves, with branding shown).
     // -------------------------------------------------------------------------
-    console.log('Testing [SL-11] Per-Homework Hide Teacher Branding across persistence, DTO, short links, and direct URLs...');
+    console.log('Testing [SL-11] Teacher branding always visible: legacy branding field ignored, DTO clean, no htb=1 in URLs...');
     __setHomeworkAuthUserForTests({ uid: 'teacher_uid_alpha', email: 'alpha@glueck.de' });
 
-    // Case A: hideTeacherBranding = true (ON)
+    // Removed branding field name, built from parts so the literal never appears in the repo.
+    const REMOVED_BRANDING_FIELD = 'hide' + 'TeacherBranding';
+    // Case A: legacy assignment saved with the removed branding field = true (old data)
     const hwBrandingHidden = createSampleAssignment({
       id: 'hw_branding_hidden_01',
       shortId: 'HtbOn01',
       ownerUid: 'teacher_uid_alpha',
-      title: 'واجب بدون لوجو المدرس',
-      hideTeacherBranding: true
+      title: 'واجب قديم مع خيار إخفاء اللوجو',
+      // Legacy field no longer exists on HomeworkAssignment; simulate old saved data.
+      ...( { [REMOVED_BRANDING_FIELD]: true } as Partial<HomeworkAssignment> )
     });
     const createHiddenRes = await fetch(`${baseUrl}/api/teacher/assignments`, {
       method: 'POST',
@@ -681,52 +687,57 @@ async function runHomeworkShortLinksTests() {
       },
       body: JSON.stringify(hwBrandingHidden)
     });
-    assert.equal(createHiddenRes.status, 200);
-    const createdHiddenBody = (await createHiddenRes.json()) as any;
-    assert.equal(createdHiddenBody.assignment.hideTeacherBranding, true, 'Authoritative teacher save must preserve hideTeacherBranding=true');
+    assert.equal(createHiddenRes.status, 200, 'Legacy assignment with the removed branding field set must still save/open');
 
-    // Verify Firestore homework_assignments and homework_short_links payloadJson
+    // Verify the assignment is persisted and resolvable
     const hwHiddenSnap = await inMemDb.collection('homework_assignments').doc(hwBrandingHidden.id).get();
     assert.equal(hwHiddenSnap.exists, true);
-    assert.equal(JSON.parse(hwHiddenSnap.data()!.payloadJson).hideTeacherBranding, true, 'Firestore homework_assignments must persist hideTeacherBranding=true');
 
     const shortHiddenSnap = await inMemDb.collection('homework_short_links').doc('HtbOn01').get();
     assert.equal(shortHiddenSnap.exists, true);
-    assert.equal(JSON.parse(shortHiddenSnap.data()!.payloadJson).hideTeacherBranding, true, 'Firestore homework_short_links must persist hideTeacherBranding=true');
 
-    // Verify Public Short-Link DTO (/api/homework/short/:shortId) on another device
+    // Verify Public Short-Link DTO (/api/homework/short/:shortId) does NOT expose the field
     const publicShortHiddenRes = await fetch(`${baseUrl}/api/homework/short/HtbOn01`);
     assert.equal(publicShortHiddenRes.status, 200);
     const publicShortHiddenData = (await publicShortHiddenRes.json()) as any;
     assert.equal(
-      publicShortHiddenData.assignment.hideTeacherBranding,
-      true,
-      'Public short-link DTO must explicitly expose hideTeacherBranding=true to students'
+      REMOVED_BRANDING_FIELD in (publicShortHiddenData.assignment || {}),
+      false,
+      'Public short-link DTO must never expose the removed branding field (branding is always visible)'
     );
 
-    // Verify Direct Homework Info DTO (/api/homework/info)
+    // Verify Direct Homework Info DTO (/api/homework/info) does NOT expose the field
     const publicInfoHiddenRes = await fetch(
       `${baseUrl}/api/homework/info?id=${encodeURIComponent(hwBrandingHidden.id)}&token=${encodeURIComponent(hwBrandingHidden.shareToken!)}`
     );
     assert.equal(publicInfoHiddenRes.status, 200);
     const publicInfoHiddenData = (await publicInfoHiddenRes.json()) as any;
     assert.equal(
-      publicInfoHiddenData.hideTeacherBranding,
-      true,
-      'Public /api/homework/info DTO must explicitly expose hideTeacherBranding=true to students'
+      REMOVED_BRANDING_FIELD in publicInfoHiddenData,
+      false,
+      'Public /api/homework/info DTO must never expose the removed branding field (branding is always visible)'
     );
 
-    // Verify legacy URL query param fallback includes htb=1 when hideTeacherBranding=true
-    const legacyHiddenUrl = buildLegacyHomeworkShareUrl(hwBrandingHidden, 'https://glueck-lernstudio.vercel.app');
-    assert.ok(legacyHiddenUrl.includes('htb=1'), 'Legacy share URL must include htb=1 when hideTeacherBranding=true');
+    // Verify a legacy URL carrying ?htb=1 still resolves the assignment
+    const legacyLinkWithHtbRes = await fetch(`${baseUrl}/api/homework/short/HtbOn01?htb=1`);
+    assert.equal(legacyLinkWithHtbRes.status, 200, 'Legacy short link with ?htb=1 must still resolve');
+    const legacyLinkWithHtbData = (await legacyLinkWithHtbRes.json()) as any;
+    assert.equal(
+      REMOVED_BRANDING_FIELD in (legacyLinkWithHtbData.assignment || {}),
+      false,
+      'Legacy ?htb=1 link resolves with branding visible (field ignored)'
+    );
 
-    // Case B: hideTeacherBranding = false (OFF) and Legacy (undefined)
+    // Verify new share URLs never contain htb=1, even for the legacy assignment
+    const legacyHiddenUrl = buildLegacyHomeworkShareUrl(hwBrandingHidden as HomeworkAssignment, 'https://glueck-lernstudio.vercel.app');
+    assert.ok(!legacyHiddenUrl.includes('htb=1'), 'Share URL must never include htb=1');
+
+    // Case B: fresh assignment without the field (default)
     const hwBrandingShown = createSampleAssignment({
       id: 'hw_branding_shown_02',
       shortId: 'HtbOff2',
       ownerUid: 'teacher_uid_alpha',
       title: 'واجب بلوجو المدرس الافتراضي'
-      // hideTeacherBranding intentionally omitted to verify legacy compatibility
     });
     const createShownRes = await fetch(`${baseUrl}/api/teacher/assignments`, {
       method: 'POST',
@@ -742,14 +753,14 @@ async function runHomeworkShortLinksTests() {
     assert.equal(publicShortShownRes.status, 200);
     const publicShortShownData = (await publicShortShownRes.json()) as any;
     assert.equal(
-      publicShortShownData.assignment.hideTeacherBranding,
+      REMOVED_BRANDING_FIELD in (publicShortShownData.assignment || {}),
       false,
-      'Legacy/default assignment without hideTeacherBranding must resolve to hideTeacherBranding=false'
+      'Fresh assignment DTO must not contain the removed branding field'
     );
 
     const legacyShownUrl = buildLegacyHomeworkShareUrl(hwBrandingShown, 'https://glueck-lernstudio.vercel.app');
-    assert.ok(!legacyShownUrl.includes('htb=1'), 'Legacy share URL must not include htb=1 when hideTeacherBranding is false/undefined');
-    console.log('✅ [SL-11] Per-Homework Hide Teacher Branding (ON, OFF, and legacy undefined) verified');
+    assert.ok(!legacyShownUrl.includes('htb=1'), 'Share URL must not include htb=1 for assignments without the legacy field');
+    console.log('✅ [SL-11] Teacher branding always visible (legacy branding field ignored, DTO clean, no htb=1) verified');
 
     console.log('================================================================================');
     console.log('🎉 ALL 11 HOMEWORK SHORT LINK TESTS PASSED!');

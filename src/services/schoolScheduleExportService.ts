@@ -4,7 +4,6 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
 import { 
   SchoolSettings, 
   SchoolPeriodRecord, 
@@ -25,7 +24,7 @@ import {
 } from '../utils/certificateExportUtils';
 import { generateRecurringSchoolScheduleIcs } from '../utils/schoolScheduleIcsUtils';
 import { escapeHtml } from '../utils/securityUtils';
-import { saveToPhoneSubfolderAndRegister } from './downloadedFilesService';
+import { saveToPhoneSubfolderAndRegister, shareFileNative } from './downloadedFilesService';
 
 export type SchoolScheduleExportFormat = 'png' | 'jpeg' | 'pdf' | 'ics';
 export type SchoolScheduleExportTheme = 'clean_light' | 'brand_accent';
@@ -722,12 +721,13 @@ export async function exportSchoolScheduleAsIcs(
     if (Capacitor.isNativePlatform()) {
       try {
         if (reg.nativeUri) {
-          await Share.share({
-            title: 'School Schedule Calendar Export',
-            text: `Glück School Schedule - ${filename}`,
-            url: reg.nativeUri,
-            dialogTitle: options.language === 'ar' ? 'حفظ / استيراد ملف التقويم' : 'Save / Import Calendar (.ics)'
-          });
+          const shareResult = await shareFileNative(reg.nativeUri, filename, options.language === 'ar' ? 'حفظ / استيراد ملف التقويم' : 'Save / Import Calendar (.ics)');
+          if (shareResult === 'failed') {
+            // The helper already showed a clear error toast; throw so the
+            // existing catch falls through to the direct blob download below
+            // instead of reporting success for a share that never happened.
+            throw new Error('Native ICS file share failed');
+          }
         }
         return { success: true, filename, icsContent };
       } catch (nativeErr: any) {
@@ -798,14 +798,14 @@ export async function shareSchoolSchedule(
       showNativeToast: true
     });
 
-    // 1. Native Capacitor Share
+    // 1. Native Capacitor Share (file only — no url/text, see shareFileNative)
     if (Capacitor.isNativePlatform() && reg.nativeUri) {
-      await Share.share({
-        title: filename,
-        url: reg.nativeUri,
-        dialogTitle: model.language === 'ar' ? 'مشاركة جدول المدرسة' : 'Share School Schedule'
-      });
-      return { success: true };
+      const shareResult = await shareFileNative(reg.nativeUri, filename, model.language === 'ar' ? 'مشاركة جدول المدرسة' : 'Share School Schedule');
+      if (shareResult !== 'failed') {
+        return { success: true };
+      }
+      // 'failed': the helper already showed a clear error toast; fall through
+      // to the direct download fallback below.
     }
 
     // 2. Direct Web Anchor Download to Phone Internal Storage / Downloads

@@ -194,7 +194,6 @@ export interface HomeworkAssignment {
   createdBy: string;
   cloudSynced?: boolean;
   cloudCreatePending?: boolean; // Only true for a new assignment created offline and safe to retry under its owner account.
-  hideTeacherBranding?: boolean; // Per-homework option to hide teacher logo, name, and signatures across student screens.
 }
 
 export type HomeworkLinkActionStatus =

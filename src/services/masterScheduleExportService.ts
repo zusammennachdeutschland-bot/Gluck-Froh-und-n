@@ -5,11 +5,10 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
 import { sanitizeModernCssColors, dataUrlToBlob } from '../utils/certificateExportUtils';
 import { SchoolScheduleExportOptions } from './schoolScheduleExportService';
 import { escapeHtml } from '../utils/securityUtils';
-import { saveToPhoneSubfolderAndRegister } from './downloadedFilesService';
+import { saveToPhoneSubfolderAndRegister, shareFileNative } from './downloadedFilesService';
 
 export async function exportMasterSchedule(
   settings: SchoolSettings,
@@ -70,9 +69,10 @@ export async function exportMasterSchedule(
         showNativeToast: true
       });
       
-      if (Capacitor.isNativePlatform() && reg.nativeUri) {
-        await Share.share({ title: filename, url: reg.nativeUri });
-      } else {
+      const shareResult = Capacitor.isNativePlatform() && reg.nativeUri
+        ? await shareFileNative(reg.nativeUri, filename)
+        : 'failed';
+      if (shareResult === 'failed') {
         pdf.save(filename);
       }
       return { success: true, filename };
@@ -93,9 +93,10 @@ export async function exportMasterSchedule(
         showNativeToast: true
       });
 
-      if (Capacitor.isNativePlatform() && reg.nativeUri) {
-        await Share.share({ title: filename, url: reg.nativeUri });
-      } else {
+      const shareResult = Capacitor.isNativePlatform() && reg.nativeUri
+        ? await shareFileNative(reg.nativeUri, filename)
+        : 'failed';
+      if (shareResult === 'failed') {
         const blob = dataUrlToBlob(dataUrl);
         const objectUrl = URL.createObjectURL(blob);
         const link = document.createElement('a');

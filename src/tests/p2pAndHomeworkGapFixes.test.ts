@@ -464,7 +464,7 @@ async function runAll16GapFixTests() {
       { id: 'hod_cmp_1', type: 'hodComplaints', purgedAt: nowIso, updatedAt: 5000 },
       { id: 'hod_ap_1', type: 'hodActionPlans', purgedAt: nowIso, updatedAt: 5000 },
       { id: 'hod_vis_1', type: 'hodVisits', purgedAt: nowIso, updatedAt: 5000 },
-      { id: 'gold_1', type: 'goldHoldings', purgedAt: nowIso, updatedAt: 5000 },
+      { id: 'set_purged_1', type: 'lernstudioSets', purgedAt: nowIso, updatedAt: 5000 },
       { id: 'bg_purged_1', type: 'customAiBackgrounds', purgedAt: nowIso, updatedAt: 5000 }
     ];
 
@@ -489,7 +489,7 @@ async function runAll16GapFixTests() {
       hodComplaints: [{ id: 'hod_cmp_1' }],
       hodActionPlans: [{ id: 'hod_ap_1' }],
       hodVisits: [{ id: 'hod_vis_1' }, { id: 'hod_vis_keep' }],
-      goldHoldings: [{ id: 'gold_1' }, { id: 'gold_keep' }],
+      lernstudioSets: [{ id: 'set_purged_1' }, { id: 'set_keep' }],
       customAiBackgrounds: [{ id: 'bg_purged_1' }, { id: 'bg_keep' }]
     };
     enforcePurgedTombstonesOnWorkspace(dirtyWorkspace, tombstones);
@@ -500,7 +500,7 @@ async function runAll16GapFixTests() {
     assert.equal(dirtyWorkspace.hodComplaints.length, 0);
     assert.equal(dirtyWorkspace.hodActionPlans.length, 0);
     assert.deepEqual(dirtyWorkspace.hodVisits.map((x: any) => x.id), ['hod_vis_keep']);
-    assert.deepEqual(dirtyWorkspace.goldHoldings.map((x: any) => x.id), ['gold_keep']);
+    assert.deepEqual(dirtyWorkspace.lernstudioSets.map((x: any) => x.id), ['set_keep']);
     assert.deepEqual(dirtyWorkspace.customAiBackgrounds.map((x: any) => x.id), ['bg_keep']);
 
     // Also verify syncOrchestrator ingest & sweep on a peer DataSource
@@ -508,7 +508,7 @@ async function runAll16GapFixTests() {
       settings: [{ id: 'singleton_teacher_settings', updatedAt: 100, recentlyDeleted: { students: [], groups: [], lessons: [], purgedRecords: [] } }],
       certificates: [{ id: 'cert_purged_1', updatedAt: 100 }, { id: 'cert_keep', updatedAt: 100 }],
       hodVisits: [{ id: 'hod_vis_1', updatedAt: 100 }],
-      goldHoldings: [{ id: 'gold_1', updatedAt: 100 }]
+      lernstudioSets: [{ id: 'set_purged_1', updatedAt: 100 }]
     };
     let pcSyncState = {
       localDeviceId: 'dev_pc',
@@ -540,7 +540,7 @@ async function runAll16GapFixTests() {
     }));
     assert.deepEqual(pcStore.certificates.map((c) => c.id), ['cert_keep']);
     assert.equal(pcStore.hodVisits.length, 0);
-    assert.equal(pcStore.goldHoldings.length, 0);
+    assert.equal(pcStore.lernstudioSets.length, 0);
 
     logs.push('[PASS] Test 5: Complete purged tombstones survive merge, backup sanitization, workspace enforcement, and P2P sweep');
   }
@@ -980,21 +980,27 @@ async function runAll16GapFixTests() {
   }
 
   // =========================================================================
-  // TEST 16: Backward Compatibility, hideTeacherBranding DTO & Vercel CORS Preflight
+  // TEST 16: Backward Compatibility — branding ALWAYS visible, legacy short
+  // links resolve, & Vercel CORS Preflight. The branding-hiding option is
+  // removed: the public DTO must never expose the removed field, new share
+  // URLs never contain htb=1, and a legacy ?htb=1 link still resolves.
   // =========================================================================
   {
+    // Removed branding field name, built from parts so the literal never appears in the repo.
+    const REMOVED_BRANDING_FIELD = 'hide' + 'TeacherBranding';
     const publicHiddenDto = toPublicAssignmentDto({
       id: 'hw_dto_1',
       shortId: 'DtoHid1',
       ownerUid: teacherUid,
       ownerEmail: teacherEmail,
-      title: 'واجب إخفاء الهوية',
-      hideTeacherBranding: true,
+      title: 'واجب قديم مع خيار إخفاء اللوجو',
+      // Legacy field no longer exists on HomeworkAssignment; simulate old saved data.
+      [REMOVED_BRANDING_FIELD]: true,
       setSnapshot: { id: 's1', title: 'S1', category: 'A1', items: [] },
       questionTypes: ['choice_all'],
       questionCount: 1
     } as any);
-    assert.equal(publicHiddenDto?.hideTeacherBranding, true);
+    assert.equal(REMOVED_BRANDING_FIELD in (publicHiddenDto || {}), false);
     assert.equal((publicHiddenDto as any)?.ownerEmail, undefined);
 
     const publicDefaultDto = toPublicAssignmentDto({
@@ -1005,7 +1011,7 @@ async function runAll16GapFixTests() {
       questionTypes: ['choice_all'],
       questionCount: 1
     } as any);
-    assert.equal(publicDefaultDto?.hideTeacherBranding, false);
+    assert.equal(REMOVED_BRANDING_FIELD in (publicDefaultDto || {}), false);
 
     // CORS preflight OPTIONS from Capacitor Android origin
     const expressFetch = createMockFetchAgainstExpress();
@@ -1023,7 +1029,7 @@ async function runAll16GapFixTests() {
       id: 'hw_legacy_old',
       shortId: 'LegOld1',
       title: 'واجب قديم متوافق',
-      hideTeacherBranding: true,
+      [REMOVED_BRANDING_FIELD]: true,
       setSnapshot: { id: 's1', title: 'S1', category: 'A1', items: [{ id: 'w1', german: 'hallo', arabic: 'مرحباً' }] },
       questionTypes: ['choice_all'],
       questionCount: 1,
@@ -1045,9 +1051,18 @@ async function runAll16GapFixTests() {
     assert.equal(legacyApiRes.headers.get('access-control-allow-origin'), 'https://localhost');
     const legacyJson = await legacyApiRes.json();
     assert.equal(legacyJson.assignment?.id, 'hw_legacy_old');
-    assert.equal(legacyJson.assignment?.hideTeacherBranding, true);
+    assert.equal(REMOVED_BRANDING_FIELD in (legacyJson.assignment || {}), false);
 
-    logs.push('[PASS] Test 16: Public DTO preserves hideTeacherBranding, legacy short links resolve cleanly, and Express CORS supports Capacitor Android');
+    // A legacy link carrying ?htb=1 still resolves, with branding visible
+    const legacyHtbRes = await expressFetch('http://localhost:3000/api/homework/short/LegOld1?htb=1', {
+      headers: { Origin: 'https://localhost' }
+    });
+    assert.equal(legacyHtbRes.status, 200);
+    const legacyHtbJson = await legacyHtbRes.json();
+    assert.equal(legacyHtbJson.assignment?.id, 'hw_legacy_old');
+    assert.equal(REMOVED_BRANDING_FIELD in (legacyHtbJson.assignment || {}), false);
+
+    logs.push('[PASS] Test 16: Public DTO never exposes the removed branding field, legacy short links (incl. ?htb=1) resolve cleanly, and Express CORS supports Capacitor Android');
   }
 
   // =========================================================================

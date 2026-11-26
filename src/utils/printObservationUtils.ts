@@ -4,11 +4,10 @@ import html2canvas from 'html2canvas';
 import { Capacitor } from '@capacitor/core';
 import { escapeHtml } from './securityUtils';
 import { Filesystem, Directory } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
 import { sanitizeModernCssColors } from './certificateExportUtils';
 import { getReportSchoolLogoHtml, getEffectiveSchoolName, getReportSchoolNameHtml } from './alsunLogoData';
 import { formatLocalDate } from './timeUtils';
-import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesService';
+import { saveToPhoneSubfolderAndRegister, shareFileNative } from '../services/downloadedFilesService';
 
 export function getVisitsForStageReport(
   record: StageFollowUpRecord,
@@ -692,11 +691,15 @@ export async function shareStageFollowUpViaWhatsApp(
     });
 
     if (Capacitor.isNativePlatform() && reg.nativeUri) {
-      await Share.share({
-        title: fileName,
-        url: reg.nativeUri
-      });
-      return;
+      const shareResult = await shareFileNative(reg.nativeUri, fileName);
+      if (shareResult === 'cancelled') {
+        return;
+      }
+      if (shareResult === 'shared') {
+        return;
+      }
+      // 'failed': the helper already showed a clear error toast; fall through
+      // to the direct file-download fallback below.
     }
 
     const blob = pdf.output('blob');
@@ -1397,12 +1400,18 @@ export async function shareObservationReportViaWhatsApp(
     });
 
     if (Capacitor.isNativePlatform() && reg.nativeUri) {
-      await Share.share({
-        title: fileName,
-        text: textSummary,
-        url: reg.nativeUri
-      });
-      return;
+      const shareResult = await shareFileNative(reg.nativeUri, fileName);
+      if (shareResult === 'shared') {
+        // WhatsApp text is a SEPARATE step, after the file share succeeds —
+        // never in the same share call (text turns the share into text-only).
+        window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(textSummary)}`, '_blank');
+        return;
+      }
+      if (shareResult === 'cancelled') {
+        return;
+      }
+      // 'failed': the helper already showed a clear error toast; fall through
+      // to the web share / direct-download fallback below.
     }
 
     const blob = pdf.output('blob');
@@ -1474,12 +1483,18 @@ export async function shareCombinedObservationReportsViaWhatsApp(
     });
 
     if (Capacitor.isNativePlatform() && reg.nativeUri) {
-      await Share.share({
-        title: fileName,
-        text: textSummary,
-        url: reg.nativeUri
-      });
-      return;
+      const shareResult = await shareFileNative(reg.nativeUri, fileName);
+      if (shareResult === 'shared') {
+        // WhatsApp text is a SEPARATE step, after the file share succeeds —
+        // never in the same share call (text turns the share into text-only).
+        window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(textSummary)}`, '_blank');
+        return;
+      }
+      if (shareResult === 'cancelled') {
+        return;
+      }
+      // 'failed': the helper already showed a clear error toast; fall through
+      // to the web share / direct-download fallback below.
     }
 
     const blob = pdf.output('blob');

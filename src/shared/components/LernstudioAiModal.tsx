@@ -14,6 +14,16 @@ import {
 } from '../../utils/lernstudioAiUtils';
 import { auth } from '../firebaseCloudSync';
 import {
+  AI_APPCHECK_AR,
+  AI_NOT_CONFIGURED_AR,
+  AI_QUOTA_AR,
+  extractLernstudioSetFromImages,
+  getTodayAiExtractionCount,
+  isAiLogicAppCheckError,
+  isAiLogicNotConfiguredError,
+  isAiLogicQuotaError
+} from '../../services/aiLogicService';
+import {
   normalizeGrammarContent,
   normalizeLernstudioSet,
   stripHeavyGrammarMediaForSync,
@@ -123,6 +133,11 @@ export const LernstudioAiModal: React.FC<Props> = ({
   const [extractionWarnings, setExtractionWarnings] = useState<string[]>([]);
   const [extractedDraft, setExtractedDraft] = useState<LernstudioSet | null>(null);
   const [copiedVisionFallbackPrompt, setCopiedVisionFallbackPrompt] = useState(false);
+  // Quota fallback: set when the free daily limit (429) is hit. The banner
+  // then offers a one-tap switch to the manual paste tab (prompt auto-copied).
+  const [quotaFallback, setQuotaFallback] = useState(false);
+  // Info only — today's extraction request count, never a block.
+  const [todayAiCount, setTodayAiCount] = useState<number>(() => getTodayAiExtractionCount());
 
   if (!isOpen) return null;
 
@@ -274,14 +289,72 @@ export const LernstudioAiModal: React.FC<Props> = ({
     setExtractionError(null);
     setExtractionWarnings([]);
     setExtractedDraft(null);
+    setQuotaFallback(false);
 
-    await new Promise((r) => setTimeout(r, 400));
-    setIsExtractingImages(false);
-    setExtractionError(
-      isRtl
-        ? 'تم إيقاف خدمة استخراج القواعد التلقائي من الصور. يرجى استخدام مولّد البرومبت ولصق كود JSON للاستيراد الفوري.'
-        : 'Automated AI image extraction has been discontinued. Please use JSON prompt generation and manual import.'
-    );
+    try {
+      // All pages (max 6) go in ONE generateContent call — one quota unit.
+      const pages = uploadedPages.slice(0, 6).map((p) => {
+        const commaIdx = p.dataUrl.indexOf(',');
+        const base64Data =
+          p.dataUrl.startsWith('data:') && commaIdx >= 0 ? p.dataUrl.slice(commaIdx + 1) : p.dataUrl;
+        return { mimeType: p.mimeType || 'image/jpeg', base64Data };
+      });
+
+      const { draft, warnings } = await extractLernstudioSetFromImages(
+        pages,
+        generatedPrompt,
+        {
+          title: grammarTitleInput.trim() || undefined,
+          topic: grammarTopicInput.trim() || undefined,
+          level,
+          difficulty,
+          setKind: targetImageSetKind,
+          teacherName: creatorTeacherName.trim() || defaultCreatorName || undefined,
+          exerciseMode
+        }
+      );
+
+      // Draft only — nothing is imported here. The teacher reviews/edits the
+      // draft below and only handleSaveExtractedDraft imports it.
+      setExtractedDraft(draft);
+      setExtractionWarnings(warnings);
+    } catch (err: any) {
+      if (isAiLogicQuotaError(err)) {
+        setExtractionError(AI_QUOTA_AR);
+        setQuotaFallback(true);
+        // Copy the prompt automatically so the paste tab is ready to use.
+        try {
+          await navigator.clipboard.writeText(generatedPrompt);
+        } catch {
+          // Clipboard unavailable; the banner button still copies on tap.
+        }
+      } else if (isAiLogicAppCheckError(err)) {
+        setExtractionError(AI_APPCHECK_AR);
+      } else if (isAiLogicNotConfiguredError(err)) {
+        setExtractionError(AI_NOT_CONFIGURED_AR);
+      } else {
+        setExtractionError(
+          err?.message ||
+            (isRtl
+              ? 'تعذّر الاستخراج التلقائي — حاول مرة أخرى أو استخدم لصق الكود اليدوي.'
+              : 'Automatic extraction failed — try again or use manual code paste.')
+        );
+      }
+    } finally {
+      // Never spin forever: the service enforces a 120s timeout.
+      setIsExtractingImages(false);
+      setTodayAiCount(getTodayAiExtractionCount());
+    }
+  };
+
+  // One-tap quota fallback: copy the prompt and switch to the paste tab.
+  const handleQuotaFallbackToPaste = async () => {
+    try {
+      await navigator.clipboard.writeText(generatedPrompt);
+    } catch {
+      // Clipboard unavailable; user can still copy from the paste tab.
+    }
+    setActiveTab('simple');
   };
 
   const handleCopyVisionFallbackPrompt = () => {
@@ -812,6 +885,14 @@ export const LernstudioAiModal: React.FC<Props> = ({
                   </button>
                 </div>
 
+                {todayAiCount > 0 && (
+                  <p className="text-[11px] text-text-muted">
+                    {isRtl
+                      ? `استخدمت ${todayAiCount} ${todayAiCount === 1 ? 'طلباً' : 'طلبات'} استخراج اليوم (معلومة فقط — الحد اليومي المجاني يُصفَّر بعد منتصف الليل بتوقيت المحيط الهادئ).`
+                      : `Used ${todayAiCount} extraction request(s) today (info only — the free daily limit resets after midnight Pacific Time).`}
+                  </p>
+                )}
+
                 {uploadedPages.length > 0 && (
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                     {uploadedPages.map((page, idx) => (
@@ -884,6 +965,20 @@ export const LernstudioAiModal: React.FC<Props> = ({
                           : 'Copy Grammar Prompt for External AI'}
                       </span>
                     </button>
+                    {quotaFallback && (
+                      <button
+                        type="button"
+                        onClick={handleQuotaFallbackToPaste}
+                        className="px-3 py-1.5 rounded-lg bg-primary text-white text-[11px] font-bold cursor-pointer inline-flex items-center gap-1"
+                      >
+                        <ClipboardPaste className="w-3 h-3" />
+                        <span>
+                          {isRtl
+                            ? 'تم نسخ البرومبت — انتقل للصق الكود ←'
+                            : 'Prompt copied — go to Paste Code →'}
+                        </span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => setActiveTab('simple')}

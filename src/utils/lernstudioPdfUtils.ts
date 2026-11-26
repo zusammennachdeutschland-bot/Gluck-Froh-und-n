@@ -2,10 +2,9 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
 import { Toast } from '@capacitor/toast';
 import { LernstudioSet } from '../types/lernstudio';
-import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesService';
+import { saveToPhoneSubfolderAndRegister, shareFileNative } from '../services/downloadedFilesService';
 import {
   A4_PAGE_HEIGHT_PX,
   A4_PAGE_WIDTH_PX,
@@ -566,12 +565,12 @@ export async function downloadOrSaveLernstudioWorksheet(
   if (Capacitor.isNativePlatform()) {
     try {
       if (reg.nativeUri) {
-        await Share.share({
-          title: fileName,
-          text: `ورقة عمل: ${set.title || 'Worksheet'} (${isTeacher ? 'نموذج المعلم' : 'نسخة الطالب'})`,
-          url: reg.nativeUri,
-          dialogTitle: 'حفظ أو مشاركة أو طباعة ورقة العمل'
-        });
+        const shareResult = await shareFileNative(reg.nativeUri, fileName, 'حفظ أو مشاركة أو طباعة ورقة العمل');
+        if (shareResult === 'failed') {
+          // The helper already showed a clear error toast; offer the direct
+          // download instead of a text-only share.
+          result.pdf.save(fileName);
+        }
       }
     } catch (saveErr) {
       console.error('Failed to share PDF on native platform:', saveErr);

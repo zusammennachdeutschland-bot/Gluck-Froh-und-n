@@ -147,10 +147,11 @@ export function extractNumeralForItem(item: LernstudioItem): string | undefined 
 }
 
 // Seeded PRNG for deterministic shuffle
-export function createSeededRandom(seedStr: string) {
+export function createSeededRandom(seedStr: string | number) {
+  const seed = String(seedStr);
   let hash = 0;
-  for (let i = 0; i < seedStr.length; i++) {
-    hash = (hash << 5) - hash + seedStr.charCodeAt(i);
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash << 5) - hash + seed.charCodeAt(i);
     hash |= 0;
   }
   return function random(): number {

@@ -21,7 +21,7 @@ import { getSchoolSettings, calculatePeriodsTimings } from '../utils/schoolUtils
 import { DAY_KEY_TO_RRULE_BYDAY, getUpcomingDateForDayKey, formatIcsEventBlock, SchoolIcsEventItem } from '../utils/schoolScheduleIcsUtils';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
+import { shareFileNative } from '../services/downloadedFilesService';
 import { resolveActiveZoomLinkForLesson, resolveCanonicalZoomLinkStatus } from '../services/zoomSessionStandardizer';
 
 export const ScheduleView: React.FC = () => {
@@ -545,12 +545,12 @@ export const ScheduleView: React.FC = () => {
           directory: Directory.Documents,
           encoding: Encoding.UTF8
         });
-        await Share.share({
-          title: filename,
-          url: savedFile.uri,
-          dialogTitle: 'Save Schedule Calendar File'
-        });
-        return;
+        const shareResult = await shareFileNative(savedFile.uri, filename, 'Save Schedule Calendar File');
+        // 'shared'/'cancelled': done. 'failed': the helper already showed a
+        // clear error toast — fall through to the web download below.
+        if (shareResult !== 'failed') {
+          return;
+        }
       } catch (err) {
         console.warn('Capacitor schedule save/share failed, fallback to web:', err);
       }

@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
+import { shareFileNative } from '../services/downloadedFilesService';
 import { getSchoolSettings } from '../utils/schoolUtils';
 import { generateMonthlySchoolScheduleIcsEvents } from '../utils/schoolScheduleIcsUtils';
 import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
@@ -284,12 +284,12 @@ export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProp
           directory: Directory.Cache,
           encoding: Encoding.UTF8
         });
-        await Share.share({
-          title: exportStats.filename,
-          url: savedFile.uri,
-          dialogTitle: 'Share Calendar File'
-        });
-        return;
+        const shareResult = await shareFileNative(savedFile.uri, exportStats.filename, 'Share Calendar File');
+        if (shareResult !== 'failed') {
+          return;
+        }
+        // 'failed': the helper already showed a clear error toast; fall through
+        // to the Web Share / direct-download fallback below.
       } catch (err) {
         console.warn('Capacitor share failed, fallback to web:', err);
       }

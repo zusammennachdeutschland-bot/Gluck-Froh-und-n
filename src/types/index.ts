@@ -1,4 +1,3 @@
-import { GoldHolding } from '../services/goldPrice/goldPriceTypes';
 import { LernstudioSet } from './lernstudio';
 
 export type GradeLevel = 
@@ -173,7 +172,6 @@ export interface TeacherSettingsRecord extends SyncableRecord {
   inspirationMessages?: InspirationMessage[];
   pickerNames?: string[];
   prunedLessonIds?: string[];
-  goldPriceSettings?: Record<string, any>;
   theme?: 'light' | 'dark' | 'amoled' | 'tinted';
   accentColor?: AccentColor;
   reportLanguage?: AppLanguage;
@@ -237,7 +235,6 @@ export interface SyncDeltaPayload {
     financeRecurring?: FinanceRecurring[];
     financeInstallments?: FinanceInstallment[];
     financeNotifications?: FinanceNotification[];
-    goldHoldings?: GoldHolding[];
     customAiBackgrounds?: AICertificateBackground[];
     lernstudioSets?: LernstudioSet[];
     homeworkAssignments?: any[];
@@ -1031,8 +1028,6 @@ export interface PurgedRecordTombstone {
     | 'hodComplaints'
     | 'hodActionPlans'
     | 'hodVisits'
-    | 'goldHoldings'
-    | 'goldHolding'
     | 'customAiBackgrounds'
     | 'lernstudioSet'
     | 'lernstudioSets';
@@ -1197,7 +1192,6 @@ export interface BackupData {
   financeRecurring?: FinanceRecurring[];
   financeInstallments?: FinanceInstallment[];
   financeNotifications?: FinanceNotification[];
-  goldHoldings?: GoldHolding[];
   lernstudioSets?: LernstudioSet[];
   homeworkAssignments?: any[];
   homeworkSubmissions?: any[];
@@ -1546,8 +1540,6 @@ export interface HodGermanStudent extends SyncableRecord {
   name?: string;
   createdAt?: string;
 }
-
-export * from '../services/goldPrice/goldPriceTypes';
 
 // ==========================================
 // GLÜCK × GRAIN INTEGRATION TYPES (COMPACT, PRIVACY-SAFE)

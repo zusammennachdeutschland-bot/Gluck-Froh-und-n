@@ -6,8 +6,7 @@ import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } f
 import {
   getSetVocabularyItems,
   getDistractorChoices,
-  createSeededRandom,
-  seededShuffle
+  createSeededRandom
 } from '../../../utils/lernstudioVocabularyAdapter';
 import { GameSetupConfig } from '../LernstudioGameSetupScreen';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
@@ -128,8 +127,7 @@ export const LernstudioSpaceDefenseGame: React.FC<Props> = ({
     if (!targetItem || isGameOver || isVictory || items.length === 0) return;
 
     const rng = createSeededRandom(sessionSeed + targetIndex * 71);
-    const distractors = getDistractorChoices(targetItem, items, 3, rng);
-    const candidates = seededShuffle([targetItem, ...distractors], rng);
+    const candidates = getDistractorChoices(targetItem, items, 3, rng);
 
     const initialShips: AlienShip[] = candidates.map((it, idx) => ({
       id: `${it.id}_${targetIndex}_${idx}`,

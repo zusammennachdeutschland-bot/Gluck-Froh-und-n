@@ -652,7 +652,6 @@ async function runAll() {
           financeRecurring: [],
           financeInstallments: [],
           financeNotifications: [],
-          goldHoldings: [],
           lernstudioSets: []
         } as any,
         backupPayload

@@ -42,7 +42,7 @@ import {
   enforcePurgedTombstonesOnWorkspace,
   stampFieldTimestamps
 } from '../services/sync/mergeEngine';
-import { runSyncCycle, forceFullSync, SyncDataSource } from '../services/sync/syncOrchestrator';
+import { SyncDataSource } from '../services/sync/syncOrchestrator';
 import { calculatePendingOutbox } from '../services/sync/deltaBuilder';
 import { startLocalServer, regeneratePairingPin } from '../services/sync/localServer';
 import { sanitizeSyncStateForStorage } from '../services/sync/syncMigration';
@@ -81,21 +81,15 @@ import {
   DEFAULT_NOTIFICATION_SETTINGS,
   INITIAL_TODOS, INITIAL_CERTIFICATES, INITIAL_SCHOOL_NOTES,
   INITIAL_HOD_STUDENTS, INITIAL_HOD_VISITS, INITIAL_HOD_ACTION_PLANS, INITIAL_HOD_COMPLAINTS,
-  INITIAL_FINANCE_TRANSACTIONS, INITIAL_FINANCE_ACCOUNTS, INITIAL_FINANCE_RECURRING, INITIAL_FINANCE_INSTALLMENTS, INITIAL_FINANCE_NOTIFICATIONS,
-  INITIAL_GOLD_HOLDINGS
+  INITIAL_FINANCE_TRANSACTIONS, INITIAL_FINANCE_ACCOUNTS, INITIAL_FINANCE_RECURRING, INITIAL_FINANCE_INSTALLMENTS, INITIAL_FINANCE_NOTIFICATIONS
 } from '../data/initialData';
-import { 
-  GoldHolding, GoldPriceResult, GoldPriceSettings, DEFAULT_GOLD_PRICE_SETTINGS
-} from '../services/goldPrice/goldPriceTypes';
-import { goldPriceService } from '../services/goldPrice/goldPriceService';
 
 import { alarmAudioService } from '../services/alarmAudioService';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
 import { validateAndSanitizeBackupPayload, hasBackupSection, MAX_BACKUP_FILE_SIZE_BYTES, isBackupFileSizeValid } from '../utils/backupEngine';
 import { syncAllWidgetsToNative } from '../services/widgetService';
-import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesService';
+import { saveToPhoneSubfolderAndRegister, shareFileNative } from '../services/downloadedFilesService';
 import { loadGrainGroupLearningRecords, saveGrainGroupLearningRecords, sanitizeGrainGroupLearningRecord } from '../services/grainService';
 import { loadZoomUiMeta, sanitizeZoomRecordForStorage, persistZoomWorkspaceDurably, ZoomPersistenceVerificationResult } from '../services/zoomService';
 import { DEFAULT_ZOOM_TIMEZONE, reconcileGroupWeeklySessions, resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
@@ -430,18 +424,6 @@ interface AppContextType {
   markFinanceNotificationAsRead: (id: string) => void;
   markAllFinanceNotificationsAsRead: () => void;
   deleteFinanceNotification: (id: string) => void;
-
-  // Gold Investments & Price Auto-Update
-  goldHoldings: GoldHolding[];
-  setGoldHoldings: React.Dispatch<React.SetStateAction<GoldHolding[]>>;
-  addGoldHolding: (holding: Omit<GoldHolding, 'id' | 'createdAt' | 'updatedAt' | 'type' | 'currency'> & { id?: string; currency?: 'EGP' }) => GoldHolding;
-  updateGoldHolding: (id: string, updates: Partial<GoldHolding>) => void;
-  deleteGoldHolding: (id: string) => void;
-  latestGoldPrice: GoldPriceResult | null;
-  isRefreshingGoldPrice: boolean;
-  refreshGoldPrice: (force?: boolean) => Promise<GoldPriceResult>;
-  goldPriceSettings: GoldPriceSettings;
-  updateGoldPriceSettings: (updates: Partial<GoldPriceSettings>) => Promise<void>;
 
   addAppNotification: (title: string, message: string, type: 'system' | 'reminder' | 'payment', extraFields?: any) => void;
   getFullLessonsSnapshot: () => Lesson[];
@@ -1842,25 +1824,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     storage.setItem('dl_finance_notifications', financeNotifications);
   }, [financeNotifications]);
 
-  // Gold Holdings State & Persistence (Empty by default, strictly private)
-  const [goldHoldings, setGoldHoldings] = useState<GoldHolding[]>(() => {
-    const raw = initialData['gluck_gold_holdings'];
-    if (Array.isArray(raw)) {
-      // Purge any sample/seed holding so user data is 100% private
-      const cleaned = raw.filter((h: any) => h && h.id !== 'gold_btc_5g_init');
-      if (cleaned.length !== raw.length) {
-        storage.setItem('gluck_gold_holdings', cleaned);
-      }
-      return cleaned;
-    }
-    return [];
-  });
-
-  useEffect(() => {
-    if (!isInitializedRef.current) return;
-    storage.setItem('gluck_gold_holdings', goldHoldings);
-  }, [goldHoldings]);
-
   // Standardized Weekly Zoom Sessions, Zoom Meeting Records, History & Grain Match Records (V2.0)
   const [groupWeeklySessions, setGroupWeeklySessions] = useState<GroupWeeklySession[]>(() => {
     const raw = initialData['glueck_group_weekly_sessions_v1'];
@@ -2046,34 +2009,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       needsResyncCount
     };
   }, [profile.defaultZoomTimezone, profile.includeOfflineInGoogleCalendar]);
-
-  // Gold Price State
-  const [latestGoldPrice, setLatestGoldPrice] = useState<GoldPriceResult | null>(null);
-  const [isRefreshingGoldPrice, setIsRefreshingGoldPrice] = useState<boolean>(false);
-  const [goldPriceSettings, setGoldPriceSettings] = useState<GoldPriceSettings>(() => {
-    const raw = initialData['gluck_gold_settings'];
-    return raw && typeof raw === 'object' ? { ...DEFAULT_GOLD_PRICE_SETTINGS, ...raw } : DEFAULT_GOLD_PRICE_SETTINGS;
-  });
-
-  // Initialize Gold Price Service and subscribe to live changes
-  useEffect(() => {
-    goldPriceService.init().then(() => {
-      const current = goldPriceService.getCurrentPrice();
-      if (current) {
-        setLatestGoldPrice(current);
-      }
-    }).catch(err => {
-      console.warn('Failed to init gold price service:', err);
-    });
-
-    const unsubscribe = goldPriceService.subscribe((price) => {
-      setLatestGoldPrice(price);
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, []);
 
   // Reconciliation: Ensure paid payments have transactions and default account exists
   const hasReconciledRef = useRef(false);
@@ -4703,66 +4638,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     setFinanceNotifications(prev => (prev || []).map(n => n.id === id ? wrapMutation({ ...n, deleted: true }) : n));
   }, []);
 
-  // Gold Holdings CRUD & Price Refresh
-  const addGoldHolding = useCallback((data: Omit<GoldHolding, 'id' | 'createdAt' | 'updatedAt' | 'type' | 'currency'> & { id?: string; currency?: 'EGP' }) => {
-    const now = new Date().toISOString();
-    const newHolding: GoldHolding = wrapMutation({
-      ...data,
-      id: data.id || `gold_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      type: 'gold',
-      currency: 'EGP',
-      createdAt: now,
-      updatedAt: Date.now(),
-    } as GoldHolding);
-    setGoldHoldings(prev => [newHolding, ...(prev || [])]);
-    registerFinanceActivity();
-    return newHolding;
-  }, [registerFinanceActivity]);
-
-  const updateGoldHolding = useCallback((id: string, updates: Partial<GoldHolding>) => {
-    setGoldHoldings(prev => (prev || []).map(item => {
-      if (item.id !== id) return item;
-      return wrapMutation({
-        ...item,
-        ...updates,
-        updatedAt: Date.now(),
-      } as GoldHolding);
-    }));
-    registerFinanceActivity();
-  }, [registerFinanceActivity]);
-
-  const deleteGoldHolding = useCallback((id: string) => {
-    setGoldHoldings(prev => (prev || []).map(item => item.id === id ? wrapDeletion(item as any) : item).filter(item => !item.deleted));
-    if (id) {
-      applyCascadePurgeTombstonesToAppState([
-        {
-          id: id.trim(),
-          type: 'goldHoldings',
-          purgedAt: new Date().toISOString(),
-          updatedAt: Date.now(),
-          originRevision: (syncRevisionRef.current || 1) + 1
-        }
-      ]);
-    }
-    registerFinanceActivity();
-  }, [registerFinanceActivity]);
-
-  const refreshGoldPrice = useCallback(async (force = true): Promise<GoldPriceResult> => {
-    setIsRefreshingGoldPrice(true);
-    try {
-      const result = await goldPriceService.fetchLatestPrice({ force });
-      setLatestGoldPrice(result);
-      return result;
-    } finally {
-      setIsRefreshingGoldPrice(false);
-    }
-  }, []);
-
-  const updateGoldPriceSettings = useCallback(async (updates: Partial<GoldPriceSettings>) => {
-    const updated = await goldPriceService.updateSettings(updates);
-    setGoldPriceSettings(updated);
-  }, []);
-
   // Recently Deleted (Soft Delete Recovery — strictly respects terminal PurgedRecordTombstones)
   const restoreItem = (type: 'student' | 'group' | 'lesson', id: string) => {
     const targetId = (id || '').trim();
@@ -4919,6 +4794,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     const purgedGroupIds = new Set(mergedPurged.filter(p => p.type === 'group').map(p => p.id.trim()));
     const purgedStudentIds = new Set(mergedPurged.filter(p => p.type === 'student').map(p => p.id.trim()));
     const purgedLessonIds = new Set(mergedPurged.filter(p => p.type === 'lesson').map(p => p.id.trim()));
+    const purgedLernstudioSetIds = new Set(mergedPurged.filter(p => p.type === 'lernstudioSet' || p.type === 'lernstudioSets').map(p => p.id.trim()));
     const allPurgedIds = new Set(mergedPurged.map(p => p.id.trim()));
 
     const nextRecentlyDeleted = mergeRecentlyDeleted(
@@ -4956,6 +4832,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       });
       if (filtered.length !== prev.length) {
         storage.setItem('dl_students', filtered);
+      }
+      return filtered;
+    });
+
+    // Sweep lernstudio sets deleted via tombstone (local delete or P2P sync)
+    setLernstudioSets(prev => {
+      const filtered = (prev || []).filter(s => s && s.id && !purgedLernstudioSetIds.has(s.id.trim()));
+      if (filtered.length !== (prev || []).length) {
+        storage.setItem('dl_lernstudio_sets', filtered);
       }
       return filtered;
     });
@@ -5008,7 +4893,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         .map(p => p.id.trim())
     );
 
-    // Sweep certificates, HOD datasets, goldHoldings, and customAiBackgrounds by purged ID
+    // Sweep certificates, HOD datasets, and customAiBackgrounds by purged ID
     setCertificates(prev => {
       const filtered = (prev || []).filter(c => c && c.id && !allPurgedIds.has(String(c.id).trim()));
       if (filtered.length !== (prev || []).length) {
@@ -5063,14 +4948,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       };
       storage.setItem('dl_profile', updated);
       return updated;
-    });
-
-    setGoldHoldings(prev => {
-      const filtered = (prev || []).filter(g => g && g.id && !allPurgedIds.has(String(g.id).trim()));
-      if (filtered.length !== (prev || []).length) {
-        storage.setItem('gluck_gold_holdings', filtered);
-      }
-      return filtered;
     });
 
     setCustomAiBackgrounds(prev => {
@@ -7481,7 +7358,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         ? aiBackgroundsFromStorage
         : (customAiBackgrounds.length > 0 ? customAiBackgrounds : await getAllAIBackgroundsIncludingDeleted());
     const prunedIds = (await storage.getItem<string[]>('dl_pruned_lesson_ids')) || [];
-    const gold = (await storage.getItem<GoldHolding[]>('gluck_gold_holdings')) || [];
     const financeNotifs = (await storage.getItem<FinanceNotification[]>('dl_finance_notifications')) || [];
     const notes = (await storage.getItem<SchoolNote[]>('dl_school_notes')) || [];
     const recDeleted = recentlyDeletedRef.current || (await storage.getItem<any>('dl_recently_deleted')) || recentlyDeleted || { students: [], groups: [], lessons: [], purgedRecords: [] };
@@ -7520,7 +7396,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       financeRecurring,
       financeInstallments,
       financeNotifications: financeNotifs.length > 0 ? financeNotifs : (financeNotifications || []),
-      goldHoldings: gold.length > 0 ? gold : goldHoldings,
       lernstudioSets,
       homeworkAssignments: hwAssignments,
       homeworkSubmissions: hwSubmissions,
@@ -7957,13 +7832,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         setDismissedDashboardLessonIds(mergedDismissed);
         await writeAndTrack('dl_dismissed_dashboard_lessons', mergedDismissed);
       }
-      if (hasBackupSection(parsed, 'goldHoldings') && data.goldHoldings) {
-        const mergedGold = goldHoldings.length > 0
-          ? (mergeEntities(goldHoldings as any, data.goldHoldings as any, 'goldHoldings').merged as unknown as GoldHolding[])
-          : data.goldHoldings;
-        setGoldHoldings(mergedGold);
-        await writeAndTrack('gluck_gold_holdings', mergedGold);
-      }
       if (hasBackupSection(parsed, 'financeNotifications') && data.financeNotifications) {
         const localFinNotif = (await storage.getItem<FinanceNotification[]>('dl_finance_notifications')) || [];
         const mergedFinNotif = localFinNotif.length > 0
@@ -8317,7 +8185,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       financeRecurring,
       financeInstallments,
       financeNotifications,
-      goldHoldings,
       lernstudioSets,
       grainGroupLearningRecords: await loadGrainGroupLearningRecords(),
       groupWeeklySessions: groupWeeklySessions.map((x) => sanitizeZoomRecordForStorage(x)),
@@ -8349,12 +8216,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           directory: Directory.Cache,
           encoding: Encoding.UTF8
         });
-        await Share.share({
-          title: 'Glück Backup',
-          files: [reg.nativeUri || savedFile.uri],
-          dialogTitle: 'Export Backup JSON'
-        });
-        return;
+        const shareResult = await shareFileNative(reg.nativeUri || savedFile.uri, fileName, 'Export Backup JSON');
+        if (shareResult !== 'failed') {
+          return;
+        }
+        // 'failed': the helper already showed a clear error toast; fall through
+        // to the blob download below.
       } catch (err) {
         console.warn('Native export via Filesystem failed, falling back to download blob:', err);
       }
@@ -8651,7 +8518,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       inspirationMessages,
       pickerNames: pickerNamesList,
       prunedLessonIds,
-      goldPriceSettings,
       theme,
       accentColor,
       reportLanguage,
@@ -8674,7 +8540,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     notificationSettings,
     inspirationSettings,
     inspirationMessages,
-    goldPriceSettings,
     theme,
     accentColor,
     reportLanguage,
@@ -8708,7 +8573,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     financeRecurring,
     financeInstallments,
     financeNotifications,
-    goldHoldings,
     lernstudioSets,
     groupWeeklySessions,
     zoomMeetingRecords,
@@ -8737,14 +8601,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       financeRecurring,
       financeInstallments,
       financeNotifications,
-      goldHoldings,
       lernstudioSets,
       groupWeeklySessions: groupWeeklySessions.map((x) => sanitizeZoomRecordForStorage(x)),
       zoomMeetingRecords: zoomMeetingRecords.map((x) => sanitizeZoomRecordForStorage(x)),
       zoomMeetingHistory: zoomMeetingHistory.map((x) => sanitizeZoomRecordForStorage(x)),
       grainRecordingMatches: grainRecordingMatches.map((x) => sanitizeZoomRecordForStorage(x))
     };
-  }, [groups, students, lessons, payments, notifications, todos, certificates, customAiBackgrounds, teacherSettingsRecord, hodStudents, hodComplaints, hodActionPlans, hodVisits, schoolNotes, financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments, financeNotifications, goldHoldings, lernstudioSets, groupWeeklySessions, zoomMeetingRecords, zoomMeetingHistory, grainRecordingMatches]);
+  }, [groups, students, lessons, payments, notifications, todos, certificates, customAiBackgrounds, teacherSettingsRecord, hodStudents, hodComplaints, hodActionPlans, hodVisits, schoolNotes, financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments, financeNotifications, lernstudioSets, groupWeeklySessions, zoomMeetingRecords, zoomMeetingHistory, grainRecordingMatches]);
 
   // Notify P2P auto-sync engine whenever local homework assignments or submissions mutate
   useEffect(() => {
@@ -8848,20 +8711,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         data.homeworkSubmissions = [];
       }
 
-      // Ensure goldHoldings & customAiBackgrounds have normalized numeric updatedAt and origin metadata for P2P
-      data.goldHoldings = (Array.isArray(data.goldHoldings) ? data.goldHoldings : []).map((g: any) => {
-        const ts = typeof g.updatedAt === 'number'
-          ? g.updatedAt
-          : Date.parse(String(g.updatedAt || g.createdAt || '')) || Date.now();
-        return {
-          ...g,
-          updatedAt: ts,
-          originDeviceId: g.originDeviceId || localDeviceId,
-          originPlatform: g.originPlatform || localPlatform,
-          originRevision: g.originRevision || 1
-        };
-      });
-
+      // Ensure customAiBackgrounds have normalized numeric updatedAt and origin metadata for P2P
       const rawAiBgs = Array.isArray(data.customAiBackgrounds)
         ? data.customAiBackgrounds
         : [];
@@ -9026,12 +8876,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           setFinanceNotifications(data);
           break;
         }
-        case 'goldHoldings': {
-          const activeGold = (Array.isArray(data) ? data : []).filter((g: any) => g && g.id && !g.deleted);
-          await storage.setItem('gluck_gold_holdings', activeGold);
-          setGoldHoldings(activeGold);
-          break;
-        }
         case 'customAiBackgrounds': {
           const normalizedBgs = (Array.isArray(data) ? data : []).filter((b: any) => b && b.id);
           await storage.setItem('dl_custom_ai_backgrounds', normalizedBgs);
@@ -9072,7 +8916,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           for (const ds of DEFAULT_LERNSTUDIO_SETS) {
             existingMap.set(ds.id, ds);
           }
-          for (const ls of lernstudioSets) {
+          // Seed from the live ref, not the state variable captured when the
+          // sync data source was first registered: a set deleted (locally or
+          // via an incoming tombstone) after init must not be re-seeded here.
+          for (const ls of (localDataRef.current?.lernstudioSets || [])) {
             if (ls && ls.id) existingMap.set(ls.id, ls);
           }
           for (const item of incomingList) {
@@ -9199,11 +9046,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
                   storage.removeItem('dl_active_lesson_session');
                 }
               }
-            }
-            if (incoming?.goldPriceSettings) {
-              const nextGoldSettings = { ...DEFAULT_GOLD_PRICE_SETTINGS, ...incoming.goldPriceSettings };
-              await storage.setItem('gluck_gold_settings', nextGoldSettings);
-              setGoldPriceSettings(nextGoldSettings);
             }
             if (incoming?.recentlyDeleted) {
               const mergedRec = mergeRecentlyDeleted(recentlyDeletedRef.current, incoming.recentlyDeleted);
@@ -9569,18 +9411,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         markFinanceNotificationAsRead,
         markAllFinanceNotificationsAsRead,
         deleteFinanceNotification,
-
-        // Gold Investment & Prices
-        goldHoldings,
-        setGoldHoldings,
-        addGoldHolding,
-        updateGoldHolding,
-        deleteGoldHolding,
-        latestGoldPrice,
-        isRefreshingGoldPrice,
-        refreshGoldPrice,
-        goldPriceSettings,
-        updateGoldPriceSettings,
 
         addAppNotification,
         getFullLessonsSnapshot,

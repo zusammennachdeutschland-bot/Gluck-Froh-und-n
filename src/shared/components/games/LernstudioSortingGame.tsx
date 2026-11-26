@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { LernstudioSet, LernstudioTheme, LernstudioGameCompletionPayload } from '../../../types/lernstudio';
 import { extractSortingItems, SortingItem } from '../../../utils/lernstudioQuestionAdapter';
+import { createSeededRandom } from '../../../utils/lernstudioVocabularyAdapter';
 import { playLernstudioSound, playGermanVoiceFeedback } from '../../../utils/lernstudioAudioUtils';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../../utils/lernstudioTranslations';
 import { GameSetupConfig } from '../LernstudioGameSetupScreen';
@@ -42,7 +43,7 @@ export const LernstudioSortingGame: React.FC<Props> = ({
 
   const [sessionSeed, setSessionSeed] = useState<number>(() => Date.now());
   const itemsPool = useMemo(() => {
-    const all = extractSortingItems(set.items || [], sessionSeed);
+    const all = extractSortingItems(set.items || [], createSeededRandom(sessionSeed));
     if (gameConfig?.questionCount && gameConfig.questionCount > 0) {
       return all.slice(0, gameConfig.questionCount);
     }

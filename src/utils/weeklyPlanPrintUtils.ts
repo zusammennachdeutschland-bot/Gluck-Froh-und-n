@@ -3,7 +3,6 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
 import { getReportSchoolLogoHtml, getEffectiveSchoolName } from './alsunLogoData';
 import { escapeHtml } from './securityUtils';
 import { saveToPhoneSubfolderAndRegister } from '../services/downloadedFilesService';

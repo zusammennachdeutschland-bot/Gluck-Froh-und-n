@@ -454,8 +454,6 @@ export function getAuthorizedGroupStudentsForAssignment(
  */
 export function normalizeHomeworkAssignment(hw: HomeworkAssignment): HomeworkAssignment {
   const mode = resolveAssignmentAudienceMode(hw);
-  const normalizedHideBranding =
-    hw.hideTeacherBranding !== undefined ? { hideTeacherBranding: Boolean(hw.hideTeacherBranding) } : {};
   const cleanOriginalShortId = (hw.originalShortId || hw.shortId || '').trim();
   const normalizedOriginalShortId =
     cleanOriginalShortId && isValidHomeworkShortId(cleanOriginalShortId)
@@ -477,7 +475,6 @@ export function normalizeHomeworkAssignment(hw: HomeworkAssignment): HomeworkAss
       ...hw,
       ...autoCloseOverrides,
       ...(normalizedSnapshot ? { setSnapshot: normalizedSnapshot } : {}),
-      ...normalizedHideBranding,
       ...normalizedOriginalShortId,
       audienceMode: 'open',
       groupId: undefined,
@@ -487,6 +484,9 @@ export function normalizeHomeworkAssignment(hw: HomeworkAssignment): HomeworkAss
     delete copy.groupId;
     delete copy.groupName;
     delete copy.assignedStudents;
+    // Legacy field removed in the single-push cleanup: strip it so old saved
+    // assignments never leak it into the DTO or share URLs.
+    delete (copy as any).hideTeacherBranding;
     return copy;
   }
 
@@ -494,17 +494,18 @@ export function normalizeHomeworkAssignment(hw: HomeworkAssignment): HomeworkAss
   const cleanGroupName = (hw.groupName || '').trim();
   const cleanRoster = getAuthorizedGroupStudentsForAssignment(hw);
 
-  return {
+  const grouped: HomeworkAssignment = {
     ...hw,
     ...autoCloseOverrides,
     ...(normalizedSnapshot ? { setSnapshot: normalizedSnapshot } : {}),
-    ...normalizedHideBranding,
     ...normalizedOriginalShortId,
     audienceMode: 'group',
     groupId: cleanGroupId && cleanGroupId !== 'all' ? cleanGroupId : undefined,
     groupName: cleanGroupName || undefined,
     assignedStudents: cleanRoster
   };
+  delete (grouped as any).hideTeacherBranding;
+  return grouped;
 }
 
 /**
@@ -1844,12 +1845,12 @@ export async function setHomeworkAssignmentActiveStatus(
 }
 
 /**
- * Updates editable homework assignment metadata (title, maxAttempts, allowReplay, hideTeacherBranding)
+ * Updates editable homework assignment metadata (title, maxAttempts, allowReplay)
  * directly on Android or Web and persists the updated snapshot to Homework Cloud & P2P.
  */
 export async function updateHomeworkAssignmentMetadata(
   assignmentId: string,
-  updates: Partial<Pick<HomeworkAssignment, 'title' | 'maxAttempts' | 'allowReplay' | 'hideTeacherBranding'>>
+  updates: Partial<Pick<HomeworkAssignment, 'title' | 'maxAttempts' | 'allowReplay'>>
 ): Promise<{ assignment: HomeworkAssignment | null; cloudSynced: boolean }> {
   if (!assignmentId) return { assignment: null, cloudSynced: false };
   const scopeUid = getActiveHomeworkScopeUid();
@@ -4374,7 +4375,6 @@ export function buildLegacyHomeworkShareUrl(hw: HomeworkAssignment, overrideDoma
   if (hw.contentSource) params.set('cs', hw.contentSource);
   if (hw.verbSubjectPoolMode) params.set('vsp', hw.verbSubjectPoolMode);
   if (hw.includeGrammarStudy === false) params.set('igs', '0');
-  if (hw.hideTeacherBranding) params.set('htb', '1');
   if (hw.title) params.set('t', hw.title);
   if (hw.selectedItemIds && hw.selectedItemIds.length > 0) {
     params.set('ids', hw.selectedItemIds.join(','));

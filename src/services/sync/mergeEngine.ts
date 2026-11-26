@@ -114,8 +114,6 @@ export function mergePurgedTombstones(
     'hodComplaints',
     'hodActionPlans',
     'hodVisits',
-    'goldHoldings',
-    'goldHolding',
     'customAiBackgrounds',
     'lernstudioSet',
     'lernstudioSets'
@@ -1347,12 +1345,6 @@ export function mergeTeacherSettings(
       : undefined,
     pickerNames: mergedPickerNames,
     prunedLessonIds: mergedPrunedLessonIds,
-    goldPriceSettings: (baseRecord?.goldPriceSettings || fallbackRecord?.goldPriceSettings)
-      ? {
-          ...fallbackRecord?.goldPriceSettings,
-          ...baseRecord?.goldPriceSettings
-        }
-      : undefined,
     theme: baseRecord?.theme ?? fallbackRecord?.theme,
     accentColor: baseRecord?.accentColor ?? fallbackRecord?.accentColor,
     reportLanguage: baseRecord?.reportLanguage ?? fallbackRecord?.reportLanguage,
@@ -1385,7 +1377,6 @@ export interface WorkspaceMutableState {
   hodComplaints?: any[];
   hodActionPlans?: any[];
   hodVisits?: any[];
-  goldHoldings?: any[];
   customAiBackgrounds?: any[];
   lernstudioSets?: any[];
   financeTransactions?: any[];
@@ -1598,9 +1589,6 @@ export function enforcePurgedTombstonesOnWorkspace<T extends WorkspaceMutableSta
   }
   if (Array.isArray(workspace.hodVisits)) {
     workspace.hodVisits = workspace.hodVisits.filter((v: any) => v && v.id && !allPurgedIds.has(String(v.id).trim()));
-  }
-  if (Array.isArray(workspace.goldHoldings)) {
-    workspace.goldHoldings = workspace.goldHoldings.filter((g: any) => g && g.id && !allPurgedIds.has(String(g.id).trim()));
   }
   if (Array.isArray(workspace.customAiBackgrounds)) {
     workspace.customAiBackgrounds = workspace.customAiBackgrounds.filter((b: any) => b && b.id && !allPurgedIds.has(String(b.id).trim()));

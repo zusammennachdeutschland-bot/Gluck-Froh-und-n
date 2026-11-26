@@ -364,6 +364,56 @@ export async function saveToPhoneSubfolderAndRegister(
   return record;
 }
 
+export type NativeShareResult = 'shared' | 'cancelled' | 'failed';
+
+function isNativeShareCancelled(err: unknown): boolean {
+  const text = `${(err as any)?.message || ''} ${(err as any)?.code || ''} ${(err as any)?.name || ''}`.toLowerCase();
+  return text.includes('cancel') || text.includes('abort') || text.includes('dismiss');
+}
+
+/**
+ * Single shared native file-share helper — the ONLY place that calls
+ * Capacitor Share for a file.
+ *
+ * Android root cause (see review §6): call sites used to pass the file as
+ * `url: <file:// URI>` plus `title`/`text`, so Android/WhatsApp received a
+ * text share (the file title) instead of the file attachment. This helper
+ * always passes `files: [uri]` and never `url` or `text`.
+ *
+ * - Returns 'shared' when the share sheet was opened successfully.
+ * - Returns 'cancelled' when the user dismissed the sheet — no error shown.
+ * - Returns 'failed' on a genuine failure (e.g. FileProvider cannot resolve
+ *   the URI): shows a clear error toast and does NOT fall back to a text-only
+ *   share. The file is already saved on the device, so callers fall through
+ *   to their direct-download fallback and the user can re-share the saved
+ *   file from "Downloaded Files".
+ */
+export async function shareFileNative(
+  uri: string | undefined | null,
+  fileName: string,
+  dialogTitle?: string
+): Promise<NativeShareResult> {
+  if (!uri) {
+    return 'failed';
+  }
+  try {
+    await Share.share(dialogTitle ? { files: [uri], dialogTitle } : { files: [uri] });
+    return 'shared';
+  } catch (err) {
+    if (isNativeShareCancelled(err)) {
+      return 'cancelled';
+    }
+    console.warn('Native file share failed:', err);
+    try {
+      await Toast.show({
+        text: `تعذّرت مشاركة الملف «${fileName}» — الملف محفوظ في هاتفك، ويمكنك إعادة مشاركته من «الملفات المُنزَّلة».`,
+        duration: 'long'
+      });
+    } catch {}
+    return 'failed';
+  }
+}
+
 /**
  * Deletes a single file record from the registry (and attempts to remove from native storage if present).
  */
@@ -401,17 +451,22 @@ export function clearDownloadedFilesRegistry(category?: DownloadedFileCategory):
  */
 export async function reshareRegisteredFileToWhatsApp(record: DownloadedFileRecord): Promise<boolean> {
   if (Capacitor.isNativePlatform() && record.nativeUri) {
-    try {
-      await Share.share({
-        title: record.title,
-        text: record.textContent || record.title,
-        url: record.nativeUri,
-        dialogTitle: 'مشاركة الملف عبر واتساب'
-      });
+    const shareResult = await shareFileNative(record.nativeUri, record.fileName, 'مشاركة الملف عبر واتساب');
+    if (shareResult === 'shared') {
+      // WhatsApp text is a SEPARATE step, after the file share succeeds —
+      // never in the same share call (text turns the share into text-only).
+      const textToShare = record.textContent || `📄 ${record.title}\n📁 المسار: ${record.fullStoragePath}`;
+      window.open(buildWhatsAppUrl(record.recipientPhone || '', textToShare), '_blank');
       return true;
-    } catch (e) {
-      console.warn('Native URI share failed, falling back to text share:', e);
     }
+    if (shareResult === 'cancelled') {
+      return true;
+    }
+    // 'failed': the helper already showed a clear error toast. Do NOT fall
+    // back to a WhatsApp text share — that is the reported bug (the file
+    // title shared as text instead of the file). The file stays saved and
+    // can be re-shared from Downloaded Files.
+    return false;
   }
 
   const textToShare = record.textContent || `📄 ${record.title}\n📁 المسار: ${record.fullStoragePath}`;
@@ -425,14 +480,12 @@ export async function reshareRegisteredFileToWhatsApp(record: DownloadedFileReco
  */
 export async function redownloadRegisteredFile(record: DownloadedFileRecord): Promise<boolean> {
   if (Capacitor.isNativePlatform() && record.nativeUri) {
-    try {
-      await Share.share({
-        title: record.fileName,
-        url: record.nativeUri,
-        dialogTitle: 'فتح أو حفظ الملف'
-      });
+    const shareResult = await shareFileNative(record.nativeUri, record.fileName, 'فتح أو حفظ الملف');
+    if (shareResult !== 'failed') {
       return true;
-    } catch {}
+    }
+    // 'failed': the helper already showed a clear error toast; fall through
+    // to the direct-download fallbacks below.
   }
 
   if (record.previewDataUrl) {

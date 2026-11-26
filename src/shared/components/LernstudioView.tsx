@@ -42,7 +42,7 @@ import { LernstudioGameSetupScreen, GameSetupConfig } from './LernstudioGameSetu
 import { LernstudioSetEditorModal } from './LernstudioSetEditorModal';
 import { LernstudioAiModal } from './LernstudioAiModal';
 import { LernstudioWorksheetModal } from './LernstudioWorksheetModal';
-import { LernstudioTeachModal } from './LernstudioTeachModal';
+import { LernstudioTeachPage } from './LernstudioTeachPage';
 import { LernstudioWordsModal } from './LernstudioWordsModal';
 import { LernstudioHomeworkModal } from './LernstudioHomeworkModal';
 import { GameEffectsProvider } from './effects/GameEffectsOverlay';
@@ -222,6 +222,87 @@ export const LernstudioView: React.FC<Props> = ({
     setsRef.current = sets;
   }, [sets]);
 
+  // Teach-page deep link: opening the Teach page pushes
+  // `#/lernstudio/teach/<setId>` so the Android/browser Back button returns
+  // to the sets list (same pattern as the homework player hash in App.tsx).
+  // The visible Back button always works even if the hash cannot be used.
+  const TEACH_HASH_PREFIX = '#/lernstudio/teach/';
+  const teachHashPushedRef = React.useRef(false);
+  const getTeachHashSetId = (): string | null => {
+    if (typeof window === 'undefined') return null;
+    const hash = window.location.hash || '';
+    if (!hash.startsWith(TEACH_HASH_PREFIX)) return null;
+    try {
+      const id = decodeURIComponent(hash.slice(TEACH_HASH_PREFIX.length));
+      return id || null;
+    } catch {
+      return null;
+    }
+  };
+  const stripTeachHash = () => {
+    try {
+      if (getTeachHashSetId()) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+    } catch {
+      // Hash cleanup is best-effort; the Back button always works.
+    }
+  };
+  const openTeachPage = (set: LernstudioSet) => {
+    setTeachPageSet(set);
+    try {
+      window.history.pushState(null, '', `${TEACH_HASH_PREFIX}${encodeURIComponent(set.id)}`);
+      teachHashPushedRef.current = true;
+    } catch {
+      // Hash is best-effort; the page still opens.
+    }
+  };
+  const closeTeachPage = () => {
+    // Clear state synchronously so the UI responds at once, then step back
+    // one history entry (the one openTeachPage pushed) so Back stays in sync.
+    setTeachPageSet(null);
+    if (teachHashPushedRef.current) {
+      teachHashPushedRef.current = false;
+      try {
+        window.history.back();
+        return;
+      } catch {
+        // Fall through to stripping the hash below.
+      }
+    }
+    stripTeachHash();
+  };
+  React.useEffect(() => {
+    const syncTeachHash = () => {
+      const id = getTeachHashSetId();
+      if (!id) {
+        teachHashPushedRef.current = false;
+        setTeachPageSet((cur) => (cur ? null : cur));
+        return;
+      }
+      // Hash points at a Teach page (Back/forward or a shared link):
+      // reopen it when the set is known. Temporary verb sets are not in
+      // `sets`, so a stale hash for one of them simply leaves the list open.
+      setTeachPageSet((cur) => {
+        if (cur && cur.id === id) return cur;
+        const found = (setsRef.current || []).find((s) => s.id === id);
+        return found || cur;
+      });
+    };
+    // Deep link on mount (e.g. refresh while on the Teach page).
+    syncTeachHash();
+    window.addEventListener('popstate', syncTeachHash);
+    window.addEventListener('hashchange', syncTeachHash);
+    return () => {
+      window.removeEventListener('popstate', syncTeachHash);
+      window.removeEventListener('hashchange', syncTeachHash);
+      // Do not leave a stale Teach hash behind when this view unmounts
+      // (e.g. switching tabs) — the Teach state is gone with the component.
+      stripTeachHash();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Theme State
   const [currentThemeId, setCurrentThemeId] = useState<LernstudioThemeId>('neutral');
   const activeTheme = LERNSTUDIO_THEMES[currentThemeId];
@@ -242,8 +323,9 @@ export const LernstudioView: React.FC<Props> = ({
   const [isWorksheetModalOpen, setIsWorksheetModalOpen] = useState(false);
   const [selectedSetForWorksheet, setSelectedSetForWorksheet] = useState<LernstudioSet | null>(null);
 
-  const [isTeachModalOpen, setIsTeachModalOpen] = useState(false);
-  const [selectedSetForTeach, setSelectedSetForTeach] = useState<LernstudioSet | null>(null);
+  // Teach/Presentation is a FULL PAGE, not a modal: when set, renderContent()
+  // renders only the Teach page instead of the sets list.
+  const [teachPageSet, setTeachPageSet] = useState<LernstudioSet | null>(null);
 
   const [isWordsModalOpen, setIsWordsModalOpen] = useState(false);
   const [selectedSetForWordsModal, setSelectedSetForWordsModal] = useState<LernstudioSet | null>(null);
@@ -721,6 +803,29 @@ export const LernstudioView: React.FC<Props> = ({
   };
 
   const renderContent = () => {
+    // Teach/Presentation FULL PAGE: when open it replaces the sets list
+    // entirely (both mobile and desktop mounts render this same component).
+    if (teachPageSet) {
+      return (
+        <LernstudioTeachPage
+          isOpen
+          set={teachPageSet}
+          language={language}
+          onClose={closeTeachPage}
+          onLaunchGame={(gMode) => {
+            // Exit to games via the sets list first: clear the Teach page
+            // (and its hash) synchronously, then open the game.
+            const targetSet = teachPageSet;
+            teachHashPushedRef.current = false;
+            setTeachPageSet(null);
+            stripTeachHash();
+            setSelectedSetForMode(targetSet);
+            setActiveMode(gMode);
+          }}
+        />
+      );
+    }
+
     const activeGameSet = effectiveSetForMode || hydratedSelectedSet || selectedSetForMode;
 
     if (activeMode === 'games_portal' && (hydratedSelectedSet || selectedSetForMode)) {
@@ -1778,8 +1883,7 @@ export const LernstudioView: React.FC<Props> = ({
                           <button
                             type="button"
                             onClick={() => {
-                              setSelectedSetForTeach(set);
-                              setIsTeachModalOpen(true);
+                              openTeachPage(set);
                             }}
                             className="flex-1 py-1.5 px-2 bg-surface hover:bg-surface-hover text-text-main border border-surface-border rounded-lg text-xs font-semibold cursor-pointer inline-flex items-center justify-center gap-1.5 transition-all truncate"
                           >
@@ -2036,8 +2140,7 @@ export const LernstudioView: React.FC<Props> = ({
                         verbs: chosen,
                         setKind: 'verb_group'
                       });
-                      setSelectedSetForTeach(tempSet);
-                      setIsTeachModalOpen(true);
+                      openTeachPage(tempSet);
                     }}
                     className="px-3 py-1.5 rounded-lg bg-surface border border-surface-border text-text-main text-xs font-bold cursor-pointer inline-flex items-center gap-1"
                   >
@@ -2358,8 +2461,7 @@ export const LernstudioView: React.FC<Props> = ({
                         verbs: combined,
                         setKind: 'verb_group'
                       });
-                      setSelectedSetForTeach(tempSet);
-                      setIsTeachModalOpen(true);
+                      openTeachPage(tempSet);
                     }}
                     className="px-3 py-1.5 rounded-lg bg-surface border border-surface-border text-text-main text-xs font-bold cursor-pointer inline-flex items-center gap-1"
                   >
@@ -2496,8 +2598,7 @@ export const LernstudioView: React.FC<Props> = ({
                         <button
                           type="button"
                           onClick={() => {
-                            setSelectedSetForTeach(launchSet());
-                            setIsTeachModalOpen(true);
+                            openTeachPage(launchSet());
                           }}
                           className="flex-1 py-1.5 px-2 bg-surface hover:bg-surface-hover border border-surface-border text-text-main rounded-lg text-xs font-semibold cursor-pointer inline-flex items-center justify-center gap-1"
                         >
@@ -2621,23 +2722,6 @@ export const LernstudioView: React.FC<Props> = ({
           />
         )}
 
-        {isTeachModalOpen && selectedSetForTeach && (
-          <LernstudioTeachModal
-            isOpen={isTeachModalOpen}
-            set={selectedSetForTeach}
-            language={language}
-            onClose={() => {
-              setIsTeachModalOpen(false);
-              setSelectedSetForTeach(null);
-            }}
-            onLaunchGame={(gMode) => {
-              setSelectedSetForMode(selectedSetForTeach);
-              setActiveMode(gMode);
-              setIsTeachModalOpen(false);
-            }}
-          />
-        )}
-
         {isWordsModalOpen && selectedSetForWordsModal && (
           <LernstudioWordsModal
             isOpen={isWordsModalOpen}
@@ -2653,8 +2737,7 @@ export const LernstudioView: React.FC<Props> = ({
               setIsWordsModalOpen(false);
             }}
             onStartTeach={() => {
-              setSelectedSetForTeach(selectedSetForWordsModal);
-              setIsTeachModalOpen(true);
+              openTeachPage(selectedSetForWordsModal);
               setIsWordsModalOpen(false);
             }}
             onStartWorksheet={() => {

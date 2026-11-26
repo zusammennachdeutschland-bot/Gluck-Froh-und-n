@@ -214,8 +214,6 @@ export function calculatePendingOutbox(
           title = `Recurring Bill: ${(record as any).name || (record as any).id} (${(record as any).amount || 0})`;
         } else if (entityType === 'financeInstallments') {
           title = `Installment: ${(record as any).name || (record as any).id} (${(record as any).amountPerInstallment || 0})`;
-        } else if (entityType === 'goldHoldings') {
-          title = `Gold Holding: ${(record as any).label || (record as any).karat || 'Gold'} (${(record as any).grams || 0}g)`;
         } else if (entityType === 'homeworkAssignments') {
           title = `Homework Assignment: ${(record as any).title || (record as any).setTitle || (record as any).id}`;
         } else if (entityType === 'homeworkSubmissions') {

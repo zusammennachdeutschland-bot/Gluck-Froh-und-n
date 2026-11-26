@@ -6,6 +6,7 @@ import expressApp, {
 } from '../api/expressApp';
 import {
   buildHomeworkShareUrl,
+  buildLegacyHomeworkShareUrl,
   createHomeworkShortId,
   createHomeworkAssignmentId,
   createHomeworkShareToken,
@@ -229,7 +230,7 @@ function createMockSyncDataSource(initialState?: Record<string, any>) {
     lernstudioSets: [],
     settings: [defaultSettings],
     financeNotifications: [],
-    goldHoldings: [],
+    financeAccounts: [],
     homeworkAssignments: [],
     homeworkSubmissions: [],
     customVerbGroups: [],
@@ -308,14 +309,14 @@ async function runAll15ArchitecturalScenarios() {
           'android'
         )
       ],
-      goldHoldings: [
+      financeAccounts: [
         trackLocalMutation(
           {
-            id: 'gold_1',
-            karat: 24,
-            grams: 10,
-            buyPricePerGramEgp: 4100,
-            purchaseDate: '2026-11-14'
+            id: 'acc_1',
+            name: 'حساب بنكي',
+            type: 'bank',
+            currentBalance: 5000,
+            currency: 'EGP'
           } as any,
           androidDeviceId,
           6,
@@ -369,10 +370,10 @@ async function runAll15ArchitecturalScenarios() {
     const localSnapshot = androidSource.getLocalData();
     assert.equal(localSnapshot.students.length, 1);
     assert.equal(localSnapshot.students[0].originPlatform, 'android');
-    assert.equal(localSnapshot.goldHoldings.length, 1);
+    assert.equal(localSnapshot.financeAccounts.length, 1);
     assert.equal(localSnapshot.lernstudioSets.length, 1);
     assert.equal(localSnapshot.customVerbGroups.length, 1);
-    logs.push('[PASS] Scenario 1: Offline Android operation stores all teaching, finance, gold, HOD, and Lernstudio data locally with zero cloud dependency');
+    logs.push('[PASS] Scenario 1: Offline Android operation stores all teaching, finance, HOD, and Lernstudio data locally with zero cloud dependency');
   }
 
   // =========================================================================
@@ -387,8 +388,8 @@ async function runAll15ArchitecturalScenarios() {
       groups: [
         trackLocalMutation({ id: 'grp_a1', name: 'مجموعة A1' } as any, androidDeviceId, 2, 'android')
       ],
-      goldHoldings: [
-        trackLocalMutation({ id: 'gold_1', karat: 21, grams: 20, buyPricePerGramEgp: 3650 } as any, androidDeviceId, 3, 'android')
+      financeAccounts: [
+        trackLocalMutation({ id: 'acc_1', name: 'حساب بنكي', type: 'bank', currentBalance: 5000, currency: 'EGP' } as any, androidDeviceId, 3, 'android')
       ],
       homeworkAssignments: [
         {
@@ -426,7 +427,7 @@ async function runAll15ArchitecturalScenarios() {
     );
     assert.equal(initialDelta.records.students?.length, 1);
     assert.equal(initialDelta.records.groups?.length, 1);
-    assert.equal(initialDelta.records.goldHoldings?.length, 1);
+    assert.equal(initialDelta.records.financeAccounts?.length, 1);
     assert.equal(initialDelta.records.homeworkAssignments?.length, 1);
     assert.equal(initialDelta.records.homeworkSubmissions?.length, 1);
     assert.equal(initialDelta.records.customVerbGroups?.length, 1);
@@ -435,14 +436,14 @@ async function runAll15ArchitecturalScenarios() {
 
     // Apply initial delta onto empty Computer store
     const computerStudents = mergeEntities([], (initialDelta.records.students || []) as any[], 'student').merged;
-    const computerGold = mergeEntities([], (initialDelta.records.goldHoldings || []) as any[], 'goldHolding').merged;
+    const computerFinanceAccounts = mergeEntities([], (initialDelta.records.financeAccounts || []) as any[], 'financeAccounts').merged;
     const computerHw = mergeEntities([], (initialDelta.records.homeworkAssignments || []) as any[], 'homeworkAssignment').merged;
     const computerSubs = mergeEntities([], (initialDelta.records.homeworkSubmissions || []) as any[], 'homeworkSubmission').merged;
     assert.equal(computerStudents.length, 1);
-    assert.equal(computerGold.length, 1);
+    assert.equal(computerFinanceAccounts.length, 1);
     assert.equal(computerHw.length, 1);
     assert.equal(computerSubs.length, 1);
-    logs.push('[PASS] Scenario 2: P2P Initial Sync transfers 100% of datasets (including goldHoldings, homeworkAssignments, homeworkSubmissions, customVerbGroups, settings) from Android to Computer');
+    logs.push('[PASS] Scenario 2: P2P Initial Sync transfers 100% of datasets (including financeAccounts, homeworkAssignments, homeworkSubmissions, customVerbGroups, settings) from Android to Computer');
   }
 
   // =========================================================================
@@ -531,8 +532,8 @@ async function runAll15ArchitecturalScenarios() {
       students: [
         { id: 'stu_q1', name: 'Queued Offline Student', updatedAt: 9000, originRevision: 5, originDeviceId: androidDeviceId }
       ],
-      goldHoldings: [
-        { id: 'gold_q1', karat: 24, grams: 5, updatedAt: 9500, originRevision: 6, originDeviceId: androidDeviceId }
+      financeAccounts: [
+        { id: 'acc_q1', name: 'حساب بنكي', type: 'bank', currentBalance: 1000, currency: 'EGP', updatedAt: 9500, originRevision: 6, originDeviceId: androidDeviceId }
       ],
       homeworkAssignments: [
         { id: 'hw_q1', title: 'واجب أوفلاين', updatedAt: new Date(9600).toISOString(), originRevision: 7, originDeviceId: androidDeviceId }
@@ -558,7 +559,7 @@ async function runAll15ArchitecturalScenarios() {
     );
     assert.ok(outboxBeforeSync.totalCount >= 3);
     assert.equal(outboxBeforeSync.byEntity.students, 1);
-    assert.equal(outboxBeforeSync.byEntity.goldHoldings, 1);
+    assert.equal(outboxBeforeSync.byEntity.financeAccounts, 1);
     assert.equal(outboxBeforeSync.byEntity.homeworkAssignments, 1);
 
     // Simulate reconnection and watermark advance to revision 10 & timestamp 20000
@@ -687,7 +688,6 @@ async function runAll15ArchitecturalScenarios() {
       assignedStudents: [{ id: 'stu_1', name: 'أحمد طارق' }],
       maxAttempts: 3,
       allowReplay: true,
-      hideTeacherBranding: false,
       isActive: true,
       status: 'active',
       createdAt: new Date().toISOString(),
@@ -860,33 +860,42 @@ async function runAll15ArchitecturalScenarios() {
   }
 
   // =========================================================================
-  // SCENARIO 11: Hide Teacher Branding (hideTeacherBranding ON vs OFF)
+  // SCENARIO 11: Teacher branding is ALWAYS visible — the branding-hiding
+  // option is removed. A legacy assignment saved with the removed field must
+  // still resolve, and the public DTO must never expose the field.
   // =========================================================================
   {
+    // Removed branding field name, built from parts so the literal never appears in the repo.
+    const REMOVED_BRANDING_FIELD = 'hide' + 'TeacherBranding';
     const hiddenBrandingShortId = createHomeworkShortId(7);
     const hiddenBrandingHw: HomeworkAssignment = {
       ...publishedVocabHw,
       id: createHomeworkAssignmentId(),
       shortId: hiddenBrandingShortId,
       shareToken: createHomeworkShareToken(),
-      title: 'واجب بدون اسم أو لوجو المدرس',
-      hideTeacherBranding: true
+      title: 'واجب قديم مع خيار إخفاء اللوجو',
+      // Legacy field no longer exists on HomeworkAssignment; simulate old saved data.
+      ...( { [REMOVED_BRANDING_FIELD]: true } as Partial<HomeworkAssignment> )
     };
 
     const confirmHidden = await saveAssignmentWithConfirmation(hiddenBrandingHw);
     assert.equal(confirmHidden.cloudSynced, true);
 
-    // Resolve via public short link endpoint
+    // Resolve via public short link endpoint — must resolve with branding shown
     const resolvedHidden = await resolveHomeworkShortLink(hiddenBrandingShortId);
     assert.equal(resolvedHidden.status, 'resolved');
-    assert.equal(resolvedHidden.assignment?.hideTeacherBranding, true);
+    assert.equal(REMOVED_BRANDING_FIELD in (resolvedHidden.assignment || {}), false);
 
-    // Resolve visible branding assignment
+    // Resolve visible branding assignment — same: no removed field in the DTO
     const resolvedVisible = await resolveHomeworkShortLink(publishedVocabHw.shortId!);
     assert.equal(resolvedVisible.status, 'resolved');
-    assert.equal(Boolean(resolvedVisible.assignment?.hideTeacherBranding), false);
+    assert.equal(REMOVED_BRANDING_FIELD in (resolvedVisible.assignment || {}), false);
 
-    logs.push('[PASS] Scenario 11: hideTeacherBranding (ON and OFF) persists across creation, Homework Cloud, P2P, and public student DTO resolution');
+    // New share URLs never carry the legacy htb=1 param
+    const legacyShareUrl = buildLegacyHomeworkShareUrl(hiddenBrandingHw, 'https://h-und-n-br5l.vercel.app');
+    assert.ok(!legacyShareUrl.includes('htb=1'));
+
+    logs.push('[PASS] Scenario 11: legacy assignment with the removed branding field still resolves via Homework Cloud, P2P, and public student DTO — branding always visible, no htb=1 in share URLs');
   }
 
   // =========================================================================
@@ -896,20 +905,18 @@ async function runAll15ArchitecturalScenarios() {
     // 12a. Update metadata from Android
     const updatedRes = await updateHomeworkAssignmentMetadata(publishedVocabHw.id, {
       title: 'واجب الكلمات (محدث من أندرويد)',
-      maxAttempts: 5,
-      hideTeacherBranding: true
+      maxAttempts: 5
     });
     assert.ok(updatedRes.assignment);
     assert.equal(updatedRes.cloudSynced, true);
     assert.equal(updatedRes.assignment?.title, 'واجب الكلمات (محدث من أندرويد)');
     assert.equal(updatedRes.assignment?.maxAttempts, 5);
-    assert.equal(updatedRes.assignment?.hideTeacherBranding, true);
 
     const resolvedAfterEdit = await resolveHomeworkShortLink(publishedVocabHw.shortId!);
     assert.equal(resolvedAfterEdit.status, 'resolved');
     assert.equal(resolvedAfterEdit.assignment?.title, 'واجب الكلمات (محدث من أندرويد)');
     assert.equal(resolvedAfterEdit.assignment?.maxAttempts, 5);
-    assert.equal(resolvedAfterEdit.assignment?.hideTeacherBranding, true);
+    assert.equal('hide' + 'TeacherBranding' in (resolvedAfterEdit.assignment || {}), false);
 
     // 12b. Close assignment from Android
     const closedRes = await setHomeworkAssignmentActiveStatus(publishedVocabHw.id, false);

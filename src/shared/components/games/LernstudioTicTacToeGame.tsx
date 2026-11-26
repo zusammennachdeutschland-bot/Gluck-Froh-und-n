@@ -6,8 +6,7 @@ import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } f
 import {
   getSetVocabularyItems,
   getDistractorChoices,
-  createSeededRandom,
-  seededShuffle
+  createSeededRandom
 } from '../../../utils/lernstudioVocabularyAdapter';
 import { GameSetupConfig } from '../LernstudioGameSetupScreen';
 import { GameStageBanner } from '../GameArtAssets';
@@ -181,8 +180,7 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
     turnCounterRef.current += 1;
     const rng = createSeededRandom(sessionSeed + index * 43 + turnCounterRef.current * 19);
     const target = items[(turnCounterRef.current + index) % items.length];
-    const distractors = getDistractorChoices(target, items, 2, rng);
-    const choices = seededShuffle([target, ...distractors], rng);
+    const choices = getDistractorChoices(target, items, 2, rng);
 
     setActiveCellIndex(index);
     setActiveQuestion({ targetItem: target, choices });
@@ -538,6 +536,7 @@ export const LernstudioTicTacToeGame: React.FC<Props> = ({
                 <button
                   key={choice.id}
                   type="button"
+                  disabled={questionFeedback !== null}
                   onClick={() => handleAnswerQuestion(choice)}
                   className="py-3 px-4 rounded-xl bg-surface hover:bg-surface-hover border border-surface-border hover:border-primary text-text-main font-black text-sm font-mono transition-all cursor-pointer flex items-center justify-between gap-2"
                   dir="ltr"

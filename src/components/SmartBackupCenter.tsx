@@ -9,7 +9,7 @@ import { formatLocalDate } from '../utils/timeUtils';
 import { storage } from '../services/storageService';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
+import { shareFileNative } from '../services/downloadedFilesService';
 import { 
   ALL_BACKUP_CATEGORIES, BackupCategory, calculateBackupStats, 
   generateBackupFilename, encryptBackupData, decryptBackupData, 
@@ -40,13 +40,13 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
     profile, notificationSettings, inspirationSettings, 
     inspirationMessages, todos, certificates,
     hodStudents, hodComplaints, hodActionPlans, hodVisits,
-    schoolNotes, goldHoldings, lernstudioSets,
+    schoolNotes, lernstudioSets,
     financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments,
     setStudents, setGroups, setLessons, setPayments, setNotifications, setProfile, 
     setNotificationSettings, setInspirationSettings, setInspirationMessages,
     setTodos, setCertificates,
     setHodStudents, setHodComplaints, setHodActionPlans, setHodVisits,
-    setSchoolNotes, setGoldHoldings, setLernstudioSets,
+    setSchoolNotes, setLernstudioSets,
     setFinanceAccounts, setFinanceCategories, setFinanceTransactions, setFinanceRecurring, setFinanceInstallments,
     updateFullLessonsStorage, updateFullPaymentsStorage,
     bumpExternalDataVersion,
@@ -237,7 +237,6 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           payloadData.inspirationMessages = inspirationMessages;
           payloadData.todos = todos;
           payloadData.lernstudioSets = lernstudioSets;
-          payloadData.goldHoldings = goldHoldings;
         }
         if (selectedCategories.includes('availability')) payloadData.workingHours = profile.workingHours;
         if (selectedCategories.includes('templates')) payloadData.parentMessageTemplates = profile.parentMessageTemplates;
@@ -324,11 +323,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             // 3. Prompt native share sheet with safe timeout race (never hang)
             try {
               await Promise.race([
-                Share.share({
-                  title: fileName,
-                  url: savedFile.uri,
-                  dialogTitle: 'Export Backup JSON'
-                }),
+                shareFileNative(savedFile.uri, fileName, 'Export Backup JSON'),
                 new Promise((resolve) => setTimeout(resolve, 2500))
               ]);
             } catch (shareErr) {
@@ -412,7 +407,6 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           hodVisits,
           schoolNotes,
           lernstudioSets,
-          goldHoldings,
           financeAccounts,
           financeCategories,
           financeTransactions,
@@ -485,11 +479,7 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             // 3. Prompt native share sheet with safe timeout race (never hang)
             try {
               await Promise.race([
-                Share.share({
-                  title: fileName,
-                  url: savedFile.uri,
-                  dialogTitle: 'Save Backup File'
-                }),
+                shareFileNative(savedFile.uri, fileName, 'Save Backup File'),
                 new Promise((resolve) => setTimeout(resolve, 2500))
               ]);
             } catch (shareErr) {
@@ -595,7 +585,6 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         hodVisits,
         schoolNotes,
         lernstudioSets,
-        goldHoldings,
         financeAccounts,
         financeCategories,
         financeTransactions,
@@ -704,10 +693,6 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
           if (rp.lernstudioSets) {
             setLernstudioSets(rp.lernstudioSets);
             await storage.setItem('dl_lernstudio_sets', rp.lernstudioSets);
-          }
-          if (rp.goldHoldings) {
-            setGoldHoldings(rp.goldHoldings);
-            await storage.setItem('gluck_gold_holdings', rp.goldHoldings);
           }
           bumpExternalDataVersion();
         } catch (rollbackErr) {
@@ -901,10 +886,6 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             setLernstudioSets(data.lernstudioSets);
             await storage.setItem('dl_lernstudio_sets', data.lernstudioSets);
           }
-          if (hasBackupSection(parsed, 'goldHoldings') && data.goldHoldings) {
-            setGoldHoldings(data.goldHoldings);
-            await storage.setItem('gluck_gold_holdings', data.goldHoldings);
-          }
 
           bumpExternalDataVersion();
           setSimpleSuccessMsg(t('auto_all_data_restored_successful'));
@@ -1058,7 +1039,6 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
       hodVisits,
       schoolNotes,
       lernstudioSets,
-      goldHoldings,
       financeAccounts,
       financeCategories,
       financeTransactions,
@@ -1512,10 +1492,6 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             setTodos(finalTodos);
             await storage.setItem('dl_quick_todos', finalTodos);
           }
-          if (data.goldHoldings) {
-            setGoldHoldings(data.goldHoldings);
-            await storage.setItem('gluck_gold_holdings', data.goldHoldings);
-          }
         }
         if ((selectedRestoreCategories.includes('lernstudio') || selectedRestoreCategories.includes('settings')) && data.lernstudioSets) {
           setLernstudioSets(data.lernstudioSets);
@@ -1589,7 +1565,6 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
             if (currentSnapshot.financeRecurring) { setFinanceRecurring(currentSnapshot.financeRecurring); await storage.setItem('dl_finance_recurring', currentSnapshot.financeRecurring).catch(() => {}); }
             if (currentSnapshot.financeInstallments) { setFinanceInstallments(currentSnapshot.financeInstallments); await storage.setItem('dl_finance_installments', currentSnapshot.financeInstallments).catch(() => {}); }
             if (currentSnapshot.lernstudioSets) { setLernstudioSets(currentSnapshot.lernstudioSets); await storage.setItem('dl_lernstudio_sets', currentSnapshot.lernstudioSets).catch(() => {}); }
-            if (currentSnapshot.goldHoldings) { setGoldHoldings(currentSnapshot.goldHoldings); await storage.setItem('gluck_gold_holdings', currentSnapshot.goldHoldings).catch(() => {}); }
             bumpExternalDataVersion();
           }
           throw commitErr;
@@ -1717,10 +1692,6 @@ export const SmartBackupCenter: React.FC<SmartBackupCenterProps> = ({ onBack }) 
         if (rp.lernstudioSets) {
           setLernstudioSets(rp.lernstudioSets);
           await storage.setItem('dl_lernstudio_sets', rp.lernstudioSets);
-        }
-        if (rp.goldHoldings) {
-          setGoldHoldings(rp.goldHoldings);
-          await storage.setItem('gluck_gold_holdings', rp.goldHoldings);
         }
 
         bumpExternalDataVersion();

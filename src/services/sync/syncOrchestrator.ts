@@ -177,7 +177,6 @@ async function ingestAndSweepPurgedTombstonesOnDataSource(
       'hodComplaints',
       'hodActionPlans',
       'hodVisits',
-      'goldHoldings',
       'customAiBackgrounds',
       'homeworkAssignments',
       'homeworkSubmissions',

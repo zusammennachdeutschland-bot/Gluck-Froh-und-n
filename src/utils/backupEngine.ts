@@ -1127,8 +1127,6 @@ export function validateAndSanitizeBackupPayload(rawParsed: any): ValidationResu
       'hodComplaints',
       'hodActionPlans',
       'hodVisits',
-      'goldHoldings',
-      'goldHolding',
       'customAiBackgrounds'
     ]);
     for (const p of rawPurged) {
@@ -1826,7 +1824,6 @@ export function mergeBackupPayloadIntoWorkspace(
       'financeRecurring',
       'financeInstallments',
       'financeNotifications',
-      'goldHoldings',
       'homeworkAssignments',
       'homeworkSubmissions',
       'grainGroupLearningRecords',

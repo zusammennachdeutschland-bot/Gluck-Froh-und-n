@@ -6,8 +6,7 @@ import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } f
 import {
   getSetVocabularyItems,
   getDistractorChoices,
-  createSeededRandom,
-  seededShuffle
+  createSeededRandom
 } from '../../../utils/lernstudioVocabularyAdapter';
 import { GameSetupConfig } from '../LernstudioGameSetupScreen';
 import { GameStageBanner, SharedVictoryTrophyArt } from '../GameArtAssets';
@@ -128,8 +127,7 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
     (target: LernstudioItem, roundIdx: number): FallingWord[] => {
       waveCounterRef.current += 1;
       const rng = createSeededRandom(sessionSeed + roundIdx * 97 + waveCounterRef.current * 31);
-      const distractors = getDistractorChoices(target, items, 2, rng);
-      const candidates = seededShuffle([target, ...distractors], rng);
+      const candidates = getDistractorChoices(target, items, 2, rng);
       return candidates.map((it, idx) => ({
         id: `${it.id}_${waveCounterRef.current}_${idx}`,
         item: it,

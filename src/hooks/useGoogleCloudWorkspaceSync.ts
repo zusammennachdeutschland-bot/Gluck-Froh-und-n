@@ -29,7 +29,7 @@ function stripSnapshotTimestamp(jsonStr: string): string {
  * Checks ALL backup sections:
  * - Core CRM: students, groups, lessons, payments, certificates, notifications, prunedLessonIds
  * - School & HOD: hodStudents, hodComplaints, hodActionPlans, hodVisits, schoolNotes
- * - Finance: financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments, financeNotifications, goldHoldings
+ * - Finance: financeAccounts, financeCategories, financeTransactions, financeRecurring, financeInstallments, financeNotifications
  * - Homework: homeworkAssignments, homeworkSubmissions
  * - Lernstudio: CUSTOM sets created by teacher (!BUILTIN_LERNSTUDIO_MAP.has(s.id))
  * - Singletons: custom pickerNames, customAiBackgrounds, todos, non-default profile or schoolSettings
@@ -65,7 +65,6 @@ export function hasAnyWorkspaceData(jsonStr: string | null): boolean {
       'financeRecurring',
       'financeInstallments',
       'financeNotifications',
-      'goldHoldings',
       'homeworkAssignments',
       'homeworkSubmissions',
       'pickerNames',

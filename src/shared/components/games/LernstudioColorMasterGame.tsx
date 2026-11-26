@@ -180,7 +180,11 @@ export const LernstudioColorMasterGame: React.FC<Props> = ({
             maxScore: totalQuestions * 100,
             passed: false
           });
+        } else if (currentIndex + 1 >= totalQuestions) {
+          setIsVictory(true);
+          reportCompletion({ score, maxScore: totalQuestions * 100, passed: true });
         } else {
+          setCurrentIndex((prev) => prev + 1);
           setIsAnswerSubmitted(false);
           setSelectedChoice(null);
           setIsCorrect(null);

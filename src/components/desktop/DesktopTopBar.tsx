@@ -253,7 +253,7 @@ export const DesktopTopBar: React.FC<DesktopTopBarProps> = () => {
           {/* Divider */}
           <div className="h-6 w-px bg-surface-border/80 mx-1" />
 
-          {/* LAN Sync Center Button */}
+          {/* Sync Center Button */}
           {isSyncReady && syncState && (
             <motion.button
               whileHover={{ scale: 1.03 }}

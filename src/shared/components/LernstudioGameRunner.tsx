@@ -302,14 +302,10 @@ export const LernstudioGameRunner: React.FC<Props> = ({
       setStreak(0);
       setFeedback({
         isCorrect: false,
-        message: `${t.wrongAnswerMsg} (حاول مرة أخرى / Try again)`
+        message: `${t.wrongAnswerMsg} (${currentItem.german})`
       });
       playSfx('wrong');
       playVoice('noch_einmal');
-      scheduleTimeout(() => {
-        setFeedback(null);
-        setSelectedOptionIndex(null);
-      }, 1000);
     }
   };
 
@@ -347,13 +343,10 @@ export const LernstudioGameRunner: React.FC<Props> = ({
       setStreak(0);
       setFeedback({
         isCorrect: false,
-        message: `${t.wrongAnswerMsg} (حاول مرة أخرى)`
+        message: `${t.wrongAnswerMsg} (${currentItem.german})`
       });
       playSfx('wrong');
       playVoice('noch_einmal');
-      scheduleTimeout(() => {
-        setFeedback(null);
-      }, 1000);
     }
   };
 
@@ -387,14 +380,11 @@ export const LernstudioGameRunner: React.FC<Props> = ({
       setStreak(0);
       setFeedback({
         isCorrect: false,
-        message: `${t.reorderSolutionMsg} (حاول مرة أخرى)`,
-        showSolution: false
+        message: `${t.reorderSolutionMsg} ${sentenceTarget}`,
+        showSolution: true
       });
       playSfx('wrong');
       playVoice('noch_einmal');
-      scheduleTimeout(() => {
-        setFeedback(null);
-      }, 1200);
     }
   };
 
@@ -423,13 +413,10 @@ export const LernstudioGameRunner: React.FC<Props> = ({
       setStreak(0);
       setFeedback({
         isCorrect: false,
-        message: `${t.wrongAnswerMsg} ${language === 'ar' ? '(حاول مرة أخرى)' : language === 'de' ? '(Versuche es noch einmal)' : '(Try again)'}`
+        message: `${t.wrongAnswerMsg} (${currentItem.german})`
       });
       playSfx('wrong');
       playVoice('noch_einmal');
-      scheduleTimeout(() => {
-        setFeedback(null);
-      }, 1000);
     }
   };
 
@@ -456,14 +443,10 @@ export const LernstudioGameRunner: React.FC<Props> = ({
       setStreak(0);
       setFeedback({
         isCorrect: false,
-        message: `${t.wrongAnswerMsg} ${language === 'ar' ? '(حاول مرة أخرى)' : language === 'de' ? '(Versuche es noch einmal)' : '(Try again)'}`
+        message: `${t.wrongAnswerMsg} (${currentItem.german})`
       });
       playSfx('wrong');
       playVoice('noch_einmal');
-      scheduleTimeout(() => {
-        setFeedback(null);
-        setScrambledSelected([]);
-      }, 1000);
     }
   };
 
@@ -990,10 +973,6 @@ export const LernstudioGameRunner: React.FC<Props> = ({
                                 });
                                 playLernstudioSound('wrong');
                                 playGermanVoiceFeedback('noch_einmal');
-                                setTimeout(() => {
-                                  setFeedback(null);
-                                  setSelectedOptionIndex(null);
-                                }, 1200);
                               }
                             }}
                             className={`p-4 rounded-2xl font-black text-base text-center transition-all border cursor-pointer font-mono ${
