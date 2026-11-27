@@ -24,13 +24,17 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({
   const effectiveLang = propLanguage || appLanguage;
   const lang: 'ar' | 'en' | 'de' = (effectiveLang === 'de' || effectiveLang === 'en') ? effectiveLang : 'ar';
 
-  const levels: { value: PerformanceLevel; label: string; color: string }[] = React.useMemo(() => [
-    { value: 'excellent', label: _t('ممتاز', 'Excellent', 'Ausgezeichnet'), color: 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-900/40 dark:text-emerald-400 dark:border-emerald-800' },
-    { value: 'very_good', label: _t('جيد جدًا', 'Very Good', 'Sehr gut'), color: 'bg-teal-100 text-teal-800 border-teal-300 dark:bg-teal-900/40 dark:text-teal-400 dark:border-teal-800' },
-    { value: 'good', label: _t('جيد', 'Good', 'Gut'), color: 'bg-sky-100 text-sky-800 border-sky-300 dark:bg-sky-900/40 dark:text-sky-400 dark:border-sky-800' },
-    { value: 'developing', label: _t('في تطور', 'Developing', 'In Entwicklung'), color: 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/40 dark:text-amber-400 dark:border-amber-800' },
-    { value: 'needs_support', label: _t('يحتاج دعم', 'Needs Support', 'Braucht Förderung'), color: 'bg-red-100 text-red-800 border-red-300 dark:bg-red-900/40 dark:text-red-400 dark:border-red-800' }
+  // Distinct color per level (excellent green → needs support red) so each
+  // student's level is readable at a glance while scrolling: every option
+  // always shows its level tint, and the chosen level is a solid chip.
+  const levels: { value: PerformanceLevel; label: string; color: string; selected: string; dot: string }[] = React.useMemo(() => [
+    { value: 'excellent', label: _t('ممتاز', 'Excellent', 'Ausgezeichnet'), color: 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-900/40 dark:text-emerald-400 dark:border-emerald-800', selected: 'bg-emerald-600 text-white border-emerald-600', dot: 'bg-emerald-500' },
+    { value: 'very_good', label: _t('جيد جدًا', 'Very Good', 'Sehr gut'), color: 'bg-teal-100 text-teal-800 border-teal-300 dark:bg-teal-900/40 dark:text-teal-400 dark:border-teal-800', selected: 'bg-teal-600 text-white border-teal-600', dot: 'bg-teal-500' },
+    { value: 'good', label: _t('جيد', 'Good', 'Gut'), color: 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/40 dark:text-amber-400 dark:border-amber-800', selected: 'bg-amber-600 text-white border-amber-600', dot: 'bg-amber-500' },
+    { value: 'developing', label: _t('في تطور', 'Developing', 'In Entwicklung'), color: 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-900/40 dark:text-orange-400 dark:border-orange-800', selected: 'bg-orange-600 text-white border-orange-600', dot: 'bg-orange-500' },
+    { value: 'needs_support', label: _t('يحتاج دعم', 'Needs Support', 'Braucht Förderung'), color: 'bg-red-100 text-red-800 border-red-300 dark:bg-red-900/40 dark:text-red-400 dark:border-red-800', selected: 'bg-red-600 text-white border-red-600', dot: 'bg-red-500' }
   ], [_t]);
+
 
   const participationOpts: { value: ParticipationLevel; label: string }[] = React.useMemo(() => [
     { value: 'active', label: _t('نشط', 'Active', 'Aktiv') },
@@ -81,6 +85,7 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({
   ], [_t]);
 
   const perf = performance || {};
+  const selectedLevel = levels.find((l) => l.value === perf.level);
   // Automatically determine student's gender from profile settings or name
   const autoResolvedGender: 'male' | 'female' = defaultGender || (student ? getStudentGender(student) : 'male');
   const currentGender: 'male' | 'female' = perf.gender || autoResolvedGender;
@@ -123,6 +128,12 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({
         <div className="flex items-center gap-2">
           <BarChart2 className="w-3.5 h-3.5 text-text-muted" />
           <span className="text-[10.5px] font-black text-text-main">{_t('أداء الحصة', 'Session Performance', 'Lektionsleistung')}</span>
+          {selectedLevel && (
+            <span
+              className={`w-2.5 h-2.5 rounded-full shrink-0 ${selectedLevel.dot}`}
+              title={selectedLevel.label}
+            />
+          )}
         </div>
 
         {/* Small subtle gender indicator (auto from student profile) */}
@@ -141,8 +152,8 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({
               onClick={() => handleUpdate({ level: l.value })}
               className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors ${
                 perf.level === l.value 
-                  ? l.color + ' shadow-xs ring-1 ring-current' 
-                  : 'bg-surface border-surface-border text-text-muted hover:bg-surface-hover hover:text-text-main'
+                 ? l.selected + ' shadow-xs'
+                  : l.color + ' hover:brightness-95'
               }`}
             >
               {l.label}

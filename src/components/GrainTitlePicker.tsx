@@ -50,24 +50,55 @@ export const GrainTitlePicker: React.FC<GrainTitlePickerProps> = ({
   const [appliedTitle, setAppliedTitle] = useState<string | null>(null);
   const ranForLessonRef = useRef<string | null>(null);
 
-  // Same summaryOptions logic as GrainLessonMatcherPanel (up to 4 short titles).
+  // Strip markdown markers from a title option ("#", "**", "__", backticks,
+  // leading bullets). A bare markdown heading (e.g. "## Summary") is not a
+  // title at all and must never appear as an option.
+  const stripMarkdown = (text: string): string =>
+    text
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/#/g, '')
+      .replace(/\*\*/g, '')
+      .replace(/__/g, '')
+      .replace(/`/g, '')
+      .replace(/^[-*•]\s+/gm, '')
+      .trim();
+  const isBareHeading = (text: string): boolean =>
+    /^(summary|ملخص|zusammenfassung|overview)$/i.test(text.trim());
+
+  // Lesson titles ONLY. The grammar option ("شرح وتطبيق قاعدة: …") appears
+  // only when the lesson itself IS a grammar lesson: the AI summary or the
+  // recording title must literally name the rule (draft.grammar[].explicit,
+  // set in grainService). Inferred matches — e.g. "gespielt" matching
+  // Perfekt in a hobbies lesson — never produce a grammar option.
   const summaryOptions = useMemo(() => {
     if (!draft) return [];
     const opts: string[] = [];
-    const mainTitle = selectedLesson.title || draft.mainLearningObjectives[0] || 'درس اللغة الألمانية';
-    opts.push(mainTitle);
-    if (draft.grammar[0]) {
-      opts.push(`شرح وتطبيق قاعدة: ${draft.grammar[0].topic}`);
+    const pushOpt = (raw?: string) => {
+      const clean = raw ? stripMarkdown(raw) : '';
+      if (!clean || isBareHeading(clean) || opts.includes(clean)) return;
+      opts.push(clean);
+    };
+    // Lesson title first. Never fall back to an inferred grammar topic as the
+    // title when the lesson has no title of its own.
+    let mainTitle = selectedLesson.title || draft.mainLearningObjectives[0] || 'درس اللغة الألمانية';
+    if (!selectedLesson.title && draft.grammar.some((g) => g.topic === mainTitle && !g.explicit)) {
+      mainTitle = 'درس اللغة الألمانية';
+    }
+    pushOpt(mainTitle);
+    const explicitGrammar = draft.grammar.find((g) => g.explicit);
+    if (explicitGrammar) {
+      pushOpt(`شرح وتطبيق قاعدة: ${explicitGrammar.topic}`);
     }
     if (draft.vocabulary.length > 0) {
-      opts.push(`شرح المفردات والتطبيقات اللغوية الجديدة (${draft.vocabulary.length} كلمات)`);
+      const vocabCount = draft.vocabulary.length;
+      pushOpt(`شرح المفردات والتطبيقات اللغوية الجديدة (${vocabCount} ${vocabCount === 1 ? 'كلمة' : 'كلمات'})`);
     }
     const rawClean = draft.whatWasCoveredAr
       .replace(/^ملخص مقترح من Grain.*?[:\-]\s*/i, '')
       .split(/[.!?\n]/)[0]
       ?.trim();
-    if (rawClean && rawClean.length > 5 && !opts.includes(rawClean)) {
-      opts.push(rawClean);
+    if (rawClean && rawClean.length > 5) {
+      pushOpt(rawClean);
     }
     return opts.slice(0, 4);
   }, [draft, selectedLesson.title]);

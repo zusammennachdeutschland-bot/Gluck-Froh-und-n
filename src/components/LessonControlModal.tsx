@@ -16,6 +16,11 @@ import { HomeworkFollowUpModal } from './HomeworkFollowUpModal';
 import { GroupProfileModal } from './GroupProfileModal';
 import { GrainLessonMatcherPanel } from './GrainLessonMatcherPanel';
 import { GrainTitlePicker } from './GrainTitlePicker';
+import {
+  ReportPresetPicker,
+  HOMEWORK_REPORT_PRESETS,
+  EXPLANATION_REPORT_PRESETS,
+} from './ReportPresetPicker';
 import { LernstudioHomeworkModal } from '../shared/components/LernstudioHomeworkModal';
 import { useSyncedHomeworkData } from '../hooks/useSyncedHomeworkData';
 import { resolveLinkedOnlineHomeworkForLesson } from '../utils/lessonHomeworkLinkUtils';
@@ -212,6 +217,38 @@ export const LessonControlModal: React.FC = () => {
 
   const lastInitializedLessonIdRef = useRef<string | null>(null);
 
+  // Offline (in-person) lessons are paid on the spot, so the group student
+  // payment map defaults to 'paid' for them. A SAVED status always wins: if
+  // Abdo previously marked a student unpaid, that stays unpaid. Students
+  // with no saved entry at all also default to paid for offline lessons
+  // (they can still be marked unpaid from the payment card).
+  // Lesson type is 'online' | 'offline' (LessonType); there is no
+  // `type === 'offline'` check in the payment logic anywhere else.
+  const buildInitialStudentPayments = (
+    saved: Record<string, any> | undefined
+  ): Record<string, { status: PaymentStatus; amount: number }> => {
+    const isOfflineLesson = selectedLesson?.type === 'offline';
+    const initialMap: Record<string, { status: PaymentStatus; amount: number }> = {};
+    if (saved) {
+      Object.entries(saved).forEach(([stId, pDetail]: [string, any]) => {
+        if (pDetail) {
+          initialMap[stId] = {
+            status: pDetail.status || (isOfflineLesson ? 'paid' : 'pending'),
+            amount: typeof pDetail.amount === 'number' ? pDetail.amount : (typeof pDetail.amountPaid === 'number' ? pDetail.amountPaid : 0)
+          };
+        }
+      });
+    }
+    if (isOfflineLesson) {
+      activeLessonStudents.forEach(st => {
+        if (!initialMap[st.id]) {
+          initialMap[st.id] = { status: 'paid', amount: 0 };
+        }
+      });
+    }
+    return initialMap;
+  };
+
   // Initialize report form strictly when a NEW lesson is opened
   useEffect(() => {
     if (!selectedLesson) {
@@ -294,18 +331,7 @@ export const LessonControlModal: React.FC = () => {
       setAmountPaid(selectedLesson.report.amountPaid || selectedLesson.amountDue);
       setTeacherNotes(selectedLesson.report.teacherNotes || '');
       setPackageChoice(selectedLesson.totalSessionsInPackage || 4);
-      if (selectedLesson.studentPayments) {
-        const initialMap: Record<string, { status: PaymentStatus; amount: number }> = {};
-        Object.entries(selectedLesson.studentPayments).forEach(([stId, pDetail]: [string, any]) => {
-          if (pDetail) {
-            initialMap[stId] = { 
-              status: pDetail.status || 'pending', 
-              amount: typeof pDetail.amount === 'number' ? pDetail.amount : (typeof pDetail.amountPaid === 'number' ? pDetail.amountPaid : 0)
-            };
-          }
-        });
-        setStudentPayments(initialMap);
-      }
+      setStudentPayments(buildInitialStudentPayments(selectedLesson.studentPayments));
       setShowReportForm(true);
       setIsEditingReport(true);
     } else if (selectedLesson) {
@@ -352,18 +378,7 @@ export const LessonControlModal: React.FC = () => {
         }
       }
 
-      if (selectedLesson.studentPayments) {
-        const initialMap: Record<string, { status: PaymentStatus; amount: number }> = {};
-        Object.entries(selectedLesson.studentPayments).forEach(([stId, pDetail]: [string, any]) => {
-          if (pDetail) {
-            initialMap[stId] = { 
-              status: pDetail.status || 'pending', 
-              amount: typeof pDetail.amount === 'number' ? pDetail.amount : (typeof pDetail.amountPaid === 'number' ? pDetail.amountPaid : 0)
-            };
-          }
-        });
-        setStudentPayments(initialMap);
-      }
+      setStudentPayments(buildInitialStudentPayments(selectedLesson.studentPayments));
       setShowReportForm(false);
       setIsEditingReport(false);
 
@@ -834,6 +849,27 @@ export const LessonControlModal: React.FC = () => {
     });
   };
 
+  // Report quick-insert presets: the lesson title used to fill the
+  // "(عنوان الدرس)" placeholder — the title picked in the Grain title picker
+  // first, then the first line of "ما تم شرحه", then the scheduled lesson title.
+  const reportLessonTitle = useMemo(() => {
+    const approved = lessonGrainMeta?.approvedSummary?.trim();
+    if (approved) return approved;
+    const firstLine = lessonWhatWasTaught
+      .split('\n')
+      .map((line) => line.trim())
+      .find(Boolean);
+    if (firstLine) return firstLine;
+    return (selectedLesson.title || '').trim();
+  }, [lessonGrainMeta?.approvedSummary, lessonWhatWasTaught, selectedLesson.title]);
+
+  const appendReportPresetLine = (
+    setter: React.Dispatch<React.SetStateAction<string>>,
+    line: string
+  ) => {
+    setter((prev) => (prev.trim() ? `${prev.trimEnd()}\n${line}` : line));
+  };
+
   const handleSaveReport = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const qId = targetStudent?.id || quickStudentSynthetic.id;
@@ -911,9 +947,14 @@ export const LessonControlModal: React.FC = () => {
               activeLessonStudents.forEach(st => {
                 const p = studentPayments[st.id];
                 const fee = getCollectionFeeForStudent(st);
+                // Offline lessons default to paid (same rule as the report
+                // open path); a status Abdo set always wins. The amount
+                // follows the effective status so a default-paid student is
+                // recorded with the fee, not with 0.
+                const effectiveStatus = p?.status || (selectedLesson.type === 'offline' ? 'paid' : 'pending');
                 finalMap[st.id] = {
-                  status: p?.status || 'pending',
-                  amount: p?.status === 'paid' ? (p.amount || fee) : 0
+                  status: effectiveStatus,
+                  amount: effectiveStatus === 'paid' ? (p?.amount || fee) : 0
                 };
               });
               return finalMap;
@@ -1737,6 +1778,12 @@ export const LessonControlModal: React.FC = () => {
                           triggerToast={triggerToast}
                         />
                       )}
+                      {/* Quick-insert presets for "ما تم شرحه" */}
+                      <ReportPresetPicker
+                        presets={EXPLANATION_REPORT_PRESETS}
+                        lessonTitle={reportLessonTitle}
+                        onInsert={(line) => appendReportPresetLine(setLessonWhatWasTaught, line)}
+                      />
                     </div>
 
                     {/* Previous Homework Description */}
@@ -1773,6 +1820,12 @@ export const LessonControlModal: React.FC = () => {
                         onChange={(e) => setLessonNextHomework(e.target.value)}
                         className="w-full px-3 py-1.5 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-text-muted/60"
                         placeholder={t('auto_enter_details_of_homework_pag')}
+                      />
+                      {/* Quick-insert presets for the next homework */}
+                      <ReportPresetPicker
+                        presets={HOMEWORK_REPORT_PRESETS}
+                        lessonTitle={reportLessonTitle}
+                        onInsert={(line) => appendReportPresetLine(setLessonNextHomework, line)}
                       />
                     </div>
 

@@ -1760,6 +1760,14 @@ export interface GrainGrammarSuggestion {
   possibleLearnerDifficulties: string[]; // Explicitly labeled as suggestions (Section 10)
   source: 'grain_ai_summary' | 'transcript_analysis' | 'recording_metadata';
   status: 'teacher_review_required' | 'teacher_approved';
+  /**
+   * STRONG evidence only: true when the Grain AI summary or the recording
+   * title literally names the rule (e.g. "Perfekt", "Dativ", "Partizip II").
+   * False when the topic was only inferred by loose pattern-matching on
+   * ordinary words (e.g. "gespielt" matching Perfekt in a hobbies lesson).
+   * The Grain title picker shows a grammar option only when this is true.
+   */
+  explicit?: boolean;
 }
 
 export interface GrainHomeworkSuggestion {

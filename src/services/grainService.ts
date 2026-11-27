@@ -5755,6 +5755,13 @@ export async function getTranscriptEphemerally(recordingId: string): Promise<{
 
 const KNOWN_GERMAN_GRAMMAR_TOPICS: Array<{
   pattern: RegExp;
+  /**
+   * Matches ONLY the literal name of the rule (e.g. "Perfekt", "Dativ",
+   * "Partizip II"). Used to decide whether the AI summary / recording title
+   * explicitly names the rule — loose pattern hits (e.g. "gespielt" matching
+   * Perfekt in a hobbies lesson) must never count as explicit evidence.
+   */
+  explicitNamePattern: RegExp;
   topic: string;
   explanationAr: string;
   explanationDe: string;
@@ -5762,6 +5769,7 @@ const KNOWN_GERMAN_GRAMMAR_TOPICS: Array<{
 }> = [
   {
     pattern: /\b(akkusativ|den\s+\w+|einen\s+\w+)\b/i,
+    explicitNamePattern: /\bakkusativ\b/i,
     topic: 'Akkusativ (المفعول به في الألمانية)',
     explanationAr: 'تحويل أداة التعريف المذكرة der إلى den والنكرة ein إلى einen بعد أفعال المفعول به.',
     explanationDe: 'Bestimmter und unbestimmter Artikel im Akkusativ (der → den, ein → einen).',
@@ -5769,6 +5777,7 @@ const KNOWN_GERMAN_GRAMMAR_TOPICS: Array<{
   },
   {
     pattern: /\b(dativ|dem\s+\w+|einem\s+\w+|mit\s+dem|mit\s+der)\b/i,
+    explicitNamePattern: /\bdativ\b/i,
     topic: 'Dativ (حالة الجر والمفعول غير المباشر)',
     explanationAr: 'استخدام حالة Dativ مع حروف الجر (mit, nach, عند, zu, von) وتغير الأدوات (der/das → dem, die → der).',
     explanationDe: 'Artikel und Präpositionen mit dem Dativ (dem, der, den + n).',
@@ -5776,6 +5785,7 @@ const KNOWN_GERMAN_GRAMMAR_TOPICS: Array<{
   },
   {
     pattern: /\b(trennbar\w*\s+verb\w*|aufstehen|einkaufen|anrufen|fernsehen|mitkommen)\b/i,
+    explicitNamePattern: /\btrennbar\w*\s+verb\w*\b/i,
     topic: 'Trennbare Verben (الأفعال المنفصلة)',
     explanationAr: 'انفصال المقطع الأمامي للفعل ووضعه في نهاية الجملة الخبرية أو السؤال.',
     explanationDe: 'Trennbare Präfixe stehen im Hauptsatz am Satzende.',
@@ -5783,6 +5793,7 @@ const KNOWN_GERMAN_GRAMMAR_TOPICS: Array<{
   },
   {
     pattern: /\b(modalverb\w*|können|müssen|wollen|sollen|dürfen|möchten)\b/i,
+    explicitNamePattern: /\bmodalverb\w*\b/i,
     topic: 'Modalverben (الأفعال الناقصة)',
     explanationAr: 'تصريف الفعل الناقص في الموقع الثاني ووضع الفعل الأصلي في المصدر (Infinitiv) في نهاية الجملة.',
     explanationDe: 'Modalverb auf Position 2, Vollverb im Infinitiv am Satzende.',
@@ -5790,6 +5801,7 @@ const KNOWN_GERMAN_GRAMMAR_TOPICS: Array<{
   },
   {
     pattern: /\b(perfekt|ge\w+t|ge\w+en|haben\s+.*\s+ge|sein\s+.*\s+ge)\b/i,
+    explicitNamePattern: /\bperfekt\b|\bpartizip\s+ii\b|\bpartizip\s+2\b/i,
     topic: 'Das Perfekt (الماضي التام)',
     explanationAr: 'تكوين صيغة الماضي التام باستخدام الفعل المساعد haben أو sein في الموقع الثاني والتصريف الثالث (Partizip II) في آخر الجملة.',
     explanationDe: 'Perfekt mit Hilfsverb (haben/sein) und Partizip II am Satzende.',
@@ -5797,6 +5809,7 @@ const KNOWN_GERMAN_GRAMMAR_TOPICS: Array<{
   },
   {
     pattern: /\b(wechselpräposition\w*|in\s+dem|im\s+|auf\s+den|an\s+der)\b/i,
+    explicitNamePattern: /\bwechselpräposition\w*\b/i,
     topic: 'Wechselpräpositionen (حروف الجر المشتركة)',
     explanationAr: 'استخدام Dativ عند السكون (Wo?) واستخدام Akkusativ عند الحركة والاتجاه (Wohin?).',
     explanationDe: 'Wo? → Dativ (Position) | Wohin? → Akkusativ (Richtung).',
@@ -5903,6 +5916,11 @@ export async function generateEducationalDraftForRecording(
 
   // Detect authentic German grammar topics covered in the text
   const grammarSuggestions: GrainGrammarSuggestion[] = [];
+  // STRONG evidence only: the AI summary or the recording title must name the
+  // rule literally (e.g. "Perfekt", "Dativ", "Partizip II"). The full corpus
+  // (incl. transcript) is deliberately NOT used here — a word like "gespielt"
+  // in a hobbies lesson must never make the lesson look like a Perfekt lesson.
+  const explicitGrammarEvidenceText = [recording.title, rawAiSummary].filter(Boolean).join('\n');
   for (const gRule of KNOWN_GERMAN_GRAMMAR_TOPICS) {
     if (gRule.pattern.test(combinedCorpus)) {
       grammarSuggestions.push({
@@ -5912,7 +5930,8 @@ export async function generateEducationalDraftForRecording(
         examples: [],
         possibleLearnerDifficulties: [gRule.difficultySuggestion],
         source: sourceType,
-        status: 'teacher_review_required'
+        status: 'teacher_review_required',
+        explicit: gRule.explicitNamePattern.test(explicitGrammarEvidenceText)
       });
     }
   }

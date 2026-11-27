@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { LernstudioSet } from '../../types/lernstudio';
+import { LernstudioSet, LernstudioSetKind } from '../../types/lernstudio';
 import { useApp } from '../../context/AppContext';
 import {
   HomeworkAssignment,
@@ -167,6 +167,35 @@ function formatDurationAr(seconds?: number): string {
   return rem > 0 ? `${mins} د ${rem} ث` : `${mins} د`;
 }
 
+// Set-picker filters (online homework creation): resolve a set's kind even
+// when setKind was never stored (older / builtin sets), then newest first.
+export type HomeworkSetKindFilter = 'all' | LernstudioSetKind;
+
+export function resolveHomeworkSetKind(set: LernstudioSet): LernstudioSetKind {
+  if (set.setKind) return set.setKind;
+  if (isVerbGroupSet(set)) return 'verb_group';
+  if (isGrammarSet(set)) return 'grammar';
+  if (hasGrammarContent(set)) return 'mixed';
+  return 'vocab';
+}
+
+export function filterAndSortHomeworkSets(
+  source: readonly LernstudioSet[],
+  query: string,
+  kindFilter: HomeworkSetKindFilter
+): LernstudioSet[] {
+  const byQuery = filterLernstudioSetsByQuery(source, query);
+  const byKind =
+    kindFilter === 'all'
+      ? byQuery
+      : byQuery.filter((s) => resolveHomeworkSetKind(s) === kindFilter);
+  return [...byKind].sort((a, b) => {
+    const aTime = a?.createdAt ? Date.parse(a.createdAt) : NaN;
+    const bTime = b?.createdAt ? Date.parse(b.createdAt) : NaN;
+    return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
+  });
+}
+
 export const LernstudioHomeworkModal: React.FC<Props> = ({
   isOpen,
   onClose,
@@ -225,13 +254,15 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     return [];
   });
   const [vocabSetSearchQuery, setVocabSetSearchQuery] = useState('');
+  // Set-type filter for the single set list (vocab / verbs / grammar / mixed).
+  const [setKindFilter, setSetKindFilter] = useState<HomeworkSetKindFilter>('all');
   const selectableSetsForSource = useMemo(
     () => (contentSource === 'grammar' ? grammarSets : vocabSets),
     [contentSource, grammarSets, vocabSets]
   );
   const filteredVocabSets = useMemo(
-    () => filterLernstudioSetsByQuery(selectableSetsForSource, vocabSetSearchQuery),
-    [selectableSetsForSource, vocabSetSearchQuery]
+    () => filterAndSortHomeworkSets(selectableSetsForSource, vocabSetSearchQuery, setKindFilter),
+    [selectableSetsForSource, vocabSetSearchQuery, setKindFilter]
   );
 
   const [verbSubjectPoolMode, setVerbSubjectPoolMode] = useState<'pronouns_and_names' | 'pronouns_only'>(
@@ -1619,9 +1650,10 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                           onChange={(e) => {
                             const nextQuery = e.target.value;
                             setVocabSetSearchQuery(nextQuery);
-                            const nextFiltered = filterLernstudioSetsByQuery(
+                            const nextFiltered = filterAndSortHomeworkSets(
                               selectableSetsForSource,
-                              nextQuery
+                              nextQuery,
+                              setKindFilter
                             );
                             if (
                               nextFiltered.length > 0 &&
@@ -1647,6 +1679,47 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                             <X className="w-3.5 h-3.5" />
                           </button>
                         )}
+                      </div>
+                      {/* Set-type filter + newest-first ordering for the single set list */}
+                      <div className="flex flex-wrap gap-1">
+                        {(
+                          [
+                            { id: 'all', label: 'الكل' },
+                            { id: 'vocab', label: 'مفردات' },
+                            { id: 'verb_group', label: 'أفعال' },
+                            { id: 'grammar', label: 'قواعد' },
+                            { id: 'mixed', label: 'مختلط' },
+                          ] as { id: HomeworkSetKindFilter; label: string }[]
+                        ).map((kind) => (
+                          <button
+                            key={kind.id}
+                            type="button"
+                            onClick={() => {
+                              setSetKindFilter(kind.id);
+                              const nextFiltered = filterAndSortHomeworkSets(
+                                selectableSetsForSource,
+                                vocabSetSearchQuery,
+                                kind.id
+                              );
+                              if (
+                                nextFiltered.length > 0 &&
+                                !nextFiltered.some((s) => s.id === selectedSetId)
+                              ) {
+                                setSelectedSetId(nextFiltered[0].id);
+                              }
+                            }}
+                            className={`px-2 py-1 rounded-lg text-[10.5px] font-bold transition-all cursor-pointer border ${
+                              setKindFilter === kind.id
+                                ? 'bg-primary text-white border-primary shadow-2xs'
+                                : 'bg-surface text-text-muted border-surface-border hover:text-text-main hover:bg-surface-hover'
+                            }`}
+                          >
+                            {kind.label}
+                          </button>
+                        ))}
+                        <span className="ml-auto self-center text-[10px] font-bold text-text-muted">
+                          الأحدث أولاً
+                        </span>
                       </div>
                       <select
                         value={selectedSetId}
