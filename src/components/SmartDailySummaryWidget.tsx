@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { calculateDuePaymentCycles } from '../utils/paymentUtils';
-import { getLessonsForDate, useLocalDateKey } from '../utils/dailyLessonUtils';
+import { useLocalDateKey } from '../utils/dailyLessonUtils';
+import { getDashboardTodaySummary } from '../utils/dashboardStatsUtils';
 import { useSyncedHomeworkData } from '../hooks/useSyncedHomeworkData';
 import { buildSmartDailySummaryHomeworkInsights } from '../utils/lessonHomeworkLinkUtils';
 
@@ -20,43 +21,29 @@ import {
 } from 'lucide-react';
 
 export const SmartDailySummaryWidget: React.FC = () => {
-  const { lessons, getFullLessonsSnapshot, students, groups, groupWeeklySessions, payments, profile, language, t, _t } = useApp();
+  const { lessons, getFullLessonsSnapshot, students, groups, groupWeeklySessions, payments, profile, language, t, _t, dismissedDashboardLessonIds = [] } = useApp();
   const { assignments: syncedAssignments, submissions: syncedSubmissions, currentOwnerUid } = useSyncedHomeworkData();
   const [isAlertsExpanded, setIsAlertsExpanded] = useState(false);
 
   const todayStr = useLocalDateKey(0);
 
   const summary = useMemo(() => {
-    const todaysLessons = getLessonsForDate(
+    // Single source of truth shared identically with Header
+    // (dashboardStatsUtils.getDashboardTodaySummary): active lessons exclude
+    // cancelled and dismissed ones; students count respects biweekly weeks
+    // and is 0 on a lesson-free day (no roster fallback).
+    const todaySummary = getDashboardTodaySummary({
       todayStr,
-      getFullLessonsSnapshot(),
+      lessons: getFullLessonsSnapshot(),
       groups,
       groupWeeklySessions,
-      {
-        includeCancelled: false,
-        defaultZoomLink: profile.defaultZoomLink,
-      }
-    );
-
-    const todaysLessonsCount = todaysLessons.length;
-
-    // Unique students attending today
-    const studentSet = new Set<string>();
-    todaysLessons.forEach(l => {
-      if (l.studentId) {
-        studentSet.add(l.studentId);
-      } else if (l.groupId && l.groupId !== 'quick_group') {
-        const groupStudents = students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === l.groupId);
-        if (groupStudents.length > 0) {
-          groupStudents.forEach(s => studentSet.add(s.id));
-        } else {
-          studentSet.add(`group_${l.groupId}`);
-        }
-      } else if (l.studentName) {
-        studentSet.add(l.studentName);
-      }
+      students,
+      dismissedDashboardLessonIds,
     });
-    const todaysStudentsCount = studentSet.size;
+
+    const todaysLessons = todaySummary.activeLessons;
+    const todaysLessonsCount = todaySummary.lessonsCount;
+    const todaysStudentsCount = todaySummary.studentsCount;
 
     // Revenue collected today (matching Payments View)
     const paidOnly = payments.filter(p => p.status === 'paid');
@@ -83,7 +70,7 @@ export const SmartDailySummaryWidget: React.FC = () => {
     });
 
     // First lesson time today
-    const firstLessonTime = todaysLessons[0]?.time || null;
+    const firstLessonTime = todaySummary.firstLessonTime;
 
     const formatTime12h = (timeStr: string) => {
       if (!timeStr) return '';
@@ -157,7 +144,7 @@ export const SmartDailySummaryWidget: React.FC = () => {
       currency,
       hwInsights
     };
-  }, [lessons, getFullLessonsSnapshot, students, groups, groupWeeklySessions, payments, profile, todayStr, language, t, syncedAssignments, syncedSubmissions, currentOwnerUid]);
+  }, [lessons, getFullLessonsSnapshot, students, groups, groupWeeklySessions, payments, profile, todayStr, language, t, syncedAssignments, syncedSubmissions, currentOwnerUid, dismissedDashboardLessonIds]);
 
   const { hwInsights } = summary;
   const hasAlerts = hwInsights.alerts.length > 0;

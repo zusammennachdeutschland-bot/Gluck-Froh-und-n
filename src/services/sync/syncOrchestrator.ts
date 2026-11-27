@@ -272,7 +272,7 @@ export async function runSyncCycle(
         };
 
     // 3. Negotiate capabilities and build the outbound delta payload
-    const localData = dataSource.getLocalData();
+    let localData = dataSource.getLocalData();
     const localDevice = { id: syncState.localDeviceId, name: syncState.localDeviceName };
     let pendingEvents: any[] = [];
     try {
@@ -378,6 +378,13 @@ export async function runSyncCycle(
     if (pendingEvents.length > 0) {
       await syncEventQueue.clearEvents(pendingEvents.map(e => e.id));
     }
+
+    // C2: re-read fresh local data immediately before the merge — a lesson
+    // completed locally during the exchange (after the outbound snapshot in
+    // step 3) must be visible to the merge, or the incoming stale snapshot
+    // overwrites the completion. Step 5 changes were already persisted via
+    // saveMergedData, so the fresh read includes them.
+    localData = dataSource.getLocalData();
 
     // 6. Ingestion Phase: Merge received records into local storage with diff tracking & deferral guard
     const deferredRecordIds = new Set<string>();
@@ -491,7 +498,7 @@ export async function handleInboundExchange(
   options?: { authenticatedPeerDeviceId?: string }
 ): Promise<SyncDeltaPayload> {
   const syncState = dataSource.getSyncState();
-  const localData = dataSource.getLocalData();
+  let localData = dataSource.getLocalData();
   const peerId = inboundDelta.senderDeviceId;
   // When the caller authenticated the sender (localServer exchange route),
   // owner-wins checks verify record origins against it. Without it (legacy /
@@ -533,6 +540,12 @@ export async function handleInboundExchange(
       }
     }
   }
+
+  // C2: re-read fresh local data immediately before the merge — same
+  // staleness as runSyncCycle step 6: a local mutation that landed while
+  // the tombstone sweep / event handling awaited must be visible to the
+  // merge. Step 1 changes were already persisted via saveMergedData.
+  localData = dataSource.getLocalData();
 
   // 2. Ingestion Phase: Merge received records into local storage with centralized tombstone enforcement
   const deferredRecordIds = new Set<string>();

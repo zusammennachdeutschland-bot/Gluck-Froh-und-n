@@ -1,39 +1,39 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
-import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
+import { normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
 import { useLocalDateKey } from '../utils/dailyLessonUtils';
+import {
+  computeDashboardPeriodStats,
+  getDashboardLessonsForRange,
+  getWeekDateRangeFridayToThursday,
+} from '../utils/dashboardStatsUtils';
 import { CheckCircle2, XCircle, Clock, Wallet, CalendarDays, Target } from 'lucide-react';
 
 export const WeeklyOverviewWidget: React.FC = () => {
-  const { lessons, groups, students, payments, profile, language, t, _t } = useApp();
+  const { getFullLessonsSnapshot, groups, groupWeeklySessions, payments, profile, language, t, _t } = useApp();
   const todayStr = useLocalDateKey(0);
 
-  // Week calculation: Friday to Thursday
+  // Week calculation: Friday to Thursday — single source of truth shared
+  // with MonthlyOverviewWidget (dashboardStatsUtils): the range helper
+  // projects recurring group occurrences for today/future days and dedupes
+  // by slot, so counts may be higher than the stored-lessons-only count.
   const getWeekStats = () => {
-    const now = parseLocalDate(todayStr);
-    const day = now.getDay(); // 0 = Sun, 1 = Mon, ..., 5 = Fri, 6 = Sat
-    const daysSinceFriday = (day + 2) % 7;
+    const refDate = parseLocalDate(todayStr);
+    const { startDateStr, endDateStr, startDate, endDate } = getWeekDateRangeFridayToThursday(refDate);
 
-    const friday = new Date(now);
-    friday.setDate(now.getDate() - daysSinceFriday);
-    friday.setHours(0, 0, 0, 0);
+    const friStr = startDateStr;
+    const thuStr = endDateStr;
 
-    const thursday = new Date(friday);
-    thursday.setDate(friday.getDate() + 6);
-    thursday.setHours(23, 59, 59, 999);
-
-    const friStr = formatLocalDate(friday);
-    const thuStr = formatLocalDate(thursday);
-
-    const weekLessons = lessons.filter(l => {
-      if (!l || l.deleted) return false;
-      const isoDate = normalizeDateToISO(l.date);
-      return Boolean(isoDate && isoDate >= friStr && isoDate <= thuStr);
+    const weekLessons = getDashboardLessonsForRange({
+      startDateStr,
+      endDateStr,
+      todayStr,
+      lessons: getFullLessonsSnapshot(),
+      groups,
+      groupWeeklySessions,
     });
 
-    const completed = weekLessons.filter(l => l.status === 'completed').length;
-    const cancelled = weekLessons.filter(l => l.status === 'cancelled').length;
-    const remaining = weekLessons.filter(l => l.status === 'scheduled' || l.status === 'in_progress').length;
+    const { completed, cancelled, remaining } = computeDashboardPeriodStats(weekLessons);
 
     // Use actual payment records for accurate revenue tracking (matching Payments View)
     const paidOnly = payments.filter(p => p.status === 'paid' && !p.deleted);
@@ -61,7 +61,7 @@ export const WeeklyOverviewWidget: React.FC = () => {
       revenue,
       pendingRevenue,
       totalExpected: revenue + pendingRevenue,
-      dateRange: `${friday.toLocaleDateString(language === 'ar' ? 'ar-EG' : language === 'de' ? 'de-DE' : 'en-US', { day: 'numeric', month: 'short' })} - ${thursday.toLocaleDateString(language === 'ar' ? 'ar-EG' : language === 'de' ? 'de-DE' : 'en-US', { day: 'numeric', month: 'short' })}`
+      dateRange: `${startDate.toLocaleDateString(language === 'ar' ? 'ar-EG' : language === 'de' ? 'de-DE' : 'en-US', { day: 'numeric', month: 'short' })} - ${endDate.toLocaleDateString(language === 'ar' ? 'ar-EG' : language === 'de' ? 'de-DE' : 'en-US', { day: 'numeric', month: 'short' })}`
     };
   };
 

@@ -4,7 +4,8 @@ import { Lesson } from '../types';
 import { formatLocalDate, parseLocalDate } from '../utils/timeUtils';
 import { isPendingStatus, pickAuthoritativeLesson, normalizeTime } from '../utils/lessonUtils';
 import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence } from '../utils/scheduleUtils';
-import { getLessonsForDate, useLocalDateKey } from '../utils/dailyLessonUtils';
+import { useLocalDateKey } from '../utils/dailyLessonUtils';
+import { getDashboardTodaySummary } from '../utils/dashboardStatsUtils';
 import { Bell, CheckCircle2, Clock, Trash2, Award, History, BarChart2, Settings, Menu, Sparkles, BookOpen, Layers, X, Users, Gamepad2, Video, SlidersHorizontal } from 'lucide-react';
 import { NotificationsModal } from './NotificationsModal';
 import { motion, AnimatePresence } from 'motion/react';
@@ -241,52 +242,29 @@ export const Header: React.FC = () => {
   // Today's Date String (updates across midnight)
   const todayStr = useLocalDateKey(0);
 
-  // Today's lessons
-  const todaysLessons = useMemo(() => {
-    return getLessonsForDate(
+  // Today's dashboard summary — single source of truth shared identically
+  // with SmartDailySummaryWidget (dashboardStatsUtils.getDashboardTodaySummary).
+  // Counts exclude cancelled lessons; students count is 0 on a lesson-free
+  // day (no fallback to the whole roster); percent counts completed only.
+  const todaySummary = useMemo(() => {
+    return getDashboardTodaySummary({
       todayStr,
-      getFullLessonsSnapshot(),
+      lessons: getFullLessonsSnapshot(),
       groups,
       groupWeeklySessions,
-      {
-        includeCancelled: true,
-        dismissedLessonIds: dismissedDashboardLessonIds,
-        defaultZoomLink: profile?.defaultZoomLink,
-      }
-    );
-  }, [lessons, getFullLessonsSnapshot, groups, groupWeeklySessions, dismissedDashboardLessonIds, todayStr, profile?.defaultZoomLink]);
-
-  // Total lessons count
-  const lessonsCount = todaysLessons.length;
-
-  // Unique students scheduled today (or total active students)
-  const todayStudentsCount = useMemo(() => {
-    const studentSet = new Set<string>();
-    todaysLessons.forEach(l => {
-      if (l.studentId) {
-        studentSet.add(l.studentId);
-      } else if (l.groupId && l.groupId !== 'quick_group') {
-        const groupStudents = students.filter(s => !s.deleted && s.status !== 'archived' && s.groupId === l.groupId);
-        if (groupStudents.length > 0) {
-          groupStudents.forEach(s => studentSet.add(s.id));
-        } else {
-          studentSet.add(`group_${l.groupId}`);
-        }
-      } else if (l.studentName) {
-        studentSet.add(l.studentName);
-      }
+      students,
+      dismissedDashboardLessonIds,
     });
-    return studentSet.size > 0 ? studentSet.size : (students?.length || 0);
-  }, [todaysLessons, students]);
+  }, [lessons, getFullLessonsSnapshot, groups, groupWeeklySessions, students, dismissedDashboardLessonIds, todayStr]);
 
-  // Completed / resolved count & percent done
-  const closedCount = useMemo(() => {
-    return todaysLessons.filter(l => l.status === 'completed' || l.status === 'cancelled').length;
-  }, [todaysLessons]);
+  // Total lessons count (active lessons today, cancelled excluded)
+  const lessonsCount = todaySummary.lessonsCount;
 
-  const percentDone = useMemo(() => {
-    return lessonsCount > 0 ? Math.round((closedCount / lessonsCount) * 100) : 0;
-  }, [lessonsCount, closedCount]);
+  // Unique students scheduled today (0 on a lesson-free day)
+  const todayStudentsCount = todaySummary.studentsCount;
+
+  // Completed percent (completed only, over active lessons)
+  const percentDone = todaySummary.percentDone;
 
   return (
     <>
