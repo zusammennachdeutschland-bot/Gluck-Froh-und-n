@@ -11,7 +11,7 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { shareFileNative } from '../services/downloadedFilesService';
 import { getSchoolSettings } from '../utils/schoolUtils';
 import { generateMonthlySchoolScheduleIcsEvents } from '../utils/schoolScheduleIcsUtils';
-import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
+import { resolveActiveMeetingLinkForLesson } from '../services/zoomSessionStandardizer';
 
 interface ExportMonthlyCalendarModalProps {
   onClose: () => void;
@@ -139,7 +139,7 @@ export const ExportMonthlyCalendarModal: React.FC<ExportMonthlyCalendarModalProp
       const duration = l.durationMinutes || targetGroup?.lessonDurationMinutes || 60;
       const lessonType = l.type || targetGroup?.type || 'offline';
       const zoomLink = lessonType === 'online'
-        ? resolveActiveZoomLinkForLesson({
+        ? resolveActiveMeetingLinkForLesson({
             group: targetGroup,
             lesson: l,
             groupWeeklySessions,

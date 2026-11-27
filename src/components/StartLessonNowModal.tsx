@@ -8,7 +8,7 @@ import {
   X, Play, Users, User, Clock, Calendar as CalendarIcon, Video, MapPin, 
   CheckCircle2, Sparkles, BookOpen, Award, FileText, Zap, ChevronRight, ArrowLeft
 } from 'lucide-react';
-import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
+import { resolveActiveMeetingLinkForLesson } from '../services/zoomSessionStandardizer';
 
 interface StartLessonNowModalProps {
   onClose: () => void;
@@ -198,7 +198,7 @@ export const StartLessonNowModal: React.FC<StartLessonNowModalProps> = ({ onClos
       amountDue,
       amountPaid: 0,
       meetingLink: lessonType === 'online'
-        ? resolveActiveZoomLinkForLesson({
+        ? resolveActiveMeetingLinkForLesson({
             group: selectedGroup,
             lesson: { groupId: targetGroupId, date: lessonDate, time: startTime },
             groupWeeklySessions,

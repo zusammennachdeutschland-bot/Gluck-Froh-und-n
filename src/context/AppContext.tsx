@@ -26,7 +26,7 @@ import { getStudentCyclePricing, calculateEstimatedPastDate, sanitizePaymentLess
 import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence, getAlternatingWeek } from '../utils/scheduleUtils';
 import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
 import { getPrunedLessonIds, addPrunedLessonIds, executeLessonCleanup, analyzeLessonCleanup, formatLocalDateStr, LAST_CLEANUP_DATE_KEY, PRUNED_LESSONS_BACKUP_KEY, repairFutureAutoLessonTombstones, repairFutureAutoLessonTombstonesFromStorage } from '../services/lessonCleanupService';
-import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo, calculateSequentialSessionNumber, resolveLessonCycleNumber, buildGroupCycleAnchorFields, compareLessonsChronologically, resequenceScheduledLessonsAfterChange, isGroupPerLesson, shouldRetainLessonInActiveWindow, findInvalidBiweeklyAutoLessons, buildLessonSlotSet, buildBlockedLessonSlotSet, makeLessonSlotKey, normalizeTime } from '../utils/lessonUtils';
+import { isPendingStatus, areDuplicateLessons, deduplicateLessonList, deduplicatePaymentsList, checkOverlap, getGroupCycleInfo, calculateSequentialSessionNumber, resolveLessonCycleNumber, buildGroupCycleAnchorFields, compareLessonsChronologically, resequenceScheduledLessonsAfterChange, isGroupPerLesson, resolveDefaultGrade, shouldRetainLessonInActiveWindow, findInvalidBiweeklyAutoLessons, buildLessonSlotSet, buildBlockedLessonSlotSet, makeLessonSlotKey, normalizeTime } from '../utils/lessonUtils';
 import { filterActiveLessonsList, mergeLessonListsMonotonically, normalizeStudentPaymentsForLesson } from '../services/lessonPersistenceEngine';
 import { translations, TranslationKey } from '../i18n/translations';
 import { syncTodayLessonsToWidget } from '../services/widgetService';
@@ -92,7 +92,7 @@ import { syncAllWidgetsToNative } from '../services/widgetService';
 import { saveToPhoneSubfolderAndRegister, shareFileNative } from '../services/downloadedFilesService';
 import { loadGrainGroupLearningRecords, saveGrainGroupLearningRecords, sanitizeGrainGroupLearningRecord } from '../services/grainService';
 import { loadZoomUiMeta, sanitizeZoomRecordForStorage, persistZoomWorkspaceDurably, ZoomPersistenceVerificationResult } from '../services/zoomService';
-import { DEFAULT_ZOOM_TIMEZONE, reconcileGroupWeeklySessions, resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
+import { DEFAULT_ZOOM_TIMEZONE, reconcileGroupWeeklySessions, resolveActiveMeetingLinkForLesson } from '../services/zoomSessionStandardizer';
 
 export const DEFAULT_BOTTOM_NAV_ORDER = [
   'home',
@@ -137,7 +137,7 @@ interface AppContextType {
   // Lernstudio Sets
   lernstudioSets: LernstudioSet[];
   setLernstudioSets: React.Dispatch<React.SetStateAction<LernstudioSet[]>>;
-  saveLernstudioSet: (set: LernstudioSet) => void;
+  saveLernstudioSet: (set: LernstudioSet, opts?: { silent?: boolean }) => void;
   deleteLernstudioSet: (setId: string) => void;
 
   // Certificates
@@ -172,7 +172,7 @@ interface AppContextType {
 
   // Groups
   groups: Group[];
-  addGroup: (group: Omit<Group, 'id'>) => Group;
+  addGroup: (group: Omit<Group, 'id'>, opts?: { silent?: boolean }) => Group;
   duplicateGroup: (groupId: string) => Group;
   updateGroup: (id: string, updates: Partial<Group>) => void;
   deleteGroup: (id: string) => void;
@@ -181,7 +181,7 @@ interface AppContextType {
 
   // Students
   students: Student[];
-  addStudent: (student: Omit<Student, 'id' | 'documents' | 'joinedDate'>) => Student;
+  addStudent: (student: Omit<Student, 'id' | 'documents' | 'joinedDate'>, opts?: { silent?: boolean }) => Student;
   updateStudent: (id: string, updates: Partial<Student>) => void;
   deleteStudent: (id: string) => void;
   deleteStudentsBulk: (ids: string[]) => void;
@@ -194,7 +194,7 @@ interface AppContextType {
 
   // Lessons
   lessons: Lesson[];
-  addLesson: (lesson: Omit<Lesson, 'id' | 'sessionNumber' | 'totalSessionsInPackage'> & { id?: string }, repeatWeeks?: number) => Lesson[];
+  addLesson: (lesson: Omit<Lesson, 'id' | 'sessionNumber' | 'totalSessionsInPackage'> & { id?: string }, repeatWeeks?: number, opts?: { silent?: boolean }) => Lesson[];
   addQuickLesson: (data: Omit<Lesson, 'id' | 'sessionNumber' | 'totalSessionsInPackage' | 'groupId' | 'groupName'> & {
     studentName: string;
     quickStudentPhone?: string;
@@ -859,7 +859,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         email: '',
         avatarUrl: '',
         currency: 'USD',
-        language: 'de',
+        language: 'ar',
         phone: '',
         workingHours: {
           workingDays: [],
@@ -879,7 +879,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     if (profileSaved) {
       if (profileSaved.language && ['ar', 'en', 'de'].includes(profileSaved.language)) return profileSaved.language;
     }
-    return INITIAL_TEACHER_PROFILE.language || 'de';
+    return INITIAL_TEACHER_PROFILE.language || 'ar';
   });
 
   const setLanguage = (lang: AppLanguage) => {
@@ -1097,7 +1097,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     return deduped;
   });
 
-  const saveLernstudioSet = (newSet: LernstudioSet) => {
+  const saveLernstudioSet = (newSet: LernstudioSet, opts?: { silent?: boolean }) => {
     const profileTeacherName = (
       profile?.displayNameAr?.trim() ||
       profile?.nameAr?.trim() ||
@@ -1158,6 +1158,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return updated;
     });
     autoSyncEngine.notifyMutation('lernstudioSets', newSet.id);
+    if (!opts?.silent) {
+      triggerToast(_t(`تم حفظ السيت "${newSet.title || ''}" ✓ — هتلاقيه في Lernstudio`, `Saved set "${newSet.title || ''}" ✓ — find it in Lernstudio`));
+    }
   };
 
   const deleteLernstudioSet = (setId: string) => {
@@ -1917,7 +1920,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       const refreshLessonMeetingLink = (l: Lesson): Lesson => {
         if (l.deleted || l.type !== 'online' || !l.groupId) return l;
         if (l.status !== 'scheduled' && l.status !== 'in_progress') return l;
-        const resolved = resolveActiveZoomLinkForLesson({
+        const resolved = resolveActiveMeetingLinkForLesson({
+          group: groups.find(g => g.id === l.groupId),
           groupId: l.groupId,
           lesson: l,
           groupWeeklySessions: cleanedSessions
@@ -2942,7 +2946,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               amountDue: perSessionPrice,
               amountPaid: 0,
               meetingLink: group.type === 'online'
-                ? resolveActiveZoomLinkForLesson({
+                ? resolveActiveMeetingLinkForLesson({
                     group,
                     lesson: { groupId: group.id, date: dateStr, time: sessionTime },
                     groupWeeklySessions: groupWeeklySessionsRef.current,
@@ -3302,7 +3306,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   // Group operations
-  const addGroup = (groupData: Omit<Group, 'id'>): Group => {
+  const addGroup = (groupData: Omit<Group, 'id'>, opts?: { silent?: boolean }): Group => {
     const isPerLesson = groupData.paymentCycle === 'per_lesson' || groupData.paymentModel === 'per_session';
     const effectivePrice = isPerLesson
       ? (groupData.pricePerSession ?? groupData.monthlyPackagePrice ?? 0)
@@ -3327,6 +3331,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       reconcileGroupSessionsState(newGroup);
     }
     autoSyncEngine.notifyMutation('groups', newGroup.id);
+    if (!opts?.silent) {
+      triggerToast(_t(`تم إنشاء مجموعة "${newGroup.name}" ✓ — هتلاقيها في الطلاب والجدول`, `Created group "${newGroup.name}" ✓ — find it under Students & Schedule`));
+    }
     return newGroup;
   };
 
@@ -3503,7 +3510,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               amountDue: perSessionPrice,
               amountPaid: 0,
               meetingLink: updatedGroup.type === 'online'
-                ? resolveActiveZoomLinkForLesson({
+                ? resolveActiveMeetingLinkForLesson({
                     group: updatedGroup,
                     lesson: { groupId: updatedGroup.id, date: dateStr, time: sessionTime },
                     groupWeeklySessions: groupWeeklySessionsRef.current,
@@ -3556,7 +3563,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           scheduleRecurrence: updatedGroup.scheduleRecurrence || 'weekly',
           biweeklyWeek: l.date ? getAlternatingWeek(l.date) : l.biweeklyWeek,
           meetingLink: updatedGroup.type === 'online'
-            ? (resolveActiveZoomLinkForLesson({
+            ? (resolveActiveMeetingLinkForLesson({
                 group: updatedGroup,
                 lesson: l,
                 groupWeeklySessions: groupWeeklySessionsRef.current,
@@ -3845,7 +3852,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   // Student operations (Note: Pricing is automatically inherited from assigned group!)
-  const addStudent = (studentData: Omit<Student, 'id' | 'documents' | 'joinedDate'>): Student => {
+  const addStudent = (studentData: Omit<Student, 'id' | 'documents' | 'joinedDate'>, opts?: { silent?: boolean }): Student => {
     const normalizedInputName = (studentData.name || '').trim().toLowerCase();
     const existingDuplicate = normalizedInputName
       ? students.find(s => !s.deleted && (s.name || '').trim().toLowerCase() === normalizedInputName)
@@ -3882,6 +3889,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       return [...prev, newStudent];
     });
     autoSyncEngine.notifyMutation('students', newStudent.id);
+    if (!opts?.silent) {
+      triggerToast(_t(`تمت إضافة الطالب "${newStudent.name}" ✓ — هتلاقيه في مجموعته`, `Added student "${newStudent.name}" ✓ — find them in their group`));
+    }
     return newStudent;
   };
 
@@ -5151,7 +5161,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   };
 
   // Lesson operations with session calculation
-  const addLesson = (lessonData: Omit<Lesson, 'id' | 'sessionNumber' | 'totalSessionsInPackage'> & { id?: string }, repeatWeeks: number = 1): Lesson[] => {
+  const addLesson = (lessonData: Omit<Lesson, 'id' | 'sessionNumber' | 'totalSessionsInPackage'> & { id?: string }, repeatWeeks: number = 1, opts?: { silent?: boolean }): Lesson[] => {
     const targetGroup = groups.find(g => (g.id === lessonData.groupId || (g.name && lessonData.groupId && g.name.trim().toLowerCase() === lessonData.groupId.trim().toLowerCase())) && !g.deleted);
     const allLessonsSource = fullLessonsRef.current.length > 0 ? fullLessonsRef.current : lessons;
     const activeLessons = allLessonsSource.filter(l => !l.deleted && l.status !== 'cancelled');
@@ -5185,7 +5195,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           sessionNumber: 1,
           totalSessionsInPackage: totalSessions,
           meetingLink: lessonData.type === 'online'
-            ? resolveActiveZoomLinkForLesson({
+            ? resolveActiveMeetingLinkForLesson({
                 group: targetGroup,
                 lesson: { groupId: targetGroup?.id || lessonData.groupId, date: dateStr, time: lessonData.time, meetingLink: lessonData.meetingLink },
                 groupWeeklySessions: groupWeeklySessionsRef.current,
@@ -5228,6 +5238,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         });
       });
       autoSyncEngine.notifyMutation('lessons', createdLessons[0]?.id || 'new');
+    }
+    if (!opts?.silent && createdLessons.length > 0) {
+      triggerToast(_t(
+        createdLessons.length > 1
+          ? `تم حفظ ${createdLessons.length} حصص ✓ — هتلاقيهم في الجدول`
+          : 'تم حفظ الحصة ✓ — هتلاقيها في الجدول',
+        createdLessons.length > 1
+          ? `Saved ${createdLessons.length} lessons ✓ — find them in the Schedule`
+          : 'Saved the lesson ✓ — find it in the Schedule'
+      ));
     }
     return createdLessons;
   };
@@ -6197,7 +6217,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
               amountDue: perSessionPrice,
               amountPaid: 0,
               meetingLink: targetGroup.type === 'online'
-                ? resolveActiveZoomLinkForLesson({
+                ? resolveActiveMeetingLinkForLesson({
                     group: targetGroup,
                     lesson: { groupId: targetGroup.id, date: dateStr, time: sessionTime },
                     groupWeeklySessions: groupWeeklySessionsRef.current,
@@ -7140,7 +7160,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       email: '',
       avatarUrl: '',
       currency: 'USD',
-      language: 'de',
+      language: 'ar',
       phone: '',
       workingHours: {
         workingDays: [],
@@ -7182,7 +7202,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       email: '',
       avatarUrl: '',
       currency: 'USD',
-      language: 'de',
+      language: 'ar',
       phone: '',
       workingHours: {
         workingDays: [],
@@ -7194,7 +7214,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     setNotificationSettings(DEFAULT_NOTIFICATION_SETTINGS);
     setInspirationSettings(INITIAL_INSPIRATION_SETTINGS);
     setInspirationMessages(INITIAL_INSPIRATION_MESSAGES);
-    setLanguageState(INITIAL_TEACHER_PROFILE.language || 'de');
+    setLanguageState(INITIAL_TEACHER_PROFILE.language || 'ar');
 
     // Fire celebration confetti
     /* confetti removed */
@@ -7290,12 +7310,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     if (!defaultGroup) {
       defaultGroup = addGroup({
         name: 'Einzelunterricht (1-on-1)',
-        grade: targetLesson.grade || 'Grade 9',
+        grade: targetLesson.grade || resolveDefaultGrade(groups, profile.defaultGrade),
         type: targetLesson.type || 'online',
         monthlyPackagePrice: 1200,
         sessionCount: 4,
         color: '#3b82f6'
-      });
+      }, { silent: true });
     }
 
     const newStudent: Student = wrapMutation({

@@ -20,7 +20,10 @@ import {
   Clock,
   Snowflake,
   Gauge,
-  Zap
+  Zap,
+  AlertTriangle,
+  Eye,
+  Pause
 } from 'lucide-react';
 import { speakGermanText, stopGermanSpeech } from '../shared/audioSpeechUtils';
 import { fetchHomeworkApi } from '../shared/firebaseCloudSync';
@@ -195,6 +198,47 @@ function deterministicShuffle<T>(arr: T[], seedOffset: number): T[] {
   return copy;
 }
 
+/**
+ * Map a permanent cloud rejection (server English error + HTTP status) to a
+ * clear Arabic message for the student/parent (Q18). Local validation errors
+ * are already Arabic and pass through untouched.
+ */
+function formatSubmissionRejectionMessage(err: any): string {
+  const raw = String(err?.message || '').trim();
+  const status = Number(err?.status || 0);
+  // Already Arabic (e.g. local validation inside saveSubmissionWithConfirmation).
+  if (/[\u0600-\u06FF]/.test(raw)) return raw;
+  const lower = raw.toLowerCase();
+  if (
+    status === 409 ||
+    lower.includes('already_completed') ||
+    lower.includes('already completed') ||
+    lower.includes('cannot be modified') ||
+    lower.includes('locked')
+  ) {
+    return 'تم تسجيل حل سابق لهذا الطالب ولا يمكن تعديله.';
+  }
+  if (status === 404 || lower.includes('not found')) {
+    return 'تعذر العثور على هذا الواجب — قد يكون محذوفاً. اطلب رابطاً جديداً من المعلم.';
+  }
+  if (status === 403 || status === 401) {
+    if (lower.includes('closed') || lower.includes('inactive')) {
+      return 'هذا الواجب أُغلق ولم يعد يقبل إجابات جديدة.';
+    }
+    if (lower.includes('token') || lower.includes('share')) {
+      return 'رابط الواجب غير صالح — اطلب رابطاً جديداً من المعلم.';
+    }
+    if (lower.includes('studentname') || lower.includes('student name')) {
+      return 'الاسم لا يطابق اسم الطالب المسجّل لهذه المحاولة.';
+    }
+    if (lower.includes('attemptsecret')) {
+      return 'هذه المحاولة مسجّلة من جهاز آخر ولا يمكن تعديلها من هنا.';
+    }
+    return 'تم رفض هذا التسليم — تواصل مع المعلم ليتحقق من الواجب.';
+  }
+  return 'تم رفض هذا التسليم من السحابة — تواصل مع المعلم ليتحقق من الواجب.';
+}
+
 
 export const HomeworkPlayerPage: React.FC<Props> = ({
   assignmentId: propId,
@@ -271,6 +315,15 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     usedTileIds: string[];
     wrongStepsCount: number;
   };
+  // Q20: time-up confirmation dialog + untimed continuation after time runs out
+  const [timeUpDialog, setTimeUpDialog] = useState(false);
+  const [untimedMode, setUntimedMode] = useState(false);
+  // Q25/Q32: final practice retry round with only the wrong questions.
+  // Corrected answers here do NOT count toward score/points.
+  const [retryQuestions, setRetryQuestions] = useState<GeneratedQuizQuestion[] | null>(null);
+  const [retryRoundDone, setRetryRoundDone] = useState(false);
+  // Q21: view my last result from the lobby when attempts are exhausted
+  const [showLastResult, setShowLastResult] = useState(false);
   // Grammar interactive state (short_answer / sentence_ordering)
   const [grammarTypedInput, setGrammarTypedInput] = useState<string>('');
   const [grammarOrderedTiles, setGrammarOrderedTiles] = useState<HomeworkTileChoice[]>([]);
@@ -304,6 +357,11 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     nextResponses: HomeworkQuestionResponse[];
   } | null>(null);
   const advanceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Latest manual-retry handler + auto-retry attempt counter (Q18): the
+  // backoff chain must survive the 'pending_retry' -> 'syncing' ->
+  // 'pending_retry' state flips between attempts.
+  const handleManualRetryCloudSyncRef = useRef<(() => void) | null>(null);
+  const autoRetryAttemptsRef = useRef<number>(0);
   const hasRestoredSessionRef = useRef<string>('');
   // Set by the session-restore effect when it restores in-progress tile state,
   // so the quiz effect below does not wipe it on the re-render that follows.
@@ -335,6 +393,53 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
   }, []);
+
+  // Warn before closing the tab while the submission is still unsynced (Q18):
+  // without this, closing the tab loses a pending_retry submission that the
+  // student already saw celebrated as done.
+  useEffect(() => {
+    if (cloudSyncState !== 'pending_retry') return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [cloudSyncState]);
+
+  // Auto-retry a pending submission with exponential backoff while the page
+  // stays open (Q18). Stops after 6 attempts; the manual retry button stays
+  // available. The `online` listener above still handles reconnects.
+  useEffect(() => {
+    if (cloudSyncState === 'synced' || cloudSyncState === 'rejected') {
+      autoRetryAttemptsRef.current = 0;
+      return;
+    }
+    if (cloudSyncState !== 'pending_retry') return;
+    const delaysMs = [5000, 10000, 20000, 40000, 60000, 60000];
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleNext = () => {
+      if (cancelled) return;
+      const idx = autoRetryAttemptsRef.current;
+      if (idx >= delaysMs.length) return;
+      timer = setTimeout(() => {
+        if (cancelled) return;
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+          scheduleNext();
+          return;
+        }
+        autoRetryAttemptsRef.current += 1;
+        handleManualRetryCloudSyncRef.current?.();
+        scheduleNext();
+      }, delaysMs[idx]);
+    };
+    scheduleNext();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [cloudSyncState]);
 
   // Load Assignment (Supports both /Herr-Abdul-rahman/{SHORT_ID} and legacy /homework/{assignmentId})
   useEffect(() => {
@@ -1512,7 +1617,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     return list;
   }, [studyItems, assignment, assignmentVerbs, assignmentGrammarExercises, activeQuestionTypes]);
 
-  const currentQuestion = quizQuestions[currentIdx];
+  // Q25 retry round: when active, the quiz runs over the wrong questions only.
+  // Everything else (totals, restore, replay) keeps using the full quizQuestions.
+  const activeQuizQuestions = retryQuestions ?? quizQuestions;
+  const currentQuestion = activeQuizQuestions[currentIdx];
   const currentGrammarStudyCard =
     studyIndex < grammarStudyCards.length ? grammarStudyCards[studyIndex] : null;
   const currentStudyItem =
@@ -1630,6 +1738,17 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     return false;
   }, [assignment?.allowReplay, assignment?.maxAttempts, studentCompletedAttempts.length]);
 
+  // Q21: the most recent completed attempt, for "view my last result" in the lobby
+  const lastCompletedAttempt = useMemo(() => {
+    if (studentCompletedAttempts.length === 0) return null;
+    const sorted = [...studentCompletedAttempts].sort((a, b) => {
+      const ta = a.completedAt ? new Date(a.completedAt).getTime() : 0;
+      const tb = b.completedAt ? new Date(b.completedAt).getTime() : 0;
+      return tb - ta;
+    });
+    return sorted[0] || null;
+  }, [studentCompletedAttempts]);
+
   const handleStartHomework = (e: React.FormEvent) => {
     e.preventDefault();
     setIdentityError(null);
@@ -1687,6 +1806,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     pendingPostBonusRef.current = null;
     setActiveOverlayRound(null);
     latestResponsesRef.current = [];
+    setRetryQuestions(null);
+    setRetryRoundDone(false);
+    setTimeUpDialog(false);
+    setUntimedMode(false);
     setResponses([]);
     setSelectedChoice(null);
     setFeedback(null);
@@ -1951,24 +2074,41 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     }
   }, [assignmentId, assignment, quizQuestions, totalStudySteps, mergedSubmissionsForAssignment, phase, syncGamificationState]);
 
+  // Q31: the homework timer pauses while a remote grammar check is running,
+  // while the child is reading the post-answer explanation (an answer is
+  // selected and feedback is showing), and during the practice retry round.
+  const timerPausedRef = useRef(false);
+  useEffect(() => {
+    timerPausedRef.current =
+      checkingRemoteAnswer || selectedChoice !== null || retryQuestions !== null;
+  }, [checkingRemoteAnswer, selectedChoice, retryQuestions]);
+
   // Countdown Timer loop during active Quiz phase (paused while Bonus Card Round is open)
   useEffect(() => {
     if (phase !== 'quiz') return;
     const interval = setInterval(() => {
       if (isSubmittingRef.current) return;
+      if (timerPausedRef.current) return;
+      if (untimedMode) return;
       const prev = gamificationRef.current;
-      if (prev.pendingBonusRound || activeOverlayRound || prev.timeRemainingSeconds <= 0) return;
+      if (prev.pendingBonusRound || activeOverlayRound) return;
+
+      if (prev.timeRemainingSeconds <= 0) {
+        // Q20: time ran out — ask before finishing instead of ending silently
+        if (!timeUpDialog) setTimeUpDialog(true);
+        return;
+      }
 
       const next = tickGamificationTimer(prev, false);
       if (next !== prev) {
         syncGamificationState(next);
-        if (next.timeRemainingSeconds === 0 && prev.timeRemainingSeconds > 0) {
-          handleFinishHomework(latestResponsesRef.current, next.points, next.maxStreak);
+        if (next.timeRemainingSeconds === 0) {
+          setTimeUpDialog(true);
         }
       }
     }, 1000);
     return () => clearInterval(interval);
-  }, [phase, activeOverlayRound, syncGamificationState]);
+  }, [phase, activeOverlayRound, syncGamificationState, untimedMode, timeUpDialog]);
 
   // Persist active session periodically & on navigation transitions so page refresh preserves exact timer & state
   useEffect(() => {
@@ -2004,16 +2144,41 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     setGrammarTypedInput('');
     setGrammarOrderedTiles([]);
 
-    if (currentIdx + 1 < quizQuestions.length) {
+    const activeLen = (retryQuestions ?? quizQuestions).length;
+    if (currentIdx + 1 < activeLen) {
       const nextIdx = currentIdx + 1;
       setCurrentIdx(nextIdx);
-      persistCurrentActiveSession({
-        phase: 'quiz',
-        currentIdx: nextIdx,
-        responses: nextResponses,
-        gamification: gamificationRef.current,
-        tileProgress: null
-      });
+      if (!retryQuestions) {
+        persistCurrentActiveSession({
+          phase: 'quiz',
+          currentIdx: nextIdx,
+          responses: nextResponses,
+          gamification: gamificationRef.current,
+          tileProgress: null
+        });
+      }
+    } else if (retryQuestions) {
+      // End of the practice retry round (Q25/Q32): finish with the ORIGINAL
+      // responses — retry answers never change the score or the submission.
+      setRetryQuestions(null);
+      setRetryRoundDone(true);
+      setCurrentIdx(0);
+      handleFinishHomework(nextResponses, currentGold, currentMaxStreak);
+    } else if (!retryRoundDone) {
+      // Q25: the mistakes come back at the very END as a final retry round
+      // with only the wrong questions (practice only, Q32).
+      const wrongIds = new Set(
+        nextResponses
+          .filter((r) => !r.isCorrect && !r.pendingServerGrading)
+          .map((r) => r.questionId)
+      );
+      const retryQs = quizQuestions.filter((q) => wrongIds.has(q.id));
+      if (retryQs.length > 0) {
+        setRetryQuestions(retryQs);
+        setCurrentIdx(0);
+        return;
+      }
+      handleFinishHomework(nextResponses, currentGold, currentMaxStreak);
     } else {
       handleFinishHomework(nextResponses, currentGold, currentMaxStreak);
     }
@@ -2060,6 +2225,33 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
   ) => {
     if (!currentQuestion) return;
     if (!studentAnswerStr || !studentAnswerStr.trim()) return;
+
+    // Q25/Q32 practice retry round: feedback only — no points, no streak
+    // change, no response recording, no sync. The original responses (and
+    // score) are kept untouched and submitted when the round ends.
+    if (retryQuestions) {
+      setFeedback(isCorrect ? 'correct' : 'wrong');
+      if (isCorrect) {
+        playLernstudioSound('correct');
+      } else {
+        playLernstudioSound('wrong');
+        if (currentQuestion.type !== 'true_false' && currentQuestion.audioPromptText) {
+          speakGermanText(currentQuestion.audioPromptText, 0.9);
+        }
+      }
+      if (advanceTimeoutRef.current) {
+        clearTimeout(advanceTimeoutRef.current);
+      }
+      advanceTimeoutRef.current = setTimeout(() => {
+        advanceToNextQuestion(
+          latestResponsesRef.current,
+          gamificationRef.current.points,
+          gamificationRef.current.maxStreak
+        );
+      }, 950);
+      return;
+    }
+
     if (
       processedQuestionIdsRef.current.has(currentQuestion.id) ||
       gamificationRef.current.processedQuestionIds.includes(currentQuestion.id)
@@ -2173,7 +2365,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
 
   const handleSelectOption = async (chosenOption: string) => {
     if (selectedChoice !== null || checkingRemoteAnswer || !currentQuestion || !chosenOption || !chosenOption.trim()) return;
-    if (processedQuestionIdsRef.current.has(currentQuestion.id)) return;
+    // In the practice retry round the question was already answered once —
+    // that must not block re-answering it for practice (Q25).
+    if (!retryQuestions && processedQuestionIdsRef.current.has(currentQuestion.id)) return;
     setSelectedChoice(chosenOption);
 
     const requiresRemoteCheck =
@@ -2532,9 +2726,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     } catch (err: any) {
       if (err?.rejected || err?.status === 409 || err?.status === 403 || err?.status === 404) {
         setCloudSyncState('rejected');
-        setSubmissionConflictError(
-          err?.message || 'تم تسجيل تسليم مكتمل لهذه المحاولة مسبقاً ولا يمكن تعديل بياناتها.'
-        );
+        setSubmissionConflictError(formatSubmissionRejectionMessage(err));
         setFinalScore({ ...localSubmissionObj, cloudSynced: false });
       } else {
         setCloudSyncState('pending_retry');
@@ -2564,9 +2756,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
         } catch (err: any) {
           if (err?.rejected || err?.status === 409 || err?.status === 403 || err?.status === 404) {
             setCloudSyncState('rejected');
-            setSubmissionConflictError(
-              err?.message || 'تم تسجيل تسليم مكتمل لهذه المحاولة مسبقاً ولا يمكن تعديل بياناتها.'
-            );
+            setSubmissionConflictError(formatSubmissionRejectionMessage(err));
             return;
           }
         }
@@ -2577,6 +2767,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       setRetryingCloudSync(false);
     }
   };
+
+  // Keep the latest retry handler reachable from the auto-retry effect.
+  handleManualRetryCloudSyncRef.current = handleManualRetryCloudSync;
 
   if (loading) {
     return (
@@ -2787,9 +2980,21 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                 </div>
 
                 {isAttemptLimitReached && (
-                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold text-center">
-                    لقد أتممت المحاولات المسموحة لهذا الواجب ({studentCompletedAttempts.length} /{' '}
-                    {assignment?.allowReplay === false ? 1 : assignment?.maxAttempts}).
+                  <div className="space-y-2">
+                    <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold text-center">
+                      لقد أتممت المحاولات المسموحة لهذا الواجب ({studentCompletedAttempts.length} /{' '}
+                      {assignment?.allowReplay === false ? 1 : assignment?.maxAttempts}).
+                    </div>
+                    {lastCompletedAttempt && (
+                      <button
+                        type="button"
+                        onClick={() => setShowLastResult(true)}
+                        className="w-full py-2.5 px-4 rounded-xl bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                      >
+                        <Eye className="w-4 h-4 text-primary" />
+                        <span>👁️ عرض نتيجتي الأخيرة</span>
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -2853,9 +3058,21 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
               </div>
 
               {isAttemptLimitReached && (
-                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold text-center">
-                  لقد أتممت المحاولات المسموحة لهذا الواجب ({studentCompletedAttempts.length} /{' '}
-                  {assignment?.allowReplay === false ? 1 : assignment?.maxAttempts}).
+                <div className="space-y-2">
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold text-center">
+                    لقد أتممت المحاولات المسموحة لهذا الواجب ({studentCompletedAttempts.length} /{' '}
+                    {assignment?.allowReplay === false ? 1 : assignment?.maxAttempts}).
+                  </div>
+                  {lastCompletedAttempt && (
+                    <button
+                      type="button"
+                      onClick={() => setShowLastResult(true)}
+                      className="w-full py-2.5 px-4 rounded-xl bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                    >
+                      <Eye className="w-4 h-4 text-primary" />
+                      <span>👁️ عرض نتيجتي الأخيرة</span>
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -2882,6 +3099,84 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
         <footer className="text-center text-[11px] text-text-muted font-medium py-3 select-none" dir="ltr">
           von Herr Abdul-rahman · Glück Deutsch
         </footer>
+
+        {/* Q21: view my last result when attempts are exhausted */}
+        {showLastResult && lastCompletedAttempt && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" dir="rtl">
+            <div className="bg-surface border border-surface-border rounded-3xl p-5 max-w-md w-full space-y-4 shadow-xl max-h-[85vh] overflow-y-auto">
+              <div className="text-center space-y-1">
+                <h3 className="text-base font-black text-text-main">📋 نتيجتي الأخيرة</h3>
+                <p className="text-xs font-bold text-text-muted">{assignment?.title || 'واجب Glück التفاعلي'}</p>
+                {lastCompletedAttempt.completedAt && (
+                  <p className="text-[11px] text-text-muted">
+                    {new Date(lastCompletedAttempt.completedAt).toLocaleString('ar-EG')}
+                  </p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="p-3 rounded-xl bg-surface-hover border border-surface-border">
+                  <div className="text-xl font-bold text-primary">{lastCompletedAttempt.scorePercentage ?? 0}%</div>
+                  <div className="text-[11px] font-medium text-text-muted mt-0.5">التقييم العام</div>
+                </div>
+                <div className="p-3 rounded-xl bg-surface-hover border border-surface-border">
+                  <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
+                    {lastCompletedAttempt.correctAnswersCount ?? 0} / {lastCompletedAttempt.totalQuestions ?? 0}
+                  </div>
+                  <div className="text-[11px] font-medium text-text-muted mt-0.5">إجابات صحيحة</div>
+                </div>
+                <div className="p-3 rounded-xl bg-surface-hover border border-surface-border">
+                  <div className="text-xl font-bold text-amber-500">💰 {lastCompletedAttempt.goldEarned ?? 0}</div>
+                  <div className="text-[11px] font-medium text-text-muted mt-0.5">النقاط</div>
+                </div>
+              </div>
+
+              {(lastCompletedAttempt.responses || []).length > 0 && (
+                <div className="text-right space-y-2">
+                  <h4 className="text-xs font-bold text-text-main">
+                    مراجعة الإجابات ({(lastCompletedAttempt.responses || []).length}):
+                  </h4>
+                  <div className="max-h-60 overflow-y-auto space-y-1.5 pr-0.5">
+                    {(lastCompletedAttempt.responses || []).map((r: HomeworkQuestionResponse, i: number) => (
+                      <div
+                        key={i}
+                        className={`flex items-center justify-between p-2.5 rounded-xl border text-xs font-medium ${
+                          r.isCorrect
+                            ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-700 dark:text-emerald-400'
+                            : 'bg-rose-500/5 border-rose-500/20 text-rose-700 dark:text-rose-400'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <div>
+                            <div className="font-bold text-text-main">{r.germanWord}</div>
+                            <div className="text-[11px] text-text-muted">إجابتك: {r.studentAnswer}</div>
+                          </div>
+                        </div>
+                        <div>
+                          {r.isCorrect ? (
+                            <span className="text-emerald-600 dark:text-emerald-400 font-bold">✓ صحيح</span>
+                          ) : r.correctAnswer ? (
+                            <span className="text-rose-600 dark:text-rose-400 font-bold">الصواب: {r.correctAnswer}</span>
+                          ) : (
+                            <span className="text-rose-600 dark:text-rose-400 font-bold">✕ غير صحيحة</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setShowLastResult(false)}
+                className="w-full py-2.5 px-4 rounded-xl bg-primary hover:bg-primary-hover text-white font-black text-xs sm:text-sm cursor-pointer transition-colors"
+              >
+                إغلاق
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -2891,6 +3186,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     const isFrozen = gamification.freezeRemainingSeconds > 0;
     const isSlowMo = gamification.slowMotionRemainingSeconds > 0;
     const isLowTime = !isStudyPhase && !isFrozen && gamification.timeRemainingSeconds <= 20;
+    // Q31: show when the timer is paused (remote check / reading the
+    // explanation / practice retry round)
+    const isTimerPaused =
+      !isStudyPhase && (checkingRemoteAnswer || selectedChoice !== null || retryQuestions !== null);
 
     return (
       <div className="max-w-3xl w-full mx-auto sticky top-2 z-30 mb-3">
@@ -2928,13 +3227,20 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
               )}
             </span>
 
+            {isTimerPaused && (
+              <span className="px-2 py-1 rounded-xl bg-sky-500/15 border border-sky-500/40 text-sky-600 dark:text-sky-300 text-[10px] font-bold inline-flex items-center gap-1">
+                <Pause className="w-3 h-3 shrink-0" />
+                <span>المؤقت متوقف مؤقتاً</span>
+              </span>
+            )}
+
             {isStudyPhase ? (
               <span className="px-2.5 py-1 rounded-xl bg-surface-hover border border-surface-border text-primary text-xs font-bold tabular-nums">
                 📖 {studyIndex + 1} / {Math.max(1, totalStudySteps)}
               </span>
             ) : (
               <span className="px-2.5 py-1 rounded-xl bg-surface-hover border border-surface-border text-text-main text-xs font-bold tabular-nums">
-                {currentIdx + 1} / {quizQuestions.length}
+                {currentIdx + 1} / {activeQuizQuestions.length}
               </span>
             )}
           </div>
@@ -3599,7 +3905,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                     setFinalScore(null);
                      const nowIso = new Date().toISOString();
                     setStartTime(nowIso);
-                    const replayPhase = totalStudySteps > 0 ? 'teacher_study' : 'quiz';
+                    // Q3: retry goes straight to the quiz, skipping the study phase.
+                    const replayPhase = 'quiz' as const;
                     const replayAttemptSecret = getOrCreateStudentAttemptSecret(activeSubmissionIdRef.current);
                     const replayStartSubmission: HomeworkSubmission = {
                       id: activeSubmissionIdRef.current,
@@ -3627,7 +3934,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                       accuracy: 0,
                       goldEarned: 0,
                       maxStreak: 0,
-                      completedStudyPhase: totalStudySteps === 0,
+                      completedStudyPhase: true,
                       gamification: toGamificationSnapshot(freshGam),
                       responses: []
                     };
@@ -3650,12 +3957,17 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                       phase: replayPhase,
                       studyIndex: 0,
                       currentIdx: 0,
-                      completedStudyPhase: totalStudySteps === 0,
+                      completedStudyPhase: true,
                       startTime: nowIso,
                       responses: [],
                       gamification: freshGam,
                       updatedAtMs: Date.now()
                     });
+                    setCompletedStudyPhase(true);
+                    setRetryQuestions(null);
+                    setRetryRoundDone(false);
+                    setTimeUpDialog(false);
+                    setUntimedMode(false);
                     setPhase(replayPhase);
                   }}
                   className="w-full py-2.5 px-4 rounded-xl bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-2xs"
@@ -3733,6 +4045,60 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       {/* Compact, Always-Visible Top HUD (Timer, Points, Streak/10, Effects & Mute) */}
       {renderCompactGamificationHud(false)}
 
+      {/* Q20: visible low-time warning (beyond the red HUD pulse under 20s) */}
+      {!retryQuestions && !untimedMode && gamification.timeRemainingSeconds <= 30 && gamification.timeRemainingSeconds > 0 && (
+        <div className="max-w-3xl w-full mx-auto mb-2.5 p-3 rounded-2xl bg-rose-500/10 border-2 border-rose-500/40 text-rose-600 dark:text-rose-400 text-xs font-black text-center animate-pulse flex items-center justify-center gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>⏰ انتبه! باقي {gamification.timeRemainingSeconds} ثانية بس — خلّص إجابتك بسرعة قبل ما الوقت يخلص!</span>
+        </div>
+      )}
+
+      {/* Q25: practice retry round banner — wrong questions return at the very end */}
+      {retryQuestions && (
+        <div className="max-w-3xl w-full mx-auto mb-2.5 p-3 rounded-2xl bg-sky-500/10 border border-sky-500/40 text-sky-700 dark:text-sky-300 text-xs font-black text-center leading-relaxed">
+          🔁 جولة تدريب أخيرة — دي الأسئلة اللي غلطت فيها، جرّب تحلّها تاني. إجاباتك هنا للتدريب بس ومش بتأثر على نتيجتك ولا نقاطك.
+        </div>
+      )}
+
+      {/* Q20: confirm before finishing when the timer runs out */}
+      {timeUpDialog && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" dir="rtl">
+          <div className="bg-surface border border-surface-border rounded-3xl p-6 max-w-sm w-full text-center space-y-4 shadow-xl">
+            <div className="text-4xl">⏰</div>
+            <h3 className="text-lg font-black text-text-main">انتهى الوقت!</h3>
+            <p className="text-xs font-bold text-text-muted leading-relaxed">
+              خلص وقت الواجب. تقدر تنهي دلوقتي وتبعت إجاباتك اللي حلّيتها، أو تكمّل باقي الأسئلة من غير مؤقت — بس الأسئلة اللي مش هتجاوبها هتفضل مش محلولة.
+            </p>
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setTimeUpDialog(false);
+                  handleFinishHomework(
+                    latestResponsesRef.current,
+                    gamificationRef.current.points,
+                    gamificationRef.current.maxStreak
+                  );
+                }}
+                className="w-full py-3 px-4 rounded-xl bg-primary hover:bg-primary-hover text-white font-black text-xs sm:text-sm shadow-md cursor-pointer transition-colors"
+              >
+                إنهاء الواجب وإرسال الإجابات ✓
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTimeUpDialog(false);
+                  setUntimedMode(true);
+                }}
+                className="w-full py-3 px-4 rounded-xl bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs sm:text-sm cursor-pointer transition-colors"
+              >
+                أكمّل باقي الأسئلة من غير مؤقت
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Icon-Only Sequential Stage Bar (Zero Horizontal Side-Scrolling) */}
       <div className="max-w-3xl w-full mx-auto bg-surface border border-surface-border rounded-2xl p-1.5 mb-2.5 shadow-2xs">
         <div className="flex items-center gap-1 w-full">
@@ -3767,7 +4133,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       <div className="max-w-3xl w-full mx-auto h-2 bg-surface-border rounded-full overflow-hidden mb-5">
         <div
           className="h-full bg-primary transition-all duration-300"
-          style={{ width: `${((currentIdx + 1) / Math.max(1, quizQuestions.length)) * 100}%` }}
+          style={{ width: `${((currentIdx + 1) / Math.max(1, activeQuizQuestions.length)) * 100}%` }}
         />
       </div>
 

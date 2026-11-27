@@ -22,7 +22,9 @@ export const SyncHeaderButton: React.FC<SyncHeaderButtonProps> = ({
   isOpen = false,
 }) => {
   const { _t, getPendingOutbox } = useApp();
-  const { status: storageStatus } = useDlSyncState();
+  const { status: storageStatus, syncState } = useDlSyncState();
+  // Honest pairing state: "ready" with zero paired devices was a lie.
+  const pairedDeviceCount = syncState?.pairedPeers?.length || 0;
   const [hwCloudOnline, setHwCloudOnline] = useState<boolean>(() =>
     typeof navigator !== 'undefined' ? navigator.onLine && !isFirestoreReadQuotaExhausted() : !isFirestoreReadQuotaExhausted()
   );
@@ -54,9 +56,11 @@ export const SyncHeaderButton: React.FC<SyncHeaderButtonProps> = ({
     ? _t('جاري المزامنة...', 'Synchronizing...', 'Synchronisation läuft')
     : isP2PConnected
     ? _t('P2P متصل', 'P2P Connected', 'P2P Verbunden')
+    : pairedDeviceCount === 0
+    ? _t('مفيش أجهزة مقترنة', 'No devices paired', 'Keine Geräte gekoppelt')
     : pendingP2PChanges > 0
     ? _t(`P2P (${pendingP2PChanges} معلق)`, `Pending local changes (${pendingP2PChanges})`, `Ausstehende Änderungen (${pendingP2PChanges})`)
-    : _t('P2P جاهز', 'P2P Ready', 'P2P Bereit');
+    : _t('P2P غير متصل', 'P2P not connected', 'P2P nicht verbunden');
 
   const hwCloudLabel = hwCloudOnline
     ? pendingHwCount > 0

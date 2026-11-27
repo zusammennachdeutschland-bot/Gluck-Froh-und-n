@@ -68,6 +68,7 @@ import {
   verbGroupToLernstudioSet
 } from '../verbGroupSync';
 import { filterLernstudioSetsByQuery } from '../lernstudioTranslations';
+import { buildWhatsAppUrl } from '../../utils/phoneUtils';
 import { isArticleGameSupported } from '../lernstudioQuestionAdapter';
 import {
   hasGrammarContent,
@@ -295,6 +296,10 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [assignmentsLastRefreshedMs, setAssignmentsLastRefreshedMs] = useState<number>(() =>
     getHomeworkLastRefreshTimestamp('assignments')
   );
+  // Visible refresh failure (Q18): set when an explicit manual refresh could
+  // not reach the cloud; cleared on the next successful refresh.
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [detailsSyncError, setDetailsSyncError] = useState<string | null>(null);
   const [preservedDeletedGroups, setPreservedDeletedGroups] = useState<
     { assignmentMeta: ArchivedAssignmentMeta; submissions: HomeworkSubmission[] }[]
   >([]);
@@ -451,29 +456,61 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [isSavingHwEdit, setIsSavingHwEdit] = useState(false);
   const [togglingActiveId, setTogglingActiveId] = useState<string | null>(null);
 
-  const loadAllAssignments = async (forceCloud = false) => {
-    setLoadingResults(forceCloud);
+  const loadAllAssignments = async (forceCloud = false, opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent);
+    if (!silent) {
+      setLoadingResults(forceCloud);
+      if (forceCloud) setRefreshError(null);
+    }
     try {
+      // ROOT-CAUSE FIX (Q18): a forced refresh MUST also pull student
+      // submissions. It used to pass `assignmentsOnly: true`, so the manual
+      // "تحديث" button only re-read the assignment list and could never show
+      // a new submission, however many times the teacher tapped it.
+      const refreshBeforeMs = getHomeworkLastRefreshTimestamp('assignments');
       const list = await syncAndFetchTeacherAssignments(studentsRef.current, {
         force: forceCloud,
-        assignmentsOnly: forceCloud,
         localOnly: !forceCloud
       });
       setAssignmentsList(list);
       setPreservedDeletedGroups(getPreservedSubmissionsForDeletedAssignments());
       setPendingSyncCount(getPendingHomeworkSyncCount());
-      setAssignmentsLastRefreshedMs(
-        forceCloud ? Date.now() : getHomeworkLastRefreshTimestamp('assignments')
-      );
+      if (forceCloud) {
+        // The sync records the 'assignments' timestamp ONLY on success, so a
+        // timestamp that did not advance proves the cloud sync failed — never
+        // stamp "آخر تحديث: now" on a failed refresh.
+        const refreshAfterMs = getHomeworkLastRefreshTimestamp('assignments');
+        if (refreshAfterMs > refreshBeforeMs) {
+          setAssignmentsLastRefreshedMs(Date.now());
+          if (!silent) setRefreshError(null);
+        } else if (!silent && activeAuthUid) {
+          setRefreshError('تعذر التحديث — تحقق من الإنترنت ثم أعد المحاولة');
+        }
+      } else {
+        setAssignmentsLastRefreshedMs(getHomeworkLastRefreshTimestamp('assignments'));
+      }
     } finally {
-      setLoadingResults(false);
+      if (!silent) setLoadingResults(false);
     }
   };
 
-  // Render strictly from local P2P/localStorage cache on open (0 automatic Firestore reads)
+  // Render instantly from local P2P/localStorage cache on open, then pull once
+  // from the cloud when the cached data is stale (no continuous listener).
   useEffect(() => {
     if (!isOpen) return;
     loadAllAssignments(false);
+    if (Date.now() - getHomeworkLastRefreshTimestamp('assignments') > 60_000) {
+      loadAllAssignments(true, { silent: true });
+    }
+
+    // Poll at most once a minute ONLY while the modal is open, so a submission
+    // that lands while the teacher is looking at the list shows up without a
+    // manual tap. Stops when the modal closes (cleanup below). No onSnapshot.
+    const pollId = window.setInterval(() => {
+      if (document.hidden) return;
+      if (Date.now() - getHomeworkLastRefreshTimestamp('assignments') < 45_000) return;
+      loadAllAssignments(true, { silent: true });
+    }, 60_000);
 
     const refreshFromLocalOrP2P = () => {
       syncAndFetchTeacherAssignments(studentsRef.current, { localOnly: true })
@@ -497,6 +534,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     window.addEventListener('glueck-homework-sync-updated', refreshFromLocalOrP2P);
 
     return () => {
+      window.clearInterval(pollId);
       window.removeEventListener('storage', refreshFromLocalOrP2P);
       window.removeEventListener('glueck-homework-sync-updated', refreshFromLocalOrP2P);
     };
@@ -1165,6 +1203,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
 
     // 2. Explicit manual report refresh (reads ONLY this assignment + paginated submissions)
     setLoadingDetails(true);
+    setDetailsSyncError(null);
     try {
       const details = await fetchAssignmentDetailsWithSync(hwId, studentsRef.current, matchedHw, {
         limit: 100
@@ -1173,6 +1212,11 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         setSelectedDetails(details);
         setDetailsNextCursor(details.nextCursor || null);
         setDetailsHasMore(Boolean(details.hasMore));
+        // cloudSyncOk === false means the cloud did not answer (timeout /
+        // offline): the numbers on screen are still the stale local ones.
+        setDetailsSyncError(
+          details.cloudSyncOk === false ? 'تعذر جلب أحدث التسليمات — تحقق من الإنترنت ثم أعد المحاولة' : null
+        );
       }
     } finally {
       setLoadingDetails(false);
@@ -1182,6 +1226,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const handleLoadMoreDetails = async () => {
     if (!selectedDetails?.assignment?.id || !detailsNextCursor || loadingMoreDetails) return;
     setLoadingMoreDetails(true);
+    setDetailsSyncError(null);
     try {
       const details = await fetchAssignmentDetailsWithSync(
         selectedDetails.assignment.id,
@@ -1193,6 +1238,9 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         setSelectedDetails(details);
         setDetailsNextCursor(details.nextCursor || null);
         setDetailsHasMore(Boolean(details.hasMore));
+        setDetailsSyncError(
+          details.cloudSyncOk === false ? 'تعذر جلب باقي التسليمات — تحقق من الإنترنت ثم أعد المحاولة' : null
+        );
       }
     } finally {
       setLoadingMoreDetails(false);
@@ -2422,17 +2470,30 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                         onClick={() => {
                           const groupLabel = createdAssignment?.groupName ? ` [${createdAssignment.groupName}]` : '';
                           const msg = `🇩🇪 *واجب الألماني التفاعلي (Glück Lernstudio)*${groupLabel}\n📚 *${createdAssignment?.title || 'واجب جديد'}*\n\nيرجى الضغط على الرابط التالي لبدء حل الواجب:\n${createdShareLink}`;
-                          navigator.clipboard.writeText(msg);
-                          setCopiedId('whatsapp_msg');
-                          setTimeout(() => setCopiedId(null), 2500);
+                          window.open(buildWhatsAppUrl(undefined, msg), '_blank', 'noopener,noreferrer');
                         }}
                         className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs"
                       >
                         <Share2 className="w-3.5 h-3.5" />
+                        <span>فتح واتساب برسالة الواجب</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const groupLabel = createdAssignment?.groupName ? ` [${createdAssignment.groupName}]` : '';
+                          const msg = `🇩🇪 *واجب الألماني التفاعلي (Glück Lernstudio)*${groupLabel}\n📚 *${createdAssignment?.title || 'واجب جديد'}*\n\nيرجى الضغط على الرابط التالي لبدء حل الواجب:\n${createdShareLink}`;
+                          navigator.clipboard.writeText(msg);
+                          setCopiedId('whatsapp_msg');
+                          setTimeout(() => setCopiedId(null), 2500);
+                        }}
+                        className="px-3.5 py-2 bg-surface hover:bg-surface-hover border border-surface-border text-text-main text-xs font-semibold rounded-xl flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
                         <span>
                           {copiedId === 'whatsapp_msg'
                             ? 'تم نسخ رسالة واتساب! ✓'
-                            : 'نسخ رسالة واتساب لولي الأمر'}
+                            : 'نسخ الرسالة (لو واتساب مش متاح)'}
                         </span>
                       </button>
 
@@ -2661,6 +2722,11 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                                 })}`
                               : '· محفوظ محلياً (اضغط تحديث التقرير لجلب أحدث التسليمات)'}
                           </span>
+                          {detailsSyncError && (
+                            <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400">
+                              · ⚠ {detailsSyncError}
+                            </span>
+                          )}
                         </div>
                         <p className="text-xs text-text-muted mt-0.5">
                           {selectedDetails.assignment.setSnapshot?.title} · 📖 التعلم والنطق + مراحل الأسئلة ·{' '}
@@ -3278,6 +3344,11 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                           آخر تحديث: {new Date(assignmentsLastRefreshedMs).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       )}
+                      {refreshError && (
+                        <span className="text-[11px] font-bold text-rose-600 dark:text-rose-400">
+                          ⚠ {refreshError}
+                        </span>
+                      )}
                       <button
                         type="button"
                         onClick={() => loadAllAssignments(true)}
@@ -3467,12 +3538,10 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                                   onClick={() => {
                                     const groupText = hw.groupName ? ` [${hw.groupName}]` : '';
                                     const msg = `🇩🇪 *واجب الألماني التفاعلي (Glück Lernstudio)*${groupText}\n📚 *${hw.title}*\n\nيرجى فتح الرابط لبدء حل الواجب:\n${shareUrl}`;
-                                    navigator.clipboard.writeText(msg);
-                                    setCopiedId(`wa_${hw.id}`);
-                                    setTimeout(() => setCopiedId(null), 2000);
+                                    window.open(buildWhatsAppUrl(undefined, msg), '_blank', 'noopener,noreferrer');
                                   }}
                                   className="p-1.5 rounded-lg bg-surface-hover hover:bg-surface border border-surface-border text-emerald-600 dark:text-emerald-400 cursor-pointer"
-                                  title="نسخ رسالة واتساب للطلاب"
+                                  title="فتح واتساب برسالة الواجب"
                                 >
                                   <Share2 className="w-3.5 h-3.5" />
                                 </button>

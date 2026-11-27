@@ -580,13 +580,13 @@ export const Header: React.FC = () => {
           isOpen={isSyncModalOpen}
           onClose={() => setIsSyncModalOpen(false)}
           syncStatus={onlineCount > 0 ? 'connected' : 'offline'}
-          lastSyncTime={
-            syncState?.pairedPeers && syncState.pairedPeers.length > 0
-              ? new Date(Math.max(...syncState.pairedPeers.map(p => p.lastSyncedTimestamp || 0))).toLocaleTimeString()
-              : 'Never'
-          }
-          nextAutoSyncTime="in 5 mins"
-          localDevice={{ name: syncState?.localDeviceName || 'Mein Gerät', id: syncState?.localDeviceId || 'device-local' }}
+          lastSyncTime={(() => {
+            const peerTimes = (syncState?.pairedPeers || []).map(p => p.lastSyncedTimestamp || 0);
+            const lastSyncMs = Math.max(syncState?.lastSyncedTimestamp || 0, ...peerTimes);
+            if (!lastSyncMs) return _t('لسه مفيش مزامنة', 'No sync yet', 'Noch keine Sync');
+            return new Date(lastSyncMs).toLocaleString();
+          })()}
+          localDevice={{ name: syncState?.localDeviceName?.trim() || _t('هذا الجهاز', 'This device', 'Dieses Gerät'), id: syncState?.localDeviceId || 'device-local' }}
           onRenameLocalDevice={onRenameLocalDevice}
           pairedPeers={syncState?.pairedPeers || []}
           onPair={onPair}

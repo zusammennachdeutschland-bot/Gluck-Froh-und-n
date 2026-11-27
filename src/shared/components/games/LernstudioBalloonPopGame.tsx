@@ -200,17 +200,10 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
       setBalloons(next);
 
       if (missedTarget) {
-        wrongRef.current += 1;
-        setStreak(0);
-        const nextL = Math.max(0, livesRef.current - 1);
-        livesRef.current = nextL;
-        setLives(nextL);
-        if (nextL <= 0) {
-          setIsGameOver(true);
-          reportFinishOnce(scoreRef.current, false);
-        } else {
-          setWaveRev((r) => r + 1);
-        }
+        // Q24: a correct balloon floating off the top is NOT a mistake — no
+        // life lost, no streak reset, no wrong-answer count. Just spawn a
+        // fresh wave with the same target word so the child can try again.
+        setWaveRev((r) => r + 1);
       }
     }, 40);
 
@@ -480,7 +473,15 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
               مبروك يا بطل! فرقعت كل البالونات بنجاح! 🎈🎉
             </h2>
             <p className="text-sm font-bold text-text-muted">
-              جمعت <span className="text-primary font-black text-base">{score}</span> نقطة بدون أخطاء!
+              {lives < maxLives ? (
+                <>
+                  جمعت <span className="text-primary font-black text-base">{score}</span> نقطة! 🎈
+                </>
+              ) : (
+                <>
+                  جمعت <span className="text-primary font-black text-base">{score}</span> نقطة بدون أخطاء!
+                </>
+              )}
             </p>
             <div className="flex items-center gap-3 pt-2">
               <button

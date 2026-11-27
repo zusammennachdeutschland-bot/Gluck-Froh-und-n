@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext';
 import { storage } from '../services/storageService';
 import { PREDEFINED_GRADES, COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
 import { GradeLevel, ScheduleRecurrence } from '../types';
+import { resolveDefaultGrade } from '../utils/lessonUtils';
 import { X, UserPlus, Info, Phone, AtSign, Sparkles, Repeat, RotateCcw } from 'lucide-react';
 import { isWhatsAppUsername, cleanWhatsAppUsername } from '../utils/phoneUtils';
 import { isLikelyFemaleStudent } from '../utils/genderUtils';
@@ -15,7 +16,7 @@ interface AddStudentModalProps {
 }
 
 export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initialGroupId }) => {
-  const { groups, students, addStudent, t, _t, language } = useApp();
+  const { groups, students, addStudent, t, _t, language, profile } = useApp();
 
   // Helper for inline translations
   
@@ -29,14 +30,17 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
       const g = groups.find(x => x.id === initialGroupId);
       if (g?.grade) return g.grade;
     }
-    return 'Grade 7';
+    return groups[0]?.grade || resolveDefaultGrade(groups, profile.defaultGrade);
   });
   const [parentName, setParentName] = useState('');
+  // Q35: explicit father/mother choice — the auto-generated contact name follows it ("أبو {name}" vs "أم {name}").
+  const [parentRelation, setParentRelation] = useState<'father' | 'mother'>('mother');
   const [parentContactType, setParentContactType] = useState<'phone' | 'username'>('phone');
   const [parentPhone, setParentPhone] = useState('');
   const [studentContactType, setStudentContactType] = useState<'phone' | 'username'>('phone');
   const [studentPhone, setStudentPhone] = useState('');
   const [notes, setNotes] = useState('');
+  const [formError, setFormError] = useState<string | null>(null);
   const [scheduleRecurrence, setScheduleRecurrence] = useState<ScheduleRecurrence>(() => {
     if (initialGroupId) {
       const g = groups.find(x => x.id === initialGroupId);
@@ -70,6 +74,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
     setGender('male');
     setHasManualGender(false);
     setParentName('');
+    setParentRelation('mother');
     setParentPhone('');
     setParentContactType('phone');
     setStudentPhone('');
@@ -89,6 +94,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
         if (draft.scheduleRecurrence) setScheduleRecurrence(draft.scheduleRecurrence);
         if (draft.grade) setGrade(draft.grade);
         if (draft.parentName) setParentName(draft.parentName);
+        if (draft.parentRelation === 'father' || draft.parentRelation === 'mother') setParentRelation(draft.parentRelation);
         if (draft.parentContactType) setParentContactType(draft.parentContactType);
         if (draft.parentPhone) {
           setParentPhone(draft.parentPhone);
@@ -113,10 +119,10 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
   useEffect(() => {
     if (name || certificateName || parentName || parentPhone || studentPhone || notes) {
       storage.setItem('dl_draft_add_student', {
-        name, certificateName, groupId, scheduleRecurrence, grade, parentName, parentContactType, parentPhone, studentContactType, studentPhone, notes
+        name, certificateName, groupId, scheduleRecurrence, grade, parentName, parentRelation, parentContactType, parentPhone, studentContactType, studentPhone, notes
       });
     }
-  }, [name, certificateName, groupId, scheduleRecurrence, grade, parentName, parentContactType, parentPhone, studentContactType, studentPhone, notes]);
+  }, [name, certificateName, groupId, scheduleRecurrence, grade, parentName, parentRelation, parentContactType, parentPhone, studentContactType, studentPhone, notes]);
 
   const handleParentPhoneChange = (val: string) => {
     setParentPhone(val);
@@ -134,15 +140,22 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !groupId) return;
+    if (!name.trim() || !groupId) {
+      setFormError(
+        groups.length === 0
+          ? _t('مفيش مجموعات أصلاً — اعمل مجموعة الأول وبعدين ضيف الطالب.', 'No groups yet — create a group first, then add the student.', 'Keine Gruppen vorhanden — bitte zuerst eine Gruppe erstellen.')
+          : _t('اكتب اسم الطالب واختار المجموعة الأول.', 'Enter the student name and pick a group first.', 'Bitte Schülername eingeben und Gruppe wählen.')
+      );
+      return;
+    }
     if (!certificateName.trim()) {
-      alert(_t('اسم الطالب بالإنجليزية مطلوب للشهادات!', 'Student English name is required for certificates!', 'Der englische Name des Schülers ist für Zertifikate erforderlich!'));
+      setFormError(_t('اسم الطالب بالإنجليزية مطلوب للشهادات!', 'Student English name is required for certificates!', 'Der englische Name des Schülers ist für Zertifikate erforderlich!'));
       return;
     }
     if (!parentPhone.trim()) {
-      alert(_t(
-        'رقم هاتف أو يوزر نيم ولي الأمر مطلوب!', 
-        'Parent phone number or WhatsApp username is required!', 
+      setFormError(_t(
+        'رقم هاتف أو يوزر نيم ولي الأمر مطلوب!',
+        'Parent phone number or WhatsApp username is required!',
         'Telefonnummer oder WhatsApp-Benutzername der Eltern ist erforderlich!'
       ));
       return;
@@ -150,13 +163,14 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
     const normalizedName = (name || '').trim().toLowerCase();
     const isDuplicate = students.some(s => !s.deleted && (s.name || '').trim().toLowerCase() === normalizedName);
     if (isDuplicate) {
-      alert(_t(
+      setFormError(_t(
         'يوجد طالب بنفس الاسم بالفعل! لا يمكن إضافة اسم مكرر.',
         'A student with the same name already exists! Duplicate names are blocked.',
         'Ein Schüler mit demselben Namen existiert bereits!'
       ));
       return;
     }
+    setFormError(null);
 
     const isParentUser = parentContactType === 'username' || isWhatsAppUsername(parentPhone);
     const cleanParentUser = cleanWhatsAppUsername(parentPhone);
@@ -167,7 +181,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
     const cleanStudentUser = hasStudentVal ? cleanWhatsAppUsername(studentPhone) : '';
     const finalStudentPhone = hasStudentVal ? (isStudentUser ? `@${cleanStudentUser}` : normalizeEgyptianPhone(studentPhone)) : '';
 
-    const finalParentName = parentName.trim() || `أم ${name.trim()}`;
+    const finalParentName = parentName.trim() || (parentRelation === 'father' ? `أبو ${name.trim()}` : `أم ${name.trim()}`);
 
     addStudent({
       name,
@@ -175,7 +189,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
       gender,
       groupId,
       scheduleRecurrence,
-      grade: grade || selectedGroup?.grade || 'Grade 7',
+      grade: grade || selectedGroup?.grade || resolveDefaultGrade(groups, profile.defaultGrade),
       parentName: finalParentName,
       parentPhone: finalParentPhone,
       parentUsername: isParentUser ? cleanParentUser : undefined,
@@ -217,6 +231,12 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-3.5 sm:p-5 space-y-3 sm:space-y-4 max-h-[78vh] overflow-y-auto">
+          {formError && (
+            <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-xl p-3 text-xs font-bold text-amber-900 dark:text-amber-200 flex items-start gap-2">
+              <Info className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <span>{formError}</span>
+            </div>
+          )}
           {/* Top Status & Clear Draft Banner */}
           {filledFieldsCount > 0 ? (
             <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-2xl flex items-center justify-between text-xs gap-2 shadow-2xs">
@@ -544,7 +564,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
 
           {/* Parent Name */}
           <div className="space-y-1">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <label className="text-xs font-bold text-text-main flex items-center gap-1.5">
                 <span>{t('auto_parent_name')}</span>
                 {isParentNameFilled ? (
@@ -566,6 +586,29 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ onClose, initi
                 isParentNameFilled ? 'ring-2 ring-emerald-500/30 border-emerald-500/50 bg-emerald-500/5' : 'border-surface-border dark:border-surface-border-soft'
               }`}
             />
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center bg-surface-hover border border-surface-border rounded-lg p-0.5 text-[11px] font-bold">
+                <button
+                  type="button"
+                  onClick={() => setParentRelation('father')}
+                  className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${parentRelation === 'father' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted hover:text-text-main'}`}
+                >
+                  {_t('والد (أبو)', 'Father', 'Vater')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setParentRelation('mother')}
+                  className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${parentRelation === 'mother' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted hover:text-text-main'}`}
+                >
+                  {_t('والدة (أم)', 'Mother', 'Mutter')}
+                </button>
+              </div>
+              {!isParentNameFilled && isNameFilled && (
+                <span className="text-[10px] text-text-muted font-medium">
+                  {_t(`هيتسجل كـ "${parentRelation === 'father' ? 'أبو' : 'أم'} ${name.trim()}"`, `Will be saved as "${parentRelation === 'father' ? 'Father of' : 'Mother of'} ${name.trim()}"`)}
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Phone Numbers / WhatsApp Usernames */}

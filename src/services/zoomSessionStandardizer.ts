@@ -8,6 +8,7 @@ import {
   ZoomMeetingRecord
 } from '../types';
 import { getDayNumber, getGroupScheduleSlots } from '../utils/scheduleUtils';
+import { getGroupMeetingLink, isMeetGroup } from '../utils/groupPlatformUtils';
 import { normalizeDateToISO } from '../utils/timeUtils';
 
 export const DEFAULT_ZOOM_TIMEZONE = 'Africa/Cairo';
@@ -963,6 +964,20 @@ export function resolveCanonicalZoomLinkStatus(params: {
     };
   }
 
+  // Meet groups never use Zoom: their Google Meet link is the canonical meeting link,
+  // so no Zoom "missing/needs_update" warning may ever fire for them.
+  if (isMeetGroup(params.group)) {
+    const meetUrl = getGroupMeetingLink(params.group);
+    return {
+      url: meetUrl,
+      session: null,
+      slotSession: null,
+      status: 'approved',
+      shouldWarn: false,
+      warningKey: 'none'
+    };
+  }
+
   const approvedSession = resolveActiveWeeklySessionForLesson(params);
   if (approvedSession && (approvedSession.zoomJoinUrl || '').trim()) {
     return {
@@ -1077,4 +1092,23 @@ export function resolveActiveZoomLinkForLesson(params: {
   defaultZoomLink?: string | null;
 }): string {
   return (resolveActiveWeeklySessionForLesson(params)?.zoomJoinUrl || '').trim();
+}
+
+/**
+ * Platform-aware meeting link for a lesson: the group's Google Meet link for
+ * Meet groups, otherwise the canonical approved Zoom join URL. Use this
+ * wherever a lesson's `meetingLink` is assigned or displayed — never the
+ * Zoom-only resolver above, or Meet groups would get a Zoom link (or none).
+ */
+export function resolveActiveMeetingLinkForLesson(params: {
+  group?: Partial<Group> | null;
+  groupId?: string | null;
+  lesson?: Partial<Lesson> | null;
+  groupWeeklySessions?: GroupWeeklySession[] | null;
+  targetDay?: string | number | null;
+  targetTime?: string | null;
+  defaultZoomLink?: string | null;
+}): string {
+  if (isMeetGroup(params.group)) return getGroupMeetingLink(params.group);
+  return resolveActiveZoomLinkForLesson(params);
 }

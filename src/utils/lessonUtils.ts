@@ -1,4 +1,4 @@
-import { Group, Lesson, LessonReport, PaymentRecord, Student } from '../types';
+import { Group, GradeLevel, Lesson, LessonReport, PaymentRecord, Student } from '../types';
 import { normalizeDateToISO } from './timeUtils';
 import { isDateMatchingGroupRecurrence } from './scheduleUtils';
 
@@ -53,6 +53,39 @@ export function isGroupPerLesson(group?: Partial<Group> | null): boolean {
     gNotes.includes('حصة بحصة')
   );
 }
+
+/**
+ * Default grade, derived from context — never a hardcoded grade.
+ * Priority: the teacher profile's own defaultGrade (when the teacher set one)
+ * → the most common grade among the teacher's groups (their real classes)
+ * → the first group's grade → the first option of the grade list.
+ */
+export function resolveDefaultGrade(
+  groups: Array<{ grade?: GradeLevel | string } | null | undefined>,
+  profileDefaultGrade?: GradeLevel | string | null
+): GradeLevel {
+  if (profileDefaultGrade) return profileDefaultGrade as GradeLevel;
+  const counts = new Map<string, number>();
+  let firstGrade: string | null = null;
+  for (const g of groups || []) {
+    const grade = g?.grade;
+    if (!grade) continue;
+    if (!firstGrade) firstGrade = grade;
+    counts.set(grade, (counts.get(grade) || 0) + 1);
+  }
+  let bestGrade: string | null = null;
+  let bestCount = 0;
+  counts.forEach((count, grade) => {
+    if (count > bestCount) {
+      bestCount = count;
+      bestGrade = grade;
+    }
+  });
+  if (bestGrade) return bestGrade as GradeLevel;
+  if (firstGrade) return firstGrade as GradeLevel;
+  return 'A1';
+}
+
 
 export interface LessonCycleResolution {
   sessionNumber: number;

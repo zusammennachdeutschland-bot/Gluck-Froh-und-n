@@ -305,6 +305,7 @@ export const GroupProfileModal: React.FC<GroupProfileModalProps> = ({ group, onC
       schedules,
       zoomLink: data.type === 'online' ? data.zoomLink : undefined,
       meetLink: data.type === 'online' ? data.meetLink : undefined,
+      onlinePlatform: data.type === 'online' ? data.onlinePlatform : undefined,
       address: data.type === 'offline' ? data.address : undefined,
       color: data.color,
       lessonDurationMinutes: Number(data.lessonDurationMinutes),

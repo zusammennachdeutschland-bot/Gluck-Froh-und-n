@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { isMeetGroup } from '../utils/groupPlatformUtils';
 import {
   Video,
   Key,
@@ -1013,6 +1014,11 @@ export const ZoomIntegrationsManager: React.FC = () => {
   };
 
   const handleRowSync = async (session: GroupWeeklySession) => {
+    // Meet groups run on Google Meet — never create or recover a Zoom meeting for them.
+    if (isMeetGroup(groups.find((g) => g.id === session.groupId))) {
+      triggerToast(_t('المجموعة دي شغالة على Google Meet — مفيش اجتماع Zoom ليها.', 'This group runs on Google Meet — no Zoom meeting applies.', 'Diese Gruppe nutzt Google Meet — kein Zoom-Meeting.'));
+      return;
+    }
     setBusySessionId(session.id);
     try {
       const reconciledBaseSessions = livePreviewSummary.reconciledSessions;

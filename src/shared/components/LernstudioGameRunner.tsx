@@ -131,9 +131,51 @@ export const LernstudioGameRunner: React.FC<Props> = ({
   const [feedback, setFeedback] = useState<{ isCorrect: boolean; message: string; showSolution?: boolean } | null>(null);
   const [teacherOverride, setTeacherOverride] = useState(false);
 
-  const currentItem: LernstudioItem | undefined = items[currentIndex];
+  // Q25: words/questions answered wrong, shown on the completion screen with a
+  // practice-only retry round ("اتدرب على الكلمات دي"). Corrected answers in
+  // the retry round do NOT count toward score/points (Q32).
+  interface WrongWordEntry {
+    id: string;
+    german: string;
+    arabic: string;
+  }
+  const [wrongItems, setWrongItems] = useState<WrongWordEntry[]>([]);
+  const [retryDeck, setRetryDeck] = useState<LernstudioItem[] | null>(null);
+  const [retryDone, setRetryDone] = useState(false);
+  const retryCorrectIdsRef = useRef<Set<string>>(new Set());
+  const isRetryRound = retryDeck !== null;
+  const recordWrongItem = (item: LernstudioItem) => {
+    const arabic = item.arabic || '';
+    setWrongItems((prev) =>
+      prev.some((w) => w.id === item.id)
+        ? prev
+        : [...prev, { id: item.id, german: item.german, arabic }]
+    );
+  };
+  const recordWrongGrammar = (q: GameQuestion) => {
+    setWrongItems((prev) =>
+      prev.some((w) => w.id === q.id)
+        ? prev
+        : [...prev, { id: q.id, german: q.correctAnswer, arabic: q.prompt }]
+    );
+  };
+  const startRetryRound = () => {
+    const deck = wrongItems
+      .map((w) => rawItems.find((it) => it.id === w.id))
+      .filter((it): it is LernstudioItem => Boolean(it));
+    if (deck.length === 0) return;
+    retryCorrectIdsRef.current = new Set();
+    setRetryDeck(deck);
+    setRetryDone(false);
+    setIsCompleted(false);
+    setSelectedGameType('multiple_choice');
+    setCurrentIndex(0);
+    resetQuestionState();
+  };
+
+  const currentItem: LernstudioItem | undefined = (retryDeck ?? items)[currentIndex];
   const currentGrammarQuestion: GameQuestion | undefined = grammarQuestions[currentIndex];
-  const activeListLength = selectedGameType === 'grammar' ? grammarQuestions.length : items.length;
+  const activeListLength = selectedGameType === 'grammar' ? grammarQuestions.length : (retryDeck ?? items).length;
 
   // Prepare Multiple Choice Options (German Target Words, deduplicated & seeded)
   const mcOptions = useMemo(() => {
@@ -246,6 +288,17 @@ export const LernstudioGameRunner: React.FC<Props> = ({
     resetQuestionState();
     if (currentIndex + 1 < activeListLength) {
       setCurrentIndex((prev) => prev + 1);
+    } else if (isRetryRound) {
+      // End of the practice-only retry round (Q25/Q32): drop the words the
+      // child re-answered correctly from the review list and show the
+      // completion screen again. No score/accuracy is reported for practice.
+      const remaining = wrongItems.filter((w) => !retryCorrectIdsRef.current.has(w.id));
+      retryCorrectIdsRef.current = new Set();
+      setWrongItems(remaining);
+      setRetryDeck(null);
+      setRetryDone(true);
+      setCurrentIndex(0);
+      setIsCompleted(true);
     } else {
       setIsCompleted(true);
       playSfx('fanfare_victory');
@@ -271,6 +324,10 @@ export const LernstudioGameRunner: React.FC<Props> = ({
     completedReportedRef.current = false;
     correctCountRef.current = 0;
     attemptCountRef.current = 0;
+    retryCorrectIdsRef.current = new Set();
+    setWrongItems([]);
+    setRetryDeck(null);
+    setRetryDone(false);
     setSessionNonce((n) => n + 1);
     setCurrentIndex(0);
     setScore(0);
@@ -283,23 +340,28 @@ export const LernstudioGameRunner: React.FC<Props> = ({
   const handleCheckMultipleChoice = (opt: string, idx: number) => {
     if (!currentItem || feedback) return;
     setSelectedOptionIndex(idx);
-    attemptCountRef.current += 1;
+    if (!isRetryRound) attemptCountRef.current += 1;
 
     const isCorrect = opt.trim().toLowerCase() === currentItem.german.trim().toLowerCase();
     if (isCorrect) {
-      correctCountRef.current += 1;
-      setScore((s) => s + 10);
-      setStreak((st) => st + 1);
+      if (isRetryRound) {
+        retryCorrectIdsRef.current.add(currentItem.id);
+      } else {
+        correctCountRef.current += 1;
+        setScore((s) => s + 10);
+        setStreak((st) => st + 1);
+      }
       setFeedback({ isCorrect: true, message: t.rightAnswerMsg });
       playSfx('correct');
       playVoice('richtig');
       triggerSparkles(50, 50, '#10b981');
-      triggerFloatingText('+10 ★ Richtig!', 50, 40, '#10b981');
+      triggerFloatingText(isRetryRound ? 'صح! 👏' : '+10 ★ Richtig!', 50, 40, '#10b981');
       scheduleTimeout(() => {
         handleNextQuestion();
       }, 900);
     } else {
-      setStreak(0);
+      if (!isRetryRound) setStreak(0);
+      recordWrongItem(currentItem);
       setFeedback({
         isCorrect: false,
         message: `${t.wrongAnswerMsg} (${currentItem.german})`
@@ -316,7 +378,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({
 
   const handleCheckMissingLetter = () => {
     if (!currentItem || feedback) return;
-    attemptCountRef.current += 1;
+    if (!isRetryRound) attemptCountRef.current += 1;
     const expectedFullClean = currentItem.german.replace(/^(der|die|das)\s+/i, '').trim().toLowerCase();
     const expectedFullWithArticle = currentItem.german.trim().toLowerCase();
     const expectedMissingChar = extractMissingLetterChar(currentItem.german, activeMaskedWord).trim().toLowerCase();
@@ -328,19 +390,24 @@ export const LernstudioGameRunner: React.FC<Props> = ({
         userClean === expectedFullClean ||
         userClean === expectedFullWithArticle);
     if (isCorrect) {
-      correctCountRef.current += 1;
-      setScore((s) => s + 10);
-      setStreak((st) => st + 1);
+      if (isRetryRound) {
+        retryCorrectIdsRef.current.add(currentItem.id);
+      } else {
+        correctCountRef.current += 1;
+        setScore((s) => s + 10);
+        setStreak((st) => st + 1);
+      }
       setFeedback({ isCorrect: true, message: t.rightAnswerMsg });
       playSfx('correct');
       playVoice('super');
       triggerSparkles(50, 50, '#10b981');
-      triggerFloatingText('+10 ★ Super!', 50, 40, '#fbbf24');
+      triggerFloatingText(isRetryRound ? 'صح! 👏' : '+10 ★ Super!', 50, 40, '#fbbf24');
       scheduleTimeout(() => {
         handleNextQuestion();
       }, 900);
     } else {
-      setStreak(0);
+      if (!isRetryRound) setStreak(0);
+      recordWrongItem(currentItem);
       setFeedback({
         isCorrect: false,
         message: `${t.wrongAnswerMsg} (${currentItem.german})`
@@ -353,7 +420,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({
   // 3. Sentence Builder Check
   const handleCheckSentenceBuilder = () => {
     if (!currentItem || feedback) return;
-    attemptCountRef.current += 1;
+    if (!isRetryRound) attemptCountRef.current += 1;
     const constructedSentence = sentenceBuiltIndices
       .map((i) => sentenceElements[i] || '')
       .join(' ')
@@ -365,19 +432,24 @@ export const LernstudioGameRunner: React.FC<Props> = ({
       constructedSentence.replace(/[.,!?]/g, '') === originalTarget.replace(/[.,!?]/g, '');
 
     if (isCorrect || teacherOverride) {
-      correctCountRef.current += 1;
-      setScore((s) => s + 15);
-      setStreak((st) => st + 1);
+      if (isRetryRound) {
+        retryCorrectIdsRef.current.add(currentItem.id);
+      } else {
+        correctCountRef.current += 1;
+        setScore((s) => s + 15);
+        setStreak((st) => st + 1);
+      }
       setFeedback({ isCorrect: true, message: t.perfectSentenceMsg });
       playSfx('correct');
       playVoice('fantastisch');
       triggerSparkles(50, 50, '#10b981');
-      triggerFloatingText('+15 ★ Fantastisch!', 50, 40, '#fbbf24');
+      triggerFloatingText(isRetryRound ? 'صح! 👏' : '+15 ★ Fantastisch!', 50, 40, '#fbbf24');
       scheduleTimeout(() => {
         handleNextQuestion();
       }, 900);
     } else {
-      setStreak(0);
+      if (!isRetryRound) setStreak(0);
+      recordWrongItem(currentItem);
       setFeedback({
         isCorrect: false,
         message: `${t.reorderSolutionMsg} ${sentenceTarget}`,
@@ -391,26 +463,31 @@ export const LernstudioGameRunner: React.FC<Props> = ({
   // 4. Emoji Vocabulary Check
   const handleCheckEmojiVocab = () => {
     if (!currentItem || feedback) return;
-    attemptCountRef.current += 1;
+    if (!isRetryRound) attemptCountRef.current += 1;
     const userText = userAnswerText.trim().toLowerCase();
     const targetGerman = currentItem.german.trim().toLowerCase();
     const targetClean = targetGerman.replace(/^(der|die|das)\s+/i, '');
 
     const isCorrect = userText === targetGerman || userText === targetClean;
     if (isCorrect || teacherOverride) {
-      correctCountRef.current += 1;
-      setScore((s) => s + 10);
-      setStreak((st) => st + 1);
+      if (isRetryRound) {
+        retryCorrectIdsRef.current.add(currentItem.id);
+      } else {
+        correctCountRef.current += 1;
+        setScore((s) => s + 10);
+        setStreak((st) => st + 1);
+      }
       setFeedback({ isCorrect: true, message: t.rightAnswerMsg });
       playSfx('correct');
       playVoice('richtig');
       triggerSparkles(50, 50, '#10b981');
-      triggerFloatingText('+10 ★ Richtig!', 50, 40, '#10b981');
+      triggerFloatingText(isRetryRound ? 'صح! 👏' : '+10 ★ Richtig!', 50, 40, '#10b981');
       scheduleTimeout(() => {
         handleNextQuestion();
       }, 900);
     } else {
-      setStreak(0);
+      if (!isRetryRound) setStreak(0);
+      recordWrongItem(currentItem);
       setFeedback({
         isCorrect: false,
         message: `${t.wrongAnswerMsg} (${currentItem.german})`
@@ -423,24 +500,29 @@ export const LernstudioGameRunner: React.FC<Props> = ({
   // 5. Scrambled Letters Check
   const handleCheckScrambled = () => {
     if (!currentItem || feedback) return;
-    attemptCountRef.current += 1;
+    if (!isRetryRound) attemptCountRef.current += 1;
     const constructedWord = scrambledSelected.map((i) => scrambledLetters[i]?.char || '').join('').toLowerCase();
     const targetWord = currentItem.german.replace(/^(der|die|das)\s+/i, '').trim().toLowerCase();
 
     if (constructedWord === targetWord) {
-      correctCountRef.current += 1;
-      setScore((s) => s + 10);
-      setStreak((st) => st + 1);
+      if (isRetryRound) {
+        retryCorrectIdsRef.current.add(currentItem.id);
+      } else {
+        correctCountRef.current += 1;
+        setScore((s) => s + 10);
+        setStreak((st) => st + 1);
+      }
       setFeedback({ isCorrect: true, message: t.rightAnswerMsg });
       playSfx('correct');
       playVoice('weiter_so');
       triggerSparkles(50, 50, '#10b981');
-      triggerFloatingText('+10 ★ Weiter so!', 50, 40, '#fbbf24');
+      triggerFloatingText(isRetryRound ? 'صح! 👏' : '+10 ★ Weiter so!', 50, 40, '#fbbf24');
       scheduleTimeout(() => {
         handleNextQuestion();
       }, 900);
     } else {
-      setStreak(0);
+      if (!isRetryRound) setStreak(0);
+      recordWrongItem(currentItem);
       setFeedback({
         isCorrect: false,
         message: `${t.wrongAnswerMsg} (${currentItem.german})`
@@ -452,13 +534,15 @@ export const LernstudioGameRunner: React.FC<Props> = ({
 
   const handleCheckGrammarAnswer = (answerStr: string, optIdx?: number) => {
     if (!currentGrammarQuestion || feedback) return;
-    attemptCountRef.current += 1;
+    if (!isRetryRound) attemptCountRef.current += 1;
     if (optIdx !== undefined) setSelectedOptionIndex(optIdx);
     const isCorrect = evaluateGameQuestionAnswer(answerStr, currentGrammarQuestion) || teacherOverride;
     if (isCorrect) {
-      correctCountRef.current += 1;
-      setScore((s) => s + 10);
-      setStreak((st) => st + 1);
+      if (!isRetryRound) {
+        correctCountRef.current += 1;
+        setScore((s) => s + 10);
+        setStreak((st) => st + 1);
+      }
       setFeedback({
         isCorrect: true,
         message: currentGrammarQuestion.explanation
@@ -468,10 +552,11 @@ export const LernstudioGameRunner: React.FC<Props> = ({
       playSfx('correct');
       playVoice('richtig');
       triggerSparkles(50, 50, '#10b981');
-      triggerFloatingText('+10 ★ Richtig!', 50, 40, '#10b981');
+      triggerFloatingText(isRetryRound ? 'صح! 👏' : '+10 ★ Richtig!', 50, 40, '#10b981');
       scheduleTimeout(() => handleNextQuestion(), 1100);
     } else {
-      setStreak(0);
+      if (!isRetryRound) setStreak(0);
+      recordWrongGrammar(currentGrammarQuestion);
       setFeedback({
         isCorrect: false,
         message: `${t.wrongAnswerMsg} (${currentGrammarQuestion.correctAnswer})${
@@ -552,6 +637,12 @@ export const LernstudioGameRunner: React.FC<Props> = ({
             <Award className="w-3.5 h-3.5" />
             <span>{t.streakLabel} {streak} 🔥</span>
           </div>
+
+          {isRetryRound && (
+            <div className="px-2.5 py-1 rounded-lg bg-sky-500/15 border border-sky-500/40 text-sky-600 dark:text-sky-300 font-bold text-xs flex items-center gap-1">
+              <span>🔁 جولة تدريب — بدون نقاط</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -657,6 +748,51 @@ export const LernstudioGameRunner: React.FC<Props> = ({
           <p className="text-sm text-text-muted">
             {t.completedGameDesc} (<strong className="text-primary font-black">{score} {t.pointsLabel}</strong>)
           </p>
+
+          {/* Q25: real review of the words answered wrong + "practice these" */}
+          {retryDone && wrongItems.length === 0 && (
+            <p className="text-sm font-black text-emerald-600 dark:text-emerald-400">
+              🎉 راجعت كل الكلمات اللي غلطت فيها وجاوبتها صح!
+            </p>
+          )}
+          {wrongItems.length > 0 && (
+            <div className="text-right space-y-2 max-w-md mx-auto w-full">
+              <h3 className="text-xs font-black text-text-main text-center">
+                📝 كلمات تحتاج مراجعة ({wrongItems.length}):
+              </h3>
+              <div className="max-h-44 overflow-y-auto space-y-1.5 pr-0.5">
+                {wrongItems.map((w) => (
+                  <div
+                    key={w.id}
+                    className="flex items-center justify-between gap-2 p-2.5 rounded-xl border bg-rose-500/5 border-rose-500/20 text-xs font-bold"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => speakGermanText(w.german, 0.9)}
+                        className="p-1 rounded-md bg-surface border border-surface-border text-text-main cursor-pointer shrink-0"
+                        aria-label="استمع للنطق"
+                      >
+                        <Volume2 className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="text-text-main font-mono" dir="ltr">{w.german}</span>
+                    </div>
+                    <span className="text-text-muted truncate">{w.arabic}</span>
+                  </div>
+                ))}
+              </div>
+              {wrongItems.some((w) => rawItems.some((it) => it.id === w.id)) && (
+                <button
+                  type="button"
+                  onClick={startRetryRound}
+                  className="w-full py-2.5 px-4 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-xs"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>🔁 اتدرب على الكلمات دي (تدريب بدون نقاط)</span>
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="flex items-center justify-center gap-3 pt-2">
             <button
@@ -850,10 +986,19 @@ export const LernstudioGameRunner: React.FC<Props> = ({
                       ? feedback?.isCorrect
                         ? 'bg-emerald-500 text-white border-emerald-600'
                         : 'bg-rose-500 text-white border-rose-600'
+                      : feedback !== null &&
+                        !feedback.isCorrect &&
+                        opt.trim().toLowerCase() === currentGrammarQuestion.correctAnswer.trim().toLowerCase()
+                      ? 'bg-emerald-500 text-white border-emerald-600'
                       : 'bg-surface hover:bg-surface-hover border-surface-border text-text-main'
                   }`}
                 >
                   {opt}
+                  {feedback !== null &&
+                  !feedback.isCorrect &&
+                  opt.trim().toLowerCase() === currentGrammarQuestion.correctAnswer.trim().toLowerCase()
+                    ? ' ✓'
+                    : ''}
                 </button>
               ))}
             </div>
@@ -906,13 +1051,13 @@ export const LernstudioGameRunner: React.FC<Props> = ({
             {/* Question Progress bar */}
             <div className="space-y-1">
               <div className="flex items-center justify-between text-xs font-extrabold text-text-muted">
-                <span>{t.questionProgress} {items.length > 0 ? currentIndex + 1 : 0} / {items.length}</span>
-                <span>{items.length > 0 ? Math.round(((currentIndex + 1) / items.length) * 100) : 0}%</span>
+                <span>{t.questionProgress} {activeListLength > 0 ? currentIndex + 1 : 0} / {activeListLength}</span>
+                <span>{activeListLength > 0 ? Math.round(((currentIndex + 1) / activeListLength) * 100) : 0}%</span>
               </div>
               <div className="w-full h-2 bg-surface-hover rounded-full overflow-hidden">
                 <div
                   className="h-full bg-primary transition-all duration-300 rounded-full"
-                  style={{ width: `${items.length > 0 ? ((currentIndex + 1) / items.length) * 100 : 0}%` }}
+                  style={{ width: `${activeListLength > 0 ? ((currentIndex + 1) / activeListLength) * 100 : 0}%` }}
                 />
               </div>
             </div>
@@ -957,16 +1102,21 @@ export const LernstudioGameRunner: React.FC<Props> = ({
                             onClick={() => {
                               setSelectedOptionIndex(idx);
                               if (isRight) {
-                                setScore((s) => s + 10);
-                                setStreak((st) => st + 1);
+                                if (isRetryRound) {
+                                  retryCorrectIdsRef.current.add(currentItem.id);
+                                } else {
+                                  setScore((s) => s + 10);
+                                  setStreak((st) => st + 1);
+                                }
                                 setFeedback({ isCorrect: true, message: t.rightAnswerMsg });
                                 playLernstudioSound('correct');
                                 playGermanVoiceFeedback('richtig');
                                 triggerSparkles(50, 50, '#10b981');
-                                triggerFloatingText('+10 ★ Richtig!', 50, 40, '#10b981');
+                                triggerFloatingText(isRetryRound ? 'صح! 👏' : '+10 ★ Richtig!', 50, 40, '#10b981');
                                 setTimeout(() => handleNextQuestion(), 900);
                               } else {
-                                setStreak(0);
+                                if (!isRetryRound) setStreak(0);
+                                recordWrongItem(currentItem);
                                 setFeedback({
                                   isCorrect: false,
                                   message: `${t.wrongAnswerMsg} (${activeEx.correctAnswer})`
@@ -980,10 +1130,13 @@ export const LernstudioGameRunner: React.FC<Props> = ({
                                 ? feedback?.isCorrect
                                   ? 'bg-emerald-500 text-white border-emerald-600'
                                   : 'bg-rose-500 text-white border-rose-600'
+                                : feedback !== null && !feedback.isCorrect && isRight
+                                ? 'bg-emerald-500 text-white border-emerald-600'
                                 : 'bg-surface hover:bg-surface-hover border-surface-border text-text-main'
                             }`}
                           >
                             {opt}
+                            {feedback !== null && !feedback.isCorrect && isRight ? ' ✓' : ''}
                           </button>
                         );
                       })}
@@ -1006,23 +1159,32 @@ export const LernstudioGameRunner: React.FC<Props> = ({
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" dir="ltr">
-                  {mcOptions.map((opt, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      disabled={feedback !== null}
-                      onClick={() => handleCheckMultipleChoice(opt, idx)}
-                      className={`p-4 rounded-2xl font-black text-base text-center transition-all border cursor-pointer font-mono ${
-                        selectedOptionIndex === idx
-                          ? feedback?.isCorrect
+                  {mcOptions.map((opt, idx) => {
+                    const isCorrectOption =
+                      opt.trim().toLowerCase() === currentItem.german.trim().toLowerCase();
+                    const showCorrectOption =
+                      feedback !== null && !feedback.isCorrect && isCorrectOption;
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        disabled={feedback !== null}
+                        onClick={() => handleCheckMultipleChoice(opt, idx)}
+                        className={`p-4 rounded-2xl font-black text-base text-center transition-all border cursor-pointer font-mono ${
+                          selectedOptionIndex === idx
+                            ? feedback?.isCorrect
+                              ? 'bg-emerald-500 text-white border-emerald-600'
+                              : 'bg-red-500 text-white border-red-600'
+                            : showCorrectOption
                             ? 'bg-emerald-500 text-white border-emerald-600'
-                            : 'bg-red-500 text-white border-red-600'
-                          : 'bg-surface hover:bg-surface-hover border-surface-border text-text-main'
-                      }`}
-                    >
-                      {opt}
-                    </button>
-                  ))}
+                            : 'bg-surface hover:bg-surface-hover border-surface-border text-text-main'
+                        }`}
+                      >
+                        {opt}
+                        {showCorrectOption ? ' ✓' : ''}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}

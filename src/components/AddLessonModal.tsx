@@ -5,6 +5,7 @@ import { useApp } from '../context/AppContext';
 import { storage } from '../services/storageService';
 import { PREDEFINED_GRADES } from '../data/initialData';
 import { GradeLevel, LessonType } from '../types';
+import { resolveDefaultGrade } from '../utils/lessonUtils';
 import { X, Calendar, Clock, AlertTriangle, Sparkles, Check, Video, MapPin, Repeat, ExternalLink, Plus } from 'lucide-react';
 
 interface AddLessonModalProps {
@@ -22,10 +23,11 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
   const [time, setTime] = useState('17:00');
   const [durationMinutes, setDurationMinutes] = useState(60);
   const [type, setType] = useState<LessonType>('online');
-  const [grade, setGrade] = useState<GradeLevel>('Grade 9');
+  const [grade, setGrade] = useState<GradeLevel>(() => groups[0]?.grade || resolveDefaultGrade(groups, profile.defaultGrade));
   const [recordingLink, setRecordingLink] = useState('');
   const [recordingLink2, setRecordingLink2] = useState('');
   const [showRecordingLink2, setShowRecordingLink2] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   
   // Weekly Recurring States (Default: True)
   const [isWeeklyRecurring, setIsWeeklyRecurring] = useState(true);
@@ -112,7 +114,12 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!groupId || hasConflict) return;
+    if (!groupId) {
+      setFormError(_t('مفيش مجموعات أصلاً — اعمل مجموعة الأول وبعدين ضيف الحصة.', 'No groups yet — create a group first, then add the lesson.', 'Keine Gruppen vorhanden — bitte zuerst eine Gruppe erstellen.'));
+      return;
+    }
+    if (hasConflict) return;
+    setFormError(null);
 
     const targetStudent = students.find(s => s.id === studentId);
 
@@ -169,10 +176,16 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-3.5 space-y-2.5 max-h-[75vh] overflow-y-auto">
+          {formError && (
+            <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-xl p-3 text-xs font-bold text-amber-900 dark:text-amber-200 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <span>{formError}</span>
+            </div>
+          )}
           {/* Select Group */}
           <div className="space-y-0.5">
             <label className="text-xs font-bold text-text-main">
-              Gruppe / Kurs *
+              {_t('المجموعة / الكورس *', 'Group / Course *', 'Gruppe / Kurs *')}
             </label>
             <select
               value={groupId}
@@ -198,14 +211,14 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
           {/* Individual Student (Optional if group lesson) */}
           <div className="space-y-0.5">
             <label className="text-xs font-bold text-text-main">
-              Einzelner Schüler (Optional)
+              {_t('طالب محدد (اختياري)', 'Individual Student (Optional)', 'Einzelner Schüler (Optional)')}
             </label>
             <select
               value={studentId}
               onChange={(e) => setStudentId(e.target.value)}
               className="w-full px-3 py-1.5 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-lg text-xs font-semibold focus:outline-none"
             >
-              <option value="">-- Gesamte Gruppe ({selectedGroup?.name}) --</option>
+              <option value="">{_t(`-- المجموعة كلها (${selectedGroup?.name}) --`, `-- Whole group (${selectedGroup?.name}) --`, `-- Gesamte Gruppe (${selectedGroup?.name}) --`)}</option>
               {groupStudents.map(s => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
@@ -215,7 +228,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
           {/* Date & Time */}
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-0.5">
-              <label className="text-xs font-bold text-text-main">Startdatum</label>
+              <label className="text-xs font-bold text-text-main">{_t('تاريخ البدء', 'Start Date', 'Startdatum')}</label>
               <input
                 type="date"
                 required
@@ -226,7 +239,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
             </div>
 
             <div className="space-y-0.5">
-              <label className="text-xs font-bold text-text-main">Uhrzeit</label>
+              <label className="text-xs font-bold text-text-main">{_t('الوقت', 'Time', 'Uhrzeit')}</label>
               <input
                 type="time"
                 required
@@ -242,7 +255,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-primary dark:text-primary flex items-center gap-1.5">
                 <Repeat className="w-3.5 h-3.5 text-primary dark:text-primary" />
-                <span>Wöchentlich Wiederholen</span>
+                <span>{_t('تكرار أسبوعي', 'Repeat Weekly', 'Wöchentlich Wiederholen')}</span>
               </span>
 
               <label className="flex items-center gap-1 cursor-pointer text-xs font-bold text-primary dark:text-primary">
@@ -252,14 +265,14 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
                   onChange={(e) => setIsWeeklyRecurring(e.target.checked)}
                   className="rounded text-primary focus:ring-primary w-3.5 h-3.5"
                 />
-                <span>Aktiv</span>
+                <span>{_t('مفعّل', 'Active', 'Aktiv')}</span>
               </label>
             </div>
 
             {isWeeklyRecurring && (
               <div className="space-y-1 pt-0.5">
                 <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 block">
-                  Anzahl der Wochen:
+                  {_t('عدد الأسابيع:', 'Number of weeks:', 'Anzahl der Wochen:')}
                 </label>
                 <div className="grid grid-cols-3 gap-1">
                   {[4, 8, 12].map((num) => (
@@ -273,12 +286,12 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
                           : 'bg-surface dark:bg-slate-800 text-text-main border border-surface-border dark:border-surface-border-soft'
                       }`}
                     >
-                      {num} W ({num}x)
+                      {_t(`${num} أسابيع`, `${num} weeks`, `${num} W`)}
                     </button>
                   ))}
                 </div>
                 <p className="text-[9.5px] text-primary dark:text-primary font-semibold italic mt-0.5">
-                  ✓ Jeden {new Date(date).toLocaleDateString('de-DE', { weekday: 'short' })} um {time} Uhr.
+                  ✓ {_t(`كل ${new Date(date).toLocaleDateString('ar-EG', { weekday: 'long' })} الساعة ${time}`, `Every ${new Date(date).toLocaleDateString('en-GB', { weekday: 'long' })} at ${time}`, `Jeden ${new Date(date).toLocaleDateString('de-DE', { weekday: 'short' })} um ${time} Uhr.`)}
                 </p>
               </div>
             )}
@@ -307,7 +320,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
           <div className="space-y-1">
             <label className="text-xs font-bold text-text-main flex items-center gap-1">
               <Sparkles className="w-3 h-3 text-primary" />
-              <span>Freie Zeitfenster:</span>
+              <span>{_t('الأوقات الفاضية:', 'Free time slots:', 'Freie Zeitfenster:')}</span>
             </label>
             <div className="flex flex-wrap gap-1">
               {availableSlots.map(slot => (
@@ -329,7 +342,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
 
           {/* Type selector */}
           <div className="space-y-1">
-            <label className="text-xs font-bold text-text-main">Lesson Type</label>
+            <label className="text-xs font-bold text-text-main">{_t('نوع الحصة', 'Lesson Type', 'Unterrichtsart')}</label>
             <div className="grid grid-cols-2 gap-1.5 text-xs">
               <button
                 type="button"
@@ -439,7 +452,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({ onClose }) => {
                 : 'bg-primary hover:bg-primary-hover text-white'
             }`}
           >
-            {hasConflict ? 'Konflikt beheben' : isWeeklyRecurring ? `${repeatWeeks} Wöchentliche Lektionen Speichern` : t('save_lesson_btn')}
+            {hasConflict ? _t('حل التعارض', 'Resolve conflict', 'Konflikt beheben') : isWeeklyRecurring ? _t(`حفظ ${repeatWeeks} حصص أسبوعية`, `Save ${repeatWeeks} weekly lessons`, `${repeatWeeks} wöchentliche Lektionen speichern`) : t('save_lesson_btn')}
           </button>
         </form>
       </div>

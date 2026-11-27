@@ -228,6 +228,20 @@ export const LernstudioTeachPage: React.FC<Props> = ({
   const [feedbackMessage, setFeedbackMessage] = useState<string>('');
   const [isSpeakingFeedback, setIsSpeakingFeedback] = useState<boolean>(false);
 
+  // Q25: words answered wrong across stages 2–8. Reviewed on stage 9 with a
+  // practice-only retry round ("اتدرب على الكلمات دي") — corrected answers
+  // in the retry round do NOT change stars (Q32).
+  const [wrongItems, setWrongItems] = useState<LernstudioItem[]>([]);
+  const [retryItems, setRetryItems] = useState<LernstudioItem[] | null>(null);
+  const [retryIndex, setRetryIndex] = useState(0);
+  const [retrySelectedId, setRetrySelectedId] = useState<string | null>(null);
+  const [retryFeedback, setRetryFeedback] = useState<{ isCorrect: boolean; message: string } | null>(null);
+  const [retryFinishedClean, setRetryFinishedClean] = useState(false);
+  const retryRemainingIdsRef = useRef<Set<string>>(new Set());
+  const recordWrongItem = (item: LernstudioItem) => {
+    setWrongItems((prev) => (prev.some((w) => w.id === item.id) ? prev : [...prev, item]));
+  };
+
   const clearAutoAdvanceTimer = () => {
     if (autoAdvanceTimerRef.current) {
       clearTimeout(autoAdvanceTimerRef.current);
@@ -260,6 +274,13 @@ export const LernstudioTeachPage: React.FC<Props> = ({
     setIsAnswerSubmitted(false);
     setIsCorrectAnswer(null);
     setFeedbackMessage('');
+    setWrongItems([]);
+    setRetryItems(null);
+    setRetryIndex(0);
+    setRetrySelectedId(null);
+    setRetryFeedback(null);
+    setRetryFinishedClean(false);
+    retryRemainingIdsRef.current = new Set();
     clearAutoAdvanceTimer();
     try {
       if (set?.id) {
@@ -297,6 +318,13 @@ export const LernstudioTeachPage: React.FC<Props> = ({
   };
 
   const handleResetProgress = () => {
+    // Q23: one tap used to wipe all teach progress — confirm first.
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm('هتمسح كل تقدم الدرس ده وتبدأ من الأول؟ مش هتقدر ترجع التقدم بعد المسح.')
+    ) {
+      return;
+    }
     clearAutoAdvanceTimer();
     try {
       localStorage.removeItem(STORAGE_KEY);
@@ -311,6 +339,13 @@ export const LernstudioTeachPage: React.FC<Props> = ({
     setIsAnswerSubmitted(false);
     setIsCorrectAnswer(null);
     setFeedbackMessage('');
+    setWrongItems([]);
+    setRetryItems(null);
+    setRetryIndex(0);
+    setRetrySelectedId(null);
+    setRetryFeedback(null);
+    setRetryFinishedClean(false);
+    retryRemainingIdsRef.current = new Set();
     setGrammarExIndex(0);
     setGrammarUserAnswer('');
     setGrammarOrderTokens([]);
@@ -324,6 +359,64 @@ export const LernstudioTeachPage: React.FC<Props> = ({
 
   const items = useMemo(() => (Array.isArray(set?.items) ? set.items : []), [set?.items]);
   const grammarExercises = useMemo(() => (set ? getGrammarLessonExercises(set) : []), [set]);
+
+  // Q25 retry round: multiple-choice over the wrong words only (practice —
+  // no stars change, Q32). Distractors come from the rest of the set.
+  const retryOptions = useMemo(() => {
+    if (!retryItems || retryItems.length === 0) return [] as LernstudioItem[];
+    const target = retryItems[retryIndex % retryItems.length];
+    if (!target) return [] as LernstudioItem[];
+    const distractors = shuffleArray(items.filter((it) => it.id !== target.id)).slice(0, 3);
+    return shuffleArray([target, ...distractors]);
+  }, [retryItems, retryIndex, items]);
+
+  const startRetryRound = () => {
+    if (wrongItems.length === 0) return;
+    retryRemainingIdsRef.current = new Set(wrongItems.map((w) => w.id));
+    setRetryItems([...wrongItems]);
+    setRetryIndex(0);
+    setRetrySelectedId(null);
+    setRetryFeedback(null);
+    setRetryFinishedClean(false);
+  };
+
+  const advanceRetry = () => {
+    if (!retryItems) return;
+    clearAutoAdvanceTimer();
+    if (retryIndex + 1 < retryItems.length) {
+      setRetryIndex((i) => i + 1);
+      setRetrySelectedId(null);
+      setRetryFeedback(null);
+    } else {
+      const remaining = retryItems.filter((it) => retryRemainingIdsRef.current.has(it.id));
+      setWrongItems(remaining);
+      setRetryItems(null);
+      setRetrySelectedId(null);
+      setRetryFeedback(null);
+      setRetryFinishedClean(remaining.length === 0);
+    }
+  };
+
+  const handleRetryAnswer = (chosen: LernstudioItem) => {
+    if (!retryItems || retrySelectedId) return;
+    const target = retryItems[retryIndex % retryItems.length];
+    if (!target) return;
+    const correct = chosen.id === target.id;
+    setRetrySelectedId(chosen.id);
+    if (correct) {
+      retryRemainingIdsRef.current.delete(target.id);
+      if (soundEnabled) playLernstudioSound('correct');
+      setRetryFeedback({ isCorrect: true, message: `صح! ${target.german} = ${target.arabic} 👏` });
+      clearAutoAdvanceTimer();
+      autoAdvanceTimerRef.current = setTimeout(() => advanceRetry(), 1100);
+    } else {
+      if (soundEnabled) playLernstudioSound('wrong');
+      setRetryFeedback({
+        isCorrect: false,
+        message: `الإجابة الصحيحة هي: ${target.german} (${target.arabic})`
+      });
+    }
+  };
 
   // German Speech Synthesis (Android & Mobile Cross-Platform)
   const handleSpeakGerman = (text: string) => {
@@ -682,6 +775,7 @@ export const LernstudioTeachPage: React.FC<Props> = ({
       // Advance to next question without repeating pronunciation
       handleCorrectAnswerAdvance(handleStage2NextQuestion);
     } else {
+      recordWrongItem(currentQ.targetItem);
       setStars((prev) => Math.max(0, prev - 50));
       if (soundEnabled) {
         playLernstudioSound('wrong');
@@ -723,6 +817,7 @@ export const LernstudioTeachPage: React.FC<Props> = ({
       // Advance to next question without repeating pronunciation
       handleCorrectAnswerAdvance(handleStage3NextQuestion);
     } else {
+      recordWrongItem(currentQ.targetItem);
       setStars((prev) => Math.max(0, prev - 50));
       if (soundEnabled) {
         playLernstudioSound('wrong');
@@ -763,6 +858,7 @@ export const LernstudioTeachPage: React.FC<Props> = ({
       // Advance to next question without repeating pronunciation
       handleCorrectAnswerAdvance(handleStage4NextQuestion);
     } else {
+      recordWrongItem(currentQ.targetItem);
       setStars((prev) => Math.max(0, prev - 50));
       if (soundEnabled) {
         playLernstudioSound('wrong');
@@ -822,6 +918,7 @@ export const LernstudioTeachPage: React.FC<Props> = ({
       }
     } else {
       // Incorrect choice — first wrong pick locks the question (no full-credit retry)
+      recordWrongItem(currentQ.targetItem);
       setStars((prev) => Math.max(0, prev - 25));
       if (soundEnabled) {
         playLernstudioSound('wrong');
@@ -864,6 +961,7 @@ export const LernstudioTeachPage: React.FC<Props> = ({
       setFeedbackMessage('ممتاز! تم إكمال الحرف الناقص بنجاح +100 💰 🌟');
       handleCorrectAnswerAdvance(handleStage5NextQuestion);
     } else {
+      recordWrongItem(currentQ.targetItem);
       setStars((prev) => Math.max(0, prev - 50));
       if (soundEnabled) {
         playLernstudioSound('wrong');
@@ -921,6 +1019,7 @@ export const LernstudioTeachPage: React.FC<Props> = ({
       }
     } else {
       // Incorrect choice — first wrong pick locks the question (no full-credit retry)
+      recordWrongItem(currentQ.targetItem);
       setStars((prev) => Math.max(0, prev - 25));
       if (soundEnabled) {
         playLernstudioSound('wrong');
@@ -982,6 +1081,7 @@ export const LernstudioTeachPage: React.FC<Props> = ({
       }
     } else {
       // Incorrect choice — first wrong pick locks the question (no full-credit retry)
+      recordWrongItem(currentQ.targetItem);
       setStars((prev) => Math.max(0, prev - 25));
       if (soundEnabled) {
         playLernstudioSound('wrong');
@@ -2604,8 +2704,86 @@ export const LernstudioTeachPage: React.FC<Props> = ({
             </div>
           )}
 
+          {/* ================= Q25 RETRY ROUND: practice the wrong words only ================= */}
+          {retryItems !== null && retryItems.length > 0 && (() => {
+            const target = retryItems[retryIndex % retryItems.length];
+            if (!target) return null;
+            return (
+              <div className="w-full space-y-5 flex-1 flex flex-col items-center justify-center py-2 animate-scale-up">
+                <div className="p-4 bg-sky-500/10 border border-sky-500/30 rounded-3xl text-center space-y-2 max-w-2xl w-full">
+                  <p className="text-xs font-black text-sky-600 dark:text-sky-300">
+                    🔁 جولة تدريب — الكلمات اللي غلطت فيها (تدريب بدون نقاط)
+                  </p>
+                  <p className="text-[11px] font-bold text-text-muted">
+                    السؤال {retryIndex + 1} من {retryItems.length} · إجابتك هنا مش بتغيّر النجوم
+                  </p>
+                  <div className="w-full h-2 bg-surface-hover rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-sky-500 transition-all duration-300 rounded-full"
+                      style={{ width: `${((retryIndex + 1) / Math.max(1, retryItems.length)) * 100}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div className="p-5 sm:p-6 bg-surface border border-surface-border rounded-3xl text-center space-y-3 max-w-2xl w-full shadow-xs">
+                  <span className="text-3xl block">{target.emoji || '📚'}</span>
+                  <h3 className="text-xl sm:text-2xl font-black text-text-main">{target.arabic}</h3>
+                  <p className="text-xs font-bold text-primary">اختر الكلمة الألمانية الصحيحة:</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1" dir="ltr">
+                    {retryOptions.map((opt) => {
+                      const isCorrectOpt = opt.id === target.id;
+                      const isPicked = retrySelectedId === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          disabled={retrySelectedId !== null}
+                          onClick={() => handleRetryAnswer(opt)}
+                          className={`p-4 rounded-2xl font-black text-base text-center transition-all border cursor-pointer font-mono ${
+                            isPicked
+                              ? retryFeedback?.isCorrect
+                                ? 'bg-emerald-500 text-white border-emerald-600'
+                                : 'bg-rose-500 text-white border-rose-600'
+                              : retryFeedback !== null && !retryFeedback.isCorrect && isCorrectOpt
+                              ? 'bg-emerald-500 text-white border-emerald-600'
+                              : 'bg-surface hover:bg-surface-hover border-surface-border text-text-main'
+                          }`}
+                        >
+                          {opt.german}
+                          {retryFeedback !== null && !retryFeedback.isCorrect && isCorrectOpt ? ' ✓' : ''}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {retryFeedback && (
+                    <div
+                      className={`p-3 rounded-xl text-xs font-black ${
+                        retryFeedback.isCorrect
+                          ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                          : 'bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400'
+                      }`}
+                    >
+                      {retryFeedback.message}
+                    </div>
+                  )}
+
+                  {retryFeedback && !retryFeedback.isCorrect && (
+                    <button
+                      type="button"
+                      onClick={advanceRetry}
+                      className="px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-hover text-white font-black text-xs shadow-md cursor-pointer"
+                    >
+                      التالي ➔
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* ================= STAGE 9: Game Suggestions & Victory ================= */}
-          {currentStage === 9 && (
+          {currentStage === 9 && !retryItems && (
             <div className="w-full space-y-5 flex-1 flex flex-col items-center justify-center py-2 animate-scale-up">
               <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-3xl text-center space-y-3 max-w-2xl w-full">
                 <div className="inline-flex p-3 bg-amber-500 text-white rounded-2xl shadow-lg">
@@ -2620,6 +2798,49 @@ export const LernstudioTeachPage: React.FC<Props> = ({
                   </p>
                 </div>
               </div>
+
+              {/* Q25: review of the words answered wrong + "practice these" */}
+              {retryFinishedClean && wrongItems.length === 0 && (
+                <p className="text-sm font-black text-emerald-600 dark:text-emerald-400 text-center">
+                  🎉 راجعت كل الكلمات اللي غلطت فيها وجاوبتها صح!
+                </p>
+              )}
+              {wrongItems.length > 0 && (
+                <div className="w-full max-w-2xl space-y-2">
+                  <h4 className="text-xs font-black text-text-main text-right">
+                    📝 كلمات تحتاج مراجعة ({wrongItems.length}):
+                  </h4>
+                  <div className="max-h-44 overflow-y-auto space-y-1.5 pr-0.5">
+                    {wrongItems.map((w) => (
+                      <div
+                        key={w.id}
+                        className="flex items-center justify-between gap-2 p-2.5 rounded-xl border bg-rose-500/5 border-rose-500/20 text-xs font-bold"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => speakGermanText(w.german, 0.9)}
+                            className="p-1 rounded-md bg-surface border border-surface-border text-text-main cursor-pointer shrink-0"
+                            aria-label="استمع للنطق"
+                          >
+                            <Volume2 className="w-3.5 h-3.5" />
+                          </button>
+                          <span className="text-text-main font-mono" dir="ltr">{w.german}</span>
+                        </div>
+                        <span className="text-text-muted truncate">{w.arabic}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={startRetryRound}
+                    className="w-full py-2.5 px-4 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-xs"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span>🔁 اتدرب على الكلمات دي (تدريب بدون نقاط)</span>
+                  </button>
+                </div>
+              )}
 
               {/* Game Mode Recommendations Grid */}
               <div className="w-full space-y-2">

@@ -17,6 +17,7 @@ import {
 import { Group, GroupWeeklySession, ZoomMeetingRecord, ZoomMeetingHistory } from '../types';
 import { useApp } from '../context/AppContext';
 import { isApprovedSyncedZoomSession } from '../services/zoomSessionStandardizer';
+import { isMeetGroup } from '../utils/groupPlatformUtils';
 import {
   loadZoomUiMeta,
   ZoomUiMetaState,
@@ -240,6 +241,11 @@ export const GroupWeeklySessionsPanel: React.FC<GroupWeeklySessionsPanelProps> =
   };
 
   const handleCreateOrSyncZoom = async (session: GroupWeeklySession, forceConfirmManual = false) => {
+    // Meet groups run on Google Meet — never create or recover a Zoom meeting for them.
+    if (isMeetGroup(group)) {
+      triggerToast(_t('المجموعة دي شغالة على Google Meet — مفيش اجتماع Zoom ليها.', 'This group runs on Google Meet — no Zoom meeting applies.', 'Diese Gruppe nutzt Google Meet — kein Zoom-Meeting.'));
+      return;
+    }
     const hasExplicitManual =
       session.meetingSource === 'manual' &&
       session.syncState !== 'pending' &&

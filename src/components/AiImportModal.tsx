@@ -117,7 +117,7 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
         address: group.type === 'offline' ? (group.address || '') : undefined,
         whatsAppGroupLink: group.whatsapp_link || '',
         color
-      });
+      }, { silent: true });
 
       createdGroups.push(newGroup);
 
@@ -145,7 +145,7 @@ export const AiImportModal: React.FC<AiImportModalProps> = ({
             groupId: newGroup.id,
             scheduleRecurrence: st.scheduleRecurrence || group.recurrence || 'weekly',
             grade: group.grade
-          });
+          }, { silent: true });
           createdAllStudents.push(newStudent);
           totalStudentsAdded++;
         } catch (dupErr: any) {

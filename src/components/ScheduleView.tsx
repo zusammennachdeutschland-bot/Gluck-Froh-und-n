@@ -22,7 +22,7 @@ import { DAY_KEY_TO_RRULE_BYDAY, getUpcomingDateForDayKey, formatIcsEventBlock, 
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { shareFileNative } from '../services/downloadedFilesService';
-import { resolveActiveZoomLinkForLesson, resolveCanonicalZoomLinkStatus } from '../services/zoomSessionStandardizer';
+import { resolveActiveMeetingLinkForLesson, resolveCanonicalZoomLinkStatus } from '../services/zoomSessionStandardizer';
 
 export const ScheduleView: React.FC = () => {
   const { lessons, getFullLessonsSnapshot, groups, students, groupWeeklySessions, profile, openLessonControl, setIsAddLessonModalOpen, setIsAddQuickLessonModalOpen, updateLesson, deleteLesson, refreshCalendarAndDashboard, t, language, _t } = useApp();
@@ -441,7 +441,7 @@ export const ScheduleView: React.FC = () => {
       const grade = l.grade || targetGroup?.grade || 'General';
       const isOnlineLesson = l.type === 'online' || targetGroup?.type === 'online';
       const resolvedOnlineLink = isOnlineLesson
-        ? resolveActiveZoomLinkForLesson({
+        ? resolveActiveMeetingLinkForLesson({
             group: targetGroup,
             lesson: l,
             groupWeeklySessions

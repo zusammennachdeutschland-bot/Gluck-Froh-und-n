@@ -1,6 +1,7 @@
 import { Group, GroupScheduleSlot, GroupWeeklySession, Lesson, ScheduleRecurrence } from '../types';
 import { parseLocalDate, formatLocalDate, normalizeDateToISO } from './timeUtils';
-import { resolveActiveZoomLinkForLesson } from '../services/zoomSessionStandardizer';
+import { resolveActiveMeetingLinkForLesson } from '../services/zoomSessionStandardizer';
+import { getGroupMeetingLink, isMeetGroup } from './groupPlatformUtils';
 
 const normalizeTime = (t?: string): string => {
   if (!t || typeof t !== 'string') return '';
@@ -409,7 +410,7 @@ export function getProjectedLessonsForRange(
 
           const projectedWeekday = cursor.getDay();
           const resolvedSessionLink = Array.isArray(groupWeeklySessions)
-            ? resolveActiveZoomLinkForLesson({
+            ? resolveActiveMeetingLinkForLesson({
                 group,
                 groupId: group.id,
                 groupWeeklySessions,
@@ -438,7 +439,7 @@ export function getProjectedLessonsForRange(
               group.type === 'online'
                 ? Array.isArray(groupWeeklySessions)
                   ? resolvedSessionLink || undefined
-                  : group.zoomLink || defaultZoomLink
+                  : getGroupMeetingLink(group) || (isMeetGroup(group) ? undefined : defaultZoomLink)
                 : undefined,
             locationAddress: group.type === 'offline' ? (group.address || 'Cairo Center') : undefined,
             scheduleRecurrence: group.scheduleRecurrence || 'weekly',
@@ -469,7 +470,7 @@ export function getProjectedLessonsForRange(
         l.groupId
       ) {
         if (Array.isArray(groupWeeklySessions)) {
-          const canonicalLink = resolveActiveZoomLinkForLesson({
+          const canonicalLink = resolveActiveMeetingLinkForLesson({
             group: grp,
             groupId: l.groupId,
             lesson: l,
@@ -477,9 +478,9 @@ export function getProjectedLessonsForRange(
           });
           effectiveMeetingLink = canonicalLink || undefined;
         } else {
-          const groupZoomUrl = (grp?.zoomLink || grp?.meetLink || '').trim();
+          const groupZoomUrl = getGroupMeetingLink(grp);
           const lessonMeetingUrl = (l.meetingLink || '').trim();
-          effectiveMeetingLink = groupZoomUrl || lessonMeetingUrl || defaultZoomLink || undefined;
+          effectiveMeetingLink = groupZoomUrl || lessonMeetingUrl || (isMeetGroup(grp) ? undefined : defaultZoomLink) || undefined;
         }
       }
       const nextLesson: Lesson = {

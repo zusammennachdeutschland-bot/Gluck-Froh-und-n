@@ -10,15 +10,17 @@ import { normalizeEgyptianPhone } from '../utils/contactsStandardizer';
 import { NewGroupContactsPromptModal } from './NewGroupContactsPromptModal';
 import { Group, Student } from '../types';
 import { findDuplicateStudentByName } from '../utils/nameUtils';
+import { resolveDefaultGrade } from '../utils/lessonUtils';
 
 interface AddGroupModalProps {
   onClose: () => void;
 }
 
 export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
-  const { addGroup, addStudent, students, generateGroupScheduleLessons, triggerToast, profile, language, t, _t } = useApp();
+  const { addGroup, addStudent, students, groups, generateGroupScheduleLessons, triggerToast, profile, language, t, _t } = useApp();
 
   const [isAiImportOpen, setIsAiImportOpen] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [createdRosterForPrompt, setCreatedRosterForPrompt] = useState<{
     group: Group;
     students: Student[];
@@ -28,20 +30,21 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
   const [createStudentWithGroup, setCreateStudentWithGroup] = useState(false);
   const [studentName, setStudentName] = useState('');
   const [studentParentName, setStudentParentName] = useState('');
+  const [studentParentRelation, setStudentParentRelation] = useState<'father' | 'mother'>('mother');
   const [studentPhone, setStudentPhone] = useState('');
   const [studentContactType, setStudentContactType] = useState<'phone' | 'username'>('phone');
   const [studentParentPhone, setStudentParentPhone] = useState('');
-  const [studentGrade, setStudentGrade] = useState<GradeLevel>('Grade 9');
+  const [studentGrade, setStudentGrade] = useState<GradeLevel>(() => resolveDefaultGrade(groups, profile.defaultGrade));
   const [studentNotes, setStudentNotes] = useState('');
 
   const handleSubmit = (data: GroupFormData) => {
     if (createStudentWithGroup) {
       if (!studentName.trim()) {
-        alert(t('auto_please_enter_student_name'));
+        setSubmitError(t('auto_please_enter_student_name'));
         return;
       }
       if (!studentParentPhone.trim()) {
-        alert(_t('رقم الهاتف أو اليوزر نيم لولي الأمر مطلوب', 'Parent phone number or WhatsApp username is required', 'Telefonnummer oder WhatsApp-Benutzername der Eltern ist erforderlich'));
+        setSubmitError(_t('رقم الهاتف أو اليوزر نيم لولي الأمر مطلوب', 'Parent phone number or WhatsApp username is required', 'Telefonnummer oder WhatsApp-Benutzername der Eltern ist erforderlich'));
         return;
       }
       const dupStudent = findDuplicateStudentByName(students, studentName);
@@ -51,12 +54,12 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
           `A student with this name already exists (${dupStudent.name}). Please enter a distinct name.`,
           `Ein Schüler mit diesem Namen existiert bereits (${dupStudent.name}).`
         );
-        if (triggerToast) triggerToast(dupMsg);
-        else alert(dupMsg);
+        triggerToast(dupMsg);
         return;
       }
     }
 
+    setSubmitError(null);
     const isPerLesson = data.paymentCycle === 'per_lesson';
     const effectiveSessionCount = isPerLesson ? 1 : Math.max(2, Number(data.sessionCount) || 4);
     const pricePerSession = Number(data.pricePerSession) || 0;
@@ -87,6 +90,7 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
       schedules,
       zoomLink: data.type === 'online' ? data.zoomLink : undefined,
       meetLink: data.type === 'online' ? data.meetLink : undefined,
+      onlinePlatform: data.type === 'online' ? data.onlinePlatform : undefined,
       address: data.type === 'offline' ? data.address : undefined,
       coordinates: data.type === 'offline' ? { lat: 30.0444, lng: 31.2357 } : undefined,
       color: data.color,
@@ -99,7 +103,7 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
       const isUser = studentContactType === 'username' || isWhatsAppUsername(studentParentPhone);
       const cleanUser = cleanWhatsAppUsername(studentParentPhone);
       const finalPhone = isUser ? `@${cleanUser}` : normalizeEgyptianPhone(studentParentPhone);
-      const finalParentName = studentParentName.trim() || `أم ${studentName.trim()}`;
+      const finalParentName = studentParentName.trim() || (studentParentRelation === 'father' ? `أبو ${studentName.trim()}` : `أم ${studentName.trim()}`);
 
       const hasStudentVal = !!studentPhone.trim();
       const isStudentUser = hasStudentVal && (isWhatsAppUsername(studentPhone) || studentPhone.startsWith('@'));
@@ -166,6 +170,11 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
           </button>
         </div>
 
+        {submitError && (
+          <div className="mx-5 mt-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-xl p-3 text-xs font-bold text-amber-900 dark:text-amber-200">
+            {submitError}
+          </div>
+        )}
         {/* Form Body via GroupForm */}
         <GroupForm onSubmit={handleSubmit} isEdit={false}>
           {/* AI Import Shortcut Banner */}
@@ -243,6 +252,29 @@ export const AddGroupModal: React.FC<AddGroupModalProps> = ({ onClose }) => {
                     placeholder={t('auto_e_g_ali_mahmoud')}
                     className="w-full px-3 py-2 bg-surface border border-surface-border rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary"
                   />
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center bg-surface-hover border border-surface-border rounded-lg p-0.5 text-[11px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => setStudentParentRelation('father')}
+                        className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${studentParentRelation === 'father' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted hover:text-text-main'}`}
+                      >
+                        {_t('والد (أبو)', 'Father', 'Vater')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStudentParentRelation('mother')}
+                        className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${studentParentRelation === 'mother' ? 'bg-primary text-white shadow-2xs' : 'text-text-muted hover:text-text-main'}`}
+                      >
+                        {_t('والدة (أم)', 'Mother', 'Mutter')}
+                      </button>
+                    </div>
+                    {!studentParentName.trim() && studentName.trim() && (
+                      <span className="text-[10px] text-text-muted font-medium">
+                        {_t(`هيتسجل كـ "${studentParentRelation === 'father' ? 'أبو' : 'أم'} ${studentName.trim()}"`, `Will be saved as "${studentParentRelation === 'father' ? 'Father of' : 'Mother of'} ${studentName.trim()}"`)}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Parent Phone / Username */}

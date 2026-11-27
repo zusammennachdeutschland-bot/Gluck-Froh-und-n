@@ -5310,10 +5310,18 @@ export async function fetchAssignmentDetailsWithSync(
 
   // Fetch ONLY this assignment's paginated submissions when the assignment already exists locally,
   // avoiding an extra assignment document read on every Report Refresh click.
-  const withFastTimeout = <T>(p: Promise<T>, fallback: T, ms = 3500): Promise<T> =>
+  // 8s (was 3.5s): slow mobile networks need more time. A timeout/rejection is
+  // reported via `ok: false` so the UI can tell "fetch failed" apart from
+  // "no submissions yet" instead of silently showing a stale empty list.
+  const withFastTimeout = <T>(p: Promise<T>, fallback: T, ms = 8000): Promise<{ value: T; ok: boolean }> =>
     Promise.race([
-      p.catch(() => fallback),
-      new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))
+      p.then(
+        (value) => ({ value, ok: true }),
+        () => ({ value: fallback, ok: false })
+      ),
+      new Promise<{ value: T; ok: boolean }>((resolve) =>
+        setTimeout(() => resolve({ value: fallback, ok: false }), ms)
+      )
     ]);
 
   let nextCursor: string | null = null;
@@ -5330,35 +5338,47 @@ export async function fetchAssignmentDetailsWithSync(
     !existingLocalHw ||
     Boolean(testCloudTransport?.fetchAssignment);
 
-  const [cloudHw, cloudSubs] = await Promise.all([
+  const [cloudHwRes, cloudSubsRes] = await Promise.all([
     shouldFetchAssignmentDoc
       ? withFastTimeout(activeFetchAssignmentFromCloud(id), null)
-      : Promise.resolve(existingLocalHw),
+      : Promise.resolve({ value: existingLocalHw, ok: true }),
     (async () => {
       if (testCloudTransport?.fetchSubmissionsForAssignment) {
-        return await withFastTimeout(
+        const r = await withFastTimeout(
           testCloudTransport.fetchSubmissionsForAssignment(id),
           [] as HomeworkSubmission[]
         );
+        return { ...r, nextCursor: null as string | null, hasMore: false };
       }
       if (options?.limit !== undefined || options?.cursor !== undefined) {
-        const page = await withFastTimeout(
+        const r = await withFastTimeout(
           fetchSubmissionsPageFromFirestore(id, {
             limit: options?.limit,
             cursor: options?.cursor
           }),
           { submissions: [] as HomeworkSubmission[], nextCursor: null, hasMore: false }
         );
-        nextCursor = page.nextCursor;
-        hasMore = page.hasMore;
-        return page.submissions;
+        return {
+          value: r.value.submissions,
+          ok: r.ok,
+          nextCursor: r.value.nextCursor,
+          hasMore: r.value.hasMore
+        };
       }
-      return await withFastTimeout(
+      const r = await withFastTimeout(
         activeFetchSubmissionsForAssignmentFromCloud(id),
         [] as HomeworkSubmission[]
       );
+      return { ...r, nextCursor: null as string | null, hasMore: false };
     })()
   ]);
+
+  const cloudHw = cloudHwRes.value;
+  const cloudSubs = cloudSubsRes.value;
+  nextCursor = cloudSubsRes.nextCursor;
+  hasMore = cloudSubsRes.hasMore;
+  // True only when every cloud read that was attempted actually answered.
+  const cloudSyncOk = cloudHwRes.ok && cloudSubsRes.ok;
 
   if (getActiveHomeworkScopeUid() !== scopeAtStart || getCurrentHomeworkOwnerUid() !== authUidAtStart) {
     return null;
@@ -5383,7 +5403,11 @@ export async function fetchAssignmentDetailsWithSync(
     }
   });
 
-  const lastRefreshedAtMs = recordHomeworkLastRefreshTimestamp(`report:${safeId}`, Date.now(), scopeAtStart);
+  // Record a refresh timestamp ONLY when the cloud actually answered; a
+  // timeout must not be stamped as a successful refresh.
+  const lastRefreshedAtMs = cloudSyncOk
+    ? recordHomeworkLastRefreshTimestamp(`report:${safeId}`, Date.now(), scopeAtStart)
+    : getHomeworkLastRefreshTimestamp(`report:${safeId}`, scopeAtStart);
 
   if (hwChanged || subsChanged) {
     notifyHomeworkSyncStateChanged({
@@ -5406,6 +5430,7 @@ export async function fetchAssignmentDetailsWithSync(
     ...computeAssignmentDetailsObject(rawHw, rosterStudents),
     nextCursor,
     hasMore,
+    cloudSyncOk,
     lastRefreshedAtMs
   };
 }

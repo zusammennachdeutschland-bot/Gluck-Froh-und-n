@@ -74,10 +74,13 @@ export const SetupWizard: React.FC = () => {
 
   const [isOpen, setIsOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
+  // Q19: first run is a 2-step quick setup (language + teacher name) with Skip.
+  // The full 7-step wizard stays reachable from Settings ("معالج الإعداد الكامل").
+  const [quickMode, setQuickMode] = useState(true);
   const [direction, setDirection] = useState<1 | -1>(1);
 
   // Step 0: Display & Preferences State
-  const [language, setLocalLanguage] = useState<AppLanguage>(profile.language || currentAppLang || 'de');
+  const [language, setLocalLanguage] = useState<AppLanguage>(profile.language || currentAppLang || 'ar');
   const [accent, setLocalAccent] = useState<AccentColor>(currentAccent || 'blue');
   const [isDarkMode, setIsDarkMode] = useState<boolean>(theme === 'dark');
   const [currency, setCurrency] = useState(profile.currency || 'EGP');
@@ -337,7 +340,12 @@ export const SetupWizard: React.FC = () => {
       profile.displayName.trim() !== 'Teacher' &&
       profile.displayName.trim() !== 'أ. أحمد محمود'
     );
-    if (!hasValidProfile) {
+    const setupDone = (() => {
+      try { return localStorage.getItem('dl_setup_completed') === 'true'; } catch { return false; }
+    })();
+    if (!hasValidProfile && !setupDone) {
+      setQuickMode(true);
+      setCurrentStep(0);
       setIsOpen(true);
     }
 
@@ -375,6 +383,8 @@ export const SetupWizard: React.FC = () => {
   // Listen to manual open trigger from settings
   useEffect(() => {
     const handleManualOpen = () => {
+      // Opened from Settings: full 7-step setup, not the quick first-run flow.
+      setQuickMode(false);
       setIsOpen(true);
       setCurrentStep(0);
     };
@@ -391,8 +401,8 @@ export const SetupWizard: React.FC = () => {
     return null;
   }
 
-  // 7 Steps total: 0 to 6
-  const stepsCount = 7;
+  // Quick first run: 2 steps (language + teacher name). Full setup: 7 steps.
+  const stepsCount = quickMode ? 2 : 7;
 
   const handleNext = () => {
     if (currentStep === 1 && !displayName.trim()) {
@@ -453,6 +463,39 @@ export const SetupWizard: React.FC = () => {
       setIsRestoring(false);
       e.target.value = '';
     }
+  };
+
+  // Q19 — quick first-run finish: name + language only, everything else later from Settings.
+  const handleQuickFinish = () => {
+    const finalDisplayName = displayName.trim();
+    if (finalDisplayName) {
+      const finalEn = displayNameEn.trim() || (!/[\u0600-\u06FF]/.test(finalDisplayName) ? finalDisplayName : 'Herr ' + finalDisplayName);
+      const finalAr = displayNameAr.trim() || (/[\u0600-\u06FF]/.test(finalDisplayName) ? finalDisplayName : 'أ. ' + finalDisplayName);
+      updateProfile({
+        displayName: finalDisplayName,
+        displayNameEn: finalEn,
+        displayNameAr: finalAr,
+        nameEn: finalEn,
+        nameAr: finalAr,
+        currency,
+        language
+      });
+    }
+    setLanguage(language);
+    setAccentColor(accent);
+    if ((isDarkMode && theme === 'light') || (!isDarkMode && theme === 'dark')) {
+      toggleTheme();
+    }
+    try { localStorage.setItem('dl_setup_completed', 'true'); } catch {}
+    setIsOpen(false);
+  };
+
+  // Q19 — Skip: keep the chosen language, don't force the rest now. Won't reappear on this browser.
+  const handleSkipSetup = () => {
+    setLanguage(language);
+    setAccentColor(accent);
+    try { localStorage.setItem('dl_setup_completed', 'true'); } catch {}
+    setIsOpen(false);
   };
 
   const handleFinish = async () => {
@@ -589,7 +632,7 @@ export const SetupWizard: React.FC = () => {
     }, 500);
   };
 
-  const stepTitles = [
+  const allStepTitles = [
     { title: _t('المظهر واللغة', 'Style & Lang', 'Design & Sprache'), icon: '🎨' },
     { title: _t('هوية المعلم', 'Teacher Profile', 'Lehrer-Profil'), icon: '👤' },
     { title: _t('بيانات المدرسة', 'School Profile', 'Schuldaten'), icon: '🏫' },
@@ -598,6 +641,7 @@ export const SetupWizard: React.FC = () => {
     { title: _t('التنبيهات والبركة', 'Alerts & Quotes', 'Erinnerungen'), icon: '🔔' },
     { title: _t('المراجعة والبدء', 'Launch', 'Startklar'), icon: '🚀' }
   ];
+  const stepTitles = quickMode ? allStepTitles.slice(0, 2) : allStepTitles;
 
   return (
     <div id="setup-wizard-overlay" className="fixed inset-0 z-[120] overflow-hidden bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-1.5 sm:p-5 font-sans">
@@ -1916,20 +1960,33 @@ export const SetupWizard: React.FC = () => {
 
         {/* Footer Navigation Bar */}
         <div className="px-3.5 sm:px-6 py-2 sm:py-2.5 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
-          {/* Previous Button */}
-          <button
-            type="button"
-            onClick={handlePrev}
-            disabled={currentStep === 0}
-            className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg font-bold text-xs flex items-center gap-1 transition-all ${
-              currentStep === 0 
-                ? 'opacity-0 pointer-events-none' 
-                : 'bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-700 cursor-pointer'
-            }`}
-          >
-            <ChevronLeft className="w-3.5 h-3.5" />
-            <span>{_t('السابق', 'Back', 'Zurück')}</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Previous Button */}
+            <button
+              type="button"
+              onClick={handlePrev}
+              disabled={currentStep === 0}
+              className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg font-bold text-xs flex items-center gap-1 transition-all ${
+                currentStep === 0
+                  ? 'opacity-0 pointer-events-none'
+                  : 'bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-700 cursor-pointer'
+              }`}
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              <span>{_t('السابق', 'Back', 'Zurück')}</span>
+            </button>
+
+            {/* Q19: Skip the rest of setup — language choice is kept, full setup stays in Settings. */}
+            {quickMode && (
+              <button
+                type="button"
+                onClick={handleSkipSetup}
+                className="px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg font-bold text-xs text-text-muted hover:text-text-main hover:bg-slate-200/80 dark:hover:bg-slate-800 transition-all cursor-pointer"
+              >
+                {_t('تخطي الإعداد', 'Skip setup', 'Setup überspringen')}
+              </button>
+            )}
+          </div>
 
           {/* Next or Finish Button */}
           {currentStep < stepsCount - 1 ? (
@@ -1941,6 +1998,16 @@ export const SetupWizard: React.FC = () => {
             >
               <span>{_t('التالي', 'Next', 'Weiter')}</span>
               <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          ) : quickMode ? (
+            <button
+              type="button"
+              onClick={handleQuickFinish}
+              disabled={!displayName.trim()}
+              className="px-5 sm:px-7 py-1.5 sm:py-2 rounded-lg font-bold text-xs sm:text-sm text-white bg-primary hover:bg-primary/90 shadow-xs transition-all flex items-center gap-1.5 cursor-pointer active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span>🚀</span>
+              <span>{_t('حفظ وابدأ', 'Save & Start', 'Speichern & starten')}</span>
             </button>
           ) : (
             <button

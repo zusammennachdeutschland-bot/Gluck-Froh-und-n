@@ -56,8 +56,8 @@ console.log('Running Homework Gamification & Bonus Card Rewards Tests...');
   let state = createInitialGamificationState(25);
   assert.equal(state.points, 0);
   assert.equal(state.streak, 0);
-  assert.equal(state.timeRemainingSeconds, 25 * 15);
-  assert.equal(formatHudTimer(state.timeRemainingSeconds), '06:15');
+  assert.equal(state.timeRemainingSeconds, 25 * 30);
+  assert.equal(formatHudTimer(state.timeRemainingSeconds), '12:30');
 
   // 9 correct answers -> streak 9, points 90, no bonus round yet
   for (let i = 0; i < 9; i++) {
@@ -163,7 +163,7 @@ console.log('Running Homework Gamification & Bonus Card Rewards Tests...');
   assert.equal(dupValid.nextState.points, 10);
 }
 
-// Scenario 4 & 5: Bonus Card effects (Gold, Lucky, Double Points x2 only next correct, Time Bonus, Freeze, Slow Motion, Oops, Bad Luck) & one-card guard
+// Scenario 4 & 5: Bonus Card effects (Gold, Lucky, Double Points x2 only next correct, Time Bonus, Freeze, Slow Motion) & one-card guard
 {
   // Helper creating an active bonus round with a chosen card in slot 0
   function makeRoundWithCard(cardType: keyof typeof BONUS_CARD_DEFINITIONS, basePoints = 100, baseTime = 120) {
@@ -208,14 +208,22 @@ console.log('Running Homework Gamification & Bonus Card Rewards Tests...');
   const timePick = applyBonusCardSelection(makeRoundWithCard('time_bonus', 50, 90), 'inst_time_bonus');
   assert.equal(timePick.nextState.timeRemainingSeconds, 110);
 
-  // Oops! (-15 pts)
-  const oopsPick = applyBonusCardSelection(makeRoundWithCard('oops', 40, 90), 'inst_oops');
-  assert.equal(oopsPick.nextState.points, 25);
-
-  // Bad Luck (-10 pts, -5s)
-  const badLuckPick = applyBonusCardSelection(makeRoundWithCard('bad_luck', 40, 90), 'inst_bad_luck');
-  assert.equal(badLuckPick.nextState.points, 30);
-  assert.equal(badLuckPick.nextState.timeRemainingSeconds, 85);
+  // Q17 (UX batch): penalty cards were removed — 'oops' / 'bad_luck' must
+  // never appear in the catalog or in any generated deck.
+  assert.equal(
+    (BONUS_CARD_DEFINITIONS as Record<string, unknown>)['oops'],
+    undefined,
+    'Oops! penalty card must not be in the catalog'
+  );
+  assert.equal(
+    (BONUS_CARD_DEFINITIONS as Record<string, unknown>)['bad_luck'],
+    undefined,
+    'Bad luck penalty card must not be in the catalog'
+  );
+  assert.ok(
+    BONUS_CARD_LIST.every((c) => c.isPositive && c.pointsDelta >= 0 && c.timeDeltaSeconds >= 0),
+    'Every bonus card must be a reward (no negative points/time)'
+  );
 
   // Double Points: doubles ONLY next correct answer (+20), then returns to normal (+10)
   const doublePick = applyBonusCardSelection(makeRoundWithCard('double_points', 100, 120), 'inst_double_points');
@@ -347,7 +355,7 @@ console.log('Running Homework Gamification & Bonus Card Rewards Tests...');
 
 // Scenario 8: Weighted distribution & card deck guarantees
 {
-  assert.equal(BONUS_CARD_LIST.length, 8);
+  assert.equal(BONUS_CARD_LIST.length, 6);
   let positiveTotal = 0;
   let totalDrawn = 0;
   for (let i = 0; i < 60; i++) {

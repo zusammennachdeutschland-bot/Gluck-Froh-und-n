@@ -15,6 +15,7 @@ import { LessonReminderModal } from './LessonReminderModal';
 import { HomeworkFollowUpModal } from './HomeworkFollowUpModal';
 import { GroupProfileModal } from './GroupProfileModal';
 import { GrainLessonMatcherPanel } from './GrainLessonMatcherPanel';
+import { GrainTitlePicker } from './GrainTitlePicker';
 import { LernstudioHomeworkModal } from '../shared/components/LernstudioHomeworkModal';
 import { useSyncedHomeworkData } from '../hooks/useSyncedHomeworkData';
 import { resolveLinkedOnlineHomeworkForLesson } from '../utils/lessonHomeworkLinkUtils';
@@ -819,6 +820,18 @@ export const LessonControlModal: React.FC = () => {
     try {
       /* confetti removed */
     } catch {}
+  };
+
+  // Shared by GrainLessonMatcherPanel and the compact GrainTitlePicker: adopt an
+  // approved Grain summary into "ما تم شرحه" (appended when the field already has text).
+  const handleApplyApprovedEducationalSummary = ({ summaryTextAr, updatedGrainMeta }: { summaryTextAr: string; updatedGrainMeta: GrainLessonMetadata }) => {
+    setLessonWhatWasTaught((prev) =>
+      prev.trim() ? `${prev.trim()}\n${summaryTextAr}` : summaryTextAr
+    );
+    setLessonGrainMeta(updatedGrainMeta);
+    updateLesson(selectedLesson.id, {
+      grainMeta: updatedGrainMeta
+    });
   };
 
   const handleSaveReport = (e?: React.FormEvent) => {
@@ -1710,6 +1723,20 @@ export const LessonControlModal: React.FC = () => {
                         className="w-full px-3 py-1.5 bg-surface-hover hover:bg-slate-50 focus:bg-white border border-surface-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-text-muted/60"
                         placeholder={t('auto_enter_topics_taught_new_gramm')}
                       />
+                      {/* Q14: Grain title picker — auto-fetches the matched recording when the report opens (online lessons only). */}
+                      {selectedLesson.type === 'online' && (
+                        <GrainTitlePicker
+                          selectedLesson={selectedLesson}
+                          lessons={lessons}
+                          groups={groups}
+                          students={students}
+                          grainMeta={lessonGrainMeta}
+                          onApplyTitle={handleApplyApprovedEducationalSummary}
+                          onUpdateLesson={(lessonId, patch) => updateLesson(lessonId, patch)}
+                          _t={_t}
+                          triggerToast={triggerToast}
+                        />
+                      )}
                     </div>
 
                     {/* Previous Homework Description */}
@@ -2051,15 +2078,7 @@ export const LessonControlModal: React.FC = () => {
                             });
                           }
                         }}
-                        onApplyApprovedEducationalSummary={({ summaryTextAr, updatedGrainMeta }) => {
-                          setLessonWhatWasTaught((prev) =>
-                            prev.trim() ? `${prev.trim()}\n${summaryTextAr}` : summaryTextAr
-                          );
-                          setLessonGrainMeta(updatedGrainMeta);
-                          updateLesson(selectedLesson.id, {
-                            grainMeta: updatedGrainMeta
-                          });
-                        }}
+                        onApplyApprovedEducationalSummary={handleApplyApprovedEducationalSummary}
                         onApplyApprovedHomework={(homeworkText) => {
                           setLessonNextHomework(homeworkText);
                         }}

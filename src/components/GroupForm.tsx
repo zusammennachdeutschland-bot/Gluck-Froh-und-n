@@ -3,7 +3,7 @@ import { Group, GradeLevel, LessonType, PaymentCycle, ScheduleRecurrence } from 
 import { PREDEFINED_GRADES, COURSE_LEVELS, SCHOOL_GRADES } from '../data/initialData';
 import { useApp } from '../context/AppContext';
 import { Video, MapPin, DollarSign, Calendar, Sparkles, Repeat, Check, Info } from 'lucide-react';
-import { isGroupPerLesson } from '../utils/lessonUtils';
+import { isGroupPerLesson, resolveDefaultGrade } from '../utils/lessonUtils';
 import { getCurrentAlternatingWeek } from '../utils/scheduleUtils';
 
 export interface GroupFormData {
@@ -23,6 +23,7 @@ export interface GroupFormData {
   dayTimes: Record<string, string>;
   zoomLink: string;
   meetLink: string;
+  onlinePlatform: 'zoom' | 'meet';
   address: string;
   color: string;
   lessonDurationMinutes: number;
@@ -38,11 +39,11 @@ interface GroupFormProps {
 }
 
 export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isEdit, children, className }) => {
-  const { profile, language, t, _t } = useApp();
+  const { profile, language, t, _t, groups } = useApp();
 
   
   const [name, setName] = useState(initialData?.name || '');
-  const [grade, setGrade] = useState<GradeLevel>(initialData?.grade || 'Grade 9');
+  const [grade, setGrade] = useState<GradeLevel>(initialData?.grade || resolveDefaultGrade(groups, profile.defaultGrade));
   const [type, setType] = useState<LessonType>(initialData?.type || 'online');
   const isInitialPerLesson = isGroupPerLesson(initialData);
   const [paymentCycle, setPaymentCycle] = useState<PaymentCycle>(isInitialPerLesson ? 'per_lesson' : (initialData?.paymentCycle || 'monthly'));
@@ -63,6 +64,11 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
   const [dayTimes, setDayTimes] = useState<Record<string, string>>(initialData?.scheduleDayTimes || {});
   const [zoomLink, setZoomLink] = useState(initialData?.zoomLink || profile.defaultZoomLink || '');
   const [meetLink, setMeetLink] = useState(initialData?.meetLink || profile.defaultMeetLink || '');
+  const [onlinePlatform, setOnlinePlatform] = useState<'zoom' | 'meet'>(
+    initialData?.onlinePlatform || (initialData?.meetLink && !initialData?.zoomLink ? 'meet' : 'zoom')
+  );
+  const [formError, setFormError] = useState<string | null>(null);
+  const [noDaysAck, setNoDaysAck] = useState(false);
   const [address, setAddress] = useState(initialData?.address || '');
   const [color, setColor] = useState(initialData?.color || '#3B82F6');
   const [lessonDurationMinutes, setLessonDurationMinutes] = useState(initialData?.lessonDurationMinutes || 60);
@@ -83,12 +89,27 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name) return;
-
-    if (type === 'offline' && !address.trim()) {
-      alert(t('auto_address_location_is_required'));
+    if (!name.trim()) {
+      setFormError(_t('اكتب اسم المجموعة الأول', 'Please enter the group name first', 'Bitte zuerst den Gruppennamen eingeben'));
       return;
     }
+
+    if (type === 'offline' && !address.trim()) {
+      setFormError(t('auto_address_location_is_required'));
+      return;
+    }
+
+    // Q38: a group with no days saves silently with no lessons — warn first, save only on confirmation.
+    if (scheduleDays.length === 0 && !noDaysAck) {
+      setFormError(_t(
+        '⚠️ المجموعة دي من غير أيام — مش هيتولد لها أي حصص. دوس "حفظ" تاني لو متأكد.',
+        '⚠️ This group has no days — no lessons will be generated. Press "Save" again if you are sure.',
+        '⚠️ Diese Gruppe hat keine Tage — es werden keine Stunden erstellt. Zum Bestätigen erneut speichern.'
+      ));
+      setNoDaysAck(true);
+      return;
+    }
+    setFormError(null);
 
     const isPerLesson = paymentCycle === 'per_lesson';
     const effectiveSessionCount = isPerLesson ? 1 : Math.max(2, Number(sessionCount) || 4);
@@ -109,6 +130,7 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
       dayTimes,
       zoomLink,
       meetLink,
+      onlinePlatform,
       address,
       color,
       lessonDurationMinutes: Number(lessonDurationMinutes),
@@ -118,6 +140,12 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
 
   return (
     <form id="group-form" onSubmit={handleSubmit} className={className || "p-5 space-y-4 max-h-[75vh] overflow-y-auto"}>
+      {formError && (
+        <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-xl p-3 text-xs font-bold text-amber-900 dark:text-amber-200 flex items-start gap-2">
+          <Info className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <span>{formError}</span>
+        </div>
+      )}
       {/* AI Import Shortcut is rendered outside by parent if needed */}
 
       {/* Group Name */}
@@ -494,15 +522,53 @@ export const GroupForm: React.FC<GroupFormProps> = ({ initialData, onSubmit, isE
       {type === 'online' ? (
         <div className="space-y-3">
           <div className="space-y-1">
+            <label className="text-xs font-bold text-text-main">
+              {_t('منصة الحصة الأونلاين', 'Online lesson platform', 'Online-Plattform')}
+            </label>
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => setOnlinePlatform('zoom')}
+                className={`py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                  onlinePlatform === 'zoom'
+                    ? 'bg-primary text-white border-primary shadow-2xs'
+                    : 'bg-surface-hover text-text-main border-surface-border dark:border-surface-border-soft'
+                }`}
+              >
+                Zoom
+              </button>
+              <button
+                type="button"
+                onClick={() => setOnlinePlatform('meet')}
+                className={`py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                  onlinePlatform === 'meet'
+                    ? 'bg-primary text-white border-primary shadow-2xs'
+                    : 'bg-surface-hover text-text-main border-surface-border dark:border-surface-border-soft'
+                }`}
+              >
+                Google Meet
+              </button>
+            </div>
+            <p className="text-[10px] text-text-muted font-medium">
+              {onlinePlatform === 'meet'
+                ? _t('الحصص هتستخدم رابط Google Meet، ومش هيتولد لها اجتماع Zoom.', 'Lessons will use the Google Meet link — no Zoom meeting will be generated.', 'Die Stunden nutzen den Google-Meet-Link — es wird kein Zoom-Meeting erstellt.')
+                : _t('الحصص هتستخدم رابط Zoom.', 'Lessons will use the Zoom link.', 'Die Stunden nutzen den Zoom-Link.')}
+            </p>
+          </div>
+          <div className="space-y-1">
             <label className="text-xs font-bold text-text-main flex items-center justify-between">
-              <span>{_t('رابط زووم الدائم (اختياري)', 'Permanent Zoom Link (Optional)', 'Permanenter Zoom-Link (Optional)')}</span>
+              <span>
+                {onlinePlatform === 'meet'
+                  ? _t('رابط Google Meet الدائم (اختياري)', 'Permanent Google Meet Link (Optional)', 'Permanenter Google-Meet-Link (Optional)')
+                  : _t('رابط زووم الدائم (اختياري)', 'Permanent Zoom Link (Optional)', 'Permanenter Zoom-Link (Optional)')}
+              </span>
               <span className="text-[10px] text-text-muted font-normal">{_t('اختياري', 'Optional', 'Optional')}</span>
             </label>
             <input
               type="url"
-              value={zoomLink}
-              onChange={(e) => setZoomLink(e.target.value)}
-              placeholder="https://zoom.us/j/..."
+              value={onlinePlatform === 'meet' ? meetLink : zoomLink}
+              onChange={(e) => (onlinePlatform === 'meet' ? setMeetLink(e.target.value) : setZoomLink(e.target.value))}
+              placeholder={onlinePlatform === 'meet' ? 'https://meet.google.com/...' : 'https://zoom.us/j/...'}
               className="w-full px-3 py-2 bg-surface-hover border border-surface-border dark:border-surface-border-soft rounded-xl text-xs font-mono"
             />
           </div>

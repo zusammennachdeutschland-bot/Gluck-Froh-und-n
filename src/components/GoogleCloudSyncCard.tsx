@@ -13,7 +13,9 @@ import {
   Trash2,
   ShieldAlert,
   LogIn,
-  Upload
+  Upload,
+  HardDrive,
+  Download
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
@@ -31,7 +33,8 @@ import {
   getAndroidApkSigningInfo,
   AndroidApkSigningInfo,
   isFirestoreReadQuotaExhausted,
-  isFirestoreWriteQuotaExhaustedToday
+  isFirestoreWriteQuotaExhaustedToday,
+  downloadWorkspaceFromGoogleCloud
 } from '../services/firebaseWorkspaceSync';
 import {
   flushPendingHomeworkCloudWrites,
@@ -52,6 +55,7 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
     lernstudioSets,
     profile,
     updateProfile,
+    importBackupFile,
     triggerToast,
     _t
   } = useApp();
@@ -80,6 +84,51 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
   );
   const [cloudPasswordInput, setCloudPasswordInput] = useState<string>('');
   const [showClearConfirmModal, setShowClearConfirmModal] = useState(false);
+
+  // Q29: honest data location + manual restore from the cloud (one tap, confirmed).
+  const [restoreState, setRestoreState] = useState<'idle' | 'downloading' | 'confirm' | 'restoring'>('idle');
+  const [restoreCandidate, setRestoreCandidate] = useState<{ backupJsonStr: string; remoteTimestampIso: string | null } | null>(null);
+
+  const handleRestoreFromCloud = async () => {
+    if (restoreState === 'downloading' || restoreState === 'restoring') return;
+    setFeedbackMsg(null);
+    setRestoreState('downloading');
+    try {
+      const res = await downloadWorkspaceFromGoogleCloud();
+      if (res.error || !res.hasRemoteData || !res.backupJsonStr) {
+        setFeedbackMsg({
+          type: 'error',
+          text: res.error || _t('مفيش نسخة محفوظة في السحابة لسه.', 'No saved copy in the cloud yet.', 'Keine gespeicherte Kopie in der Cloud.')
+        });
+        setRestoreState('idle');
+        return;
+      }
+      setRestoreCandidate({ backupJsonStr: res.backupJsonStr, remoteTimestampIso: res.remoteTimestampIso });
+      setRestoreState('confirm');
+    } catch (err: any) {
+      setFeedbackMsg({ type: 'error', text: err?.message || _t('تعذر تنزيل النسخة من السحابة.', 'Could not download the copy from the cloud.', 'Kopie konnte nicht geladen werden.') });
+      setRestoreState('idle');
+    }
+  };
+
+  const handleConfirmRestoreFromCloud = async () => {
+    if (!restoreCandidate) return;
+    setRestoreState('restoring');
+    try {
+      const ok = await importBackupFile(restoreCandidate.backupJsonStr);
+      if (ok) {
+        setFeedbackMsg({ type: 'success', text: _t('تم استعادة بياناتك من السحابة ✓', 'Restored your data from the cloud ✓', 'Daten aus der Cloud wiederhergestellt ✓') });
+        if (triggerToast) triggerToast(_t('تم استعادة بياناتك من السحابة ✓', 'Restored your data from the cloud ✓'));
+      } else {
+        setFeedbackMsg({ type: 'error', text: _t('تعذرت الاستعادة — نسخة السحابة مش صالحة.', 'Restore failed — the cloud copy is not valid.', 'Wiederherstellung fehlgeschlagen — ungültige Cloud-Kopie.') });
+      }
+    } catch (err: any) {
+      setFeedbackMsg({ type: 'error', text: err?.message || _t('تعذرت الاستعادة.', 'Restore failed.', 'Wiederherstellung fehlgeschlagen.') });
+    } finally {
+      setRestoreCandidate(null);
+      setRestoreState('idle');
+    }
+  };
 
   const [hwStats, setHwStats] = useState(() => getHomeworkSummaryStats(students));
   const [pendingHwCount, setPendingHwCount] = useState<number>(() => getPendingHomeworkSyncCount());
@@ -570,6 +619,75 @@ export const GoogleCloudSyncCard: React.FC<GoogleCloudSyncCardProps> = ({ compac
             </span>
           )}
         </div>
+      </div>
+
+      {/* Q29: honest data location + manual cloud restore (no automatic cloud sync). */}
+      <div className="pt-3 border-t border-surface-border space-y-2">
+        <div className="flex items-start gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/25 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+            <HardDrive className="w-4 h-4" />
+          </div>
+          <div className="min-w-0">
+            <h4 className="text-xs font-black text-text-main">
+              {_t('مكان بياناتك', 'Where your data lives', 'Wo Ihre Daten liegen')}
+            </h4>
+            <p className="text-[11px] text-text-muted leading-relaxed">
+              {_t(
+                'البيانات (طلاب، مجموعات، حصص) عايشة في المتصفح ده بس — مفيش مزامنة سحابية تلقائية. الواجبات بس هي اللي بتتزامن مع السحابة، وبين أجهزتك بتتزامن عبر P2P.',
+                'Your data (students, groups, lessons) lives only in this browser — no automatic cloud sync. Only homework syncs to the cloud, and your devices sync via P2P.',
+                'Ihre Daten (Schüler, Gruppen, Stunden) liegen nur in diesem Browser — keine automatische Cloud-Sync. Nur Hausaufgaben gehen in die Cloud, Geräte syncen per P2P.'
+              )}
+            </p>
+          </div>
+        </div>
+        {restoreState === 'confirm' && restoreCandidate ? (
+          <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-xl p-3 space-y-2">
+            <p className="text-xs font-bold text-amber-900 dark:text-amber-200">
+              {_t(
+                `لقيت نسخة في السحابة${restoreCandidate.remoteTimestampIso ? ` (بتاريخ ${new Date(restoreCandidate.remoteTimestampIso).toLocaleString()})` : ''} — الاستعادة هتستبدل بيانات الجهاز ده بنسخة السحابة. متأكد؟`,
+                `Found a cloud copy${restoreCandidate.remoteTimestampIso ? ` (from ${new Date(restoreCandidate.remoteTimestampIso).toLocaleString()})` : ''} — restoring will replace this device's data with the cloud copy. Are you sure?`,
+                `Cloud-Kopie gefunden — die Wiederherstellung ersetzt die Daten dieses Geräts. Sicher?`
+              )}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handleConfirmRestoreFromCloud}
+                className="px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-xl cursor-pointer shadow-xs"
+              >
+                {_t('أيوه، استعد بياناتي', 'Yes, restore my data', 'Ja, wiederherstellen')}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setRestoreCandidate(null); setRestoreState('idle'); }}
+                className="px-3.5 py-2 bg-surface hover:bg-surface-hover border border-surface-border text-text-main font-bold text-xs rounded-xl cursor-pointer"
+              >
+                {_t('إلغاء', 'Cancel', 'Abbrechen')}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={restoreState !== 'idle' || !firebaseUser}
+            onClick={handleRestoreFromCloud}
+            className="px-4 py-2 bg-primary hover:bg-primary-hover disabled:opacity-50 text-white font-bold text-xs rounded-xl inline-flex items-center gap-1.5 cursor-pointer shadow-xs disabled:cursor-not-allowed"
+          >
+            <Download className={`w-3.5 h-3.5 ${restoreState === 'downloading' ? 'animate-bounce' : ''}`} />
+            <span>
+              {restoreState === 'downloading'
+                ? _t('جاري تنزيل النسخة...', 'Downloading the copy...', 'Kopie wird geladen...')
+                : restoreState === 'restoring'
+                ? _t('جاري الاستعادة...', 'Restoring...', 'Wird wiederhergestellt...')
+                : _t('استعد بياناتي من السحابة', 'Restore my data from the cloud', 'Daten aus der Cloud wiederherstellen')}
+            </span>
+          </button>
+        )}
+        {!firebaseUser && (
+          <p className="text-[11px] text-text-muted">
+            {_t('سجّل الدخول بحساب Google الأول عشان تقدر تستعد نسخة السحابة.', 'Sign in with Google first to restore a cloud copy.', 'Bitte zuerst mit Google anmelden.')}
+          </p>
+        )}
       </div>
 
       {/* Signed-Out View vs Signed-In View */}

@@ -9,7 +9,7 @@ import { LernstudioSoundType } from './lernstudioAudioUtils';
 export const STREAK_TRIGGER_THRESHOLD = 10;
 export const POINTS_CORRECT_ANSWER = 10;
 export const POINTS_WRONG_ANSWER = 5;
-export const DEFAULT_SECONDS_PER_QUESTION = 15;
+export const DEFAULT_SECONDS_PER_QUESTION = 30;
 export const MIN_QUIZ_TIMER_SECONDS = 120;
 export const BONUS_CARD_COUNT_PER_ROUND = 6;
 
@@ -36,8 +36,16 @@ export interface BonusCardDefinition {
 /**
  * Centralized, configurable Bonus Card catalog.
  * Adjust weights, deltas, or labels here to rebalance rewards globally.
+ * NOTE (UX batch, Q17): bonus-card rounds only ever give rewards — the old
+ * penalty cards ('oops' −15 points, 'bad_luck' −10 points/−5s) were removed
+ * from the deck. The 'oops' | 'bad_luck' members stay in the
+ * HomeworkBonusCardType union only so previously-saved bonusHistory records
+ * still type-check; they can never be drawn anymore.
  */
-export const BONUS_CARD_DEFINITIONS: Record<HomeworkBonusCardType, BonusCardDefinition> = {
+export const BONUS_CARD_DEFINITIONS: Record<
+  Exclude<HomeworkBonusCardType, 'oops' | 'bad_luck'>,
+  BonusCardDefinition
+> = {
   gold_bonus: {
     type: 'gold_bonus',
     titleEn: 'Gold Bonus',
@@ -124,34 +132,6 @@ export const BONUS_CARD_DEFINITIONS: Record<HomeworkBonusCardType, BonusCardDefi
     timeDeltaSeconds: 0,
     slowMotionSeconds: 10,
     soundEffect: 'bubble_wash'
-  },
-  oops: {
-    type: 'oops',
-    titleEn: 'Oops!',
-    titleAr: 'أوبس!',
-    descriptionAr: 'للأسف! تم خصم 15 نقطة من الرصيد.',
-    effectBadgeAr: '-15 نقطة',
-    emoji: '💥',
-    tone: 'rose',
-    weight: 7,
-    isPositive: false,
-    pointsDelta: -15,
-    timeDeltaSeconds: 0,
-    soundEffect: 'powerup_boom'
-  },
-  bad_luck: {
-    type: 'bad_luck',
-    titleEn: 'Bad Luck',
-    titleAr: 'حظ سيئ',
-    descriptionAr: 'خصم 10 نقاط و5 ثوانٍ من الوقت!',
-    effectBadgeAr: '-10 نقاط · -5 ث',
-    emoji: '🌩️',
-    tone: 'amber',
-    weight: 5,
-    isPositive: false,
-    pointsDelta: -10,
-    timeDeltaSeconds: -5,
-    soundEffect: 'wrong'
   }
 };
 

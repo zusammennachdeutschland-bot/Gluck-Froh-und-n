@@ -394,6 +394,7 @@ export interface TeacherProfile {
   };
   defaultZoomLink: string;
   defaultMeetLink: string;
+  defaultGrade?: GradeLevel; // Teacher's own default grade (e.g. the grade they teach); used as the fallback when no group grade applies. Never hardcoded per-teacher.
   defaultZoomTimezone?: string;
   includeOfflineInGoogleCalendar?: boolean;
   enableLessonAlerts?: boolean; // In-app alerts for upcoming lessons (within 30 mins)
@@ -846,6 +847,7 @@ export interface Group extends SyncableRecord {
   schedules?: GroupScheduleSlot[]; // Multi-schedule slots with independent day/time
   zoomLink?: string;
   meetLink?: string;
+  onlinePlatform?: 'zoom' | 'meet'; // Which online platform this group's lessons run on. Defaults to 'zoom' when unset (legacy groups).
   address?: string;
   coordinates?: { lat: number; lng: number };
   color: string;

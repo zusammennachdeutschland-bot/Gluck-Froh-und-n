@@ -3144,7 +3144,7 @@ export async function fetchSubmissionsPageFromFirestore(
       constraints.push(limit(safeLimit + 1));
 
       const q = query(collection(db, 'homework_submissions'), ...constraints);
-      const snap = await withFirestoreReadTimeout(getDocsFromServer(q), 5000).catch(() =>
+      const snap = await withFirestoreReadTimeout(getDocsFromServer(q), 10000).catch(() =>
         withFirestoreReadTimeout(getDocs(q), 5000)
       );
 
@@ -3216,7 +3216,10 @@ export async function fetchSubmissionsPageFromFirestore(
     }
   }
 
-  return { submissions: [], nextCursor: null, hasMore: false };
+  // No authoritative source could verify the submissions: fail loudly so the
+  // caller can tell "fetch failed" apart from "no submissions yet" instead of
+  // silently showing a stale empty list.
+  throw new Error('Unable to load authoritative submissions from Firestore server.');
 }
 
 export async function fetchSubmissionsForAssignmentFromFirestore(
@@ -3239,7 +3242,7 @@ export async function fetchSubmissionsForAssignmentFromFirestore(
           collection(db, 'homework_submissions'),
           where('assignmentId', '==', safeAssignmentId)
         );
-    const snap = await withFirestoreReadTimeout(getDocsFromServer(q), 4000).catch(() =>
+    const snap = await withFirestoreReadTimeout(getDocsFromServer(q), 8000).catch(() =>
       withFirestoreReadTimeout(getDocs(q), 4000)
     );
     const list: HomeworkSubmission[] = [];
@@ -3310,7 +3313,10 @@ export async function fetchSubmissionsForAssignmentFromFirestore(
     }
   }
 
-  return [];
+  // No authoritative source could verify the submissions: fail loudly so the
+  // caller can tell "fetch failed" apart from "no submissions yet" instead of
+  // silently showing a stale empty list.
+  throw new Error('Unable to load authoritative submissions from Firestore server.');
 }
 
 export async function fetchAllSubmissionsFromFirestore(
@@ -3325,7 +3331,7 @@ export async function fetchAllSubmissionsFromFirestore(
   if (!isFirestoreReadQuotaExhausted()) {
     try {
       const q = query(collection(db, 'homework_submissions'), where('ownerUid', '==', ownerUid));
-      const snap = await withFirestoreReadTimeout(getDocsFromServer(q), 5000).catch(() =>
+      const snap = await withFirestoreReadTimeout(getDocsFromServer(q), 10000).catch(() =>
         withFirestoreReadTimeout(getDocs(q), 5000)
       );
       if (!explicitOwnerUid && getCurrentHomeworkOwnerUid() !== ownerUid) {

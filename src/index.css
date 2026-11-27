@@ -759,3 +759,31 @@
     display: none;
   }
 }
+
+/* Q11 — Reports: print / Save-as-PDF shows the report ONLY (no app header, nav, buttons or backgrounds). */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #report-export-area,
+  #report-export-area * {
+    visibility: visible;
+  }
+  #report-export-area {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    background: #ffffff !important;
+    color: #111827 !important;
+  }
+  #report-export-area * {
+    color: #111827 !important;
+    border-color: #d1d5db !important;
+    box-shadow: none !important;
+  }
+  /* Interactive controls never print. */
+  #report-export-area button,
+  #report-export-area .report-actions {
+    display: none !important;
+  }
+}

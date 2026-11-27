@@ -977,7 +977,7 @@ export default function App() {
   }
 
   if (!initialData) {
-    return <LoadingScreen message="Lade Daten..." fullScreen />;
+    return <LoadingScreen message="جاري تحميل البيانات..." fullScreen />;
   }
 
   return (

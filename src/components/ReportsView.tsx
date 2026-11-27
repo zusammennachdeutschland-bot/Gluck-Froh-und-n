@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { 
-  BarChart2, Printer, TrendingUp, AlertCircle, CheckCircle2, 
+  BarChart2, FileDown, Share2, TrendingUp, AlertCircle, CheckCircle2,
   Clock, Calendar, DollarSign, ArrowUpRight, AlertTriangle, Filter, Check, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart as RePieChart, Pie, Cell } from 'recharts';
@@ -11,7 +11,7 @@ import { formatLocalDate } from '../utils/timeUtils';
 import { Pagination } from './common/Pagination';
 
 export const ReportsView: React.FC = () => {
-  const { lessons: activeLessons, payments: activePayments, getHistoricalLessons, getHistoricalPayments, updateLesson, updateLessonPaymentStatus, profile, openLessonControl, t, reportLanguage, reportT, groups, students } = useApp();
+  const { lessons: activeLessons, payments: activePayments, getHistoricalLessons, getHistoricalPayments, updateLesson, updateLessonPaymentStatus, profile, openLessonControl, t, reportLanguage, reportT, groups, students, triggerToast } = useApp();
 
   const [lessons, setLessons] = useState<Lesson[]>(activeLessons);
   const [payments, setPayments] = useState<PaymentRecord[]>(activePayments);
@@ -222,12 +222,47 @@ export const ReportsView: React.FC = () => {
     { name: reportT('غائب', 'Absent', 'Abwesend'), value: absentCount, color: '#EF4444' }
   ];
 
-  const handlePrintReport = () => {
+  // Q11: Abdo has no printer — Share the report summary, or Save-as-PDF (browser print dialog,
+  // scoped by @media print in index.css to this report only). No whole-app printing anymore.
+  const buildReportShareText = () => {
+    const lines = [
+      `${reportT('تقرير الحصص والإيرادات', 'Sessions & Revenue Report', 'Sitzungs- & Einnahmenbericht')} — ${new Date().toLocaleDateString()}`,
+      `${reportT('المحصل', 'Collected', 'Einnahmen')}: ${totalCollectedRevenue} ${profile.currency} | ${reportT('المتبقي', 'Due', 'Offen')}: ${totalUnpaidAmount} ${profile.currency}`,
+      `${reportT('حصص مكتملة', 'Completed sessions', 'Absolvierte Sitzungen')}: ${completedSessionsCount} | ${reportT('آخر دفعات مستحقة', 'Last payments due', 'Letzte Honorare offen')}: ${unpaidLastSessionsCount}`,
+      '',
+      ...weekEntries.map(([weekTitle, weekLessons]) => {
+        const fin = weekFinancialsMap[weekTitle] || { weekRevenue: 0, weekUnpaid: 0 };
+        return `${weekTitle}: ${weekLessons.length} ${reportT('حصة', 'sessions', 'Sitzungen')} — ${reportT('محصل', 'collected', 'eingenommen')} ${fin.weekRevenue} ${profile.currency} — ${reportT('متبقي', 'due', 'offen')} ${fin.weekUnpaid} ${profile.currency}`;
+      })
+    ];
+    return lines.join('\n');
+  };
+
+  const handleSaveReportPdf = () => {
     window.print();
   };
 
+  const handleShareReport = async () => {
+    const text = buildReportShareText();
+    try {
+      if (typeof navigator !== 'undefined' && (navigator as any).share) {
+        await (navigator as any).share({ title: reportT('تقرير الحصص والإيرادات', 'Sessions & Revenue Report', 'Bericht'), text });
+        return;
+      }
+      throw new Error('no-share');
+    } catch {
+      // Fallback: copy the summary so it can be pasted into WhatsApp.
+      try {
+        await navigator.clipboard.writeText(text);
+        triggerToast(reportT('تم نسخ ملخص التقرير — الصقه في واتساب', 'Report summary copied — paste it into WhatsApp', 'Berichtszusammenfassung kopiert'));
+      } catch {
+        triggerToast(reportT('تعذرت المشاركة من المتصفح ده', 'Sharing is not available in this browser', 'Teilen ist in diesem Browser nicht möglich'));
+      }
+    }
+  };
+
   return (
-    <div className="space-y-2.5 sm:space-y-3">
+    <div id="report-export-area" className="space-y-2.5 sm:space-y-3">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4">
         <div>
@@ -244,13 +279,20 @@ export const ReportsView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="report-actions flex items-center gap-2 shrink-0">
           <button
-            onClick={handlePrintReport}
+            onClick={handleShareReport}
+            className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10.5px] sm:text-xs px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs shrink-0"
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            <span>{reportT('مشاركة', 'Share', 'Teilen')}</span>
+          </button>
+          <button
+            onClick={handleSaveReportPdf}
             className="bg-primary hover:bg-primary-hover text-white font-bold text-[10.5px] sm:text-xs px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs shrink-0"
           >
-            <Printer className="w-3.5 h-3.5" />
-            <span>{reportT('طباعة / PDF', 'Print / PDF', 'Drucken / PDF')}</span>
+            <FileDown className="w-3.5 h-3.5" />
+            <span>{reportT('حفظ PDF', 'Save PDF', 'Als PDF')}</span>
           </button>
         </div>
       </div>
