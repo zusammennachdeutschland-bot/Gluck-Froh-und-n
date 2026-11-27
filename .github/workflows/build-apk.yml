@@ -114,14 +114,18 @@ jobs:
           cache: 'npm'
 
       - name: Install Dependencies
-        run: npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund || npm install --legacy-peer-deps --prefer-offline --no-audit --no-fund
+        run: npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund
 
       - name: TypeScript Lint
         run: npm run lint
 
+      - name: Verify Every Test File Is Covered by npm test
+        run: node scripts/check_test_coverage.cjs
+
   unit-tests:
     name: 1C. Tests (Shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       TZ: Africa/Cairo
     strategy:
@@ -141,7 +145,7 @@ jobs:
           cache: 'npm'
 
       - name: Install Dependencies
-        run: npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund || npm install --legacy-peer-deps --prefer-offline --no-audit --no-fund
+        run: npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund
 
       - name: Run Automated Regression Test Shard ${{ matrix.shard }}/3
         run: node scripts/run_test_shard.cjs --shard=${{ matrix.shard }} --total=3
@@ -149,6 +153,9 @@ jobs:
   build-apk:
     name: 1D. Build Web & Sign Release APK
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TZ: Africa/Cairo
     steps:
       - name: Checkout Code (Shallow + LFS)
         uses: actions/checkout@v4
@@ -240,7 +247,10 @@ jobs:
           echo "Android SDK Platform 36 verified."
 
       - name: Install Dependencies
-        run: npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund || npm install --legacy-peer-deps --prefer-offline --no-audit --no-fund
+        run: npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund
+
+      - name: Typecheck Before Web Build
+        run: npx tsc --noEmit
 
       - name: Restore Pristine Binaries & Build Web Bundle (Vite)
         run: |
