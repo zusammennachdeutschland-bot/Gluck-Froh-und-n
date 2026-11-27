@@ -46,20 +46,66 @@ export const AI_LOGIC_PRIMARY_MODEL = 'gemini-3.5-flash-lite';
 /** Fallback model: used only when the primary model ID is not found (404). */
 export const AI_LOGIC_FALLBACK_MODEL = 'gemini-3.8-flash';
 
+/**
+ * Vite replaces `import.meta.env.X` statically at build time, but it does
+ * NOT inline dynamic bracket access (`env?.[key]` with a runtime string),
+ * so the old readViteEnv(key) helper returned `undefined` for every key in
+ * the production bundle — the Vercel env var never reached the app.
+ * Each key is therefore read with a literal property access below.
+ * Empty/whitespace-only values are treated as unset. No key is hardcoded.
+ * The try/catch keeps Node/tsx test runs safe: there `import.meta.env` is
+ * undefined, so the access throws and the reader returns `undefined`
+ * (in a Vite build the access is replaced by the literal value, so no
+ * throw can happen there).
+ */
+function readEnvValue(value: string | undefined): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
 /** Optional override, e.g. VITE_GEMINI_GRAMMAR_MODEL="gemini-3.5-flash-lite". */
-function readViteEnv(key: string): string | undefined {
+function readGeminiModelOverride(): string | undefined {
   try {
-    const env = (import.meta as unknown as { env?: Record<string, string | undefined> } | undefined)
-      ?.env;
-    const value = env?.[key];
-    return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+    return readEnvValue(
+      (import.meta as unknown as { env: Record<string, string | undefined> }).env
+        .VITE_GEMINI_GRAMMAR_MODEL
+    );
   } catch {
     return undefined;
   }
 }
 
+function readRecaptchaSiteKey(): string | undefined {
+  try {
+    return readEnvValue(
+      (import.meta as unknown as { env: Record<string, string | undefined> }).env
+        .VITE_RECAPTCHA_ENTERPRISE_SITE_KEY
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+function readAppCheckDebugToken(): string | undefined {
+  try {
+    return readEnvValue(
+      (import.meta as unknown as { env: Record<string, string | undefined> }).env
+        .VITE_APPCHECK_DEBUG_TOKEN
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+function isDevMode(): boolean {
+  try {
+    return (import.meta as unknown as { env: { DEV: boolean } }).env.DEV === true;
+  } catch {
+    return false;
+  }
+}
+
 export function resolveAiLogicModelId(): string {
-  return readViteEnv('VITE_GEMINI_GRAMMAR_MODEL') || AI_LOGIC_PRIMARY_MODEL;
+  return readGeminiModelOverride() || AI_LOGIC_PRIMARY_MODEL;
 }
 
 // ---------------------------------------------------------------------------
@@ -176,7 +222,7 @@ let appCheckState: 'idle' | 'done' = 'idle';
 
 /** True when a reCAPTCHA Enterprise site key is configured (no throw). */
 export function isAiLogicConfigured(): boolean {
-  return Boolean(readViteEnv('VITE_RECAPTCHA_ENTERPRISE_SITE_KEY'));
+  return Boolean(readRecaptchaSiteKey());
 }
 
 /**
@@ -189,13 +235,13 @@ export function isAiLogicConfigured(): boolean {
  */
 export function ensureAppCheck(): void {
   if (appCheckState === 'done') return;
-  const siteKey = readViteEnv('VITE_RECAPTCHA_ENTERPRISE_SITE_KEY');
+  const siteKey = readRecaptchaSiteKey();
   if (!siteKey) {
     throw new AiLogicNotConfiguredError();
   }
   try {
-    if (typeof import.meta !== 'undefined' && (import.meta as any)?.env?.DEV) {
-      const debugToken = readViteEnv('VITE_APPCHECK_DEBUG_TOKEN');
+    if (isDevMode()) {
+      const debugToken = readAppCheckDebugToken();
       if (debugToken && typeof self !== 'undefined') {
         (self as unknown as Record<string, unknown>).FIREBASE_APPCHECK_DEBUG_TOKEN = debugToken;
       }
