@@ -38,6 +38,14 @@ interface Props {
   onBack: () => void;
 }
 
+/** Normalized German for choice dedupe: article-stripped, lowercased, single-spaced. */
+const normalizeGermanChoice = (german: string) =>
+  german
+    .replace(/^(der|die|das)\s+/i, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+
 interface MoleHole {
   holeIndex: number;
   item: LernstudioItem | null;
@@ -128,10 +136,20 @@ export const LernstudioWhackAMoleGame: React.FC<Props> = ({
         `${set.id}::mole_wave::${sessionNonce}::${targetIndex}::${spawnTickRef.current}`
       );
       const holeIndices = seededShuffle([0, 1, 2, 3, 4, 5], rng).slice(0, difficulty === 'hard' ? 4 : 3);
-      const distractors = seededShuffle(
-        rawItems.filter((it) => it.id !== targetItem.id),
+      // Dedupe distractors by normalized German text, not just id: the same
+      // word must never appear as two different moles.
+      const seenGerman = new Set<string>([normalizeGermanChoice(targetItem.german)]);
+      const distractors: LernstudioItem[] = [];
+      for (const it of seededShuffle(
+        rawItems.filter((x) => x.id !== targetItem.id),
         rng
-      ).slice(0, holeIndices.length - 1);
+      )) {
+        const key = normalizeGermanChoice(it.german);
+        if (!key || seenGerman.has(key)) continue;
+        seenGerman.add(key);
+        distractors.push(it);
+        if (distractors.length >= holeIndices.length - 1) break;
+      }
       const assignedCandidates = seededShuffle([targetItem, ...distractors], rng);
 
       setHoles(

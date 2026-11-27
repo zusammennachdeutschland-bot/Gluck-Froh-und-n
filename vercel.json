@@ -1,6 +1,11 @@
 {
   "$schema": "https://json.schemastore.org/vercel.json",
   "version": 2,
+  "functions": {
+    "api/index.ts": {
+      "maxDuration": 60
+    }
+  },
   "rewrites": [
     {
       "source": "/api/(.*)",

@@ -1,7 +1,10 @@
 import React from 'react';
 import { Student, StudentSessionPerformance, PerformanceLevel, ParticipationLevel, UnderstandingLevel, SpeakingLevel, ReadingLevel, WritingLevel, FocusLevel, ProgressLevel } from '../types';
-import { generateFeedback } from '../utils/feedbackGenerator';
 import { getStudentGender } from '../utils/genderUtils';
+// feedbackGenerator (~106KB of Arabic strings) is loaded on demand only:
+// it must NOT sit in the first bundle. The module is imported lazily the
+// first time a performance level is picked / regenerated.
+type GenerateFeedbackFn = typeof import('../utils/feedbackGenerator').generateFeedback;
 import { RefreshCw, BarChart2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -23,6 +26,18 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({
   const { _t, language: appLanguage } = useApp();
   const effectiveLang = propLanguage || appLanguage;
   const lang: 'ar' | 'en' | 'de' = (effectiveLang === 'de' || effectiveLang === 'en') ? effectiveLang : 'ar';
+
+  // Lazy feedback-generator loader (single shared import promise) + a
+  // request counter so a slow generation never overwrites a newer pick.
+  const feedbackModulePromiseRef = React.useRef<Promise<{ generateFeedback: GenerateFeedbackFn }> | null>(null);
+  const feedbackReqRef = React.useRef(0);
+  const [feedbackLoading, setFeedbackLoading] = React.useState(false);
+  const loadGenerateFeedback = React.useCallback(async (): Promise<GenerateFeedbackFn> => {
+    if (!feedbackModulePromiseRef.current) {
+      feedbackModulePromiseRef.current = import('../utils/feedbackGenerator');
+    }
+    return (await feedbackModulePromiseRef.current).generateFeedback;
+  }, []);
 
   // Distinct color per level (excellent green → needs support red) so each
   // student's level is readable at a glance while scrolling: every option
@@ -93,16 +108,34 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({
   const handleUpdate = (updates: Partial<StudentSessionPerformance>) => {
     const activeGender = updates.gender !== undefined ? updates.gender : (perf.gender || autoResolvedGender);
     const newPerf: StudentSessionPerformance = { ...perf, ...updates, gender: activeGender };
-    
-    // Auto-generate feedback if level is selected
+
+    // Auto-generate feedback if level is selected (lazy: the 106KB generator
+    // chunk loads on first use; the level itself applies immediately).
     if (newPerf.level) {
-      const generated = generateFeedback(newPerf, lang, newPerf.feedbackVariantId, activeGender);
-      newPerf.generatedFeedback = generated.feedback;
-      newPerf.feedbackVariantId = generated.variantId;
-      newPerf.feedbackLanguage = lang;
-      newPerf.generatedAt = new Date().toISOString();
+      const reqId = ++feedbackReqRef.current;
+      setFeedbackLoading(true);
+      loadGenerateFeedback().then((generateFeedback) => {
+        if (feedbackReqRef.current !== reqId) return; // a newer pick won
+        const generated = generateFeedback(newPerf, lang, newPerf.feedbackVariantId, activeGender);
+        onChange({
+          ...newPerf,
+          generatedFeedback: generated.feedback,
+          feedbackVariantId: generated.variantId,
+          feedbackLanguage: lang,
+          generatedAt: new Date().toISOString()
+        });
+      }).catch(() => {
+        // Generator chunk failed to load: keep the level, just no auto text.
+        if (feedbackReqRef.current === reqId) onChange(newPerf);
+      }).finally(() => {
+        if (feedbackReqRef.current === reqId) setFeedbackLoading(false);
+      });
+      // Apply the level/factor change immediately; the generated text
+      // follows via the onChange above once the chunk loads.
+      onChange(newPerf);
+      return;
     }
-    
+
     onChange(newPerf);
   };
 
@@ -110,14 +143,23 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({
     e.preventDefault();
     if (perf.level) {
       const activeGender = perf.gender || autoResolvedGender;
-      const generated = generateFeedback(perf, lang, perf.feedbackVariantId, activeGender);
-      onChange({
-        ...perf,
-        gender: activeGender,
-        generatedFeedback: generated.feedback,
-        feedbackVariantId: generated.variantId,
-        feedbackLanguage: lang,
-        generatedAt: new Date().toISOString()
+      const reqId = ++feedbackReqRef.current;
+      setFeedbackLoading(true);
+      loadGenerateFeedback().then((generateFeedback) => {
+        if (feedbackReqRef.current !== reqId) return;
+        const generated = generateFeedback(perf, lang, perf.feedbackVariantId, activeGender);
+        onChange({
+          ...perf,
+          gender: activeGender,
+          generatedFeedback: generated.feedback,
+          feedbackVariantId: generated.variantId,
+          feedbackLanguage: lang,
+          generatedAt: new Date().toISOString()
+        });
+      }).catch(() => {
+        // Keep the existing feedback on load failure.
+      }).finally(() => {
+        if (feedbackReqRef.current === reqId) setFeedbackLoading(false);
       });
     }
   };
@@ -308,20 +350,26 @@ export const StudentSessionPerformanceSelector: React.FC<Props> = ({
             </div>
 
             {/* Generated Feedback */}
+            {feedbackLoading && !perf.generatedFeedback && (
+              <div className="mt-2 bg-background border border-surface-border rounded-lg p-2.5">
+                <p className="text-[11px] font-semibold text-text-muted leading-relaxed">{_t('جارٍ تحميل نص التقييم…', 'Loading feedback text…', 'Feedback-Text wird geladen…')}</p>
+              </div>
+            )}
             {perf.generatedFeedback && (
               <div className="mt-2 bg-background border border-surface-border rounded-lg p-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-1.5 mb-2 pb-1.5 border-b border-surface-border/40">
                   <span className="text-[9.5px] font-black text-text-muted">{_t('النص التلقائي', 'Generated Feedback', 'Generiertes Feedback')}</span>
-                  
+
                   {/* Regenerate Button */}
                   <button
                     type="button"
                     onClick={handleRegenerate}
-                    className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-black text-primary bg-primary-soft hover:bg-primary/20 border border-primary-border transition-colors cursor-pointer"
+                    disabled={feedbackLoading}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-black text-primary bg-primary-soft hover:bg-primary/20 border border-primary-border transition-colors cursor-pointer disabled:opacity-50"
                     title={_t('تغيير صياغة النص التلقائي', 'Regenerate feedback wording', 'Formulierung neu generieren')}
                   >
                     <RefreshCw className="w-3 h-3" />
-                    <span>{_t('صياغة أخرى', 'Another phrasing', 'Neu formulieren')}</span>
+                    <span>{feedbackLoading ? _t('جارٍ التحميل…', 'Loading…', 'Lädt…') : _t('صياغة أخرى', 'Another phrasing', 'Neu formulieren')}</span>
                   </button>
                 </div>
 

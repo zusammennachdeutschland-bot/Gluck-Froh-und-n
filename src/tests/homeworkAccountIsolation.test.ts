@@ -1168,7 +1168,10 @@ async function runAllIsolationTests() {
           assignmentId: 'api_hw_a',
           studentName: 'نور الهدى',
           responses: [
-            { questionId: 'q1', germanWord: 'der Apfel', studentAnswer: 'der Apfel', correctAnswer: 'der Apfel', isCorrect: true, timeSpentSeconds: 5 }
+            // Real client responses always carry questionType (HomeworkPlayerPage);
+            // without it the server cannot derive the expected answer and the
+            // submit routes (requireKnownQuestion) correctly reject the response.
+            { questionId: 'q1', questionType: 'mc_ar_de', germanWord: 'der Apfel', studentAnswer: 'der Apfel', correctAnswer: 'der Apfel', isCorrect: true, timeSpentSeconds: 5 }
           ]
         })
       });

@@ -506,8 +506,12 @@ async function runTests(): Promise<void> {
           appliedBonusRoundIds: []
         },
         responses: [
-          { questionId: 'q1', questionType: 'choice_all', germanWord: 'Hund', studentAnswer: 'كلب', correctAnswer: 'كلب', isCorrect: true, timeSpentSeconds: 2 },
-          { questionId: 'q2', questionType: 'choice_all', germanWord: 'Katze', studentAnswer: 'قطة', correctAnswer: 'قطة', isCorrect: true, timeSpentSeconds: 3 }
+          // choice_all asks for the GERMAN word (prompt shows the Arabic
+          // meaning); the server re-grades from the set data, so the answers
+          // must be the German words for the submission to be genuinely
+          // correct.
+          { questionId: 'q1', questionType: 'choice_all', germanWord: 'Hund', studentAnswer: 'Hund', correctAnswer: 'Hund', isCorrect: true, timeSpentSeconds: 2 },
+          { questionId: 'q2', questionType: 'choice_all', germanWord: 'Katze', studentAnswer: 'Katze', correctAnswer: 'Katze', isCorrect: true, timeSpentSeconds: 3 }
         ]
       };
 
@@ -527,13 +531,17 @@ async function runTests(): Promise<void> {
       assert.equal(retryData.isIdempotentRetry, true);
       assert.equal(exactRetryRes.synced, true);
 
-      // Changed goldEarned -> 409 Conflict
+      // Changed goldEarned -> 200 idempotent retry: rewards are computed by
+      // the server from verified responses, so a client-sent goldEarned is
+      // normalised away instead of conflicting with the stored submission.
       const goldConflict = await expressFetch(`${baseUrl}/api/homework/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...completedSub, goldEarned: 999 })
       });
-      assert.equal(goldConflict.status, 409);
+      assert.equal(goldConflict.status, 200);
+      const goldRetryData = await goldConflict.json();
+      assert.equal(goldRetryData.isIdempotentRetry, true);
 
       // Changed responses content -> 409 Conflict
       const respConflict = await expressFetch(`${baseUrl}/api/homework/submit`, {
@@ -565,7 +573,9 @@ async function runTests(): Promise<void> {
       });
       assert.equal(downgradeConflict.status, 409);
 
-      // Client helper fail-closed on 409 (never falls back to Firestore setDoc, rejects cleanly)
+      // Client helper with a changed client goldEarned: the server normalises
+      // rewards from verified responses, so this resolves as an idempotent
+      // retry instead of a 409 — and still never falls back to Firestore setDoc.
       let firestoreWritesAttempted = 0;
       (globalThis as any).fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = typeof input === 'string' ? input : input.toString();
@@ -573,16 +583,19 @@ async function runTests(): Promise<void> {
         return expressFetch(input, init);
       }) as typeof fetch;
 
-      await assert.rejects(
-        () => saveSubmissionWithConfirmation({ ...completedSub, goldEarned: 777 }, hw),
-        (err: any) => err?.status === 409
-      );
-      assert.equal(firestoreWritesAttempted, 0, 'Server 409 Conflict must NEVER fall back to client Firestore setDoc');
+      const goldHelperRes = await saveSubmissionWithConfirmation({ ...completedSub, goldEarned: 777 }, hw);
+      assert.equal(goldHelperRes.cloudSynced, true);
+      assert.equal(firestoreWritesAttempted, 0, 'Server responses must NEVER fall back to client Firestore setDoc');
       (globalThis as any).fetch = expressFetch;
 
-      // Offline/transient failure queue backoff & 409 permanent drop in flushPendingHomeworkCloudWrites
+      // A genuinely conflicting retry (changed answer) is still a 409 and is
+      // permanently dropped by flushPendingHomeworkCloudWrites, never retried.
+      const pendingConflictSub: HomeworkSubmission = {
+        ...completedSub,
+        responses: [{ ...completedSub.responses[0], studentAnswer: 'ذئب' }, completedSub.responses[1]],
+        cloudSynced: false
+      };
       localStorageMock.clear();
-      const pendingConflictSub: HomeworkSubmission = { ...completedSub, goldEarned: 888, cloudSynced: false };
       saveLocalAssignment(hw, true);
       const storageKey = `glueck_hw_submissions_v3_local_unauthenticated`;
       localStorageMock.setItem(storageKey, JSON.stringify([pendingConflictSub]));
@@ -599,7 +612,7 @@ async function runTests(): Promise<void> {
       assert.equal(retryPostCalls, 0, 'Dropped 409 submission must not be retried');
       (globalThis as any).fetch = expressFetch;
 
-      pass('3. Strict completed submission immutability: exact retry 200, changed fields 409 Conflict, zero silent overwrite');
+      pass('3. Strict completed submission immutability: exact retry 200, changed answers/gamification 409 Conflict, server-normalised rewards, zero silent overwrite');
     }
 
     // =========================================================================

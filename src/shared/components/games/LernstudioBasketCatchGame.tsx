@@ -34,11 +34,15 @@ interface Props {
 interface FallingWord {
   id: string;
   item: AdaptedVocabItem;
+  /** Article-mode only: the article this falling word offers (der/die/das). */
+  article?: 'der' | 'die' | 'das';
   xPercent: number; // 5% to 85%
   yPercent: number; // 0 (top) to 100 (bottom)
   speed: number;
   caught: boolean;
 }
+
+const stripLeadingArticle = (german: string) => german.replace(/^(der|die|das)\s+/i, '').trim();
 
 export const LernstudioBasketCatchGame: React.FC<Props> = ({
   set,
@@ -57,9 +61,18 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
   const enableSoundFx = gameConfig?.enableSoundFx ?? true;
 
   const [sessionSeed, setSessionSeed] = useState<number>(() => Date.now());
-  const items = useMemo(
+  const allItems = useMemo(
     () => getSetVocabularyItems(set, language, gameConfig?.questionCount, sessionSeed),
     [set, language, gameConfig?.questionCount, sessionSeed]
+  );
+  // 'article' question type (offered by the setup screen whenever the set has
+  // articles): the round tests der/die/das instead of word meaning. Only
+  // items that actually carry an article can be targets; otherwise fall back
+  // to the normal word round.
+  const isArticleMode = gameConfig?.questionType === 'article' && allItems.some((it) => !!it.article);
+  const items = useMemo(
+    () => (isArticleMode ? allItems.filter((it) => !!it.article) : allItems),
+    [allItems, isArticleMode]
   );
 
   // Game state
@@ -128,6 +141,23 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
     (target: AdaptedVocabItem, roundIdx: number): FallingWord[] => {
       waveCounterRef.current += 1;
       const rng = createSeededRandom(sessionSeed + roundIdx * 97 + waveCounterRef.current * 31);
+      // Article mode: the falling words offer der/die/das for the target noun.
+      if (isArticleMode && target.article) {
+        const order: Array<'der' | 'die' | 'das'> = ['der', 'die', 'das'];
+        for (let i = order.length - 1; i > 0; i--) {
+          const j = Math.floor(rng() * (i + 1));
+          [order[i], order[j]] = [order[j], order[i]];
+        }
+        return order.map((art, idx) => ({
+          id: `art_${art}_${waveCounterRef.current}_${idx}`,
+          item: target,
+          article: art,
+          xPercent: Math.min(88, Math.max(12, 16 + idx * 32 + (rng() * 8 - 4))),
+          yPercent: idx * -18,
+          speed: baseSpeed + rng() * 0.14,
+          caught: false
+        }));
+      }
       const candidates = getDistractorChoices(target, items, 2, rng);
       return candidates.map((it, idx) => ({
         id: `${it.id}_${waveCounterRef.current}_${idx}`,
@@ -138,7 +168,7 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
         caught: false
       }));
     },
-    [sessionSeed, items, baseSpeed]
+    [sessionSeed, items, baseSpeed, isArticleMode]
   );
 
   // Sync basket ref
@@ -154,18 +184,9 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
     setFallingWords(wave);
   }, [targetIndex, isGameOver, isVictory, items.length, targetItem, createWaveForTarget]);
 
-  // Auto-pronounce German target word when new round starts
-  useEffect(() => {
-    if (enableAudio && targetItem?.german && !isGameOver && !isVictory) {
-      const timer = setTimeout(() => {
-        speakGermanText(targetItem.german);
-      }, 350);
-      return () => {
-        clearTimeout(timer);
-        stopGermanSpeech();
-      };
-    }
-  }, [targetItem, isGameOver, isVictory, enableAudio]);
+  // No auto-pronunciation of the target: speaking is only via the banner's
+  // speaker button, so the child must read the word instead of matching a
+  // sound to letters (P0 language bypass).
 
   // Falling & Collision Loop (mutates refs synchronously, updates React states outside updater)
   useEffect(() => {
@@ -186,9 +207,11 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
         const isInsideBasketWidth = Math.abs(word.xPercent - curBasketX) <= 13;
 
         if (isAtBasketHeight && isInsideBasketWidth) {
-          const isCorrect = word.item.id === targetItem.id;
+          const isCorrect = isArticleMode && word.article
+            ? word.article === targetItem.article
+            : word.item.id === targetItem.id;
           attemptsCountRef.current += 1;
-          setCatchFlash({ text: word.item.german, correct: isCorrect });
+          setCatchFlash({ text: isArticleMode && word.article ? word.article : word.item.german, correct: isCorrect });
           scheduleTimeout(() => setCatchFlash(null), 800);
 
           if (isCorrect) {
@@ -245,7 +268,10 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
         }
 
         if (newY > 105) {
-          if (word.item.id === targetItem.id) {
+          const isTargetWord = isArticleMode && word.article
+            ? word.article === targetItem.article
+            : word.item.id === targetItem.id;
+          if (isTargetWord) {
             attemptsCountRef.current += 1;
             if (enableSoundFx) playLernstudioSound('wrong');
             const nextLives = Math.max(0, livesRef.current - 1);
@@ -282,6 +308,7 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
     isGameOver,
     isVictory,
     items.length,
+    isArticleMode,
     createWaveForTarget,
     enableAudio,
     enableSoundFx,
@@ -374,7 +401,9 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
               </span>
             </h1>
             <p className="text-[11px] text-text-muted font-bold">
-              حرك السلة لالتقاط الكلمة الألمانية المطابقة للمطلوب!
+              {isArticleMode
+                ? 'حرك السلة لالتقاط أداة التعريف الصحيحة!'
+                : 'حرك السلة لالتقاط الكلمة الألمانية المطابقة للمطلوب!'}
             </p>
           </div>
         </div>
@@ -410,24 +439,36 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
       <GameStageBanner
         mode="basket_catch"
         title="سلة التقاط الكلمات (Basket Catch)"
-        subtitle="حرك السلة في البستان المشمس لالتقاط المفردة الألمانية الصحيحة!"
+        subtitle={isArticleMode ? 'حرك السلة لالتقاط أداة التعريف الصحيحة!' : 'حرك السلة في البستان المشمس لالتقاط المفردة الألمانية الصحيحة!'}
         badgeText={`${targetIndex + 1} / ${items.length}`}
       />
 
-      {/* Target Mission Banner */}
+      {/* Target Mission Banner — no emoji: matching must use the word, not a picture. */}
       {targetItem && !isGameOver && !isVictory && (
         <div className="bg-surface border-2 border-primary/40 rounded-2xl p-3.5 text-center space-y-1 shadow-sm">
           <span className="text-xs font-extrabold text-primary block">
-            التقط في السلة الكلمة التي تعني ({targetIndex + 1} من {items.length}):
+            {isArticleMode
+              ? `ما أداة التعريف الصحيحة؟ (${targetIndex + 1} من ${items.length})`
+              : `التقط في السلة الكلمة التي تعني (${targetIndex + 1} من ${items.length}):`}
           </span>
           <div className="flex items-center justify-center gap-2.5">
-            {targetItem.emoji && <span className="text-2xl">{targetItem.emoji}</span>}
-            <h2 className="text-xl sm:text-2xl font-black text-text-main">
-              {getItemTranslation(targetItem.originalItem, language)}
-            </h2>
+            {isArticleMode ? (
+              <>
+                <h2 className="text-xl sm:text-2xl font-black text-text-main font-mono" dir="ltr" lang="de">
+                  {stripLeadingArticle(targetItem.german)}
+                </h2>
+                <span className="text-sm font-bold text-text-muted">
+                  {getItemTranslation(targetItem.originalItem, language)}
+                </span>
+              </>
+            ) : (
+              <h2 className="text-xl sm:text-2xl font-black text-text-main">
+                {getItemTranslation(targetItem.originalItem, language)}
+              </h2>
+            )}
             <button
               type="button"
-              onClick={() => speakGermanText(targetItem.german)}
+              onClick={() => speakGermanText(isArticleMode ? stripLeadingArticle(targetItem.german) : targetItem.german)}
               className="p-1.5 rounded-xl bg-primary/10 text-primary hover:bg-primary hover:text-white transition-colors cursor-pointer"
               title="نطق الكلمة"
             >
@@ -457,8 +498,7 @@ export const LernstudioBasketCatchGame: React.FC<Props> = ({
               className="absolute z-20 pointer-events-none"
             >
               <div className="px-3.5 py-2 rounded-2xl bg-surface/95 border-2 border-primary/40 text-text-main shadow-md flex items-center gap-1.5 font-mono font-black text-xs sm:text-sm">
-                {word.item.emoji && <span className="text-base">{word.item.emoji}</span>}
-                <span>{word.item.german}</span>
+                <span>{isArticleMode && word.article ? word.article : word.item.german}</span>
               </div>
             </div>
           ))}

@@ -1,4 +1,4 @@
-import { CompactVerbTuple } from './verbTypes';
+import { CompactVerbTuple } from './verbTypes.js';
 
 /**
  * Curated A2 German Verb Bank — Part 1 (245 authentic A2 verbs).

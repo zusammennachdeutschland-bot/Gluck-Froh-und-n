@@ -229,7 +229,7 @@ export const BATCH_01_SETS: LernstudioSet[] = [
     updatedAt: 1767225600000,
     items: [
       { id: 'b01_08_01', german: 'null', arabic: 'صفر (0)', emoji: '0️⃣', exampleSentenceGerman: 'Ich habe null Fehler.', exampleSentenceArabic: 'ليس لدي أي أخطاء (صفر أخطاء).', missingLetterWord: 'n_ll', sentence4Elements: ['Null', 'ist', 'eine', 'Zahl.'] },
-      { id: 'b01_08_02', german: 'eins', arabic: 'واحد (1)', emoji: '1️⃣', exampleSentenceGerman: 'Ich habe einen Ball.', exampleSentenceArabic: 'لدي كرة واحدة.', missingLetterWord: '_ins', sentence4Elements: ['Eins', 'und', 'eins', 'ist zwei.'] },
+      { id: 'b01_08_02', german: 'eins', arabic: 'واحد (1)', emoji: '1️⃣', exampleSentenceGerman: 'Eins ist die erste Zahl.', exampleSentenceArabic: 'واحد هو الرقم الأول.', missingLetterWord: '_ins', sentence4Elements: ['Eins', 'ist die', 'erste', 'Zahl.'] },
       { id: 'b01_08_03', german: 'zwei', arabic: 'اثنان (2)', emoji: '2️⃣', exampleSentenceGerman: 'Der Vogel hat zwei Flügel.', exampleSentenceArabic: 'للطائر جناحان.', missingLetterWord: 'zw_i', sentence4Elements: ['Ich', 'habe', 'zwei', 'Augen.'] },
       { id: 'b01_08_04', german: 'drei', arabic: 'ثلاثة (3)', emoji: '3️⃣', exampleSentenceGerman: 'Drei kleine Kätzchen spielen.', exampleSentenceArabic: 'ثلاث قطط صغيرة تلعب.', missingLetterWord: 'dr_i', sentence4Elements: ['Drei', 'Bären', 'wohnen', 'hier.'] },
       { id: 'b01_08_05', german: 'vier', arabic: 'أربعة (4)', emoji: '4️⃣', exampleSentenceGerman: 'Ein Tisch hat vier Beine.', exampleSentenceArabic: 'للطاولة أربعة أرجل.', missingLetterWord: 'vi_r', sentence4Elements: ['Ein', 'Auto', 'hat', 'vier Räder.'] },
@@ -649,7 +649,7 @@ export const BATCH_01_SETS: LernstudioSet[] = [
     updatedAt: 1767225600000,
     items: [
       { id: 'b01_22_01', german: 'sauber', arabic: 'نظيف', emoji: '✨', exampleSentenceGerman: 'Meine Hände sind sauber.', exampleSentenceArabic: 'يداي نظيفتان.', missingLetterWord: 's_uber', sentence4Elements: ['Das', 'Zimmer', 'ist', 'wieder sauber.'] },
-      { id: 'b01_22_02', german: 'schmutzig', arabic: 'متسخ', emoji: '泥', exampleSentenceGerman: 'Nach dem Spiel sind die Schuhe schmutzig.', exampleSentenceArabic: 'بعد اللعب أصبحت الأحذية متسخة.', missingLetterWord: 'schm_tzig', sentence4Elements: ['Meine', 'Hände', 'sind', 'ganz schmutzig.'] },
+      { id: 'b01_22_02', german: 'schmutzig', arabic: 'متسخ', emoji: '🧽', exampleSentenceGerman: 'Nach dem Spiel sind die Schuhe schmutzig.', exampleSentenceArabic: 'بعد اللعب أصبحت الأحذية متسخة.', missingLetterWord: 'schm_tzig', sentence4Elements: ['Meine', 'Hände', 'sind', 'ganz schmutzig.'] },
       { id: 'b01_22_03', german: 'ordentlich', arabic: 'مرتّب / منظم', emoji: '📦', exampleSentenceGerman: 'Mein Schreibtisch ist ordentlich.', exampleSentenceArabic: 'مكتبي مرتب.', missingLetterWord: '_rdentlich', sentence4Elements: ['Räum', 'dein', 'Zimmer', 'ordentlich auf!'] },
       { id: 'b01_22_04', german: 'chaotisch', arabic: 'فوضوي', emoji: '🌀', exampleSentenceGerman: 'Hier sieht es etwas chaotisch aus.', exampleSentenceArabic: 'يبدو المكان فوضوياً بعض الشيء هنا.', missingLetterWord: 'ch_otisch', sentence4Elements: ['Das', 'Zimmer', 'ist', 'ziemlich chaotisch.'] },
       { id: 'b01_22_05', german: 'nass', arabic: 'مبلل', emoji: '💦', exampleSentenceGerman: 'Meine Jacke ist vom Regen nass.', exampleSentenceArabic: 'سترتي مبللة من المطر.', missingLetterWord: 'n_ss', sentence4Elements: ['Das', 'Gras', 'ist', 'morgens nass.'] },
@@ -867,7 +867,7 @@ export const BATCH_01_SETS: LernstudioSet[] = [
       { id: 'b01_29_07', german: 'leuchtend', arabic: 'ساطع / مضيء', emoji: '🌟', exampleSentenceGerman: 'Das Rot ist kräftig und leuchtend.', exampleSentenceArabic: 'اللون الأحمر قوي وساطع.', missingLetterWord: 'l_uchtend', sentence4Elements: ['Die', 'Farben', 'leuchten', 'am Himmel.'] },
       { id: 'b01_29_08', german: 'der Himmel', arabic: 'السماء', article: 'der', plural: 'die Himmel', emoji: '⛅', exampleSentenceGerman: 'Nach dem Regen leuchtet der Himmel.', exampleSentenceArabic: 'بعد المطر تتلألأ السماء.', missingLetterWord: 'der H_mmel', sentence4Elements: ['Sonne', 'und', 'Regen', 'machen einen Bogen.'] },
       { id: 'b01_29_09', german: 'der Regen', arabic: 'المطر', article: 'der', plural: 'die Regen', emoji: '🌧️', exampleSentenceGerman: 'Der warme Regen fällt auf das Dach.', exampleSentenceArabic: 'المطر الدافئ يسقط على السقف.', missingLetterWord: 'der R_gen', sentence4Elements: ['Der', 'Regen', 'hört', 'bald auf.'] },
-      { id: 'b01_29_10', german: 'das Sonnenlicht', arabic: 'ضوء الشمس', article: 'das', plural: 'die Sonnenlichter', emoji: '☀️', exampleSentenceGerman: 'Das Sonnenlicht bricht in den Tropfen.', exampleSentenceArabic: 'ضوء الشمس ينكسر في قطرات الندى.', missingLetterWord: 'das S_nnenlicht', sentence4Elements: ['Warmes', 'Sonnenlicht', 'macht', 'uns fröhlich.'] }
+      { id: 'b01_29_10', german: 'das Sonnenlicht', arabic: 'ضوء الشمس', article: 'das', plural: '-', emoji: '☀️', exampleSentenceGerman: 'Das Sonnenlicht bricht in den Tropfen.', exampleSentenceArabic: 'ضوء الشمس ينكسر في قطرات الندى.', missingLetterWord: 'das S_nnenlicht', sentence4Elements: ['Warmes', 'Sonnenlicht', 'macht', 'uns fröhlich.'] }
     ]
   },
 

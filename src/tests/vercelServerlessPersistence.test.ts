@@ -111,7 +111,10 @@ async function runAll18ServerlessPersistenceTests() {
         isActive: true,
         audienceMode: 'open',
         shareToken: 'tok_valid_p02',
-        setSnapshot: { id: 's1', title: 'A1 Vocab' }
+        // Items included so student submissions can be re-graded server-side:
+        // the submit routes require every response to resolve against the
+        // assignment snapshot (requireKnownQuestion).
+        setSnapshot: { id: 's1', title: 'A1 Vocab', items: [{ id: 'w1', german: 'der Apfel', arabic: 'التفاحة' }] }
       })
     });
     assert.equal(createRes.status, 200);
@@ -228,7 +231,10 @@ async function runAll18ServerlessPersistenceTests() {
         assignmentId: hwId1,
         token: 'tok_valid_p02',
         studentName: 'Amina Youssef',
-        responses: [{ questionId: 'q1', selectedOption: 'B', isCorrect: true }]
+        // Real client responses always carry questionType + germanWord
+        // (HomeworkPlayerPage); the submit routes require every response to
+        // resolve against the assignment snapshot.
+        responses: [{ questionId: 'q1', questionType: 'mc_ar_de', germanWord: 'der Apfel', studentAnswer: 'der Apfel', selectedOption: 'B', isCorrect: true }]
       })
     });
     assert.equal(subP07Res.status, 200);
@@ -432,8 +438,8 @@ async function runAll18ServerlessPersistenceTests() {
       studentName: 'Nadia',
       status: 'completed',
       responses: [
-        { questionId: 'q1', selectedOption: 'A', isCorrect: true },
-        { questionId: 'q2', selectedOption: 'B', isCorrect: true }
+        { questionId: 'q1', questionType: 'mc_ar_de', germanWord: 'der Apfel', studentAnswer: 'der Apfel', selectedOption: 'A', isCorrect: true },
+        { questionId: 'q2', questionType: 'mc_ar_de', germanWord: 'der Apfel', studentAnswer: 'der Apfel', selectedOption: 'B', isCorrect: true }
       ]
     };
     const firstSub = await fetch(`${baseUrl}/api/homework/submit`, {
@@ -469,7 +475,7 @@ async function runAll18ServerlessPersistenceTests() {
             assignmentId: hwId1,
             token: 'tok_valid_p02',
             studentName: `Student ${i}`,
-            responses: [{ questionId: 'q1', isCorrect: true }]
+            responses: [{ questionId: 'q1', questionType: 'mc_ar_de', germanWord: 'der Apfel', studentAnswer: 'der Apfel', isCorrect: true }]
           })
         }).then((r) => r.json() as any)
       )
@@ -491,9 +497,13 @@ async function runAll18ServerlessPersistenceTests() {
         assignmentId: hwId1,
         token: 'tok_valid_p02',
         studentName: 'Nadia',
+        // Deliberately WRONG answers (das Buch ≠ der Apfel) so the payload
+        // differs from the stored completed submission: the overwrite check
+        // must reject with 409. (The server re-grades, so isCorrect is
+        // recomputed from studentAnswer, not trusted from the client.)
         responses: [
-          { questionId: 'q1', selectedOption: 'A', isCorrect: false },
-          { questionId: 'q2', selectedOption: 'B', isCorrect: false }
+          { questionId: 'q1', questionType: 'mc_ar_de', germanWord: 'der Apfel', studentAnswer: 'das Buch', selectedOption: 'A', isCorrect: false },
+          { questionId: 'q2', questionType: 'mc_ar_de', germanWord: 'der Apfel', studentAnswer: 'das Buch', selectedOption: 'B', isCorrect: false }
         ]
       })
     });
