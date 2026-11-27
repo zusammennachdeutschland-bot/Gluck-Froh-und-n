@@ -23,6 +23,7 @@ import {
 import { App as CapacitorApp } from '@capacitor/app';
 import { storage, recordStoragePersistenceFailure } from '../services/storageService';
 import { getStudentCyclePricing, calculateEstimatedPastDate, sanitizePaymentLessonDates, allocateAdvancePaymentFifo, buildMovedStudentRecord, recalculatePendingPaymentsForGroupPriceChange } from '../utils/paymentUtils';
+import { compressPageImageFile } from '../shared/lernstudioPageImageStore';
 import { getGroupScheduleSlots, getDayNumber, isDateMatchingGroupRecurrence, getAlternatingWeek } from '../utils/scheduleUtils';
 import { formatLocalDate, normalizeDateToISO, parseLocalDate } from '../utils/timeUtils';
 import { getPrunedLessonIds, addPrunedLessonIds, executeLessonCleanup, analyzeLessonCleanup, formatLocalDateStr, LAST_CLEANUP_DATE_KEY, PRUNED_LESSONS_BACKUP_KEY, repairFutureAutoLessonTombstones, repairFutureAutoLessonTombstonesFromStorage } from '../services/lessonCleanupService';
@@ -1049,6 +1050,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const fullPaymentsRef = useRef<PaymentRecord[]>(initialPaymentDeduplication.deduplicated);
 
   // Lernstudio Sets State & Persistence (Strictly Deduplicated)
+  // C3: set by the initializer below when the stored sets value is corrupt
+  // (not an array) so a mount effect can quarantine it and warn the teacher.
+  const corruptLernstudioSetsRef = useRef<{ raw: unknown } | null>(null);
   const [lernstudioSets, setLernstudioSets] = useState<LernstudioSet[]>(() => {
     const saved = initialData['dl_lernstudio_sets'];
     let rawSets: LernstudioSet[] = [];
@@ -1078,6 +1082,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       });
 
       rawSets = [...enrichedSaved, ...missingDefaults.map((ds) => normalizeLernstudioSet(ds))];
+    } else if (saved !== null && saved !== undefined) {
+      // C3: CORRUPT storage, not empty storage. storage.getItem returns the
+      // raw unparseable string when JSON.parse fails, so a non-array saved
+      // value means the teacher's sets are damaged — fall back to the
+      // defaults for this session WITHOUT overwriting the stored key, and
+      // let the mount effect below quarantine the corrupt value + warn.
+      corruptLernstudioSetsRef.current = { raw: saved };
+      rawSets = DEFAULT_LERNSTUDIO_SETS.map((ds) => normalizeLernstudioSet(ds));
     } else {
       rawSets = DEFAULT_LERNSTUDIO_SETS.map((ds) => normalizeLernstudioSet(ds));
     }
@@ -1093,7 +1105,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       deduped.push(set);
     }
 
-    storage.setItem('dl_lernstudio_sets', deduped);
+    // C3: never write the defaults over a corrupt stored value — the
+    // original key stays untouched so the data can still be recovered.
+    if (!corruptLernstudioSetsRef.current) {
+      storage.setItem('dl_lernstudio_sets', deduped);
+    }
     return deduped;
   });
 
@@ -1146,7 +1162,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         storage.setItem('dl_recently_deleted', nextRec);
       }
 
-      const mutated = wrapMutation(cleanedNewSet);
+      // C2: stamp per-field modification times (mergeEngine) so a set edited
+      // on two devices can merge field-by-field instead of last-write-wins
+      // for the whole set.
+      const fieldStampedSet = stampFieldTimestamps(existing, cleanedNewSet);
+      const mutated = wrapMutation(fieldStampedSet);
 
       let updated: LernstudioSet[];
       if (existing) {
@@ -2171,6 +2191,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     setTimeout(() => {
       setGlobalToastMsg(prev => (prev === msg ? null : prev));
     }, 3200);
+  }, []);
+
+  // C3: if the stored Lernstudio sets were corrupt at boot, quarantine the
+  // raw value under a dated key (the original key is left untouched) and
+  // tell the teacher — the custom sets are not silently replaced.
+  useEffect(() => {
+    const corrupt = corruptLernstudioSetsRef.current;
+    if (!corrupt) return;
+    corruptLernstudioSetsRef.current = null;
+    const quarantineKey = `dl_lernstudio_sets_corrupt_${Date.now()}`;
+    storage.setItem(quarantineKey, corrupt.raw as any).catch(() => {});
+    storage
+      .setItem('dl_lernstudio_sets_corrupt_detected', {
+        key: quarantineKey,
+        at: new Date().toISOString()
+      })
+      .catch(() => {});
+    triggerToast(
+      _t(
+        '⚠ بيانات مجموعات Lernstudio كانت تالفة — رجّعنا المجموعات الافتراضية مؤقتاً وحفظنا نسخة من البيانات التالفة للمراجعة، ولم نمسحها.',
+        '⚠ Your Lernstudio sets data was corrupted — defaults were restored for now and a copy of the damaged data was kept for review, not deleted.'
+      )
+    );
   }, []);
 
   // System Notification Settings & Scheduled Notifications Engine
@@ -4146,6 +4189,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
     autoSyncEngine.notifyMutation('students', id);
   };
 
+  // Student documents used to be stored as full uncapped base64 inside
+  // dl_students, bloating every save/sync. Cap: 2 MB per document; images
+  // are downscaled/compressed (max 1600px, JPEG 0.82) before saving.
+  // (Avatars are preset cartoons, not file uploads — no avatar path here.)
+  const MAX_STUDENT_DOCUMENT_BYTES = 2 * 1024 * 1024;
+
   const uploadStudentDocument = (studentId: string, file: File, category: 'homework' | 'exam' | 'doc') => {
     const docId = `doc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const mimeType = file.type || 'application/octet-stream';
@@ -4154,10 +4203,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       : mimeType.includes('image')
       ? 'image'
       : 'doc';
-    const fileSize = `${(file.size / 1024).toFixed(1)} KB`;
     const uploadedAt = formatLocalDate();
 
-    const applyDocumentUrl = (persistentUrl: string) => {
+    const rejectOversize = (sizeBytes: number) => {
+      triggerToast(_t(
+        `الملف كبير جدًا (${(sizeBytes / 1024 / 1024).toFixed(1)} ميجا) — الحد الأقصى 2 ميجا لكل مستند`,
+        `File too large (${(sizeBytes / 1024 / 1024).toFixed(1)} MB) — max 2 MB per document`,
+        `Datei zu groß (${(sizeBytes / 1024 / 1024).toFixed(1)} MB) — max. 2 MB pro Dokument`
+      ));
+    };
+
+    const applyDocumentUrl = (persistentUrl: string, storedBytes: number) => {
+      const fileSize = `${(storedBytes / 1024).toFixed(1)} KB`;
       const newDoc: StudentDocument = {
         id: docId,
         fileName: file.name,
@@ -4179,24 +4236,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
       autoSyncEngine.notifyMutation('students', studentId);
     };
 
-    if (typeof FileReader !== 'undefined') {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string' && reader.result.startsWith('data:')) {
-          applyDocumentUrl(reader.result);
+    // Non-image documents: hard reject before reading anything.
+    if (fileType !== 'image' && file.size > MAX_STUDENT_DOCUMENT_BYTES) {
+      rejectOversize(file.size);
+      return;
+    }
+
+    // Images: downscale/compress first, then enforce the cap on the result.
+    if (fileType === 'image') {
+      compressPageImageFile(file, 1600, 0.82).then(({ base64Data, mimeType: outMime, sizeBytes }) => {
+        if (sizeBytes > MAX_STUDENT_DOCUMENT_BYTES) {
+          rejectOversize(sizeBytes);
+          return;
         }
-      };
-      reader.readAsDataURL(file);
-    } else if (typeof file.arrayBuffer === 'function') {
-      file.arrayBuffer().then(buf => {
-        const bytes = new Uint8Array(buf);
-        let binary = '';
-        for (let i = 0; i < bytes.byteLength; i++) {
-          binary += String.fromCharCode(bytes[i]);
+        applyDocumentUrl(`data:${outMime};base64,${base64Data}`, sizeBytes);
+      }).catch(() => {
+        // Compression failed (e.g. no canvas): fall back to the direct read,
+        // still capped by the raw file size.
+        if (file.size > MAX_STUDENT_DOCUMENT_BYTES) {
+          rejectOversize(file.size);
+          return;
         }
-        const base64 = typeof btoa === 'function' ? btoa(binary) : Buffer.from(buf).toString('base64');
-        applyDocumentUrl(`data:${mimeType};base64,${base64}`);
-      }).catch(() => {});
+        readFileAsDataUrl();
+      });
+      return;
+    }
+
+    readFileAsDataUrl();
+
+    function readFileAsDataUrl() {
+      if (typeof FileReader !== 'undefined') {
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (typeof reader.result === 'string' && reader.result.startsWith('data:')) {
+            applyDocumentUrl(reader.result, file.size);
+          }
+        };
+        reader.readAsDataURL(file);
+      } else if (typeof file.arrayBuffer === 'function') {
+        file.arrayBuffer().then(buf => {
+          const bytes = new Uint8Array(buf);
+          let binary = '';
+          for (let i = 0; i < bytes.byteLength; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          const base64 = typeof btoa === 'function' ? btoa(binary) : Buffer.from(buf).toString('base64');
+          applyDocumentUrl(`data:${mimeType};base64,${base64}`, file.size);
+        }).catch(() => {});
+      }
     }
   };
 
@@ -8694,6 +8781,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         });
       }
 
+      // C8: sets that reached state without wrapMutation (backup restore,
+      // direct setters) still need origin metadata, or the sync engine
+      // re-sends them on every cycle forever. C17: de-duplicate by id so a
+      // duplicated id is never sent twice in one delta.
+      if (Array.isArray(data.lernstudioSets)) {
+        const seenSetIds = new Set<string>();
+        data.lernstudioSets = data.lernstudioSets
+          .filter((st: any) => {
+            if (!st || !st.id || seenSetIds.has(st.id)) return false;
+            seenSetIds.add(st.id);
+            return true;
+          })
+          .map((st: any) => ({
+            ...st,
+            originDeviceId: st.originDeviceId || localDeviceId,
+            originRevision: st.originRevision || syncRevisionRef.current || 1
+          }));
+      }
+
       // Include local homework assignments & submissions in P2P sync so Computer and Android stay 100% consistent via P2P
       try {
         const rawHwAssignments = getLocalAssignments();
@@ -8936,10 +9042,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
           for (const ds of DEFAULT_LERNSTUDIO_SETS) {
             existingMap.set(ds.id, ds);
           }
-          // Seed from the live ref, not the state variable captured when the
-          // sync data source was first registered: a set deleted (locally or
-          // via an incoming tombstone) after init must not be re-seeded here.
-          for (const ls of (localDataRef.current?.lernstudioSets || [])) {
+          // P2-N5: seed from durable storage directly, not localDataRef: the
+          // ref only updates in a post-render effect, so a sync cycle landing
+          // between setLernstudioSets and the ref update could re-seed a set
+          // that was just deleted. Storage is written synchronously with the
+          // state update, so it is the freshest source here.
+          const storedSets = (await storage.getItem<LernstudioSet[]>('dl_lernstudio_sets')) || [];
+          for (const ls of storedSets) {
             if (ls && ls.id) existingMap.set(ls.id, ls);
           }
           for (const item of incomingList) {
@@ -9217,9 +9326,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
   const activeZoomMeetingHistory = useMemo(() => getActiveRecords(zoomMeetingHistory || []), [zoomMeetingHistory]);
   const activeGrainRecordingMatches = useMemo(() => getActiveRecords(grainRecordingMatches || []), [grainRecordingMatches]);
 
-  return (
-    <AppContext.Provider
-      value={{
+  // Memoized Provider value: without this every render created a new
+  // object identity and re-rendered all ~116 useApp() consumers.
+  const providerValue = useMemo(() => ({
         todos: activeTodos,
         setTodos,
         addTodo,
@@ -9473,7 +9582,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode, initialData: any
         setGrainRecordingMatches,
         applyZoomWorkspaceSnapshot,
         reconcileGroupSessionsState
-      }}
+  }), [
+    _t, accentColor, activeAlarmLesson, activeCertificates, activeFinanceAccounts, activeFinanceCategories, activeFinanceInstallments, activeFinanceNotifications,
+    activeFinanceRecurring, activeFinanceTransactions, activeGrainRecordingMatches, activeGroupWeeklySessions, activeGroups, activeInspirationCard, activeLessonSession, activeLessons,
+    activeNotifications, activePayments, activeSchoolNotes, activeStudents, activeTab, activeTodos, activeZoomMeetingHistory, activeZoomMeetingRecords,
+    addAppNotification, addCertificate, addCertificatesBulk, addFinanceAccount, addFinanceCategory, addFinanceInstallment, addFinanceNotification, addFinanceRecurring,
+    addFinanceTransaction, addGroup, addInspirationMessage, addLesson, addPaymentRecord, addQuickLesson, addSchoolNote, addStudent,
+    addTodo, applyZoomWorkspaceSnapshot, archiveGroup, archiveStudent, autoSyncEnabled, bottomNavOrder, bumpExternalDataVersion, cancelActiveLessonTimer,
+    cancelAllPendingScheduledNotifications, cancelLesson, cancelSingleScheduledNotification, cascadeDeleteGroup, checkAndTriggerInspirationReminder, cleanupInvalidBiweeklyAutoLessons, clearAllData, clearAllNotifications,
+    clearRecentlyDeleted, clearSyncHistory, closeLessonControl, connectionState, convertQuickLessonToStudent, deleteAllGroupLessons, deleteCertificate, deleteFinanceAccount,
+    deleteFinanceCategory, deleteFinanceInstallment, deleteFinanceNotification, deleteFinanceRecurring, deleteFinanceTransaction, deleteFutureGroupLessons, deleteGroup, deleteInspirationMessage,
+    deleteLernstudioSet, deleteLesson, deleteSchoolNote, deleteStudent, deleteStudentDocument, deleteStudentsBulk, deleteStudentsByGroup, deleteTodo,
+    devicePresences, dismissInspirationCard, dismissLessonAlarm, dismissLessonFromDashboard, dismissedDashboardLessonIds, duplicateGroup, endActiveLessonTimer, executeSmartLessonCleanup,
+    exemptCyclePayment, exemptSingleLesson, exportBackupFile, externalDataVersion, forceSyncPeer, generateGroupScheduleLessons, getFullLessonsSnapshot, getHistoricalLessons,
+    getHistoricalPayments, getNotesForClass, getNotesForLesson, getNotesForStudent, getPendingOutbox, getSyncHistory, hodActionPlans, hodComplaints,
+    hodStudents, hodVisits, importBackupFile, inspirationMessages, inspirationSettings, isAddGroupModalOpen, isAddLessonModalOpen, isAddQuickLessonModalOpen,
+    isAddStudentModalOpen, isBackupModalOpen, isControlModalOpen, isGlobalSearchOpen, isRecentlyDeletedModalOpen, isReorderBottomNavOpen, isStartLessonNowModalOpen, isSyncReady,
+    language, lastBackupTime, lernstudioSets, markAllFinanceNotificationsAsRead, markAllNotificationsRead, markCyclePaymentNotYet, markCyclePaymentPaid, markFinanceNotificationAsRead,
+    markNotificationRead, moveStudent, moveStudentsBulk, notificationSettings, openLessonControl, pauseActiveLessonTimer, pendingScheduledNotifications, performBackup,
+    permanentlyDeleteItem, previewInvalidBiweeklyAutoLessons, profile, purgeOrphanedRecords, rebuildNotificationSchedules, recentlyDeleted, reconcileGroupSessionsState, recordAdvancePayment,
+    recordPayment, rediscoverPeers, refreshCalendarAndDashboard, refreshPendingScheduledNotifications, regeneratePin, registerFinanceActivity, reportLanguage, reportT,
+    resetBottomNavOrder, restoreDefaultInspirationMessages, restoreItem, resumeActiveLessonTimer, roomState, saveLernstudioSet, saveLessonReport, selectedLesson,
+    setAccentColor, setActiveTab, setAutoSyncEnabled, setBottomNavOrder, setCertificates, setFinanceAccounts, setFinanceCategories, setFinanceInstallments,
+    setFinanceRecurring, setFinanceTransactions, setGrainRecordingMatches, setGroupWeeklySessions, setGroups, setHodActionPlans, setHodComplaints, setHodStudents,
+    setHodVisits, setInspirationMessages, setInspirationSettings, setIsAddGroupModalOpen, setIsAddLessonModalOpen, setIsAddQuickLessonModalOpen, setIsAddStudentModalOpen, setIsBackupModalOpen,
+    setIsGlobalSearchOpen, setIsRecentlyDeletedModalOpen, setIsReorderBottomNavOpen, setIsStartLessonNowModalOpen, setLanguage, setLernstudioSets, setLessonSessionNumberAnchor, setLessons,
+    setNotificationSettings, setNotifications, setPayments, setProfile, setReportLanguage, setSchoolNotes, setSelectedLesson, setStudents,
+    setTheme, setTodos, setZoomMeetingHistory, setZoomMeetingRecords, snoozeLessonAlarm, snoozedLessonAlarmMap, startActiveLessonTimer, startHosting,
+    syncAllPeers, syncDataSource, syncState, t, theme, toggleFavoriteInspirationMessage, toggleQuickPaymentStatus, toggleStudentPaymentStatus,
+    toggleTheme, toggleTodo, triggerLessonAlarm, triggerSync, triggerToast, unpairPeer, updateCertificate, updateFinanceAccount,
+    updateFinanceCategory, updateFinanceInstallment, updateFinanceNotification, updateFinanceRecurring, updateFinanceTransaction, updateFullLessonsStorage, updateFullPaymentsStorage, updateFullStudentsStorage,
+    updateGroup, updateInspirationMessage, updateInspirationSettings, updateLesson, updateLessonPaymentStatus, updateNotificationSettings, updateProfile, updateSchoolNote,
+    updateStudent, updateStudentCertificateName, updateStudentCertificateNamesBulk, updateStudentPaymentPlan, updateTodo, uploadStudentDocument, verifyBackupIntegrity,
+  ]);
+
+  return (
+    <AppContext.Provider
+      value={providerValue}
     >
       {children}
       {globalToastMsg && (

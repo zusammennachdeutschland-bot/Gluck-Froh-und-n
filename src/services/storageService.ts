@@ -147,10 +147,155 @@ export const safeLocalStorageSetItem = (
 
 const writeDebounceTimers: Record<string, any> = {};
 
+// Real write debounce (P1-7): setItem used to clear timers that were never
+// set, so every write hit IndexedDB + a full JSON.stringify immediately.
+// Writes for the same key within STORAGE_WRITE_DEBOUNCE_MS are coalesced
+// into one durable write; the in-memory store (and getItem below) always
+// reflects the latest value, so read-your-writes still holds. Pending
+// writes are flushed on page hide/unload and by flushPendingWrites().
+const STORAGE_WRITE_DEBOUNCE_MS = 250;
+
+// Sync-critical keys bypass the debounce: their callers (offline queue
+// ack/removal, pending-push flag) depend on the write being durable before
+// they proceed. Prefixes are duplicated here (same strings as in
+// useGoogleCloudWorkspaceSync.ts) to avoid a circular import.
+const IMMEDIATE_WRITE_KEY_PREFIXES = [
+  'gluck_cloud_pending_remote_queue_v2_',
+  'gluck_cloud_pending_local_push_'
+];
+
+const isImmediateWriteKey = (key: string): boolean =>
+  IMMEDIATE_WRITE_KEY_PREFIXES.some((prefix) => key.startsWith(prefix));
+
+interface PendingWrite {
+  value: unknown;
+  resolvers: Array<{ resolve: () => void; reject: (err: unknown) => void }>;
+}
+
+const pendingWrites: Record<string, PendingWrite> = {};
+
+const cancelPendingWrite = (key: string): void => {
+  const pending = pendingWrites[key];
+  if (writeDebounceTimers[key]) {
+    clearTimeout(writeDebounceTimers[key]);
+    delete writeDebounceTimers[key];
+  }
+  if (!pending) return;
+  delete pendingWrites[key];
+  // Superseded (e.g. by removeItem/clear): resolve rather than reject so
+  // fire-and-forget callers awaiting the old write do not see a spurious
+  // failure; a real write error still rejects via performWrite below.
+  for (const { resolve } of pending.resolvers) resolve();
+};
+
+async function performWrite(key: string, value: unknown): Promise<void> {
+  let savedInForage = false;
+  let forageError: unknown = null;
+  try {
+    if (simulatePrimaryDbForTests) {
+      simulatedPrimaryDbStore.set(key, value);
+      savedInForage = true;
+    } else if (isLocalforageSupported) {
+      await localforage.setItem(key, value);
+      savedInForage = true;
+    }
+  } catch (e: any) {
+    if (typeof e?.message === 'string' && e.message.includes('No available storage method')) {
+      isLocalforageSupported = false;
+    } else {
+      forageError = e;
+      console.warn('Error writing to localforage:', key, e);
+    }
+  }
+
+  let savedInLocalStorage = false;
+  if (hasLocalStorageRuntime()) {
+    try {
+      const valStr = typeof value === 'string' ? value : JSON.stringify(value);
+      savedInLocalStorage = safeLocalStorageSetItem(key, valStr, savedInForage);
+    } catch (e) {
+      console.warn('Error serializing for localStorage:', key, e);
+    }
+  }
+
+  // If a persistent backing store is active in this environment and both failed, propagate the error
+  if ((isLocalforageSupported || hasLocalStorageRuntime()) && !savedInForage && !savedInLocalStorage) {
+    throw forageError instanceof Error
+      ? forageError
+      : new Error(`Durable storage write failed for key: ${key}`);
+  }
+
+  // Update memory store only after durable write succeeded
+  memoryStore[key] = value;
+}
+
+async function flushPendingWrite(key: string): Promise<void> {
+  const pending = pendingWrites[key];
+  if (!pending) return;
+  if (writeDebounceTimers[key]) {
+    clearTimeout(writeDebounceTimers[key]);
+    delete writeDebounceTimers[key];
+  }
+  delete pendingWrites[key];
+  try {
+    // The failure hook fires at write time so simulated disk failures
+    // still surface to callers awaiting setItem (see tests).
+    if (storageFailureHookForTests) {
+      storageFailureHookForTests('set', key);
+    }
+    await performWrite(key, pending.value);
+    for (const { resolve } of pending.resolvers) resolve();
+  } catch (err) {
+    for (const { reject } of pending.resolvers) reject(err);
+    throw err;
+  }
+}
+
+async function flushAllPendingWrites(): Promise<void> {
+  const keys = Object.keys(pendingWrites);
+  for (const key of keys) {
+    try {
+      await flushPendingWrite(key);
+    } catch {
+      // One key failing must not block flushing the rest; the failing
+      // caller's promise already rejected with the real error.
+    }
+  }
+}
+
+// Best-effort flush when the page is hidden or unloaded so a debounced
+// write is not lost if the app is closed within the debounce window.
+let storageFlushListenersRegistered = false;
+function registerStorageFlushListeners(): void {
+  if (storageFlushListenersRegistered) return;
+  storageFlushListenersRegistered = true;
+  try {
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) void flushAllPendingWrites();
+      });
+    }
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('pagehide', () => void flushAllPendingWrites());
+      window.addEventListener('beforeunload', () => void flushAllPendingWrites());
+    }
+  } catch {
+    // Non-browser runtimes (tests): flushing is driven by flushPendingWrites().
+  }
+}
+registerStorageFlushListeners();
+
 export const storage = {
   async getItem<T>(key: string): Promise<T | null> {
     if (storageFailureHookForTests) {
       storageFailureHookForTests('get', key);
+    }
+
+    // A debounced write not yet flushed is still the freshest value.
+    if (pendingWrites[key]) {
+      const pendingValue = pendingWrites[key].value as T;
+      memoryStore[key] = pendingValue;
+      return pendingValue;
     }
 
     try {
@@ -197,60 +342,39 @@ export const storage = {
   },
 
   async setItem<T>(key: string, value: T): Promise<void> {
-    if (storageFailureHookForTests) {
-      storageFailureHookForTests('set', key);
+    // Latest value is visible to reads immediately (memoryStore + the
+    // pending-write check in getItem); the durable write is debounced so
+    // rapid successive saves of the same key collapse into one write.
+    memoryStore[key] = value;
+    if (isImmediateWriteKey(key)) {
+      // Sync-critical keys (offline queue + pending-push flag) must be
+      // durable before the caller proceeds: ack/removal ordering depends on
+      // it, and the queue is written rarely, so there is nothing to coalesce.
+      if (storageFailureHookForTests) {
+        storageFailureHookForTests('set', key);
+      }
+      await performWrite(key, value);
+      return;
     }
-
+    const pending = pendingWrites[key] || (pendingWrites[key] = { value, resolvers: [] });
+    pending.value = value;
     if (writeDebounceTimers[key]) {
       clearTimeout(writeDebounceTimers[key]);
+    }
+    const promise = new Promise<void>((resolve, reject) => {
+      pending.resolvers.push({ resolve, reject });
+    });
+    writeDebounceTimers[key] = setTimeout(() => {
       delete writeDebounceTimers[key];
-    }
-
-    let savedInForage = false;
-    let forageError: unknown = null;
-    try {
-      if (simulatePrimaryDbForTests) {
-        simulatedPrimaryDbStore.set(key, value);
-        savedInForage = true;
-      } else if (isLocalforageSupported) {
-        await localforage.setItem(key, value);
-        savedInForage = true;
-      }
-    } catch (e: any) {
-      if (typeof e?.message === 'string' && e.message.includes('No available storage method')) {
-        isLocalforageSupported = false;
-      } else {
-        forageError = e;
-        console.warn('Error writing to localforage:', key, e);
-      }
-    }
-
-    let savedInLocalStorage = false;
-    if (hasLocalStorageRuntime()) {
-      try {
-        const valStr = typeof value === 'string' ? value : JSON.stringify(value);
-        savedInLocalStorage = safeLocalStorageSetItem(key, valStr, savedInForage);
-      } catch (e) {
-        console.warn('Error serializing for localStorage:', key, e);
-      }
-    }
-
-    // If a persistent backing store is active in this environment and both failed, propagate the error
-    if ((isLocalforageSupported || hasLocalStorageRuntime()) && !savedInForage && !savedInLocalStorage) {
-      throw forageError instanceof Error
-        ? forageError
-        : new Error(`Durable storage write failed for key: ${key}`);
-    }
-
-    // Update memory store only after durable write succeeded
-    memoryStore[key] = value;
+      // Rejection already reaches the setItem caller via the resolvers;
+      // swallow here so the timer does not raise a second unhandled error.
+      void flushPendingWrite(key).catch(() => {});
+    }, STORAGE_WRITE_DEBOUNCE_MS);
+    return promise;
   },
 
   async flushPendingWrites(): Promise<void> {
-    for (const k of Object.keys(writeDebounceTimers)) {
-      clearTimeout(writeDebounceTimers[k]);
-      delete writeDebounceTimers[k];
-    }
+    await flushAllPendingWrites();
   },
 
   async verifyDurableReadBack(keys: string[]): Promise<boolean> {
@@ -414,10 +538,7 @@ export const storage = {
     if (storageFailureHookForTests) {
       storageFailureHookForTests('remove', key);
     }
-    if (writeDebounceTimers[key]) {
-      clearTimeout(writeDebounceTimers[key]);
-      delete writeDebounceTimers[key];
-    }
+    cancelPendingWrite(key);
 
     let removedFromPrimary = false;
     let primaryError: unknown = null;
@@ -457,9 +578,8 @@ export const storage = {
   },
 
   async clear(): Promise<void> {
-    for (const k of Object.keys(writeDebounceTimers)) {
-      clearTimeout(writeDebounceTimers[k]);
-      delete writeDebounceTimers[k];
+    for (const k of Object.keys(pendingWrites)) {
+      cancelPendingWrite(k);
     }
     // Clear memory store
     for (const key in memoryStore) {

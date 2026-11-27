@@ -314,7 +314,9 @@ export const getDashboardTodaySummary = (params: {
   } = params;
 
   const dismissedSet = new Set(dismissedDashboardLessonIds || []);
-  const visibleLessons = getLessonsForDate(todayStr, lessons, groups, groupWeeklySessions)
+  // Include cancelled lessons in visibleLessons so cancelledCount can count
+  // them; activeLessons/lessonsCount/studentsCount still exclude them below.
+  const visibleLessons = getLessonsForDate(todayStr, lessons, groups, groupWeeklySessions, { includeCancelled: true })
     .filter(l => !dismissedSet.has(l.id));
 
   const activeLessons = visibleLessons.filter(l => l.status !== 'cancelled');

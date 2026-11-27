@@ -822,6 +822,14 @@ export const LernstudioView: React.FC<Props> = ({
             setSelectedSetForMode(targetSet);
             setActiveMode(gMode);
           }}
+          onOpenClassroomBoard={() => {
+            const targetSet = teachPageSet;
+            teachHashPushedRef.current = false;
+            setTeachPageSet(null);
+            stripTeachHash();
+            setSelectedSetForMode(targetSet);
+            setActiveMode('classroom');
+          }}
         />
       );
     }

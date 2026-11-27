@@ -14,6 +14,8 @@ import {
   getVercelPublicDomain,
   setVercelPublicDomain,
   resolveHomeworkApiUrl,
+  fetchHomeworkApi,
+  getHomeworkAuthToken,
   DEFAULT_VERCEL_DOMAIN,
   sanitizeDocId,
   saveAssignmentToFirestore,
@@ -697,8 +699,10 @@ export function getOrCreateStudentDeviceToken(
 
 /**
  * Generates or retrieves a per-attempt secret token stored on the originating student device.
- * Used by Firestore rules and backend endpoints to verify that in-progress updates originate
- * from the same student session that created the submission attempt.
+ * The server (saveAuthoritativeSubmission) and the local client check that
+ * in-progress updates originate from the same student session that created
+ * the submission attempt. NOTE: Firestore rules do NOT verify this token —
+ * an earlier comment claimed they did, which was false.
  */
 export function getOrCreateStudentAttemptSecret(submissionId: string): string {
   const safeSubId = sanitizeDocId(submissionId || 'sub').slice(0, 80);
@@ -710,14 +714,26 @@ export function getOrCreateStudentAttemptSecret(submissionId: string): string {
       if (existing && existing.trim()) {
         return existing.trim();
       }
-      const generated = `sec_${Date.now().toString(36)}_${Math.random()
-        .toString(36)
-        .slice(2, 10)}${Math.random().toString(36).slice(2, 10)}`;
-      window.localStorage.setItem(storageKey, generated);
-      return generated;
     } catch {
       // Fall through if localStorage is unavailable
     }
+    // Cryptographically random (Web Crypto). Math.random() is NOT a
+    // credential generator: its output is predictable from a short seed.
+    const cryptoApi = typeof globalThis !== 'undefined' ? (globalThis as any).crypto : undefined;
+    if (cryptoApi && typeof cryptoApi.getRandomValues === 'function') {
+      const bytes = new Uint8Array(16);
+      cryptoApi.getRandomValues(bytes);
+      const generated = `sec_${Date.now().toString(36)}_${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+      try {
+        window.localStorage.setItem(storageKey, generated);
+      } catch {
+        // Storage unavailable; the secret is still returned for this session.
+      }
+      return generated;
+    }
+    // No secure randomness available (very old WebView): fall through to the
+    // deterministic placeholder below. It is NOT a credential — it only keeps
+    // offline flows from crashing — and must not be relied on for security.
   }
   return `sec_${simpleStringHash(safeSubId)}_fallback`;
 }
@@ -1529,6 +1545,84 @@ const activeDeleteSubmissionsForAssignmentFromCloud = (id: string, ownerUid?: st
   testCloudTransport?.deleteSubmissionsForAssignment
     ? testCloudTransport.deleteSubmissionsForAssignment(id, ownerUid)
     : deleteSubmissionsForAssignmentFromFirestore(id, ownerUid);
+
+/**
+ * Teacher-requested erasure of one student's homework data for one assignment
+ * (e.g. a parent asks for their child's data to be removed). Deletes the
+ * student's submissions from the server (DELETE /api/homework/student-data,
+ * owner-only) and purges the matching local copies on this device. The
+ * student's own device keeps its local copy until it next syncs.
+ */
+export async function deleteStudentHomeworkData(options: {
+  assignmentId: string;
+  studentId?: string;
+  participantId?: string;
+}): Promise<{ success: boolean; deletedCount: number; error?: string }> {
+  const assignmentId = String(options?.assignmentId || '').trim();
+  const studentId = String(options?.studentId || '').trim();
+  const participantId = String(options?.participantId || '').trim();
+  if (!assignmentId || (!studentId && !participantId)) {
+    return {
+      success: false,
+      deletedCount: 0,
+      error: 'يجب تحديد الواجب والطالب المطلوب حذف بياناته.'
+    };
+  }
+  const matchesStudent = (s: HomeworkSubmission): boolean =>
+    (Boolean(studentId) && String(s.studentId || '').trim() === studentId) ||
+    (Boolean(participantId) && String(s.participantId || '').trim() === participantId);
+
+  let deletedCount = 0;
+  try {
+    const token = await getHomeworkAuthToken();
+    const res = await fetchHomeworkApi('/api/homework/student-data', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        assignmentId,
+        ...(studentId ? { studentId } : {}),
+        ...(participantId ? { participantId } : {})
+      })
+    });
+    const data: any = await res.json().catch(() => null);
+    if (!res.ok || !data?.success) {
+      return {
+        success: false,
+        deletedCount: 0,
+        error: data?.error || 'تعذّر حذف بيانات الطالب من السيرفر.'
+      };
+    }
+    deletedCount = Number(data?.deletedCount || 0);
+  } catch (err: any) {
+    return {
+      success: false,
+      deletedCount: 0,
+      error: err?.message || 'تعذّر الاتصال بخادم الواجبات.'
+    };
+  }
+
+  // Purge the matching local copies on this device (teacher scope + the
+  // unauthenticated student scope) so the data is gone here as well.
+  try {
+    const scopes = new Set<string>([
+      getActiveHomeworkScopeUid(),
+      getCurrentHomeworkOwnerUid() || '',
+      UNAUTHENTICATED_HOMEWORK_SCOPE
+    ]);
+    for (const scope of scopes) {
+      if (!scope) continue;
+      const list = getLocalSubmissions(scope);
+      const kept = list.filter((s) => !(s.assignmentId === assignmentId && matchesStudent(s)));
+      if (kept.length !== list.length) {
+        writeLocalSubmissionsList(kept, scope);
+      }
+    }
+    notifyHomeworkSyncStateChanged({ assignmentsChanged: false, submissionsChanged: true });
+  } catch {
+    // Local purge is best-effort; the server deletion above already succeeded.
+  }
+  return { success: true, deletedCount };
+}
 
 export function getRevokedShortIdsLocally(): Set<string> {
   if (typeof window === 'undefined') return new Set();
@@ -4330,6 +4424,10 @@ export function buildShortHomeworkShareUrl(
 
 /**
  * Builds the legacy long homework link (`/homework/{id}?...`) for backward compatibility.
+ * @deprecated Do NOT generate new links with this: it embeds the full student
+ * roster (names + ids) and vocabulary in the URL. Kept only so links shared
+ * before the fix keep opening (the player still parses them) and for tests.
+ * New shares must use buildHomeworkShareUrl() (short link or minimal URL).
  */
 export function buildLegacyHomeworkShareUrl(hw: HomeworkAssignment, overrideDomain?: string): string {
   const baseDomain = (overrideDomain || getVercelPublicDomain()).replace(/\/+$/, '');
@@ -4414,15 +4512,32 @@ export function buildLegacyHomeworkShareUrl(hw: HomeworkAssignment, overrideDoma
 }
 
 /**
+ * Minimal share URL for an assignment without a shortId: `/homework/{id}` plus
+ * the share token only. The student client resolves everything else (roster,
+ * words, question counts) from the server via /api/homework/info, so no
+ * student names/ids, group roster, or vocabulary ever goes into the URL.
+ */
+export function buildMinimalHomeworkShareUrl(hw: HomeworkAssignment, overrideDomain?: string): string {
+  const baseDomain = (overrideDomain || getVercelPublicDomain()).replace(/\/+$/, '');
+  const params = new URLSearchParams();
+  if (hw.shareToken?.trim()) params.set('token', hw.shareToken.trim());
+  const query = params.toString();
+  return `${baseDomain}/homework/${hw.id}${query ? `?${query}` : ''}`;
+}
+
+/**
  * Generates the student/parent homework share link using the Vercel public domain.
  * Returns `https://YOUR_DOMAIN/Herr-Abdul-rahman/{SHORT_ID}` when `shortId` is present on the assignment,
- * while preserving backward compatibility for legacy assignments without `shortId`.
+ * otherwise the minimal `/homework/{id}?token=...` URL. Legacy long URLs that
+ * embed the full student roster and vocabulary (buildLegacyHomeworkShareUrl)
+ * are NEVER generated anymore: old links still open (the player still parses
+ * them), but no new link puts student names/ids in a URL.
  */
 export function buildHomeworkShareUrl(hw: HomeworkAssignment, overrideDomain?: string): string {
   if (hw && isValidHomeworkShortId(hw.shortId)) {
     return buildShortHomeworkShareUrl(hw, overrideDomain);
   }
-  return buildLegacyHomeworkShareUrl(hw, overrideDomain);
+  return buildMinimalHomeworkShareUrl(hw, overrideDomain);
 }
 
 /**

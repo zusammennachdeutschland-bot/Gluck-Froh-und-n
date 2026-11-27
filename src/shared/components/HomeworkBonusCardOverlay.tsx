@@ -91,6 +91,10 @@ export const HomeworkBonusCardOverlay: React.FC<Props> = ({
   const hasPickedRef = useRef(false);
   const hasCompletedRef = useRef(false);
   const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A13: separate timer for the 30s "still choosing" auto-resume — it must
+  // not share resumeTimerRef, or its cleanup would cancel the 2s auto-resume
+  // that starts after a card is picked.
+  const choosingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const reducedMotion = useMemo(() => {
     if (animationIntensity === 'Off' || animationIntensity === 'Reduced') return true;
@@ -143,12 +147,28 @@ export const HomeworkBonusCardOverlay: React.FC<Props> = ({
     };
   }, [round.roundId, round.cards, reducedMotion]);
 
-  // Cleanup auto-resume timer on unmount
+  // Cleanup auto-resume timers on unmount
   useEffect(() => {
     return () => {
       if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+      if (choosingTimerRef.current) clearTimeout(choosingTimerRef.current);
     };
   }, []);
+
+  // A13: if the student never picks a card, the homework timer is paused
+  // forever while this overlay is open — auto-resume after 30s of choosing.
+  useEffect(() => {
+    if (roundPhase !== 'selecting') return;
+    choosingTimerRef.current = setTimeout(() => {
+      finishOnce();
+    }, 30_000);
+    return () => {
+      if (choosingTimerRef.current) {
+        clearTimeout(choosingTimerRef.current);
+        choosingTimerRef.current = null;
+      }
+    };
+  }, [roundPhase]);
 
   const finishOnce = () => {
     if (hasCompletedRef.current) return;
@@ -371,8 +391,20 @@ export const HomeworkBonusCardOverlay: React.FC<Props> = ({
             </button>
           </div>
         ) : (
-          <div className="text-center text-[11px] font-medium text-slate-400">
-            يتم إيقاف المؤقت تلقائياً أثناء اختيار بطاقة المكافأة
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+            <div className="text-center sm:text-right text-[11px] font-medium text-slate-400">
+              يتم إيقاف المؤقت تلقائياً أثناء اختيار بطاقة المكافأة — وتستأنف الجولة تلقائياً بعد 30 ثانية
+            </div>
+            {roundPhase === 'selecting' && (
+              <button
+                type="button"
+                onClick={finishOnce}
+                className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-black text-xs sm:text-sm inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+              >
+                <span>تخطي بدون بطاقة</span>
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+            )}
           </div>
         )}
       </div>

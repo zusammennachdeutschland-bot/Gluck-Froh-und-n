@@ -35,14 +35,38 @@ export function useDlSyncState() {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    const interval = setInterval(reloadSyncState, 3000);
+    // Poll IndexedDB every 3s only while the tab is visible; when hidden,
+    // the storage + dl_sync_state_changed listeners above are enough, and
+    // a fresh reload runs as soon as the tab becomes visible again.
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const startPolling = () => {
+      if (interval !== null) return;
+      interval = setInterval(reloadSyncState, 3000);
+    };
+    const stopPolling = () => {
+      if (interval !== null) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+    const handleVisibility = () => {
+      if (document.hidden) {
+        stopPolling();
+      } else {
+        reloadSyncState();
+        startPolling();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    if (!document.hidden) startPolling();
 
     return () => {
       window.removeEventListener('storage', handleStorageChange as EventListener);
       window.removeEventListener('dl_sync_state_changed', handleStorageChange as EventListener);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
-      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      stopPolling();
     };
   }, [reloadSyncState]);
 

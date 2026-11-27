@@ -8,6 +8,13 @@ import {
   stripHeavyGrammarMediaForSync
 } from '../shared/grammarEngine.js';
 import {
+  SUBJECT_PROMPTS,
+  buildVerbSentenceGapExercise,
+  getVerbById,
+  getVerbByInfinitive,
+  resolveVerbPraesensForm
+} from '../shared/verbEngine.js';
+import {
   getAuthoritativeAssignment,
   getAuthoritativeShortLink,
   hasRevokedShortLinkForAssignment,
@@ -21,6 +28,7 @@ import {
   listAuthoritativeSubmissions,
   listAuthoritativeSubmissionsPage,
   saveAuthoritativeSubmission,
+  deleteAuthoritativeSubmissionsForStudent,
   getAuthoritativePublishedSet,
   listAuthoritativePublishedSets,
   saveAuthoritativePublishedSet,
@@ -75,6 +83,99 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// Per-IP sliding-window rate limiter for the public homework API, copied from
+// the Grain proxy pattern (grainServerProxy.ts checkGrainProxyRateLimit).
+// Homework routes are unauthenticated student traffic, so the limit is generous
+// (600/min/IP: a whole class behind one school NAT can submit at once) — it
+// exists to stop floods that would burn the Firestore free quota, not to police
+// normal use. The check-answer oracle gets its own stricter per-link cap below.
+const homeworkRateLimitBuckets = new Map<string, number[]>();
+let homeworkRateLimitMaxRequests = 600;
+let homeworkRateLimitWindowMs = 60 * 1000;
+
+export function __setHomeworkRateLimitForTesting(maxRequests: number, windowMs = 60000): void {
+  homeworkRateLimitMaxRequests = Math.max(1, maxRequests);
+  homeworkRateLimitWindowMs = Math.max(100, windowMs);
+  homeworkRateLimitBuckets.clear();
+  checkAnswerAttemptBuckets.clear();
+}
+
+function checkHomeworkRateLimit(bucketKey: string): { allowed: boolean; retryAfterSeconds?: number } {
+  const now = Date.now();
+  const cutoff = now - homeworkRateLimitWindowMs;
+  const existing = (homeworkRateLimitBuckets.get(bucketKey) || []).filter((ts) => ts > cutoff);
+  if (existing.length >= homeworkRateLimitMaxRequests) {
+    const oldest = existing[0] || now;
+    const retryAfterSeconds = Math.max(1, Math.ceil((oldest + homeworkRateLimitWindowMs - now) / 1000));
+    homeworkRateLimitBuckets.set(bucketKey, existing);
+    return { allowed: false, retryAfterSeconds };
+  }
+  existing.push(now);
+  homeworkRateLimitBuckets.set(bucketKey, existing);
+  return { allowed: true };
+}
+
+function getHomeworkClientIp(req: any): string {
+  // NOTE: never read req.ip here — Express's req.ip getter throws when the
+  // request has no socket (e.g. the in-process mock fetch used by tests,
+  // which calls app.handle with a plain object). Read the socket directly.
+  try {
+    const forwarded = String(req.headers?.['x-forwarded-for'] || '')
+      .split(',')[0]
+      ?.trim();
+    if (forwarded) return forwarded;
+    const sockAddr = req?.socket?.remoteAddress || req?.connection?.remoteAddress;
+    if (sockAddr) return String(sockAddr);
+  } catch {}
+  return 'unknown';
+}
+
+app.use('/api/homework', (req, res, next) => {
+  // Fail open: a limiter bug must never take the homework API down.
+  try {
+    const check = checkHomeworkRateLimit(getHomeworkClientIp(req));
+    if (!check.allowed) {
+      res.setHeader('Retry-After', String(check.retryAfterSeconds || 60));
+      return res.status(429).json({
+        success: false,
+        error: 'طلبات كثيرة جداً — يرجى الانتظار دقيقة ثم المحاولة مرة أخرى.'
+      });
+    }
+  } catch (err) {
+    console.warn('Homework rate limit check failed (failing open):', err);
+  }
+  next();
+});
+
+// /api/homework/check-answer is an answer-key oracle: anyone holding a shortId
+// can probe it question by question. Cap probes per link + IP so enumerating a
+// whole assignment key is slow, while a real student (one check per question,
+// a ~100-question homework) never hits it.
+const checkAnswerAttemptBuckets = new Map<string, number[]>();
+let checkAnswerMaxAttemptsPerWindow = 300;
+let checkAnswerWindowMs = 60 * 60 * 1000;
+
+export function __setCheckAnswerAttemptCapForTesting(maxAttempts: number, windowMs = 60 * 60 * 1000): void {
+  checkAnswerMaxAttemptsPerWindow = Math.max(1, maxAttempts);
+  checkAnswerWindowMs = Math.max(100, windowMs);
+  checkAnswerAttemptBuckets.clear();
+}
+
+function checkCheckAnswerAttemptCap(bucketKey: string): { allowed: boolean; retryAfterSeconds?: number } {
+  const now = Date.now();
+  const cutoff = now - checkAnswerWindowMs;
+  const existing = (checkAnswerAttemptBuckets.get(bucketKey) || []).filter((ts) => ts > cutoff);
+  if (existing.length >= checkAnswerMaxAttemptsPerWindow) {
+    const oldest = existing[0] || now;
+    const retryAfterSeconds = Math.max(1, Math.ceil((oldest + checkAnswerWindowMs - now) / 1000));
+    checkAnswerAttemptBuckets.set(bucketKey, existing);
+    return { allowed: false, retryAfterSeconds };
+  }
+  existing.push(now);
+  checkAnswerAttemptBuckets.set(bucketKey, existing);
+  return { allowed: true };
+}
 
 // Authoritative Firestore helpers (short-TTL process-local assignment lookup cache in firebaseAdmin)
 export function resetServerMemoryCacheOnly(): void {
@@ -441,6 +542,14 @@ export function toPublicAssignmentDto(hw: any): any {
     ...(normalized.flowMode ? { flowMode: String(normalized.flowMode) } : {}),
     ...(normalized.blooketMode ? { blooketMode: String(normalized.blooketMode) } : {}),
     maxAttempts: typeof normalized.maxAttempts === 'number' ? normalized.maxAttempts : undefined,
+    ...(typeof normalized.deadline === 'string' && normalized.deadline.trim()
+      ? { deadline: normalized.deadline.trim() }
+      : {}),
+    ...(typeof normalized.timeLimitMinutes === 'number' &&
+    Number.isFinite(normalized.timeLimitMinutes) &&
+    normalized.timeLimitMinutes > 0
+      ? { timeLimitMinutes: normalized.timeLimitMinutes }
+      : {}),
     allowReplay: typeof normalized.allowReplay === 'boolean' ? normalized.allowReplay : true,
     setSnapshot: sanitizePublicSetSnapshot(normalized.setSnapshot),
     ...(normalized.status ? { status: String(normalized.status) } : {})
@@ -654,13 +763,11 @@ app.all('/api/homework/sets', async (req, res) => {
         error: 'Built-in curriculum sets are bundled locally and do not need cloud publishing'
       });
     }
-    const creatorUid = String(setPayload.createdByUid || '').trim();
-    if (creatorUid && creatorUid !== verifiedUid) {
-      return res.status(403).json({
-        success: false,
-        error: 'Forbidden: createdByUid does not match authenticated Firebase token'
-      });
-    }
+    // The set owner is always the verified Bearer token — a client-supplied
+    // createdByUid is never trusted (an attacker would simply omit it or send
+    // their own uid). saveAuthoritativePublishedSet also rejects overwriting a
+    // set owned by a different teacher, published or not.
+    setPayload.createdByUid = verifiedUid;
     try {
       const result = await saveAuthoritativePublishedSet(setPayload, verifiedUid);
       return res.json({ success: true, ...result });
@@ -1071,13 +1178,22 @@ app.all('/api/homework/submissions', async (req, res) => {
     }
     const resolvedOwnerUid = hwOwnerUid || bodyOwnerUid || undefined;
     const rawResponses = Array.isArray(body.responses) ? body.responses : [];
-    const graded = await gradeServerHomeworkResponses(targetHw, rawResponses);
+    const graded = await gradeServerHomeworkResponses(targetHw, rawResponses, {
+      requireKnownQuestion: true
+    });
     if (!graded.valid) {
       return res.status(graded.status || 400).json({
         success: false,
         error: graded.error || 'Invalid question or exercise reference in submission'
       });
     }
+    // Score and rewards are computed ONLY from the server-verified responses:
+    // the client's score / goldEarned / xpEarned / maxStreak are never trusted.
+    const serverRewards = computeServerRewards(graded.verifiedResponses);
+    const serverPct =
+      graded.verifiedResponses.length > 0
+        ? Math.round((serverRewards.correctCount / graded.verifiedResponses.length) * 100)
+        : 0;
     const cleanSub = {
       ...body,
       ...(resolvedOwnerUid ? { ownerUid: resolvedOwnerUid } : {}),
@@ -1086,7 +1202,20 @@ app.all('/api/homework/submissions', async (req, res) => {
       participantId: check.normalizedParticipantId,
       groupId: check.normalizedGroupId,
       studentName: check.normalizedStudentName,
-      responses: graded.verifiedResponses
+      responses: graded.verifiedResponses,
+      totalQuestions: graded.verifiedResponses.length,
+      correctAnswersCount: serverRewards.correctCount,
+      scorePercentage: serverPct,
+      accuracyPercent: serverPct,
+      accuracy: serverPct,
+      score: serverRewards.correctCount,
+      goldEarned: serverRewards.goldEarned,
+      xpEarned: serverRewards.xpEarned,
+      maxStreak: serverRewards.maxStreak,
+      attemptNumber:
+        typeof body.attemptNumber === 'number' && Number.isFinite(body.attemptNumber) && body.attemptNumber >= 1
+          ? Math.floor(body.attemptNumber)
+          : 1
     };
     delete cleanSub.assignmentFallback;
 
@@ -1108,6 +1237,50 @@ app.all('/api/homework/submissions', async (req, res) => {
     return res.json({ success: true, submission: cleanSub });
   }
   return res.status(405).json({ success: false, error: 'Method not allowed' });
+});
+
+// Teacher-requested erasure of one student's homework data: deletes every
+// submission of that student for one assignment from the server store. The
+// teacher's own device purges its local copies via deleteStudentHomeworkData()
+// (homeworkStorageSync.ts); the student's device keeps only its local,
+// unsynced copy until it next syncs.
+app.delete('/api/homework/student-data', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  const authHeader = String(req.headers.authorization || '');
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+  if (!bearerToken) {
+    return res.status(401).json({ success: false, error: 'Unauthorized: Firebase Bearer token is required' });
+  }
+  const verification = await verifyFirebaseIdToken(bearerToken);
+  if (!verification.isValid || !verification.payload) {
+    return res.status(401).json({
+      success: false,
+      error: `Unauthorized: ${verification.error || 'Invalid Firebase ID token'}`
+    });
+  }
+  const verifiedUid = verification.payload.sub;
+  const body = req.body || {};
+  const assignmentId = String(body.assignmentId || '').trim();
+  const studentId = String(body.studentId || '').trim();
+  const participantId = String(body.participantId || '').trim();
+  if (!assignmentId || (!studentId && !participantId)) {
+    return res.status(400).json({
+      success: false,
+      error: 'assignmentId and studentId or participantId are required'
+    });
+  }
+  try {
+    const result = await deleteAuthoritativeSubmissionsForStudent(verifiedUid, assignmentId, {
+      ...(studentId ? { studentId } : {}),
+      ...(participantId ? { participantId } : {})
+    });
+    return res.json({ success: true, ...result });
+  } catch (err: any) {
+    return res.status(err?.status || 500).json({
+      success: false,
+      error: err?.message || 'Failed to delete student homework data'
+    });
+  }
 });
 
 app.get('/api/homework/short/:shortId', async (req, res) => {
@@ -1241,6 +1414,237 @@ async function resolveAuthoritativeAssignmentSnapshot(targetHw: any): Promise<an
   return setSnapshot;
 }
 
+// --- Server-side verb re-grading (P0-2) ---
+// Verb questions used to pass the client's isCorrect straight through.
+// The server now recomputes the expected conjugated form from the assignment's
+// verb data (the verbSnapshot embedded in the assignment, or the built-in verb
+// library) and the subject slot, and compares the student's answer to it.
+
+type ServerVerbEntry = {
+  id: string;
+  infinitive: string;
+  praesens: Record<string, string>;
+  exampleGerman?: string;
+  isSeparable?: boolean;
+  separablePrefix?: string;
+};
+
+function normalizeGermanWordForMatch(value: string): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^(der|die|das)\s+/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function verbEntryToServerVerb(entry: any): ServerVerbEntry | null {
+  if (!entry || typeof entry !== 'object') return null;
+  const praesens =
+    entry.praesens && typeof entry.praesens === 'object'
+      ? entry.praesens
+      : entry.conjugation && typeof entry.conjugation === 'object'
+        ? entry.conjugation
+        : null;
+  if (!praesens || typeof praesens.ich !== 'string') return null;
+  const infinitive = String(entry.infinitive || entry.german || '').trim();
+  if (!infinitive) return null;
+  return {
+    id: String(entry.id || entry.verbId || infinitive).trim(),
+    infinitive,
+    praesens,
+    ...(typeof entry.exampleGerman === 'string' ? { exampleGerman: entry.exampleGerman } : {}),
+    ...(typeof entry.isSeparable === 'boolean' ? { isSeparable: entry.isSeparable } : {}),
+    ...(typeof entry.separablePrefix === 'string' ? { separablePrefix: entry.separablePrefix } : {})
+  };
+}
+
+function resolveServerVerb(r: any, targetHw: any, setSnapshot: any): ServerVerbEntry | null {
+  const verbId = String(r.verbId || r.itemId || '').trim();
+  const infinitive = String(r.infinitive || '').trim();
+  if (!verbId && !infinitive) return null;
+  // 1. Assignment-embedded verb snapshot (covers custom verbs the teacher picked)
+  const snapshotVerbs = Array.isArray(targetHw?.verbSnapshot) ? targetHw.verbSnapshot : [];
+  for (const entry of snapshotVerbs) {
+    const v = verbEntryToServerVerb(entry);
+    if (!v) continue;
+    if ((verbId && v.id === verbId) || (infinitive && v.infinitive.toLowerCase() === infinitive.toLowerCase())) {
+      return v;
+    }
+  }
+  // 2. Built-in verb library (2,200+ verbs with validated praesens forms)
+  try {
+    const libVerb =
+      (verbId ? getVerbById(verbId) : undefined) || (infinitive ? getVerbByInfinitive(infinitive) : undefined);
+    if (libVerb) {
+      const v = verbEntryToServerVerb(libVerb);
+      if (v) return v;
+    }
+  } catch {
+    // Library lookup is pure data; never fail grading on it.
+  }
+  // 3. Set-snapshot items carrying conjugation data (custom set verbs)
+  const items = Array.isArray(setSnapshot?.items) ? setSnapshot.items : [];
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue;
+    const itemId = String(item.id || '').trim();
+    const itemGerman = String(item.german || '').trim();
+    if (
+      (verbId && itemId === verbId) ||
+      (infinitive && itemGerman.toLowerCase() === infinitive.toLowerCase())
+    ) {
+      const v = verbEntryToServerVerb(item);
+      if (v) return v;
+    }
+  }
+  return null;
+}
+
+const VERB_PRONOUN_SLOT_BY_BARE_LABEL: Record<string, string> = {
+  ich: 'ich',
+  du: 'du',
+  er: 'er_sie_es',
+  es: 'er_sie_es',
+  wir: 'wir',
+  ihr: 'ihr',
+  Sie: 'sie_Sie'
+};
+
+function resolveVerbSubjectSlot(r: any): string | null {
+  const subjectRaw = String(r.subject || '').trim();
+  if (subjectRaw) {
+    const byDisplay = SUBJECT_PROMPTS.find((p: any) => p.displayLabel === subjectRaw);
+    if (byDisplay) return byDisplay.slot;
+    // labelDe is ambiguous for 'sie' (she/they share it), so only use it when
+    // exactly one prompt carries that label.
+    const byLabel = SUBJECT_PROMPTS.filter((p: any) => p.labelDe === subjectRaw);
+    if (byLabel.length === 1) return byLabel[0].slot;
+    const bare = VERB_PRONOUN_SLOT_BY_BARE_LABEL[subjectRaw];
+    if (bare) return bare;
+  }
+  // Fall back to the first word of germanWord ("ich spielt" -> labelDe "ich")
+  const germanWord = String(r.germanWord || '').trim();
+  if (germanWord) {
+    const firstToken = germanWord.split(/\s+/)[0] || '';
+    const byLabel = SUBJECT_PROMPTS.filter((p: any) => p.labelDe === firstToken);
+    if (byLabel.length === 1) return byLabel[0].slot;
+    const bare = VERB_PRONOUN_SLOT_BY_BARE_LABEL[firstToken];
+    if (bare) return bare;
+  }
+  return null;
+}
+
+function gradeVerbResponse(
+  r: any,
+  verb: ServerVerbEntry,
+  studentAns: string
+): { ok: boolean; isCorrect?: boolean; error?: string } {
+  const qType = String(r.questionType || r.type || '');
+  const normalizedAns = studentAns.trim().toLowerCase();
+  if (qType === 'verb_sentence') {
+    if (!verb.exampleGerman || !verb.exampleGerman.trim()) {
+      return { ok: false, error: 'Verb sentence question cannot be re-graded: no example sentence on the server' };
+    }
+    const exercise = buildVerbSentenceGapExercise(
+      {
+        ...verb,
+        arabic: '',
+        exampleArabic: '',
+        level: 'A1',
+        classifications: [],
+        isReflexive: false,
+        topics: [],
+        meta: {}
+      } as any
+    );
+    return {
+      ok: true,
+      isCorrect: normalizedAns === String(exercise.correctAnswer).trim().toLowerCase()
+    };
+  }
+  // verb_conjugation (default for verb questions)
+  const slot = resolveVerbSubjectSlot(r);
+  if (!slot) {
+    return { ok: false, error: 'Unknown verb subject: the conjugated form cannot be verified' };
+  }
+  const expected = resolveVerbPraesensForm(verb as any, slot as any);
+  if (!expected) {
+    return { ok: false, error: 'Unknown verb form for this subject' };
+  }
+  return { ok: true, isCorrect: normalizedAns === String(expected).trim().toLowerCase() };
+}
+
+// Derives the expected answer for a vocabulary question from the server's set
+// item and the question type. Returns undefined when the type cannot be
+// re-graded from set data (true_false needs the shown pairing's truth value;
+// syllables need the tile assembly) — callers must then NOT guess.
+function deriveExpectedVocabAnswer(itemMatch: any, type: string, expectedField: any): string | undefined {
+  const t = String(type || '').toLowerCase();
+  const field = String(expectedField || '');
+  if (t.includes('article') || t.includes('der_die_das') || t === 'article_quiz' || field === 'article') {
+    const explicitArticle = typeof itemMatch.article === 'string' ? itemMatch.article.trim() : '';
+    const extractedMatch =
+      !explicitArticle && typeof itemMatch.german === 'string'
+        ? itemMatch.german.trim().match(/^(der|die|das)\s+/i)
+        : null;
+    return explicitArticle || (extractedMatch ? extractedMatch[1].toLowerCase() : undefined);
+  }
+  if (t.includes('missing') || field === 'missingLetterWord') {
+    return itemMatch.missingLetterWord || itemMatch.german;
+  }
+  if (t.includes('sentence') || t.includes('order') || field === 'exampleSentenceGerman') {
+    return (
+      itemMatch.exampleSentenceGerman ||
+      (Array.isArray(itemMatch.sentence4Elements) ? itemMatch.sentence4Elements.join(' ') : itemMatch.german)
+    );
+  }
+  if (t === 'mc_de_ar' || t.includes('arabic') || field === 'arabic') {
+    return itemMatch.arabic;
+  }
+  if (t === 'listen_choose') {
+    return itemMatch.german && itemMatch.arabic ? `${itemMatch.german} — (${itemMatch.arabic})` : undefined;
+  }
+  if (
+    t === 'choice_2' ||
+    t === 'choice_all' ||
+    t === 'mc_ar_de' ||
+    t === 'full_word' ||
+    t.includes('german') ||
+    t.includes('vocab') ||
+    t.includes('translation') ||
+    field === 'german'
+  ) {
+    return itemMatch.german;
+  }
+  return undefined;
+}
+
+// Computes the server-side reward fields from verified responses only.
+// The gold feature was removed from the UI, but the teacher report still shows
+// "points" per submission; the server awards a flat 10 points per verified
+// correct answer and the longest verified correct streak, so a forged client
+// value can never inflate them.
+function computeServerRewards(verifiedResponses: any[]): {
+  goldEarned: number;
+  xpEarned: number;
+  maxStreak: number;
+  correctCount: number;
+} {
+  let correctCount = 0;
+  let maxStreak = 0;
+  let run = 0;
+  for (const r of verifiedResponses) {
+    if (r && r.isCorrect) {
+      correctCount += 1;
+      run += 1;
+      if (run > maxStreak) maxStreak = run;
+    } else {
+      run = 0;
+    }
+  }
+  return { goldEarned: correctCount * 10, xpEarned: correctCount * 10, maxStreak, correctCount };
+}
+
 async function gradeServerHomeworkResponses(
   targetHw: any,
   responses: any[],
@@ -1269,6 +1673,17 @@ async function gradeServerHomeworkResponses(
   const allowedItemIds =
     selectedItemIds.length > 0 && serverItems.some((it: any) => selectedItemIds.includes(String(it.id)))
       ? new Set(selectedItemIds)
+      : null;
+
+  const selectedVerbIds = Array.isArray(targetHw?.selectedVerbIds)
+    ? targetHw.selectedVerbIds.map((id: any) => String(id).trim()).filter(Boolean)
+    : [];
+  const snapshotVerbIds = Array.isArray(targetHw?.verbSnapshot)
+    ? targetHw.verbSnapshot.map((v: any) => String(v?.id || '').trim()).filter(Boolean)
+    : [];
+  const allowedVerbIds =
+    selectedVerbIds.length > 0 || snapshotVerbIds.length > 0
+      ? new Set([...selectedVerbIds, ...snapshotVerbIds])
       : null;
 
   const findExerciseMatch = (r: any): any | undefined => {
@@ -1320,7 +1735,7 @@ async function gradeServerHomeworkResponses(
             ? matchedExercise.acceptedAnswers.map(String)
             : undefined
         });
-        const cleanedR = { ...r, isCorrect: isActuallyCorrect };
+        const cleanedR = { ...r, isCorrect: isActuallyCorrect, serverVerified: true };
         delete cleanedR.pendingServerGrading;
         verifiedResponses.push(cleanedR);
         continue;
@@ -1340,85 +1755,127 @@ async function gradeServerHomeworkResponses(
       };
     }
 
+    // Verb questions are ALWAYS re-graded on the server now: the client's
+    // isCorrect is never trusted for them. A verb the server cannot resolve
+    // (not in the assignment snapshot, the verb library, or the set) rejects
+    // the whole submission instead of silently trusting the client.
     if (isVerbQ) {
-      verifiedResponses.push({
+      const verb = resolveServerVerb(r, targetHw, setSnapshot);
+      if (!verb) {
+        return {
+          valid: false,
+          status: 400,
+          error: 'Unknown or unassigned verb reference in request',
+          verifiedResponses: []
+        };
+      }
+      if (allowedVerbIds && !allowedVerbIds.has(verb.id)) {
+        return {
+          valid: false,
+          status: 400,
+          error: 'Unassigned verb ID referenced in request',
+          verifiedResponses: []
+        };
+      }
+      const studentAns = String(
+        r.selectedAnswer ?? r.studentAnswer ?? r.answer ?? r.submittedAnswer ?? r.text ?? ''
+      ).trim();
+      const graded = gradeVerbResponse(r, verb, studentAns);
+      if (!graded.ok) {
+        return {
+          valid: false,
+          status: 400,
+          error: graded.error || 'Verb question could not be re-graded on the server',
+          verifiedResponses: []
+        };
+      }
+      const cleanedR = {
         ...r,
+        isCorrect: Boolean(graded.isCorrect),
+        serverVerified: true,
         isVerbQuestion: true,
         ...(r.verbId ? { verbId: String(r.verbId) } : {}),
         ...(r.infinitive ? { infinitive: String(r.infinitive) } : {}),
         ...(r.subject ? { subject: String(r.subject) } : {}),
         ...(r.sentence ? { sentence: String(r.sentence) } : {})
-      });
+      };
+      delete cleanedR.pendingServerGrading;
+      verifiedResponses.push(cleanedR);
       continue;
     }
 
-    const itemLookupId = r.itemId || r.exerciseId || (r.expectedField ? targetQId : undefined);
-    if (itemLookupId && serverItems.length > 0 && (r.expectedField || typeof r.isCorrect !== 'boolean' || options?.requireKnownQuestion)) {
-      const itemMatch = serverItems.find((it: any) => String(it.id) === String(itemLookupId));
+    // Vocabulary re-grading: resolve the item by explicit itemId when present
+    // (the client sends it since the fix-all batch), otherwise by the german
+    // word the question asked about. A claimed itemId that does not exist is
+    // rejected.
+    const type = String(r.type || r.questionType || r.mode || '').toLowerCase();
+    const studentAns = String(
+      r.selectedAnswer ?? r.studentAnswer ?? r.answer ?? r.submittedAnswer ?? r.text ?? ''
+    ).trim();
+    let itemMatch: any = undefined;
+    if (r.itemId && serverItems.length > 0) {
+      itemMatch = serverItems.find((it: any) => String(it.id) === String(r.itemId));
       if (!itemMatch) {
-        if (r.itemId || options?.requireKnownQuestion) {
-          return {
-            valid: false,
-            status: 400,
-            error: 'Unknown or unassigned vocabulary item ID',
-            verifiedResponses: []
-          };
-        }
-      } else {
-        if (allowedItemIds && !allowedItemIds.has(String(itemMatch.id).trim())) {
-          return {
-            valid: false,
-            status: 400,
-            error: 'Unassigned vocabulary item ID referenced in request',
-            verifiedResponses: []
-          };
-        }
-        const studentAns = String(
-          r.selectedAnswer ?? r.studentAnswer ?? r.answer ?? r.submittedAnswer ?? r.text ?? ''
-        ).trim();
-        const type = String(r.type || r.questionType || r.mode || '').toLowerCase();
-        let expected: string | undefined;
-
-        if (type.includes('article') || type.includes('der_die_das') || r.expectedField === 'article') {
-          const explicitArticle = typeof itemMatch.article === 'string' ? itemMatch.article.trim() : '';
-          const extractedMatch =
-            !explicitArticle && typeof itemMatch.german === 'string'
-              ? itemMatch.german.trim().match(/^(der|die|das)\s+/i)
-              : null;
-          expected = explicitArticle || (extractedMatch ? extractedMatch[1].toLowerCase() : undefined);
-        } else if (type.includes('missing') || r.expectedField === 'missingLetterWord') {
-          expected = itemMatch.missingLetterWord || itemMatch.german;
-        } else if (type.includes('sentence') || type.includes('order') || r.expectedField === 'exampleSentenceGerman') {
-          expected =
-            itemMatch.exampleSentenceGerman ||
-            (Array.isArray(itemMatch.sentence4Elements) ? itemMatch.sentence4Elements.join(' ') : itemMatch.german);
-        } else if (type.includes('arabic') || r.expectedField === 'arabic') {
-          expected = itemMatch.arabic;
-        } else if (type.includes('german') || type.includes('vocab') || type.includes('translation') || r.expectedField === 'german') {
-          expected = itemMatch.german;
-        } else {
-          expected = itemMatch.german || itemMatch.arabic;
-        }
-
-        if (expected !== undefined && expected !== null) {
-          const isActuallyCorrect = studentAns.toLowerCase() === String(expected).trim().toLowerCase();
-          const cleanedR = { ...r, isCorrect: isActuallyCorrect };
-          delete cleanedR.pendingServerGrading;
-          verifiedResponses.push(cleanedR);
-          continue;
-        }
+        return {
+          valid: false,
+          status: 400,
+          error: 'Unknown or unassigned vocabulary item ID',
+          verifiedResponses: []
+        };
       }
+    } else if (!r.itemId && r.germanWord && serverItems.length > 0) {
+      const wanted = normalizeGermanWordForMatch(r.germanWord);
+      if (wanted) {
+        itemMatch = serverItems.find((it: any) => normalizeGermanWordForMatch(it.german) === wanted);
+      }
+    }
+    if (itemMatch) {
+      if (allowedItemIds && !allowedItemIds.has(String(itemMatch.id).trim())) {
+        return {
+          valid: false,
+          status: 400,
+          error: 'Unassigned vocabulary item ID referenced in request',
+          verifiedResponses: []
+        };
+      }
+      const expected = deriveExpectedVocabAnswer(itemMatch, type, r.expectedField);
+      if (expected !== undefined && expected !== null) {
+        const isActuallyCorrect = studentAns.toLowerCase() === String(expected).trim().toLowerCase();
+        const cleanedR = { ...r, isCorrect: isActuallyCorrect, serverVerified: true };
+        delete cleanedR.pendingServerGrading;
+        verifiedResponses.push(cleanedR);
+        continue;
+      }
+      // Item resolved but the question type is not verifiable from set data
+      // (true_false, syllables): fall through to the unverified path below.
     }
 
     if (options?.requireKnownQuestion) {
-      return {
-        valid: false,
-        status: 400,
-        error: 'Question could not be resolved against assignment snapshot',
-        verifiedResponses: []
-      };
+      // Inherently unverifiable question types have no server-side answer key
+      // (true_false / syllables cannot be derived from set data), and neither
+      // does a matched grammar exercise without a correctAnswer. Rejecting
+      // those would break legitimate homework that contains them, so they keep
+      // the client's value flagged serverVerified: false below. Everything
+      // else must resolve against the assignment snapshot.
+      const unverifiableType = type === 'true_false' || type === 'syllables';
+      const matchedExerciseWithoutKey = Boolean(matchedExercise);
+      if (!unverifiableType && !matchedExerciseWithoutKey) {
+        return {
+          valid: false,
+          status: 400,
+          error: 'Question could not be resolved against assignment snapshot',
+          verifiedResponses: []
+        };
+      }
     }
-    verifiedResponses.push(r);
+    // RESIDUAL GAP (P0-2, documented): responses the server cannot resolve
+    // against the assignment snapshot (no itemId and no matching german word,
+    // or a true_false/syllables question, or a grammar exercise without an
+    // answer key) still carry the client's isCorrect, marked
+    // serverVerified: false so the teacher-facing data can tell them apart.
+    // requireKnownQuestion (used by the submit routes) rejects every other
+    // unresolvable response instead of trusting it.
+    verifiedResponses.push({ ...r, serverVerified: false });
   }
 
   return { valid: true, verifiedResponses };
@@ -1467,6 +1924,20 @@ app.post('/api/homework/check-answer', async (req, res) => {
         error: 'Forbidden: Valid share token is required'
       });
     }
+  }
+
+  // Answer-key oracle cap: one probe per question is legitimate, enumerating
+  // the whole key is not. 300 probes per link + IP per hour is far above any
+  // real homework (one check per question, ~100 questions max).
+  const oracleCheck = checkCheckAnswerAttemptCap(
+    `${providedShortId || assignmentId || targetHw.id}:${getHomeworkClientIp(req)}`
+  );
+  if (!oracleCheck.allowed) {
+    res.setHeader('Retry-After', String(oracleCheck.retryAfterSeconds || 3600));
+    return res.status(429).json({
+      success: false,
+      error: 'تم تجاوز عدد محاولات التحقق المسموح به لهذا الرابط — يرجى المحاولة لاحقاً.'
+    });
   }
 
   const studentAnswer = String(
@@ -1582,7 +2053,9 @@ app.post('/api/homework/submit', async (req, res) => {
   }
 
   const responses = Array.isArray(body.responses) ? body.responses : [];
-  const graded = await gradeServerHomeworkResponses(targetHw, responses);
+  const graded = await gradeServerHomeworkResponses(targetHw, responses, {
+    requireKnownQuestion: true
+  });
   if (!graded.valid) {
     return res.status(graded.status || 400).json({
       success: false,
@@ -1612,6 +2085,12 @@ app.post('/api/homework/submit', async (req, res) => {
     : Math.max(isInProgress ? 1 : 5, Math.round((endMs - startMs) / 1000));
   const resolvedOwnerUid = hwOwnerUid || bodyOwnerUid || undefined;
 
+  // Rewards are computed ONLY from the server-verified responses: the client's
+  // goldEarned / xpEarned / maxStreak are ignored (a forged value can never
+  // inflate them). attemptNumber stays client-supplied but is informational
+  // only — maxAttempts is enforced by counting stored submissions server-side.
+  const serverRewards = computeServerRewards(verifiedResponses);
+
   const submission: any = {
     id: body.id || `sub_${body.assignmentId || 'hw'}_${Date.now()}`,
     assignmentId: body.assignmentId,
@@ -1634,10 +2113,10 @@ app.post('/api/homework/submit', async (req, res) => {
     accuracyPercent: pct,
     score: correctCount,
     accuracy: pct,
-    goldEarned: body.goldEarned || 0,
-    maxStreak: body.maxStreak || 0,
+    goldEarned: serverRewards.goldEarned,
+    xpEarned: serverRewards.xpEarned,
+    maxStreak: serverRewards.maxStreak,
     completedStudyPhase: Boolean(body.completedStudyPhase),
-    ...(body.xpEarned !== undefined ? { xpEarned: Number(body.xpEarned) || 0 } : {}),
     ...(body.gamification && typeof body.gamification === 'object'
       ? { gamification: body.gamification }
       : {}),
@@ -1939,8 +2418,50 @@ app.all('/api/workspace/delta', async (req, res) => {
       return res.status(403).json({ error: 'Forbidden: You do not have permission to write to this workspace relay.' });
     }
 
-    // Verify chunk ownership to prevent chunk injection
+    // Validate every chunk against the same shape as the Firestore rules'
+    // isValidWorkspaceChunk() and cap count/size: the relay stores chunks in
+    // process memory, so an unbounded POST could exhaust it.
+    const MAX_DELTA_CHUNKS = 200;
+    const MAX_CHUNK_CHARS = 750000;
+    const MAX_TOTAL_CHUNK_CHARS = 10000000;
+    if (chunks.length > MAX_DELTA_CHUNKS) {
+      return res.status(413).json({ error: `Too many chunks: at most ${MAX_DELTA_CHUNKS} per request` });
+    }
+    let totalChars = 0;
     for (const chunk of chunks) {
+      const validChunk =
+        chunk &&
+        typeof chunk === 'object' &&
+        typeof chunk.id === 'string' &&
+        chunk.id.length >= 1 &&
+        chunk.id.length <= 128 &&
+        typeof chunk.categoryKey === 'string' &&
+        chunk.categoryKey.length >= 1 &&
+        chunk.categoryKey.length <= 100 &&
+        typeof chunk.chunkIndex === 'number' &&
+        chunk.chunkIndex >= 0 &&
+        chunk.chunkIndex <= 200 &&
+        typeof chunk.totalChunks === 'number' &&
+        chunk.totalChunks >= 1 &&
+        chunk.totalChunks <= 200 &&
+        typeof chunk.updatedAtMs === 'number' &&
+        chunk.updatedAtMs >= 0 &&
+        typeof chunk.updatedAtIso === 'string' &&
+        chunk.updatedAtIso.length >= 1 &&
+        chunk.updatedAtIso.length <= 64 &&
+        typeof chunk.deviceId === 'string' &&
+        chunk.deviceId.length >= 1 &&
+        chunk.deviceId.length <= 100 &&
+        typeof chunk.payloadChunk === 'string' &&
+        chunk.payloadChunk.length <= MAX_CHUNK_CHARS;
+      if (!validChunk) {
+        return res.status(400).json({ error: 'Invalid workspace chunk: chunk shape does not match isValidWorkspaceChunk' });
+      }
+      totalChars += chunk.payloadChunk.length;
+      if (totalChars > MAX_TOTAL_CHUNK_CHARS) {
+        return res.status(413).json({ error: 'Delta payload too large' });
+      }
+      // Verify chunk ownership to prevent chunk injection
       if (chunk?.ownerUid && chunk.ownerUid !== authenticatedUid) {
         return res.status(403).json({ error: 'Forbidden: Injected chunk ownerUid does not match authenticated user.' });
       }

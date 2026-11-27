@@ -135,7 +135,7 @@ export const ReportPresetPicker: React.FC<ReportPresetPickerProps> = ({
           type="button"
           onClick={() => insertPreset(preset)}
           title={preset.text}
-          className="max-w-[9.5rem] truncate px-2 py-1.5 bg-primary-soft hover:bg-primary/20 text-primary border border-primary-border rounded-lg text-[11px] font-bold transition-colors cursor-pointer"
+          className="max-w-[9.5rem] whitespace-normal leading-tight line-clamp-2 text-center px-2 py-1.5 bg-primary-soft hover:bg-primary/20 text-primary border border-primary-border rounded-lg text-[11px] font-bold transition-colors cursor-pointer"
         >
           {preset.text}
         </button>

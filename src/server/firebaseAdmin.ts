@@ -625,6 +625,11 @@ function encodeShortLinkDocument(assignment: any, verifiedOwnerUid: string): Rec
     isActive
   });
   delete publicSafeCopy.ownerEmail;
+  // The shareToken must NEVER be stored in the public short-link document
+  // (homework_short_links/{shortId} is readable without auth): anyone with the
+  // link could read it. It lives only on the owner-only homework_assignments
+  // document, and the server enforces it from there.
+  delete publicSafeCopy.shareToken;
   if (publicSafeCopy.setSnapshot && typeof publicSafeCopy.setSnapshot === 'object') {
     const cleanSet = { ...publicSafeCopy.setSnapshot };
     delete cleanSet.ownerEmail;
@@ -634,7 +639,6 @@ function encodeShortLinkDocument(assignment: any, verifiedOwnerUid: string): Rec
     shortId,
     assignmentId: String(assignment.id).trim(),
     ownerUid: verifiedOwnerUid,
-    ...(assignment.shareToken ? { shareToken: String(assignment.shareToken).trim().slice(0, 128) } : {}),
     isActive,
     ...(assignment.deleted === true ? { deleted: true } : {}),
     createdAt: String(assignment.createdAt || nowIso).slice(0, 60),
@@ -822,7 +826,11 @@ export async function saveAuthoritativePublishedSet(
     throw err;
   }
 
+  // The stored set is always owned by the verified caller: a client-supplied
+  // createdByUid is never trusted (the /api/homework/sets route already forces
+  // it from the Bearer token; this is defence in depth for direct callers).
   const clean = sanitizeSetForStorage(setItem, verifiedOwnerUid);
+  clean.createdByUid = verifiedOwnerUid;
   const contentHash = computePublishedSetHash(clean);
   const cached = serverPublishedSetCache.get(clean.id);
   if (cached && cached.hash === contentHash && cached.set?.published === clean.published) {
@@ -831,52 +839,19 @@ export async function saveAuthoritativePublishedSet(
 
   const db = getAuthoritativeFirestore();
   const docRef = db.collection('lernstudio_sets').doc(clean.id);
-  const existingSnap = await docRef.get();
-  if (existingSnap.exists) {
-    const existingRaw = existingSnap.data() || {};
-    if (
-      existingRaw.deleted !== true &&
-      existingRaw.published === false &&
-      existingRaw.createdByUid &&
-      String(existingRaw.createdByUid).trim() !== verifiedOwnerUid
-    ) {
-      const err: any = new Error('Forbidden: Cannot overwrite an unpublished learning set owned by another teacher');
-      err.status = 403;
-      throw err;
-    }
-    if (existingRaw.deleted !== true && typeof existingRaw.payloadJson === 'string') {
-      try {
-        const existingParsed = JSON.parse(existingRaw.payloadJson);
-        const existingNormalized = sanitizeSetForStorage(
-          {
-            ...existingParsed,
-            published: existingRaw.published !== false,
-            createdByUid: existingRaw.createdByUid || existingParsed.createdByUid
-          },
-          existingRaw.createdByUid || verifiedOwnerUid
-        );
-        if (computePublishedSetHash(existingNormalized) === contentHash) {
-          serverPublishedSetCache.set(clean.id, {
-            set: existingNormalized,
-            updatedAtIso: String(existingRaw.updatedAtIso || ''),
-            hash: contentHash,
-            cachedAtMs: Date.now()
-          });
-          return { set: existingNormalized, deduplicated: true, wrote: false };
-        }
-      } catch {
-        // Proceed with overwrite
-      }
-    }
-  }
 
+  // Owner check + dedup + write run inside one transaction so a concurrent
+  // writer cannot slip past the ownership check. An existing document owned
+  // by a different teacher is rejected whether it is published or not.
+  let dedupedSet: any = null;
+  let dedupedUpdatedAtIso = '';
   const nowIso = new Date().toISOString().slice(0, 64);
   const docPayload = cleanForFirestore({
     id: clean.id,
     title: String(clean.title || 'Set').slice(0, 120),
     category: String(clean.category || clean.topic || 'general').slice(0, 45),
     published: clean.published !== false,
-    createdByUid: clean.createdByUid || verifiedOwnerUid,
+    createdByUid: verifiedOwnerUid,
     ...(clean.createdByTeacherName
       ? { createdByTeacherName: String(clean.createdByTeacherName).slice(0, 140) }
       : {}),
@@ -884,7 +859,50 @@ export async function saveAuthoritativePublishedSet(
     updatedAtIso: nowIso
   });
 
-  await docRef.set(docPayload);
+  await db.runTransaction(async (transaction: any) => {
+    const existingSnap = await transaction.get(docRef);
+    if (existingSnap.exists) {
+      const existingRaw = existingSnap.data() || {};
+      const existingOwner = String(existingRaw.createdByUid || '').trim();
+      if (existingRaw.deleted !== true && existingOwner && existingOwner !== verifiedOwnerUid) {
+        const err: any = new Error('Forbidden: Cannot overwrite a learning set owned by another teacher');
+        err.status = 403;
+        throw err;
+      }
+      if (existingRaw.deleted !== true && typeof existingRaw.payloadJson === 'string') {
+        try {
+          const existingParsed = JSON.parse(existingRaw.payloadJson);
+          const existingNormalized = sanitizeSetForStorage(
+            {
+              ...existingParsed,
+              published: existingRaw.published !== false,
+              createdByUid: existingRaw.createdByUid || existingParsed.createdByUid
+            },
+            existingRaw.createdByUid || verifiedOwnerUid
+          );
+          if (computePublishedSetHash(existingNormalized) === contentHash) {
+            dedupedSet = existingNormalized;
+            dedupedUpdatedAtIso = String(existingRaw.updatedAtIso || '');
+            return;
+          }
+        } catch {
+          // Proceed with overwrite
+        }
+      }
+    }
+    transaction.set(docRef, docPayload);
+  });
+
+  if (dedupedSet) {
+    serverPublishedSetCache.set(clean.id, {
+      set: dedupedSet,
+      updatedAtIso: dedupedUpdatedAtIso,
+      hash: contentHash,
+      cachedAtMs: Date.now()
+    });
+    return { set: dedupedSet, deduplicated: true, wrote: false };
+  }
+
   const storedSet = { ...clean, updatedAtIso: nowIso };
   serverPublishedSetCache.set(clean.id, {
     set: storedSet,
@@ -994,7 +1012,10 @@ export async function getAuthoritativeShortLink(shortId: string): Promise<{
     return { status: 'revoked', shortId: cleanShortId, assignmentId: targetAssignmentId || undefined };
   }
 
-  // Fast path: 1 Firestore read when homework_short_links/{shortId} already holds an active snapshot
+  // Fast path: 1 Firestore read when homework_short_links/{shortId} already holds an active snapshot.
+  // The shareToken is NOT read from the public short-link document (it must
+  // never be stored there); it is taken from the owner-only parent assignment
+  // document instead, so token enforcement keeps working for shortId lookups.
   if (typeof rawShort.payloadJson === 'string') {
     try {
       const parsed = JSON.parse(rawShort.payloadJson);
@@ -1006,6 +1027,21 @@ export async function getAuthoritativeShortLink(shortId: string): Promise<{
         return { status: 'revoked', shortId: cleanShortId, assignmentId: revokedTargetId };
       }
       if (parsed && parsed.id && parsed.setSnapshot) {
+        let parentShareToken = '';
+        if (targetAssignmentId) {
+          try {
+            const parentHw = await getAuthoritativeAssignment(targetAssignmentId);
+            if (parentHw) {
+              parentShareToken =
+                parentHw.shareToken !== undefined && parentHw.shareToken !== null
+                  ? String(parentHw.shareToken).trim()
+                  : '';
+            }
+          } catch {
+            // Fall through to the parent lookup below on read errors.
+            parentShareToken = '';
+          }
+        }
         return {
           status: 'resolved',
           shortId: cleanShortId,
@@ -1014,7 +1050,7 @@ export async function getAuthoritativeShortLink(shortId: string): Promise<{
             ...parsed,
             shortId: cleanShortId,
             ...(rawShort.ownerUid ? { ownerUid: String(rawShort.ownerUid).trim() } : {}),
-            ...(rawShort.shareToken ? { shareToken: String(rawShort.shareToken).trim() } : {})
+            ...(parentShareToken ? { shareToken: parentShareToken } : {})
           }
         };
       }
@@ -1930,11 +1966,105 @@ export async function saveAuthoritativeSubmission(
   delete cleaned._serverDefaultedCompletedAt;
   delete cleaned._serverComputedTimeSpent;
 
+  // Scores and rewards are derived ONLY from the stored responses' isCorrect
+  // flags, here at the single write point — a caller can never store a
+  // gold/score that disagrees with the answers it stores. The API routes
+  // already grade responses server-side before calling here, so for API
+  // submissions this is idempotent; for direct callers it keeps rewards
+  // consistent with the stored answers. Mirrors the /api/homework/submit
+  // route: completed => totalQuestions is the answered count, in-progress
+  // keeps the larger declared total; score is the correct-answer COUNT.
+  const storedResponses = Array.isArray(cleaned.responses) ? cleaned.responses : [];
+  const derivedCorrectCount = storedResponses.filter((r: any) => r && r.isCorrect).length;
+  let derivedMaxStreak = 0;
+  let derivedRun = 0;
+  for (const r of storedResponses) {
+    if (r && r.isCorrect) {
+      derivedRun += 1;
+      if (derivedRun > derivedMaxStreak) derivedMaxStreak = derivedRun;
+    } else {
+      derivedRun = 0;
+    }
+  }
+  const storedIsCompleted = cleaned.status === 'completed' || (!cleaned.status && Boolean(cleaned.completedAt));
+  const derivedTotalQuestions = storedIsCompleted
+    ? storedResponses.length
+    : Math.max(storedResponses.length, Number(cleaned.totalQuestions) || 0);
+  const derivedPct =
+    derivedTotalQuestions > 0 ? Math.round((derivedCorrectCount / derivedTotalQuestions) * 100) : 0;
+  cleaned.totalQuestions = derivedTotalQuestions;
+  cleaned.correctAnswersCount = derivedCorrectCount;
+  cleaned.scorePercentage = derivedPct;
+  cleaned.accuracyPercent = derivedPct;
+  cleaned.accuracy = derivedPct;
+  cleaned.score = derivedCorrectCount;
+  cleaned.goldEarned = derivedCorrectCount * 10;
+  cleaned.xpEarned = derivedCorrectCount * 10;
+  cleaned.maxStreak = derivedMaxStreak;
+
   let isIdempotentRetry = false;
   let storedResult: any = cleaned;
 
+  // Server-side maxAttempts enforcement. The assignment's maxAttempts is the
+  // only authority: the client-sent attemptNumber is informational and the
+  // client-side count (localStorage) is trivially reset, so neither is trusted.
+  // Only completed submissions count; an in-progress doc (or an abandoned one)
+  // never consumes an attempt. A new doc for the same student + attempt number
+  // is a duplicate and is rejected as well.
+  const configuredMaxAttempts =
+    typeof parentAssignment.maxAttempts === 'number' && Number.isFinite(parentAssignment.maxAttempts)
+      ? Math.floor(parentAssignment.maxAttempts)
+      : NaN;
+  const maxAttemptsEnforced = Number.isFinite(configuredMaxAttempts) && configuredMaxAttempts >= 1;
+  const incomingIsCompleted =
+    cleaned.status === 'completed' || (!cleaned.status && Boolean(cleaned.completedAt));
+  const incomingStudentKey =
+    String(cleaned.studentId || '').trim() || String(cleaned.participantId || '').trim();
+  const incomingAttemptNumber = Number(cleaned.attemptNumber || 1);
+
   await db.runTransaction(async (t: any) => {
     const existingSnap = await t.get(docRef);
+    if (!existingSnap.exists && incomingIsCompleted && incomingStudentKey) {
+      const priorSnap = await t.get(
+        db
+          .collection('homework_submissions')
+          .where('ownerUid', '==', assignmentOwnerUid)
+          .where('assignmentId', '==', String(parentAssignment.id).trim())
+      );
+      let completedCount = 0;
+      for (const priorDoc of priorSnap.docs || []) {
+        const prior = decodeSubmissionDocument(priorDoc.data());
+        if (!prior) continue;
+        const priorCompleted =
+          prior.status === 'completed' || (!prior.status && Boolean(prior.completedAt));
+        if (!priorCompleted) continue;
+        const priorStudentKey =
+          String(prior.studentId || '').trim() || String(prior.participantId || '').trim();
+        const sameStudent =
+          (cleaned.studentId && prior.studentId === cleaned.studentId) ||
+          (cleaned.participantId && prior.participantId === cleaned.participantId) ||
+          (priorStudentKey && priorStudentKey === incomingStudentKey);
+        if (!sameStudent) continue;
+        if (Number(prior.attemptNumber || 1) === incomingAttemptNumber) {
+          const dupErr: any = new Error(
+            'Conflict: A completed submission already exists for this student and attempt number'
+          );
+          dupErr.status = 409;
+          dupErr.code = 'DUPLICATE_ATTEMPT';
+          throw dupErr;
+        }
+        completedCount += 1;
+      }
+      if (maxAttemptsEnforced && completedCount >= configuredMaxAttempts) {
+        const limitErr: any = new Error(
+          `Forbidden: Maximum number of attempts (${configuredMaxAttempts}) reached for this homework`
+        );
+        limitErr.status = 403;
+        limitErr.code = 'MAX_ATTEMPTS_REACHED';
+        throw limitErr;
+      }
+    }
+
     if (existingSnap.exists) {
       const existing = decodeSubmissionDocument(existingSnap.data()) || existingSnap.data();
 
@@ -1993,4 +2123,61 @@ export async function saveAuthoritativeSubmission(
   });
 
   return { submission: storedResult, isIdempotentRetry };
+}
+
+// ============================================================================
+// STUDENT DATA DELETION (teacher-requested erasure)
+// ============================================================================
+
+/**
+ * Deletes every submission of one student for one assignment, as requested by
+ * the owning teacher (e.g. a parent asks for their child's homework data to be
+ * removed). Only the assignment's owner may call this (enforced by the route);
+ * the local-device copies are purged by the client helper
+ * deleteStudentHomeworkData() in homeworkStorageSync.ts.
+ */
+export async function deleteAuthoritativeSubmissionsForStudent(
+  ownerUid: string,
+  assignmentId: string,
+  identifier: { studentId?: string; participantId?: string }
+): Promise<{ deletedCount: number; deletedIds: string[] }> {
+  const cleanOwner = String(ownerUid || '').trim();
+  const cleanAssignmentId = String(assignmentId || '').trim();
+  const cleanStudentId = String(identifier?.studentId || '').trim();
+  const cleanParticipantId = String(identifier?.participantId || '').trim();
+  if (!cleanOwner || !cleanAssignmentId || (!cleanStudentId && !cleanParticipantId)) {
+    const err: any = new Error('ownerUid, assignmentId and studentId or participantId are required');
+    err.status = 400;
+    throw err;
+  }
+  const parentHw = await getAuthoritativeAssignment(cleanAssignmentId);
+  if (!parentHw) {
+    const err: any = new Error('Assignment not found');
+    err.status = 404;
+    throw err;
+  }
+  if (String(parentHw.ownerUid || '').trim() !== cleanOwner) {
+    const err: any = new Error('Forbidden: Assignment belongs to another teacher account');
+    err.status = 403;
+    throw err;
+  }
+
+  const db = getAuthoritativeFirestore();
+  const snap = await db
+    .collection('homework_submissions')
+    .where('ownerUid', '==', cleanOwner)
+    .where('assignmentId', '==', cleanAssignmentId)
+    .get();
+  const deletedIds: string[] = [];
+  for (const docSnap of snap.docs || []) {
+    const decoded = decodeSubmissionDocument(docSnap.data());
+    if (!decoded) continue;
+    const matchesStudent =
+      (cleanStudentId && String(decoded.studentId || '').trim() === cleanStudentId) ||
+      (cleanParticipantId && String(decoded.participantId || '').trim() === cleanParticipantId);
+    if (!matchesStudent) continue;
+    await db.collection('homework_submissions').doc(String(decoded.id || docSnap.id)).delete();
+    deletedIds.push(String(decoded.id || docSnap.id));
+  }
+  return { deletedCount: deletedIds.length, deletedIds };
 }
