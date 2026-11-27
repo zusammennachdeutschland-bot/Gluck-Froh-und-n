@@ -1817,6 +1817,15 @@ export const LessonControlModal: React.FC = () => {
                           grainMeta={lessonGrainMeta}
                           onApplyTitle={handleApplyApprovedEducationalSummary}
                           onUpdateLesson={(lessonId, patch) => updateLesson(lessonId, patch)}
+                          onRecordingLinkFound={({ recordingLink, recordingLink2 }) => {
+                            if (recordingLink) setLessonRecordingLink(recordingLink);
+                            if (recordingLink2) {
+                              setShowRecordingLink2(true);
+                              setLessonRecordingLink2(recordingLink2);
+                            }
+                          }}
+                          currentRecordingLink={lessonRecordingLink}
+                          currentRecordingLink2={lessonRecordingLink2}
                           _t={_t}
                           triggerToast={triggerToast}
                         />

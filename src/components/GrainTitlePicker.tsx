@@ -5,7 +5,8 @@ import {
   Group,
   Student,
   GrainLessonMetadata,
-  GrainEducationalDraft
+  GrainEducationalDraft,
+  GrainDiscoveredRecording
 } from '../types';
 import {
   loadGrainIntegrationMeta,
@@ -22,6 +23,14 @@ interface GrainTitlePickerProps {
   grainMeta?: GrainLessonMetadata;
   onApplyTitle: (params: { summaryTextAr: string; updatedGrainMeta: GrainLessonMetadata }) => void;
   onUpdateLesson?: (lessonId: string, patch: Partial<Lesson>) => void;
+  // Called when the matched Grain recording is found, with the recording
+  // URL(s) to write into the report's link field automatically. The modal
+  // owns the field value; the picker only reports the URLs.
+  onRecordingLinkFound?: (links: { recordingLink?: string; recordingLink2?: string }) => void;
+  // Current values of the report's recording-link fields (local modal
+  // state), so the picker never overwrites a link the teacher typed manually.
+  currentRecordingLink?: string;
+  currentRecordingLink2?: string;
   _t: (ar: string, en: string, de?: string) => string;
   triggerToast?: (msg: string) => void;
 }
@@ -31,8 +40,12 @@ interface GrainTitlePickerProps {
  * ONLINE lesson report. It reuses the buried GrainLessonMatcherPanel flow
  * (sync recordings → match this lesson's recording → generate the educational
  * draft → summaryOptions) but runs it automatically when the report opens and
- * shows only the 3–4 title options as buttons. Tapping one fills "ما تم شرحه".
- * The full panel below stays untouched for matching / homework / drafts.
+ * shows the title options as buttons. Tapping one fills "ما تم شرحه".
+ * It also fills the report's recording-link field automatically from the
+ * matched Grain recording (only when the field is still empty), and keeps
+ * re-checking every 2 minutes while the report stays open when Grain has no
+ * recording for the lesson yet. The full panel below stays untouched for
+ * matching / homework / drafts.
  */
 export const GrainTitlePicker: React.FC<GrainTitlePickerProps> = ({
   selectedLesson,
@@ -42,14 +55,24 @@ export const GrainTitlePicker: React.FC<GrainTitlePickerProps> = ({
   grainMeta,
   onApplyTitle,
   onUpdateLesson,
+  onRecordingLinkFound,
+  currentRecordingLink,
+  currentRecordingLink2,
   _t,
   triggerToast
 }) => {
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'no-recording' | 'not-connected'>('loading');
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'no-recording' | 'not-connected' | 'waiting'>('loading');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [draft, setDraft] = useState<GrainEducationalDraft | null>(null);
   const [appliedTitle, setAppliedTitle] = useState<string | null>(null);
   const ranForLessonRef = useRef<string | null>(null);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryCountRef = useRef(0);
+  // Latest report link-field values, kept in a ref so the async fetch loop
+  // always sees the current value — even if the teacher typed a link into
+  // the field while the picker was still waiting for the recording.
+  const currentLinksRef = useRef({ link: '', link2: '' });
+  currentLinksRef.current = { link: currentRecordingLink || '', link2: currentRecordingLink2 || '' };
 
   // Strip markdown markers from a title option ("#", "**", "__", backticks,
   // leading bullets). A bare markdown heading (e.g. "## Summary") is not a
@@ -94,43 +117,118 @@ export const GrainTitlePicker: React.FC<GrainTitlePickerProps> = ({
       const vocabCount = draft.vocabulary.length;
       pushOpt(`شرح المفردات والتطبيقات اللغوية الجديدة (${vocabCount} ${vocabCount === 1 ? 'كلمة' : 'كلمات'})`);
     }
-    const rawClean = draft.whatWasCoveredAr
-      .replace(/^ملخص مقترح من Grain.*?[:\-]\s*/i, '')
-      .split(/[.!?\n]/)[0]
-      ?.trim();
-    // P2-N7: a full descriptive sentence ("تمت مناقشة موضوع …") or a
-    // "حصة مسجلة بعنوان … (60 دقيقة)" line is not a title — only offer it
-    // when it already looks like a short title.
-    if (rawClean && rawClean.length > 5 && rawClean.length < 60 && !/\(\s*\d/.test(rawClean)) {
-      pushOpt(rawClean);
+    // Second vocabulary option: the actual new words (with articles), so the
+    // teacher can pick a word-list title instead of the generic count line.
+    const topWords = draft.vocabulary
+      .filter((v) => (v.confidence === 'high' || v.confidence === 'medium') && v.german?.trim())
+      .slice(0, 3)
+      .map((v) => `${v.article ? `${v.article} ` : ''}${stripMarkdown(v.german)}`.trim());
+    if (topWords.length > 0) {
+      const wordsOpt = `مفردات جديدة: ${topWords.join('، ')}`;
+      if (wordsOpt.length <= 80) pushOpt(wordsOpt);
     }
-    return opts.slice(0, 4);
+    // More title-shaped learning objectives (not just the first one).
+    for (const obj of draft.mainLearningObjectives.slice(1, 3)) {
+      const clean = stripMarkdown(obj);
+      if (clean && clean.length > 5 && clean.length < 60 && !/\(\s*\d/.test(clean)) {
+        pushOpt(clean);
+      }
+    }
+    const summarySentences = draft.whatWasCoveredAr
+      .replace(/^ملخص مقترح من Grain.*?[:\-]\s*/i, '')
+      .split(/[.!?\n]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    // P2-N7: a full descriptive sentence ("تمت مناقشة موضوع …") or a
+    // "حصة مسجلة بعنوان … (60 دقيقة)" line is not a title — only offer
+    // sentences that already look like a short title, up to 3 of them.
+    let addedSentences = 0;
+    for (const sentence of summarySentences) {
+      if (addedSentences >= 3) break;
+      const clean = stripMarkdown(sentence);
+      if (
+        clean.length > 5 &&
+        clean.length < 60 &&
+        !/\(\s*\d/.test(clean) &&
+        !/^تمت\s/.test(clean) &&
+        !/حصة مسجلة/.test(clean)
+      ) {
+        const before = opts.length;
+        pushOpt(clean);
+        if (opts.length > before) addedSentences += 1;
+      }
+    }
+    return opts.slice(0, 10);
   }, [draft, selectedLesson.title]);
 
-  // Automatic fetch + analysis when the report opens for this lesson.
+  // Retry cadence while the report stays open and Grain has no recording
+  // for this lesson yet (e.g. Grain is still processing it). Stops after
+  // ~30 minutes of retries.
+  const RETRY_INTERVAL_MS = 2 * 60 * 1000;
+  const MAX_RETRIES = 15;
+
+  // Automatic fetch + analysis when the report opens for this lesson, plus
+  // live refresh: when Grain has no recording yet, re-check every 2 minutes
+  // until one appears, then fill the recording link and the title options
+  // automatically.
   useEffect(() => {
     if (ranForLessonRef.current === selectedLesson.id) return;
     ranForLessonRef.current = selectedLesson.id;
+    retryCountRef.current = 0;
     let cancelled = false;
     // P1-N1: abort the in-flight Grain sync/draft when the report closes or
     // the lesson changes, so a hung request cannot update a dead report.
     const abortController = new AbortController();
 
-    (async () => {
+    // Write the matched recording's URL into the report's link field, but
+    // ONLY when the field is still empty — never overwrite a link the
+    // teacher typed manually. The part-2 slot comes from the sync result's
+    // lessonPatches when present (the sync already detects part 1 / part 2
+    // pairs), otherwise from the matched recording itself.
+    const fillRecordingLink = (
+      rec: GrainDiscoveredRecording,
+      patch?: Partial<Lesson>
+    ): boolean => {
+      const cur = currentLinksRef.current;
+      const part1Url =
+        patch?.recordingLink || (rec.detectedPartSlot !== 'part2' ? rec.recordingUrl : undefined);
+      const part2Url =
+        patch?.recordingLink2 || (rec.detectedPartSlot === 'part2' ? rec.recordingUrl : undefined);
+      const links: { recordingLink?: string; recordingLink2?: string } = {};
+      if (part1Url && !(cur.link || '').trim()) links.recordingLink = part1Url.trim();
+      if (part2Url && !(cur.link2 || '').trim()) links.recordingLink2 = part2Url.trim();
+      if (Object.keys(links).length === 0) return false;
+      onRecordingLinkFound?.(links);
+      // Persist on the lesson too (idempotent with what the sync already
+      // applied via lessonPatches).
+      onUpdateLesson?.(selectedLesson.id, links);
+      return true;
+    };
+
+    type AttemptOutcome = 'found' | 'not-found' | 'error';
+    const runAttempt = async (forceFresh: boolean): Promise<AttemptOutcome> => {
       setStatus('loading');
       setErrorMessage(null);
       const meta = loadGrainIntegrationMeta();
       if (!meta.connected) {
         if (!cancelled) setStatus('not-connected');
-        return;
+        return 'error';
       }
       try {
         // P1-N1: do not re-fetch when the last successful Grain sync was
         // recent (5 min) — the locally cached recordings are fresh enough.
+        // Retries bypass this guard: they must actually re-fetch, otherwise
+        // a recording that finished processing on Grain would never appear.
         const lastSyncMs = Date.parse(meta.lastSuccessfulSyncAt || '');
-        const syncIsRecent = Number.isFinite(lastSyncMs) && Date.now() - lastSyncMs < 5 * 60 * 1000;
+        const syncIsRecent =
+          !forceFresh && Number.isFinite(lastSyncMs) && Date.now() - lastSyncMs < 5 * 60 * 1000;
         const result = syncIsRecent
-          ? { success: true as const, recordings: loadDiscoveredGrainRecordings(), newCount: 0 }
+          ? {
+              success: true as const,
+              recordings: loadDiscoveredGrainRecordings(),
+              newCount: 0,
+              lessonPatches: undefined as Record<string, Partial<Lesson>> | undefined
+            }
           : await syncGrainRecordingsIncrementally({
               lessons,
               groups,
@@ -138,7 +236,7 @@ export const GrainTitlePicker: React.FC<GrainTitlePickerProps> = ({
               onUpdateLesson,
               signal: abortController.signal
             });
-        if (cancelled) return;
+        if (cancelled) return 'error';
         if (!result.success) {
           setErrorMessage(
             result.error ||
@@ -149,7 +247,7 @@ export const GrainTitlePicker: React.FC<GrainTitlePickerProps> = ({
               )
           );
           setStatus('error');
-          return;
+          return 'error';
         }
         const recs = result.recordings;
         // Same match as the panel's visible recordings for this lesson.
@@ -182,15 +280,17 @@ export const GrainTitlePicker: React.FC<GrainTitlePickerProps> = ({
               r.candidates.some((c) => c.lessonId === selectedLesson.id)
           );
         if (!matched) {
-          setStatus('no-recording');
-          return;
+          return 'not-found';
         }
+        // Fill the recording link now, before draft generation — so the link
+        // lands in the report even if generating the draft fails.
+        fillRecordingLink(matched, result.lessonPatches?.[selectedLesson.id]);
         const res = await generateEducationalDraftForRecording(matched, {
           lesson: selectedLesson,
           students,
           includeTranscriptAnalysis: true
         });
-        if (cancelled) return;
+        if (cancelled) return 'error';
         if (!res.success || !res.draft) {
           setErrorMessage(
             res.error ||
@@ -201,10 +301,11 @@ export const GrainTitlePicker: React.FC<GrainTitlePickerProps> = ({
               )
           );
           setStatus('error');
-          return;
+          return 'error';
         }
         setDraft(res.draft);
         setStatus('ready');
+        return 'found';
       } catch (err: any) {
         if (!cancelled) {
           setErrorMessage(
@@ -217,12 +318,34 @@ export const GrainTitlePicker: React.FC<GrainTitlePickerProps> = ({
           );
           setStatus('error');
         }
+        return 'error';
       }
+    };
+
+    const scheduleRetry = () => {
+      if (cancelled) return;
+      if (retryCountRef.current >= MAX_RETRIES) {
+        if (!cancelled) setStatus('no-recording');
+        return;
+      }
+      retryCountRef.current += 1;
+      if (!cancelled) setStatus('waiting');
+      retryTimerRef.current = setTimeout(async () => {
+        if (cancelled) return;
+        const outcome = await runAttempt(true);
+        if (!cancelled && outcome === 'not-found') scheduleRetry();
+      }, RETRY_INTERVAL_MS);
+    };
+
+    (async () => {
+      const outcome = await runAttempt(false);
+      if (!cancelled && outcome === 'not-found') scheduleRetry();
     })();
 
     return () => {
       cancelled = true;
       abortController.abort();
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLesson.id]);
@@ -274,6 +397,13 @@ export const GrainTitlePicker: React.FC<GrainTitlePickerProps> = ({
       {status === 'no-recording' && (
         <p className="text-[11px] text-text-muted font-medium">
           {_t('مفيش تسجيل مطابق للحصة دي في Grain.', 'No matching recording for this lesson in Grain.', 'Keine passende Aufnahme für diese Stunde in Grain.')}
+        </p>
+      )}
+
+      {status === 'waiting' && (
+        <p className="text-[11px] text-text-muted font-medium flex items-center gap-1.5">
+          <RefreshCw className="w-3 h-3 animate-spin" />
+          {_t('لسه التسجيل متجهزش على Grain — هعيد المحاولة تلقائياً كل دقيقتين.', 'Recording not ready on Grain yet — retrying automatically every 2 minutes.', 'Aufnahme in Grain noch nicht fertig — automatischer erneuter Versuch alle 2 Minuten.')}
         </p>
       )}
 
