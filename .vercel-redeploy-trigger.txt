@@ -1,1 +1,1 @@
-Trigger Vercel deployment of latest main (534b4a1). This file exists only to trigger a fresh Vercel build; it changes no code.
+Trigger Vercel deployment of latest main (6b3fdf8). App Check registered for the web app and VITE_RECAPTCHA_ENTERPRISE_SITE_KEY set in Vercel. This file exists only to trigger a fresh Vercel build; it changes no code.
