@@ -88,12 +88,15 @@ service cloud.firestore {
     }
 
     function isValidHomeworkShortLink(data) {
+      // NOTE: 'shareToken' is deliberately NOT an allowed key here. The short-link
+      // document is public-readable (get by shortId), so a shareToken stored in it
+      // is leaked to anyone who opens the link. The token lives only on the
+      // owner-only homework_assignments document and is enforced server-side.
       return data.keys().hasAll(['shortId', 'assignmentId', 'ownerUid', 'isActive', 'createdAt', 'payloadJson'])
-        && data.keys().hasOnly(['shortId', 'assignmentId', 'ownerUid', 'shareToken', 'isActive', 'createdAt', 'updatedAt', 'payloadJson', 'deleted'])
+        && data.keys().hasOnly(['shortId', 'assignmentId', 'ownerUid', 'isActive', 'createdAt', 'updatedAt', 'payloadJson', 'deleted'])
         && data.shortId is string && data.shortId.size() >= 6 && data.shortId.size() <= 10 && data.shortId.matches('^[A-Za-z0-9]+$')
         && data.assignmentId is string && data.assignmentId.size() >= 1 && data.assignmentId.size() <= 128
         && data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128
-        && (!('shareToken' in data) || (data.shareToken is string && data.shareToken.size() <= 128))
         && data.isActive is bool
         && data.createdAt is string && data.createdAt.size() >= 1 && data.createdAt.size() <= 64
         && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64))
@@ -189,22 +192,12 @@ service cloud.firestore {
         && existing().ownerUid == request.auth.uid;
     }
 
-    // Student Submissions (Strictly readable/deletable only by owning teacher; students can submit to active shared assignments)
+    // Student Submissions (Strictly readable/deletable only by owning teacher.
+    // Direct client create is DENIED entirely: submissions are written ONLY by the
+    // server (Admin SDK) through POST /api/homework/submit, which re-grades every
+    // response server-side. Any direct client write is a grade-forgery attempt.)
     match /homework_submissions/{submissionId} {
       allow get, list: if isSignedIn() && existing().ownerUid == request.auth.uid;
-
-      allow create: if isValidId(submissionId)
-        && isValidHomeworkSubmission(incoming())
-        && incoming().id == submissionId
-        && exists(/databases/$(database)/documents/homework_assignments/$(incoming().assignmentId))
-        && (!('deleted' in get(/databases/$(database)/documents/homework_assignments/$(incoming().assignmentId)).data) || get(/databases/$(database)/documents/homework_assignments/$(incoming().assignmentId)).data.deleted != true)
-        && get(/databases/$(database)/documents/homework_assignments/$(incoming().assignmentId)).data.isActive == true
-        && (
-          incoming().ownerUid == get(/databases/$(database)/documents/homework_assignments/$(incoming().assignmentId)).data.ownerUid
-          || (
-            get(/databases/$(database)/documents/homework_assignments/$(incoming().assignmentId)).data.ownerUid == ''
-          )
-        );
 
       allow update: if isSignedIn()
         && isValidId(submissionId)
@@ -240,27 +233,40 @@ service cloud.firestore {
         && existing().ownerUid == request.auth.uid;
     }
 
-    // Homework Assignment Short Links Index (For fast shortId resolution by students)
-    match /homework_assignment_short_links/{shortId} {
-      allow get: if isValidShortId(shortId);
-      allow list: if isSignedIn() && existing().ownerUid == request.auth.uid;
+    // NOTE: the homework_assignment_short_links collection is dead (no code reads
+    // or writes it) and its former public-read rule has been deleted. Any document
+    // left there falls under the global deny-all rule above.
 
-      allow create: if isSignedIn()
-        && isValidShortId(shortId)
-        && isValidHomeworkShortLink(incoming())
-        && incoming().shortId == shortId
-        && incoming().ownerUid == request.auth.uid;
+    // Teacher Workspace Sync Chunks (Strictly isolated by owning teacher).
+    // Used by the "restore my data from the cloud" flow
+    // (src/services/firebaseWorkspaceSync.ts): the client reads/writes
+    // user_workspaces/{uid}/categories/{chunkDocId} where each chunk matches
+    // isValidWorkspaceChunk() (id == docId, ownerUid == uid). The legacy
+    // email-derived workspace path (ws_<email>) is intentionally NOT allowed:
+    // Firestore rules cannot derive it from the auth token, so only the UID
+    // path is usable; legacy-path data can no longer be restored or deleted
+    // through these rules.
+    match /user_workspaces/{uid}/categories/{docId} {
+      allow get, list: if isOwner(uid)
+        && isValidId(docId)
+        && existing().ownerUid == uid;
 
-      allow update: if isSignedIn()
-        && isValidShortId(shortId)
-        && isValidHomeworkShortLink(incoming())
-        && incoming().shortId == shortId
-        && existing().ownerUid == request.auth.uid
-        && incoming().ownerUid == existing().ownerUid;
+      allow create: if isOwner(uid)
+        && isValidId(docId)
+        && isValidWorkspaceChunk(incoming())
+        && incoming().id == docId
+        && incoming().ownerUid == uid;
 
-      allow delete: if isSignedIn()
-        && isValidShortId(shortId)
-        && existing().ownerUid == request.auth.uid;
+      allow update: if isOwner(uid)
+        && isValidId(docId)
+        && isValidWorkspaceChunk(incoming())
+        && incoming().id == docId
+        && existing().ownerUid == uid
+        && incoming().ownerUid == uid;
+
+      allow delete: if isOwner(uid)
+        && isValidId(docId)
+        && existing().ownerUid == uid;
     }
   }
 }

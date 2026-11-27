@@ -24,9 +24,32 @@ export function hydrateVerbGroupSet(set: LernstudioSet): LernstudioSet {
     fallbackVerbs: set.verbEntriesSnapshot
   });
   if (verbs.length === 0) return set;
+  // C4: MERGE instead of replacing items wholesale. The derived items are
+  // the base, but manual edits on an existing item (corrected Arabic,
+  // emoji, example sentences) survive on top of the derived item — a P2P
+  // re-hydration must never wipe the teacher's corrections.
+  const derived = verbs.map((v) => verbEntryToLernstudioItem(v));
+  const existingById = new Map((set.items || []).map((it) => [it.id, it]));
+  const merged = derived.map((d) => {
+    const existing = existingById.get(d.id);
+    if (!existing) return d;
+    const keepText = (edited?: string | null, fallback?: string) =>
+      edited && edited.trim() ? edited : fallback;
+    return {
+      ...d,
+      arabic: keepText(existing.arabic, d.arabic),
+      ...(existing.emoji ? { emoji: existing.emoji } : {}),
+      ...(existing.exampleSentenceGerman
+        ? { exampleSentenceGerman: existing.exampleSentenceGerman }
+        : {}),
+      ...(existing.exampleSentenceArabic
+        ? { exampleSentenceArabic: existing.exampleSentenceArabic }
+        : {})
+    };
+  });
   return {
     ...set,
-    items: verbs.map((v) => verbEntryToLernstudioItem(v))
+    items: merged
   };
 }
 

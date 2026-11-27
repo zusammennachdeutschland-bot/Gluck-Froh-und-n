@@ -214,6 +214,30 @@ export interface PendingRemoteQueueItem {
 
 export const PENDING_REMOTE_QUEUE_KEY_PREFIX = 'gluck_cloud_pending_remote_queue_v2_';
 
+// Offline-queue caps (P1-8): the queue used to grow without bound while the
+// app was offline, each item holding a full workspace JSON snapshot.
+// - Max 20 queued snapshots: each item is a FULL snapshot, so older items
+//   are superseded by newer ones and can be dropped safely.
+// - Max 5 MB per item: a single snapshot bigger than that is pathological
+//   and would never drain reliably; it is dropped with a warning instead
+//   of letting the queue (and IndexedDB) grow without limit.
+export const MAX_PENDING_REMOTE_QUEUE_ITEMS = 20;
+export const MAX_PENDING_REMOTE_ITEM_BYTES = 5 * 1024 * 1024;
+
+/** Drop superseded snapshots: keep only the newest item per doc-token set, newest-first order preserved, capped at MAX. */
+function trimPendingRemoteQueue(queue: PendingRemoteQueueItem[]): PendingRemoteQueueItem[] {
+  const seen = new Set<string>();
+  const deduped: PendingRemoteQueueItem[] = [];
+  for (let i = queue.length - 1; i >= 0; i--) {
+    const item = queue[i];
+    const tokenKey = item.docTokens ? JSON.stringify(Object.entries(item.docTokens).sort()) : `id:${item.id}`;
+    if (seen.has(tokenKey)) continue; // an older full snapshot for the same docs
+    seen.add(tokenKey);
+    deduped.unshift(item);
+  }
+  return deduped.slice(-MAX_PENDING_REMOTE_QUEUE_ITEMS);
+}
+
 export function loadDurablePendingRemoteQueue(uid: string): PendingRemoteQueueItem[] {
   if (!uid) return [];
   const inMem = inMemoryDurablePendingQueueByUid.get(uid);
@@ -396,11 +420,17 @@ export async function enqueueDurablePendingRemoteItem(
   docTokens?: Record<string, string>
 ): Promise<PendingRemoteQueueItem | null> {
   if (!uid || !remoteJsonStr) return null;
+  if (remoteJsonStr.length > MAX_PENDING_REMOTE_ITEM_BYTES) {
+    console.warn(
+      `[enqueueDurablePendingRemoteItem] Dropping oversize snapshot (${(remoteJsonStr.length / 1024 / 1024).toFixed(1)} MB > ${(MAX_PENDING_REMOTE_ITEM_BYTES / 1024 / 1024).toFixed(0)} MB cap) for ${uid}`
+    );
+    return null;
+  }
   const extracted = extractDocTokensFromBackupJson(remoteJsonStr);
   const effectiveTokens = docTokens || extracted.docTokens;
 
   const inMem = inMemoryDurablePendingQueueByUid.get(uid);
-  const queue = inMem ? [...inMem] : await loadDurablePendingRemoteQueueAsync(uid);
+  let queue = inMem ? [...inMem] : await loadDurablePendingRemoteQueueAsync(uid);
   const last = queue.length > 0 ? queue[queue.length - 1] : null;
   if (
     last &&
@@ -422,6 +452,10 @@ export async function enqueueDurablePendingRemoteItem(
     attemptCount: 0
   };
   queue.push(newItem);
+  // Merge consecutive/superseded snapshots and enforce the queue cap:
+  // older full snapshots for the same docs are dropped, oldest first.
+  // (The new item is newest, so trimming never drops it.)
+  queue = trimPendingRemoteQueue(queue);
   inMemoryDurablePendingQueueByUid.set(uid, queue);
   const saved = await saveDurablePendingRemoteQueue(uid, queue);
   if (!saved) {

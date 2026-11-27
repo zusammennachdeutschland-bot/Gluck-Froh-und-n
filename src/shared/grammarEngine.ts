@@ -374,7 +374,17 @@ export function normalizeLernstudioSet(raw: any, normalizeOptions?: NormalizeGra
     ...(grammarContent ? { grammarContent } : {}),
     contentOrigin: safeRaw.contentOrigin || originDefault,
     createdAt: safeRaw.createdAt || new Date().toISOString(),
-    updatedAt: Number(safeRaw.updatedAt) || Date.now()
+    // C9: parse an ISO updatedAt with Date.parse FIRST — Number('2026-…')
+    // is NaN, so a valid ISO timestamp used to be re-stamped with Date.now()
+    // and an old copy looked newest, overwriting a newer peer edit.
+    updatedAt: (() => {
+      const raw = (safeRaw as any).updatedAt;
+      const parsed =
+        typeof raw === 'number' ? raw : Date.parse(String(raw ?? ''));
+      return Number.isFinite(parsed) && parsed > 0
+        ? parsed
+        : Number(raw) || Date.now();
+    })()
   };
 
   if (!candidate.setKind) {

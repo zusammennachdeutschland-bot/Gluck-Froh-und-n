@@ -39,6 +39,7 @@ export type P2pSyncErrorCode =
   | 'PEER_OFFLINE'
   | 'PIN_EXPIRED'
   | 'PIN_INVALID'
+  | 'PIN_LOCKED'
   | 'BROKER_DOWN'
   | 'ICE_FAILED'
   | 'ID_IN_USE'

@@ -1,4 +1,4 @@
-import { VerbPraesensForms, VerbValidationMetadata } from './verbTypes';
+import { VerbPraesensForms, VerbValidationMetadata } from './verbTypes.js';
 
 /**
  * Authoritative Duden / Goethe A1–B1 Präsens dictionary for ALL strong, irregular,

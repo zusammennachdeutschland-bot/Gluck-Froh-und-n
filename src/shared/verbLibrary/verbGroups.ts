@@ -1,14 +1,14 @@
-import { VERB_LIBRARY_VERSION } from './verbCatalogBuilder';
-import { VERBS_A1 } from './verbsA1';
-import { VERBS_A2 } from './verbsA2';
-import { VERBS_B1 } from './verbsB1';
+import { VERB_LIBRARY_VERSION } from './verbCatalogBuilder.js';
+import { VERBS_A1 } from './verbsA1.js';
+import { VERBS_A2 } from './verbsA2.js';
+import { VERBS_B1 } from './verbsB1.js';
 import {
   ALL_VERB_TOPIC_TAGS,
   VerbClassification,
   VerbEntry,
   VerbGroupDefinition,
   VerbTopicTag
-} from './verbTypes';
+} from './verbTypes.js';
 
 function buildGlobalVerbRegistry(): {
   allVerbs: readonly VerbEntry[];

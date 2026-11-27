@@ -22,15 +22,17 @@ import { DesktopDashboard } from './components/desktop/DesktopDashboard';
 import { useDesktopShortcuts } from './hooks/useDesktopShortcuts';
 
 import { FinanceView } from './components/finance/FinanceView';
-import { ReportsView } from './components/ReportsView';
+// Code-split heavy screens out of the first bundle: they load on demand
+// behind the existing <React.Suspense> boundaries below.
+const ReportsView = React.lazy(() => import('./components/ReportsView').then(m => ({ default: m.ReportsView })));
+const HodHubView = React.lazy(() => import('./components/HodHubView').then(m => ({ default: m.HodHubView })));
+const LernstudioView = React.lazy(() => import('./shared/components/LernstudioView').then(m => ({ default: m.LernstudioView })));
+const GrainRecordingsLibraryView = React.lazy(() => import('./components/GrainRecordingsLibraryView').then(m => ({ default: m.GrainRecordingsLibraryView })));
 import { SessionHistoryView } from './components/SessionHistoryView';
 import { SettingsView } from './components/SettingsView';
 import { FreeTimeSlotsView } from './components/FreeTimeSlotsView';
 import { CertificateCenter } from './components/certificates/CertificateCenter';
 import { SchoolScheduleView } from './components/SchoolScheduleView';
-import { HodHubView } from './components/HodHubView';
-import { LernstudioView } from './shared/components/LernstudioView';
-import { GrainRecordingsLibraryView } from './components/GrainRecordingsLibraryView';
 import { BackupModal } from './components/BackupModal';
 import { AddFinanceTransactionModal } from './components/finance/modals/AddFinanceTransactionModal';
 
@@ -839,7 +841,10 @@ export default function App() {
         'dl_groups', 'dl_students', 'dl_lessons', 'dl_payments', 'dl_certificates', 'dl_custom_ai_backgrounds',
         'dl_notifications', 'dl_notification_settings', 'dl_inspiration_settings', 'dl_inspiration_messages',
         'dl_last_backup_time', 'dl_dismissed_dashboard_lessons', 'dl_recently_deleted',
-        'dl_active_lesson_session', 'dl_active_lesson_session_updated_at', 'dl_notified_lesson_alerts', 'dl_local_backup_data',
+        'dl_active_lesson_session', 'dl_active_lesson_session_updated_at', 'dl_notified_lesson_alerts',
+        // NOTE: 'dl_local_backup_data' intentionally NOT loaded at boot: it is a
+        // full second copy of the database and is only read directly via
+        // storage.getItem() on demand (see storageService/backup flows).
         'hod_german_students', 'hod_complaints', 'hod_student_action_plans', 'hod_visit_records', 'hod_visit_records_migrated_v1',
         'dl_school_notes', 'dl_finance_accounts', 'dl_finance_categories', 'dl_finance_transactions',
         'dl_finance_recurring', 'dl_finance_installments', 'dl_finance_notifications',

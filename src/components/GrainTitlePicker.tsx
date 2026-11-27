@@ -9,6 +9,7 @@ import {
 } from '../types';
 import {
   loadGrainIntegrationMeta,
+  loadDiscoveredGrainRecordings,
   syncGrainRecordingsIncrementally,
   generateEducationalDraftForRecording
 } from '../services/grainService';
@@ -97,7 +98,10 @@ export const GrainTitlePicker: React.FC<GrainTitlePickerProps> = ({
       .replace(/^ملخص مقترح من Grain.*?[:\-]\s*/i, '')
       .split(/[.!?\n]/)[0]
       ?.trim();
-    if (rawClean && rawClean.length > 5) {
+    // P2-N7: a full descriptive sentence ("تمت مناقشة موضوع …") or a
+    // "حصة مسجلة بعنوان … (60 دقيقة)" line is not a title — only offer it
+    // when it already looks like a short title.
+    if (rawClean && rawClean.length > 5 && rawClean.length < 60 && !/\(\s*\d/.test(rawClean)) {
       pushOpt(rawClean);
     }
     return opts.slice(0, 4);
@@ -108,6 +112,9 @@ export const GrainTitlePicker: React.FC<GrainTitlePickerProps> = ({
     if (ranForLessonRef.current === selectedLesson.id) return;
     ranForLessonRef.current = selectedLesson.id;
     let cancelled = false;
+    // P1-N1: abort the in-flight Grain sync/draft when the report closes or
+    // the lesson changes, so a hung request cannot update a dead report.
+    const abortController = new AbortController();
 
     (async () => {
       setStatus('loading');
@@ -118,12 +125,19 @@ export const GrainTitlePicker: React.FC<GrainTitlePickerProps> = ({
         return;
       }
       try {
-        const result = await syncGrainRecordingsIncrementally({
-          lessons,
-          groups,
-          students,
-          onUpdateLesson
-        });
+        // P1-N1: do not re-fetch when the last successful Grain sync was
+        // recent (5 min) — the locally cached recordings are fresh enough.
+        const lastSyncMs = Date.parse(meta.lastSuccessfulSyncAt || '');
+        const syncIsRecent = Number.isFinite(lastSyncMs) && Date.now() - lastSyncMs < 5 * 60 * 1000;
+        const result = syncIsRecent
+          ? { success: true as const, recordings: loadDiscoveredGrainRecordings(), newCount: 0 }
+          : await syncGrainRecordingsIncrementally({
+              lessons,
+              groups,
+              students,
+              onUpdateLesson,
+              signal: abortController.signal
+            });
         if (cancelled) return;
         if (!result.success) {
           setErrorMessage(
@@ -139,13 +153,32 @@ export const GrainTitlePicker: React.FC<GrainTitlePickerProps> = ({
         }
         const recs = result.recordings;
         // Same match as the panel's visible recordings for this lesson.
+        // P1-N4: the date-only fallback must ALSO match the lesson time
+        // (within +-30 minutes) AND the same group — otherwise a day with
+        // two lessons for different groups could fill in the wrong title.
+        const lessonStartMs = (() => {
+          const timePart = (selectedLesson.time || '').match(/(\d{1,2}):(\d{2})/);
+          if (!timePart) return NaN;
+          return Date.parse(
+            `${selectedLesson.date}T${timePart[1].padStart(2, '0')}:${timePart[2]}:00`
+          );
+        })();
+        const matchesDateFallback = (r: (typeof recs)[number]) => {
+          const sameDate =
+            r.evidence?.recordingDateLocal === selectedLesson.date ||
+            r.startDatetime?.startsWith(selectedLesson.date);
+          if (!sameDate) return false;
+          const recMs = Date.parse(r.startDatetime || '');
+          if (!Number.isFinite(lessonStartMs) || !Number.isFinite(recMs)) return false;
+          if (Math.abs(recMs - lessonStartMs) > 30 * 60 * 1000) return false;
+          return r.matchedGroupId === selectedLesson.groupId;
+        };
         const matched =
           recs.find((r) => r.confirmedLessonId === selectedLesson.id) ||
           recs.find((r) => r.suggestedLessonId === selectedLesson.id) ||
           recs.find(
             (r) =>
-              r.evidence?.recordingDateLocal === selectedLesson.date ||
-              r.startDatetime?.startsWith(selectedLesson.date) ||
+              matchesDateFallback(r) ||
               r.candidates.some((c) => c.lessonId === selectedLesson.id)
           );
         if (!matched) {
@@ -189,6 +222,7 @@ export const GrainTitlePicker: React.FC<GrainTitlePickerProps> = ({
 
     return () => {
       cancelled = true;
+      abortController.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLesson.id]);

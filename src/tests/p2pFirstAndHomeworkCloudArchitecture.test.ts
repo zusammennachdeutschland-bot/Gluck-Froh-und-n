@@ -792,8 +792,11 @@ async function runAll15ArchitecturalScenarios() {
           questionId: 'q1',
           questionType: 'choice_all',
           germanWord: 'der Apfel',
-          studentAnswer: 'التفاحة',
-          correctAnswer: 'التفاحة',
+          // choice_all asks for the GERMAN word (prompt shows the Arabic
+          // meaning); the answer must be the German word, not its Arabic
+          // translation — the server re-grades this from the set data.
+          studentAnswer: 'der Apfel',
+          correctAnswer: 'der Apfel',
           isCorrect: true,
           timeSpentSeconds: 3
         }
@@ -824,9 +827,15 @@ async function runAll15ArchitecturalScenarios() {
     assert.ok(matchingSub, 'Expected Android on-demand fetch to retrieve student submission');
     assert.equal(matchingSub?.studentName, 'أحمد طارق');
     assert.equal(matchingSub?.accuracyPercent, 100);
+    // NOTE: this scenario's test transport writes the submission straight to
+    // the in-memory cloud store, bypassing the API — so the stored goldEarned
+    // is still the client-sent 450 here. In production the submission goes
+    // through POST /api/homework/submit, where the server recomputes rewards
+    // from verified responses (10 per correct answer); that is covered by
+    // smartOptimizationAndReliability (TEST 3) and homeworkGamification.
     assert.equal(matchingSub?.goldEarned, 450);
     assert.equal(matchingSub?.responses.length, 1);
-    assert.equal(matchingSub?.responses[0].studentAnswer, 'التفاحة');
+    assert.equal(matchingSub?.responses[0].studentAnswer, 'der Apfel');
     logs.push('[PASS] Scenario 9: Android fetches student homework submissions on-demand and displays student answers, score, accuracy, and rewards');
   }
 
@@ -1052,7 +1061,20 @@ async function runAll15ArchitecturalScenarios() {
     assert.equal(secondWrite, true);
     assert.equal(restCallCount, callsAfterFirst, 'Expected 0 redundant HTTP/Firestore writes for unchanged assignment payload');
 
-    // Same for completed submission deduplication
+    // Same for completed submission deduplication.
+    // NOTE: submissions now go ONLY through POST /api/homework/submit (the
+    // direct-Firestore fallback is gone), so the assignment must exist in the
+    // server's authoritative store, and the submit must authorise via the
+    // short link in the page URL — exactly like the real student player.
+    await inMemDb.collection('homework_assignments').doc(quotaHw.id).set({ ...quotaHw, ownerUid: teacherUid }, { merge: true });
+    (globalThis as any).window.location = {
+      origin: 'https://h-und-n-br5l.vercel.app',
+      pathname: '/Herr-Abdul-rahman/QtDedup',
+      search: '',
+      dispatchEvent: () => true,
+      addEventListener: () => {},
+      removeEventListener: () => {}
+    };
     const quotaSub: HomeworkSubmission = {
       id: 'sub_quota_dedup_1',
       assignmentId: quotaHw.id,

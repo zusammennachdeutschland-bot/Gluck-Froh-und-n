@@ -1,4 +1,4 @@
-import { CompactVerbTuple } from './verbTypes';
+import { CompactVerbTuple } from './verbTypes.js';
 
 /**
  * Curated A1 Verb Bank — Part 2 (280 additional authentic A1/elementary verbs).

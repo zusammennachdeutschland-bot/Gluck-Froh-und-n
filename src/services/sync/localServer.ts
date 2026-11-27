@@ -28,6 +28,45 @@ let activeDataSource: SyncDataSource | null = null;
 let lastKnownHostStatus: P2pHostStartResult | null = null;
 const hostStatusListeners = new Set<(status: P2pHostStartResult) => void>();
 
+// PIN brute-force lockout: 5 wrong pairing PINs from the same remote device
+// lock that device out of /api/sync/pair for 5 minutes. The 6-digit PIN has
+// only 900k values, so without a lockout an attacker on the local network
+// could guess it. Keyed by the remote deviceId the caller claims (or
+// 'unknown' when none is sent); a successful pairing clears the entry.
+const PIN_LOCKOUT_MAX_ATTEMPTS = 5;
+const PIN_LOCKOUT_MS = 5 * 60 * 1000;
+const pinLockoutByDevice = new Map<string, { failures: number; lockedUntilMs: number }>();
+
+function isPinLockedOut(deviceKey: string): boolean {
+  const entry = pinLockoutByDevice.get(deviceKey);
+  if (!entry) return false;
+  if (entry.lockedUntilMs > 0 && Date.now() < entry.lockedUntilMs) return true;
+  if (entry.lockedUntilMs > 0 && Date.now() >= entry.lockedUntilMs) {
+    pinLockoutByDevice.delete(deviceKey);
+    return false;
+  }
+  return false;
+}
+
+function recordPinFailure(deviceKey: string): boolean {
+  const entry = pinLockoutByDevice.get(deviceKey) || { failures: 0, lockedUntilMs: 0 };
+  entry.failures += 1;
+  if (entry.failures >= PIN_LOCKOUT_MAX_ATTEMPTS) {
+    entry.lockedUntilMs = Date.now() + PIN_LOCKOUT_MS;
+  }
+  pinLockoutByDevice.set(deviceKey, entry);
+  return entry.lockedUntilMs > 0 && Date.now() < entry.lockedUntilMs;
+}
+
+function clearPinLockout(deviceKey: string): void {
+  pinLockoutByDevice.delete(deviceKey);
+}
+
+/** Test hook: clears all PIN lockout state. */
+export function __resetPinLockoutForTests(): void {
+  pinLockoutByDevice.clear();
+}
+
 function generateSixDigitPin(): string {
   const bytes = new Uint32Array(1);
   if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
@@ -204,6 +243,13 @@ function attachRouteHandlers(localDeviceName: string, localDeviceId: string) {
       }
 
       const submittedPin = String(data?.pairingPin || data?.pin || '').trim();
+      const pinLockoutKey = String(data?.deviceId || '').trim() || 'unknown';
+      if (isPinLockedOut(pinLockoutKey)) {
+        throw createP2pError(
+          'PIN_LOCKED',
+          'Too many wrong pairing codes from this device. Try again in 5 minutes.'
+        );
+      }
       const pinCheck = peerNetwork.validatePairingPin(submittedPin);
       if (pinCheck.ok === false) {
         // Also check persisted state expiry in case PIN expired between app restarts
@@ -216,8 +262,17 @@ function attachRouteHandlers(localDeviceName: string, localDeviceId: string) {
         ) {
           throw createP2pError('PIN_EXPIRED', 'Pairing code has expired. Generate a new code and try again.');
         }
+        // Only wrong-PIN failures count toward the lockout (expired PINs do
+        // not — they are not guesses).
+        if (pinCheck.errorCode === 'PIN_INVALID' && recordPinFailure(pinLockoutKey)) {
+          throw createP2pError(
+            'PIN_LOCKED',
+            'Too many wrong pairing codes from this device. Try again in 5 minutes.'
+          );
+        }
         throw createP2pError(pinCheck.errorCode, pinCheck.message);
       }
+      clearPinLockout(pinLockoutKey);
 
       const remoteDeviceId = String(data?.deviceId || '').trim();
       const remoteDeviceName = String(data?.deviceName || 'Companion Device').trim();
@@ -309,7 +364,11 @@ function attachRouteHandlers(localDeviceName: string, localDeviceId: string) {
       }
       const peer = authenticateInboundPeer(inboundDelta.senderDeviceId, data?.token);
       try {
-        const outboundDelta = await handleInboundExchange(inboundDelta, activeDataSource);
+        // The sender was authenticated above (paired peer + token), so the
+        // merge can verify record origins against this deviceId.
+        const outboundDelta = await handleInboundExchange(inboundDelta, activeDataSource, {
+          authenticatedPeerDeviceId: peer.deviceId
+        });
         void syncMissingPageImagesWithPeer({ peer, dataSource: activeDataSource }).catch(() => {});
         return { ok: true, delta: outboundDelta };
       } catch (err: any) {

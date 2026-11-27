@@ -40,6 +40,14 @@ interface Props {
   onBack: () => void;
 }
 
+/** Normalized German for choice dedupe: article-stripped, lowercased, single-spaced. */
+const normalizeGermanChoice = (german: string) =>
+  german
+    .replace(/^(der|die|das)\s+/i, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+
 interface FloatingFruit {
   id: string;
   item?: LernstudioItem;
@@ -135,8 +143,21 @@ export const LernstudioWordNinjaGame: React.FC<Props> = ({
     if (isGameOver || isVictory || !targetItem || !items.length) return;
 
     const rng = createSeededRandom(`${set.id}::ninja_wave::${sessionNonce}::${currentTargetIndex}`);
-    const otherItems = rawItems.filter((it) => it.id !== targetItem.id);
-    const decoys = seededShuffle(otherItems, rng).slice(0, difficulty === 'hard' ? 4 : 3);
+    // Dedupe decoys by normalized German text, not just id: the same word
+    // must never appear as two different fruits.
+    const decoyCount = difficulty === 'hard' ? 4 : 3;
+    const seenGerman = new Set<string>([normalizeGermanChoice(targetItem.german)]);
+    const decoys: LernstudioItem[] = [];
+    for (const it of seededShuffle(
+      rawItems.filter((x) => x.id !== targetItem.id),
+      rng
+    )) {
+      const key = normalizeGermanChoice(it.german);
+      if (!key || seenGerman.has(key)) continue;
+      seenGerman.add(key);
+      decoys.push(it);
+      if (decoys.length >= decoyCount) break;
+    }
 
     const newWave: FloatingFruit[] = [];
 

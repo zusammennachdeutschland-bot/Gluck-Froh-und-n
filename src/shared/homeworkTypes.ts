@@ -1,4 +1,4 @@
-import type { VerbEntry } from './verbLibrary/verbTypes';
+import type { VerbEntry } from './verbLibrary/verbTypes.js';
 
 export type HomeworkContentSource = 'vocab' | 'verb' | 'mixed' | 'grammar';
 

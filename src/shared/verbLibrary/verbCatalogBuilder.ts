@@ -1,11 +1,11 @@
-import { buildFullVerbPraesens } from './verbConjugationTable';
+import { buildFullVerbPraesens } from './verbConjugationTable.js';
 import {
   CompactVerbTuple,
   VerbClassification,
   VerbEntry,
   VerbLevel,
   VerbPrepositionCase
-} from './verbTypes';
+} from './verbTypes.js';
 
 export const VERB_LIBRARY_VERSION = '2026.11.1';
 

@@ -394,13 +394,22 @@ export async function runSyncCycle(
         totalTransferred += incomingRecords.length;
         const currentLocalRecords = localData[key] || [];
         const knownLocalIds = new Set(currentLocalRecords.filter(r => r && r.id).map(r => r.id.trim()));
-        const shouldDeferUnknown = !hasAuthoritativeTombstones && (key === 'groups' || key === 'students' || key === 'lessons');
+        const shouldDeferUnknown = !hasAuthoritativeTombstones && (key === 'groups' || key === 'students' || key === 'lessons' || key === 'lernstudioSets');
 
         const mergeResult = mergeEntities(currentLocalRecords, incomingRecords, {
           entityTypeName: key,
           purgedRecords: activePurgedRecords,
           deferUnknownActiveIds: shouldDeferUnknown,
-          knownLocalIds
+          knownLocalIds,
+          // runSyncCycle exchanges only with a paired peer (the transport
+          // authenticates it), so the peer's deviceId is the authenticated
+          // sender for owner-wins origin checks. Known devices: this peer
+          // plus every other paired peer (relayed records) and ourselves.
+          authenticatedPeerDeviceId: peerId,
+          knownPeerDeviceIds: [
+            ...((syncState.pairedPeers || []).map((p: any) => String(p?.deviceId || '')).filter(Boolean)),
+            String(syncState.localDeviceId || '')
+          ]
         });
 
         if (mergeResult.deferredIds && mergeResult.deferredIds.length > 0) {
@@ -476,10 +485,18 @@ export async function runSyncCycle(
   }
 }
 
-export async function handleInboundExchange(inboundDelta: SyncDeltaPayload, dataSource: SyncDataSource): Promise<SyncDeltaPayload> {
+export async function handleInboundExchange(
+  inboundDelta: SyncDeltaPayload,
+  dataSource: SyncDataSource,
+  options?: { authenticatedPeerDeviceId?: string }
+): Promise<SyncDeltaPayload> {
   const syncState = dataSource.getSyncState();
   const localData = dataSource.getLocalData();
   const peerId = inboundDelta.senderDeviceId;
+  // When the caller authenticated the sender (localServer exchange route),
+  // owner-wins checks verify record origins against it. Without it (legacy /
+  // test callers) the merge falls back to the self-asserted fields only.
+  const authenticatedPeerDeviceId = options?.authenticatedPeerDeviceId;
 
   // 1. Ingest and sweep authoritative tombstones FIRST
   const { activePurgedRecords, hasAuthoritativeTombstones } = await ingestAndSweepPurgedTombstonesOnDataSource(
@@ -530,13 +547,22 @@ export async function handleInboundExchange(inboundDelta: SyncDeltaPayload, data
     if (Array.isArray(incomingRecords) && incomingRecords.length > 0) {
       const currentLocalRecords = localData[key] || [];
       const knownLocalIds = new Set(currentLocalRecords.filter(r => r && r.id).map(r => r.id.trim()));
-      const shouldDeferUnknown = !hasAuthoritativeTombstones && (key === 'groups' || key === 'students' || key === 'lessons');
+      const shouldDeferUnknown = !hasAuthoritativeTombstones && (key === 'groups' || key === 'students' || key === 'lessons' || key === 'lernstudioSets');
 
       const mergeResult = mergeEntities(currentLocalRecords, incomingRecords, {
         entityTypeName: key,
         purgedRecords: activePurgedRecords,
         deferUnknownActiveIds: shouldDeferUnknown,
-        knownLocalIds
+        knownLocalIds,
+        ...(authenticatedPeerDeviceId
+          ? {
+              authenticatedPeerDeviceId,
+              knownPeerDeviceIds: [
+                ...((syncState.pairedPeers || []).map((p: any) => String(p?.deviceId || '')).filter(Boolean)),
+                String(syncState.localDeviceId || '')
+              ]
+            }
+          : {})
       });
 
       if (mergeResult.deferredIds && mergeResult.deferredIds.length > 0) {

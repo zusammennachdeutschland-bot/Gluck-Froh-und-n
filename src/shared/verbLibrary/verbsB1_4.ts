@@ -1,4 +1,4 @@
-import { CompactVerbTuple } from './verbTypes';
+import { CompactVerbTuple } from './verbTypes.js';
 
 /**
  * Curated B1 German Verb Bank — Part 4 (330 authentic B1 verbs).

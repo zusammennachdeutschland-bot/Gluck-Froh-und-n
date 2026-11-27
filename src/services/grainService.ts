@@ -425,6 +425,7 @@ async function buildWebProxyAuthHeaders(): Promise<Record<string, string>> {
     try {
       const res = await fetch('/api/grain/session', {
         method: 'POST',
+        signal: grainFetchTimeoutSignal(),
         headers: {
           'Content-Type': 'application/json',
           'X-Grain-Local-Client': 'glueck-web'
@@ -494,7 +495,7 @@ export async function refreshGrainRuntimeStatus(): Promise<GrainIntegrationMetaS
 
     if (runtime === 'web') {
       const headers = await buildWebProxyAuthHeaders();
-      const res = await fetch('/api/grain/status', { method: 'GET', headers });
+      const res = await fetch('/api/grain/status', { method: 'GET', headers, signal: grainFetchTimeoutSignal() });
       if (!res.ok) {
         return saveGrainIntegrationMeta({
           runtime: 'web',
@@ -629,6 +630,7 @@ export async function saveGrainPersonalToken(rawToken: string): Promise<{
       const headers = await buildWebProxyAuthHeaders();
       const res = await fetch('/api/grain/connect', {
         method: 'POST',
+        signal: grainFetchTimeoutSignal(),
         headers,
         body: JSON.stringify({ token: cleanToken })
       });
@@ -684,7 +686,7 @@ export async function disconnectGrainAccount(): Promise<GrainIntegrationMetaStat
       await invokeAndroidGrainDisconnect();
     } else if (runtime === 'web' && typeof fetch === 'function') {
       const headers = await buildWebProxyAuthHeaders();
-      await fetch('/api/grain/disconnect', { method: 'POST', headers });
+      await fetch('/api/grain/disconnect', { method: 'POST', headers, signal: grainFetchTimeoutSignal() });
     }
   } catch {
     // Proceed with local cleanup even if remote disconnect fails
@@ -1288,10 +1290,22 @@ export function classifyGrainOperationOutcome(options: {
   };
 }
 
+/** Shared 20s timeout for Grain HTTP calls (P1-N1): a hung request must never
+ *  leave the lesson report stuck in `loading` forever. Falls back to a manual
+ *  AbortController on runtimes without `AbortSignal.timeout`. */
+export function grainFetchTimeoutSignal(timeoutMs = 20000): AbortSignal {
+  const maybeTimeout = (AbortSignal as unknown as { timeout?: (ms: number) => AbortSignal }).timeout;
+  if (typeof maybeTimeout === 'function') return maybeTimeout(timeoutMs);
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), timeoutMs);
+  return controller.signal;
+}
+
 export async function executeScopedGrainOperation(options: {
   operation: GrainBridgeOperation;
   recordingId?: string;
   payload?: any;
+  signal?: AbortSignal;
 }): Promise<{
   ok: boolean;
   httpStatus: number;
@@ -1353,6 +1367,7 @@ export async function executeScopedGrainOperation(options: {
       const headers = await buildWebProxyAuthHeaders();
       const res = await fetch('/api/grain/execute', {
         method: 'POST',
+        signal: options.signal ?? grainFetchTimeoutSignal(),
         headers,
         body: JSON.stringify({
           operation: options.operation,
@@ -3697,7 +3712,7 @@ const EXTENDED_GERMAN_GRAMMAR_PATTERNS: Array<{
   },
   {
     id: 'perfekt',
-    pattern: /\b(perfekt|partizip\s+ii|partizip\s+2|ge[a-zäöüß]{3,14}(?:t|en)\b)/i,
+    pattern: /\b(perfekt|partizip\s+ii|partizip\s+2)/i,
     topic: 'Das Perfekt (Hilfsverb haben/sein + Partizip II)',
     explanationDe: 'Perfekt zur Beschreibung vergangener Ereignisse: haben oder sein auf Position 2 + Partizip II am Satzende.',
     explanationAr: 'صيغة الماضي التام باستخدام الفعل المساعد haben أو sein والتصريف الثالث في نهاية الجملة.'
@@ -5007,6 +5022,7 @@ export async function syncGrainRecordingsIncrementally(options: {
   part2Config?: Partial<GrainPart2DetectionConfig>;
   autoExtractContent?: boolean;
   onUpdateLesson?: (lessonId: string, patch: Partial<Lesson>) => void;
+  signal?: AbortSignal;
 }): Promise<{
   success: boolean;
   recordings: GrainDiscoveredRecording[];
@@ -5059,8 +5075,18 @@ export async function syncGrainRecordingsIncrementally(options: {
   const fetchedRaw: any[] = [];
 
   for (let page = 0; page < maxPages; page++) {
+    if (options.signal?.aborted) {
+      return {
+        success: false,
+        recordings: existingRecordings.filter((r) => !r.removedFromLibrary),
+        newCount: 0,
+        error: 'Grain sync cancelled.',
+        errorCode: 'ABORTED'
+      };
+    }
     let res = await executeScopedGrainOperation({
       operation: 'list_recordings',
+      signal: options.signal,
       payload: useMinimalPayloadFallback
         ? {
             ...(cursor ? { cursor } : {})
@@ -5081,6 +5107,7 @@ export async function syncGrainRecordingsIncrementally(options: {
       useMinimalPayloadFallback = true;
       res = await executeScopedGrainOperation({
         operation: 'list_recordings',
+        signal: options.signal,
         payload: {}
       });
     }
@@ -5800,7 +5827,7 @@ const KNOWN_GERMAN_GRAMMAR_TOPICS: Array<{
     difficultySuggestion: 'مقترح للمراجعة: تغير الحرف المتحرك مع الضمائر المفردة (ich/er/sie/es).'
   },
   {
-    pattern: /\b(perfekt|ge\w+t|ge\w+en|haben\s+.*\s+ge|sein\s+.*\s+ge)\b/i,
+    pattern: /\b(perfekt|haben\s+.*\s+ge|sein\s+.*\s+ge)\b/i,
     explicitNamePattern: /\bperfekt\b|\bpartizip\s+ii\b|\bpartizip\s+2\b/i,
     topic: 'Das Perfekt (الماضي التام)',
     explanationAr: 'تكوين صيغة الماضي التام باستخدام الفعل المساعد haben أو sein في الموقع الثاني والتصريف الثالث (Partizip II) في آخر الجملة.',

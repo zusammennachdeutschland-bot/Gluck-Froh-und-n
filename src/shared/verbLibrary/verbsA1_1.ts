@@ -1,4 +1,4 @@
-import { CompactVerbTuple } from './verbTypes';
+import { CompactVerbTuple } from './verbTypes.js';
 
 export const VERBS_A1_PART_1: readonly CompactVerbTuple[] = [
   ['sein', 'يكون', 'to be', 'U', '', ['Alltag', 'Familie'], 'Ich bin heute sehr glücklich.', 'أنا سعيد جداً اليوم.'],

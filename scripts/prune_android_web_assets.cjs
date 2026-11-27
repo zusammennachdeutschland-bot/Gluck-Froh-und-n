@@ -19,12 +19,14 @@ const PRUNABLE_FILES = [
   'server.cjs.map',
   'logo.svg',
   'logo.png',
-  'icon.png',
+  // NOTE: 'icon.png' and 'pwa-512x512.png' are intentionally NOT pruned:
+  // notificationService.ts (icon: '/icon.png') and alarmAudioService.ts /
+  // notificationService.ts (MediaSession '/pwa-512x512.png') still reference
+  // them, and on Android those paths would 404 (no icon / no media art).
   'icon.ico',
   'fg.png',
   'bg.png',
   'apple-touch-icon.png',
-  'pwa-512x512.png',
   'pwa-192x192.png',
   'pwa-maskable-512x512.png',
   path.join('assets', 'brand', 'teacher-crest-logo.png'),

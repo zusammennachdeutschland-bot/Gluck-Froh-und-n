@@ -220,10 +220,18 @@ export function toGamificationSnapshot(
 export function restoreGamificationStateFromSnapshot(
   snapshot: Partial<HomeworkGamificationSnapshot> | null | undefined,
   fallbackQuestionCount: number,
-  fallbackTimeLimitMinutes?: number
+  fallbackTimeLimitMinutes?: number,
+  savedAtMs?: number
 ): HomeworkGamificationState {
   const base = createInitialGamificationState(fallbackQuestionCount, fallbackTimeLimitMinutes);
   if (!snapshot) return base;
+  // B7: the timer must not freeze while the app is closed — subtract the
+  // real time elapsed since the session was saved (savedAtMs), so a child
+  // who closes the app for hours does not resume with the same seconds left.
+  const elapsedSeconds =
+    typeof savedAtMs === 'number' && Number.isFinite(savedAtMs) && savedAtMs > 0
+      ? Math.max(0, Math.floor((Date.now() - savedAtMs) / 1000))
+      : 0;
   return {
     points: typeof snapshot.points === 'number' && Number.isFinite(snapshot.points) ? Math.max(0, snapshot.points) : base.points,
     streak: typeof snapshot.streak === 'number' && Number.isFinite(snapshot.streak) ? Math.max(0, snapshot.streak) : base.streak,
@@ -234,7 +242,7 @@ export function restoreGamificationStateFromSnapshot(
     doublePointsActive: Boolean(snapshot.doublePointsActive),
     timeRemainingSeconds:
       typeof snapshot.timeRemainingSeconds === 'number' && Number.isFinite(snapshot.timeRemainingSeconds)
-        ? Math.max(0, snapshot.timeRemainingSeconds)
+        ? Math.max(0, snapshot.timeRemainingSeconds - elapsedSeconds)
         : base.timeRemainingSeconds,
     initialTimerSeconds:
       typeof snapshot.initialTimerSeconds === 'number' && Number.isFinite(snapshot.initialTimerSeconds)
@@ -366,6 +374,9 @@ export function applyAnswerGamification(
         ...state,
         points: nextPoints,
         streak: 0,
+        // A17: a picked x2 card is consumed by the next answer, right or
+        // wrong — it must not survive a wrong answer to double a later one.
+        doublePointsActive: false,
         processedQuestionIds: nextProcessedIds
       },
       pointsDelta: actualDelta,

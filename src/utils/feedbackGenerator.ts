@@ -1387,6 +1387,12 @@ export const generateFeedback = (
       parentText = `${b.item}.`;
     }
 
+    // The picked opener (greeting) previously only fed variantId and never
+    // reached the parent message — prepend it (openers already end with ': ').
+    if (op.item) {
+      parentText = `${op.item}${parentText}`;
+    }
+
     if (cl.item) {
       parentText += `\n${cl.item}`;
     }

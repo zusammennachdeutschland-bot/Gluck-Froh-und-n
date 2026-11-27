@@ -343,6 +343,9 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
 
   // Active Selected Tile Modal State
   const [activeTile, setActiveTile] = useState<BaamboozleTile | null>(null);
+  useEffect(() => {
+    awardedTileIdRef.current = null;
+  }, [activeTile?.id]);
   const [showAnswer, setShowAnswer] = useState(false);
   const [selectedChoiceId, setSelectedChoiceId] = useState<string | null>(null);
   const [choiceFeedback, setChoiceFeedback] = useState<'correct' | 'wrong' | null>(null);
@@ -363,6 +366,9 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
   >([]);
 
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  // A8: id of the tile already awarded — a second award for the same tile
+  // (judge button while the 1150ms auto-award timer is pending) is ignored.
+  const awardedTileIdRef = useRef<number | null>(null);
   const correctRef = useRef(0);
   const totalRef = useRef(0);
   const reportedRef = useRef(false);
@@ -957,6 +963,10 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
   // Award Question Points (via Interactive Choice Rune OR Teacher Judge Button)
   const handleAwardQuestion = (isCorrect: boolean) => {
     if (!activeTile) return;
+    // A8: one award per tile, even if the judge button is tapped while the
+    // auto-award timer from a correct choice is still pending.
+    if (awardedTileIdRef.current === activeTile.id) return;
+    awardedTileIdRef.current = activeTile.id;
     saveHistory();
     setIsTimerRunning(false);
     totalRef.current += 1;
@@ -1054,9 +1064,11 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
       setBearMood('celebrating');
       playLernstudioSound('correct');
       triggerSparkles(50, 48, '#10b981');
-      setTimeout(() => {
+      // A8: track the timer so it is cleared with the rest on unmount/reset.
+      const awardTimer = setTimeout(() => {
         handleAwardQuestion(true);
       }, 1150);
+      timeoutsRef.current.push(awardTimer);
     } else {
       setChoiceFeedback('wrong');
       setBearMood('encouraging');
@@ -2323,8 +2335,9 @@ export const LernstudioClassroomBoard: React.FC<Props> = ({
                   <div className="grid grid-cols-2 gap-3 pt-2 border-t border-white/10">
                     <button
                       type="button"
+                      disabled={choiceFeedback === 'correct'}
                       onClick={() => handleAwardQuestion(true)}
-                      className="py-3.5 px-4 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-2xl font-black text-xs sm:text-sm shadow-lg cursor-pointer inline-flex items-center justify-center gap-2"
+                      className="py-3.5 px-4 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-2xl font-black text-xs sm:text-sm shadow-lg cursor-pointer inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-default"
                     >
                       <CheckCircle2 className="w-5 h-5" />
                       <span>

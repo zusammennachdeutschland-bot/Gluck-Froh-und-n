@@ -295,8 +295,10 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [selectedGrammarExerciseIds, setSelectedGrammarExerciseIds] = useState<string[]>([]);
   const [includeGrammarStudy, setIncludeGrammarStudy] = useState<boolean>(true);
   const [maxAttempts, setMaxAttempts] = useState(0);
-  const [hasDeadline] = useState(false);
-  const [deadlineDate] = useState('');
+  // B3: deadline / time limit are teacher-set (were hard-coded off).
+  const [hasDeadline, setHasDeadline] = useState(false);
+  const [deadlineDate, setDeadlineDate] = useState('');
+  const [timeLimitMinutes, setTimeLimitMinutes] = useState<number | ''>('');
   const [isCreating, setIsCreating] = useState(false);
   const [createdAssignment, setCreatedAssignment] = useState<HomeworkAssignment | null>(null);
   const [createdShareLink, setCreatedShareLink] = useState<string | null>(null);
@@ -324,6 +326,10 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
   const [flushingPending, setFlushingPending] = useState<boolean>(false);
+  // P2-N8: silent polling must not fail invisibly — after 2 consecutive
+  // failures a quiet "auto-refresh unavailable" indicator is shown.
+  const pollingFailuresRef = useRef(0);
+  const [pollingUnavailable, setPollingUnavailable] = useState(false);
   const [assignmentsLastRefreshedMs, setAssignmentsLastRefreshedMs] = useState<number>(() =>
     getHomeworkLastRefreshTimestamp('assignments')
   );
@@ -487,7 +493,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
   const [isSavingHwEdit, setIsSavingHwEdit] = useState(false);
   const [togglingActiveId, setTogglingActiveId] = useState<string | null>(null);
 
-  const loadAllAssignments = async (forceCloud = false, opts?: { silent?: boolean }) => {
+  const loadAllAssignments = async (forceCloud = false, opts?: { silent?: boolean }): Promise<boolean> => {
     const silent = Boolean(opts?.silent);
     if (!silent) {
       setLoadingResults(forceCloud);
@@ -520,6 +526,12 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       } else {
         setAssignmentsLastRefreshedMs(getHomeworkLastRefreshTimestamp('assignments'));
       }
+      return true;
+    } catch {
+      if (!silent && activeAuthUid) {
+        setRefreshError('تعذر التحديث — تحقق من الإنترنت ثم أعد المحاولة');
+      }
+      return false;
     } finally {
       if (!silent) setLoadingResults(false);
     }
@@ -540,7 +552,15 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
     const pollId = window.setInterval(() => {
       if (document.hidden) return;
       if (Date.now() - getHomeworkLastRefreshTimestamp('assignments') < 45_000) return;
-      loadAllAssignments(true, { silent: true });
+      loadAllAssignments(true, { silent: true }).then((ok) => {
+        if (ok) {
+          pollingFailuresRef.current = 0;
+          setPollingUnavailable(false);
+        } else {
+          pollingFailuresRef.current += 1;
+          if (pollingFailuresRef.current >= 2) setPollingUnavailable(true);
+        }
+      });
     }, 60_000);
 
     const refreshFromLocalOrP2P = () => {
@@ -888,6 +908,13 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
       setCreateError('يرجى اختيار فعل واحد أو مجموعة أفعال واحدة على الأقل من مكتبة الأفعال.');
       return;
     }
+    // B4: a homework with 0 questions must never be created (it would
+    // auto-complete at 0%). This also covers the missing vocab-empty guard:
+    // an empty vocab set with no verbs/grammar selected configures 0.
+    if (totalConfiguredQuestions === 0) {
+      setCreateError('لا يمكن إنشاء واجب بدون أسئلة — اختر مجموعة تحتوي على كلمات أو أفعال أو تمارين قواعد، أو فعّل مرحلة واحدة على الأقل.');
+      return;
+    }
     setCreateError(null);
 
     const isGroupMode = audienceMode === 'group';
@@ -991,6 +1018,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         flowMode,
         blooketMode,
         deadline: hasDeadline && deadlineDate ? new Date(deadlineDate).toISOString() : '',
+        ...(timeLimitMinutes !== '' ? { timeLimitMinutes: Number(timeLimitMinutes) } : {}),
         ownerUid: resolvedOwnerUid || '',
         groupName: isGroupMode && targetGroup ? targetGroup.name : '',
         assignedStudents: isGroupMode
@@ -1109,6 +1137,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
         groupName: isGroupMode && targetGroup ? targetGroup.name : undefined,
         assignedStudents: isGroupMode ? assignedStudentsList : undefined,
         deadline: hasDeadline && deadlineDate ? new Date(deadlineDate).toISOString() : undefined,
+        ...(timeLimitMinutes !== '' ? { timeLimitMinutes: Number(timeLimitMinutes) } : {}),
         maxAttempts,
         allowReplay: maxAttempts !== 1,
         isActive: true,
@@ -2100,6 +2129,43 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                       <option value={2}>2️⃣ محاولتان كحد أقصى</option>
                       <option value={3}>3️⃣ 3 محاولات كحد أقصى</option>
                     </select>
+                  </div>
+                </div>
+
+                {/* 2b. Deadline & Time Limit (B3) */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <label className="flex items-center gap-2 px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-xs font-bold text-text-main cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={hasDeadline}
+                      onChange={(e) => setHasDeadline(e.target.checked)}
+                      className="w-4 h-4 accent-primary cursor-pointer"
+                    />
+                    <span>📅 له موعد تسليم (Deadline)</span>
+                  </label>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-text-main">تاريخ التسليم:</label>
+                    <input
+                      type="date"
+                      value={deadlineDate}
+                      disabled={!hasDeadline}
+                      onChange={(e) => setDeadlineDate(e.target.value)}
+                      className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-text-main text-xs font-semibold outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-text-main">الحد الزمني الكلي (دقائق — اختياري):</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={timeLimitMinutes}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setTimeLimitMinutes(v === '' ? '' : Math.max(1, Math.round(Number(v) || 1)));
+                      }}
+                      placeholder="مثال: 30"
+                      className="w-full px-3 py-2 bg-surface-hover border border-surface-border rounded-xl text-text-main text-xs font-semibold outline-none focus:ring-1 focus:ring-primary"
+                    />
                   </div>
                 </div>
 
@@ -3420,6 +3486,11 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                       {refreshError && (
                         <span className="text-[11px] font-bold text-rose-600 dark:text-rose-400">
                           ⚠ {refreshError}
+                        </span>
+                      )}
+                      {pollingUnavailable && !refreshError && (
+                        <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400">
+                          ⚠ التحديث التلقائي متعذر حالياً — دوس "تحديث" للمحاولة يدوياً
                         </span>
                       )}
                       <button

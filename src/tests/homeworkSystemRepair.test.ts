@@ -380,10 +380,13 @@ async function runTests() {
       groupId: 'grp-1',
       groupName: 'مجموعة 1'
     });
+    // Share URLs no longer carry audience/group params (or student names/ids):
+    // the player resolves the audience from the server by assignment id.
     const shareUrl = buildHomeworkShareUrl(groupHwWithoutSnapshot, 'https://glueck.example.com');
     const parsedUrl = new URL(shareUrl);
-    assert.equal(parsedUrl.searchParams.get('am'), 'group');
-    assert.equal(parsedUrl.searchParams.get('gid'), 'grp-1');
+    assert.equal(parsedUrl.pathname, '/homework/hw-grp-12');
+    assert.equal(parsedUrl.searchParams.get('am'), null);
+    assert.equal(parsedUrl.searchParams.get('gid'), null);
     assert.equal(resolveAssignmentAudienceMode(groupHwWithoutSnapshot), 'group');
   });
 

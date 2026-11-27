@@ -61,7 +61,7 @@ export const BATCH_10_SETS: RawBatchSet[] = [
       { id: 'b10_272_07', german: 'Australien', arabic: 'أستراليا', emoji: '🦘', exampleSentenceGerman: 'In Australien hüpfen viele Kängurus und Koalas.', exampleSentenceArabic: 'في أستراليا تقفز حيوانات الكنغر وتعيش الكوالا.' },
       { id: 'b10_272_08', german: 'die Antarktis', arabic: 'القارة القطبية الجنوبية', emoji: '🐧', exampleSentenceGerman: 'In der eisigen Antarktis wohnen die Pinguine.', exampleSentenceArabic: 'في القارة القطبية الجنوبية الجليدية تعيش طيور البطريق.' },
       { id: 'b10_272_09', german: 'der Ozean / das Weltmeer', arabic: 'المحيط / البحر العالمي', article: 'der', plural: 'die Ozeane', emoji: '🌊', exampleSentenceGerman: 'Der Pazifische Ozean ist das größte Meer der Erde.', exampleSentenceArabic: 'المحيط الهادئ هو أكبر مسطح مائي على وجه الأرض.' },
-      { id: 'b10_272_10', german: 'der Globus', arabic: 'الكرة الأرضية المجسمة', article: 'der', plural: 'die Globen', emoji: '🌐', exampleSentenceGerman: 'Ich drehe den Globus und suche mein Heimatland.', exampleSentenceArabic: 'أدير مجسم الكرة الأرضية وأبحث عن وطني الأم.' }
+      { id: 'b10_272_10', german: 'der Globus', arabic: 'الكرة الأرضية المجسمة', article: 'der', plural: 'die Globusse', emoji: '🌐', exampleSentenceGerman: 'Ich drehe den Globus und suche mein Heimatland.', exampleSentenceArabic: 'أدير مجسم الكرة الأرضية وأبحث عن وطني الأم.' }
     ]
   },
 
@@ -328,7 +328,7 @@ export const BATCH_10_SETS: RawBatchSet[] = [
     description: 'الكلمات السحرية للصلح والاعتذار والتفاهم بالحديث الهادئ',
     emoji: '🕊️',
     items: [
-      { id: 'b10_284_01', german: 'der Streit', arabic: 'الخلاف / النزاع', article: 'der', plural: 'die Streite', emoji: '⚡', exampleSentenceGerman: 'Streit kommt vor, aber wir finden eine gute Lösung.', exampleSentenceArabic: 'الخلاف قد يحدث أحياناً، لكننا نجد حلاً طيباً.' },
+      { id: 'b10_284_01', german: 'der Streit', arabic: 'الخلاف / النزاع', article: 'der', plural: '-', emoji: '⚡', exampleSentenceGerman: 'Streit kommt vor, aber wir finden eine gute Lösung.', exampleSentenceArabic: 'الخلاف قد يحدث أحياناً، لكننا نجد حلاً طيباً.' },
       { id: 'b10_284_02', german: 'die Versöhnung', arabic: 'المصالحة وإنهاء الشجار', article: 'die', plural: 'die Versöhnungen', emoji: '🕊️', exampleSentenceGerman: 'Nach dem Streit feiern wir eine fröhliche Versöhnung.', exampleSentenceArabic: 'بعد الخلاف نحتفل بمصالحة ودية وجميلة.' },
       { id: 'b10_284_03', german: 'der Friede / Frieden', arabic: 'السلام والوئام', article: 'der', plural: '-', emoji: '✌️', exampleSentenceGerman: 'Wir wünschen uns Frieden und Freundschaft auf der Erde.', exampleSentenceArabic: 'نتمنى السلام والصداقة الطيبة على كوكب الأرض.' },
       { id: 'b10_284_04', german: 'der Kompromiss', arabic: 'الحل الوسط التوفيقي', article: 'der', plural: 'die Kompromisse', emoji: '⚖️', exampleSentenceGerman: 'Ein guter Kompromiss macht beide Kinder froh.', exampleSentenceArabic: 'الحل الوسط المنصف يرضي الطرفين ويسعدهما.' },
@@ -404,7 +404,7 @@ export const BATCH_10_SETS: RawBatchSet[] = [
       { id: 'b10_287_05', german: 'der Handlauf / das Geländer', arabic: 'درابزين / درابزين الدرج للأمان', article: 'der', plural: 'die Handläufe', emoji: '🪜', exampleSentenceGerman: 'Auf der Treppe halte ich mich am Handlauf fest.', exampleSentenceArabic: 'على الدرج أتمسك بالدرابزين بيدي لمنع الانزلاق.' },
       { id: 'b10_287_06', german: 'die Schulordnung', arabic: 'لائحة قواعد ونظام المدرسة', article: 'die', plural: 'die Schulordnungen', emoji: '📜', exampleSentenceGerman: 'Unsere Schulordnung sorgt dafür, dass sich alle wohlfühlen.', exampleSentenceArabic: 'لائحة المدرسة تضمن شعور الجميع بالأمان والراحة.' },
       { id: 'b10_287_07', german: 'aufpassen', arabic: 'ينتبه ويحترس', emoji: '👀', exampleSentenceGerman: 'Pass gut auf deine Sachen und deine Freunde auf!', exampleSentenceArabic: 'انتبه جيداً لأغراضك ولأصدقائك في كل وقت!' },
-      { id: 'b10_287_08', german: 'bescheid sagen', arabic: 'يخبر المعلم أو المسؤول', emoji: '🗣️', exampleSentenceGerman: 'Wenn etwas passiert, sagen wir der Aufsicht Bescheid.', exampleSentenceArabic: 'إذا حدث أي شيء، نخبر مشرفة الفسحة في الحال.' },
+      { id: 'b10_287_08', german: 'Bescheid sagen', arabic: 'يخبر المعلم أو المسؤول', emoji: '🗣️', exampleSentenceGerman: 'Wenn etwas passiert, sagen wir der Aufsicht Bescheid.', exampleSentenceArabic: 'إذا حدث أي شيء، نخبر مشرفة الفسحة في الحال.' },
       { id: 'b10_287_09', german: 'sitzend rutschen', arabic: 'التزحلق بوضعية الجلوس السليمة', emoji: '🛝', exampleSentenceGerman: 'Auf der Rutsche rutscht man immer sitzend mit den Füßen voran.', exampleSentenceArabic: 'على الزحليقة نتزحلق دائماً في وضع الجلوس وقديمنا للأمام.' },
       { id: 'b10_287_10', german: 'Rücksicht nehmen', arabic: 'يراعي شعور وسلامة الآخرين', emoji: '🤲', exampleSentenceGerman: 'Größere Schulkinder nehmen Rücksicht auf die Erstklässler.', exampleSentenceArabic: 'التلاميذ الأكبر سناً يراعون سلامة تلاميذ الصف الأول الصغار.' }
     ]
@@ -513,7 +513,7 @@ export const BATCH_10_SETS: RawBatchSet[] = [
     emoji: '🦖',
     items: [
       { id: 'b10_292_01', german: 'der Dinosaurier', arabic: 'الديناصور', article: 'der', plural: 'die Dinosaurier', emoji: '🦕', exampleSentenceGerman: 'Vor Millionen Jahren lebten riesige Dinosaurier auf der Erde.', exampleSentenceArabic: 'قبل ملايين السنين عاشت ديناصورات عملاقة على الأرض.' },
-      { id: 'b10_292_02', german: 'der Tyrannosaurus Rex', arabic: 'تيرانوصور ريكس (المرعب)', article: 'der', plural: 'die Tyrannosaurier', emoji: '🦖', exampleSentenceGerman: 'Der T-Rex hatte scharfe Zähne und war ein starker Jäger.', exampleSentenceArabic: 'كان للتي-ريكس أسنان حادة جداً وكان صياداً قوياً.' },
+      { id: 'b10_292_02', german: 'der Tyrannosaurus Rex', arabic: 'تيرانوصور ريكس (المرعب)', article: 'der', plural: 'die Tyrannosaurus Rex', emoji: '🦖', exampleSentenceGerman: 'Der T-Rex hatte scharfe Zähne und war ein starker Jäger.', exampleSentenceArabic: 'كان للتي-ريكس أسنان حادة جداً وكان صياداً قوياً.' },
       { id: 'b10_292_03', german: 'der Brachiosaurus', arabic: 'براكيوسورس (طويل العنق)', article: 'der', plural: 'die Brachiosaurier', emoji: '🦕', exampleSentenceGerman: 'Mit seinem langen Hals fraß der Brachiosaurus Blätter von hohen Baumkronen.', exampleSentenceArabic: 'بعنقه الطويل كان البراكيوسورس يأكل أوراق أعالي الشجر.' },
       { id: 'b10_292_04', german: 'das Fossil', arabic: 'الأحفورة الصخرية', article: 'das', plural: 'die Fossilien', emoji: '🐚', exampleSentenceGerman: 'Im Steinbruch entdecken Forscher eine uralte Versteinerung.', exampleSentenceArabic: 'في المقلع الحجري يكتشف الباحثون أحفورة قديمة متحجرة.' },
       { id: 'b10_292_05', german: 'das Dinosaurier-Ei', arabic: 'بيضة الديناصور المتحجرة', article: 'das', plural: 'die Dinosaurier-Eier', emoji: '🥚', exampleSentenceGerman: 'Das versteinerte Saurier-Ei ist im Museum ausgestellt.', exampleSentenceArabic: 'بيضة الديناصور المتحجرة معروضة في متحف التاريخ الطبيعي.' },
