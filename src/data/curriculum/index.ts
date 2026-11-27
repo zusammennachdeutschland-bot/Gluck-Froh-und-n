@@ -9,6 +9,7 @@ import { BATCH_07_SETS } from './batch07_professions_routine.js';
 import { BATCH_08_SETS } from './batch08_actions_sports.js';
 import { BATCH_09_SETS } from './batch09_adjectives_grammar_shopping.js';
 import { BATCH_10_SETS } from './batch10_culture_tech_stories_expansion.js';
+import { BATCH_11_SETS } from './batch11_dabei_a1_2.js';
 import { BUILTIN_GRAMMAR_SETS } from '../builtinGrammarSets.js';
 
 export interface RawCurriculumSet {
@@ -41,7 +42,8 @@ const RAW_ALL_SETS: RawCurriculumSet[] = [
   ...(BATCH_07_SETS as unknown as RawCurriculumSet[]),
   ...(BATCH_08_SETS as unknown as RawCurriculumSet[]),
   ...(BATCH_09_SETS as unknown as RawCurriculumSet[]),
-  ...(BATCH_10_SETS as unknown as RawCurriculumSet[])
+  ...(BATCH_10_SETS as unknown as RawCurriculumSet[]),
+  ...(BATCH_11_SETS as unknown as RawCurriculumSet[])
 ];
 
 function mapGrade(rawGrade?: string): { grade: string; level: LernstudioLevel; difficulty: LernstudioDifficulty } {
@@ -181,6 +183,7 @@ export const CURRICULUM_GRADES = [
   'جريد 4 (Grade 4)',
   'جريد 5 (Grade 5)',
   'جريد 6 (Grade 6)',
+  'Klasse 11',
   'مبتدئ A1 (Beginner)',
   'أساسي A2 (Elementary)'
 ];

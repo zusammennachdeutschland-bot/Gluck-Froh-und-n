@@ -255,6 +255,15 @@ export interface MergeEntitiesOptions<T extends SyncableRecord = any> {
   deferUnknownActiveIds?: boolean;
   knownLocalIds?: Set<string>;
   baseArray?: T[];
+  // DeviceId of the peer whose pairing token was verified for this exchange
+  // (passed from localServer.authenticateInboundPeer via handleInboundExchange).
+  // The self-asserted lastModifiedBy/origin fields inside the payload are
+  // never trusted on their own: a record that claims to originate from a
+  // device other than the authenticated sender (or another known paired
+  // device, for relayed records) is rejected.
+  authenticatedPeerDeviceId?: string;
+  // DeviceIds this device trusts (its paired peers + its own local deviceId).
+  knownPeerDeviceIds?: string[];
 }
 
 const METADATA_KEYS = new Set<string>([
@@ -865,14 +874,39 @@ export function mergeEntities<T extends SyncableRecord>(
       }
 
       // Owner-Wins Protection for Lernstudio Sets:
-      // If a set has an owner (createdByUid), only the owner (matching createdByUid or lastModifiedBy) can mutate or delete it.
+      // If a set has an owner (createdByUid), only the owner can mutate or delete it.
       // Non-owner edits or deletions are rejected and the owner's version always wins!
+      // The incoming createdByUid / lastModifiedBy fields are self-asserted by the
+      // sender, so they are checked against the LOCAL owner (never trusted as
+      // proof of identity on their own); when the exchange was authenticated,
+      // the record's claimed origin device must also be the authenticated
+      // sender or another known paired device.
       const isLernstudioSet = (entityTypeName || '').toLowerCase() === 'lernstudiosets' || (entityTypeName || '').toLowerCase() === 'lernstudioset';
       if (isLernstudioSet) {
         const localOwnerUid = String((localItem as any)?.createdByUid || '').trim();
-        const incomingModifierUid = String((incomingItem as any)?.lastModifiedBy || (incomingItem as any)?.createdByUid || '').trim();
+        const incomingOwnerUid = String((incomingItem as any)?.createdByUid || '').trim();
+        const incomingModifierUid = String((incomingItem as any)?.lastModifiedBy || '').trim();
+        // An incoming set that claims a different owner than the local set is
+        // rejected outright — even when lastModifiedBy was forged to match.
+        if (localOwnerUid && incomingOwnerUid && incomingOwnerUid !== localOwnerUid) {
+          shouldAcceptIncoming = false;
+        }
         if (localOwnerUid && incomingModifierUid && incomingModifierUid !== localOwnerUid) {
           shouldAcceptIncoming = false;
+        }
+        if (options.authenticatedPeerDeviceId) {
+          const claimedOriginDevice = String(
+            (incomingItem as any)?.updatedByDeviceId || (incomingItem as any)?.originDeviceId || ''
+          ).trim();
+          if (claimedOriginDevice) {
+            const trustedDevices = new Set<string>([
+              options.authenticatedPeerDeviceId,
+              ...(options.knownPeerDeviceIds || [])
+            ]);
+            if (!trustedDevices.has(claimedOriginDevice)) {
+              shouldAcceptIncoming = false;
+            }
+          }
         }
         // Built-in curriculum sets must never be deleted by incoming deletion tombstones
         if (incomingItem.deleted && (id.startsWith('curric_') || id.startsWith('set_def_'))) {

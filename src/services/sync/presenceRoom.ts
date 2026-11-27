@@ -31,6 +31,246 @@ const FORBIDDEN_PRESENCE_KEYS = new Set([
   'pairingPin'
 ]);
 
+// --- Presence announce signing (device impersonation protection) ----------------
+// The room id is derived from the account UID, so ANYONE who knows the UID
+// scheme could join the room and announce as one of Abdo's devices — and the
+// teacher would then pair with the attacker's device thinking it is his own
+// phone. Each device therefore keeps a persistent ECDSA P-256 keypair and
+// signs its announces. The holder pins the first key it sees per deviceId
+// (TOFU) and rejects later announces for that deviceId that are unsigned or
+// signed under a different key. Unsigned announces are still accepted when
+// no key is pinned for that deviceId, so older app versions (and the APK,
+// which lags the web build) keep working until they first announce signed.
+// Presence alone never grants access — pairing still needs the 6-digit PIN —
+// but a pinned key stops an attacker from wearing a known device's identity.
+const PRESENCE_DEVICE_KEY_STORAGE_KEY = 'glueck_presence_device_key_v1';
+const PRESENCE_PINNED_KEYS_STORAGE_KEY = 'glueck_presence_pinned_keys_v1';
+const PRESENCE_SIGNATURE_MAX_AGE_MS = 120_000;
+const PRESENCE_ANNOUNCE_SIGN_DOMAIN = 'glueck-presence-announce-v1';
+
+let cachedSigningKeyPair: CryptoKeyPair | null = null;
+const pinnedKeysMemoryFallback = new Map<string, string>();
+
+function getPresenceSubtle(): SubtleCrypto | null {
+  try {
+    const c: any = typeof crypto !== 'undefined' ? crypto : (globalThis as any)?.crypto;
+    if (c && c.subtle && typeof c.subtle.digest === 'function') return c.subtle as SubtleCrypto;
+  } catch {}
+  return null;
+}
+
+function presenceBase64UrlEncode(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function presenceBase64UrlDecode(input: string): Uint8Array | null {
+  try {
+    const normalized = String(input || '').replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
+function readPresenceStoredString(key: string): string | null {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return window.localStorage.getItem(key);
+    }
+  } catch {}
+  return null;
+}
+
+function writePresenceStoredString(key: string, value: string): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(key, value);
+    }
+  } catch {}
+}
+
+function removePresenceStoredString(key: string): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.removeItem(key);
+    }
+  } catch {}
+}
+
+async function getOrCreatePresenceSigningKeyPair(): Promise<CryptoKeyPair | null> {
+  const subtle = getPresenceSubtle();
+  if (!subtle) return null;
+  if (cachedSigningKeyPair) return cachedSigningKeyPair;
+  try {
+    const stored = readPresenceStoredString(PRESENCE_DEVICE_KEY_STORAGE_KEY);
+    if (stored) {
+      const jwk = JSON.parse(stored);
+      if (jwk && jwk.kty === 'EC' && jwk.crv === 'P-256' && jwk.d) {
+        const privateKey = await subtle.importKey('jwk', jwk, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign']);
+        const publicKey = await subtle.importKey(
+          'jwk',
+          { kty: 'EC', crv: 'P-256', x: jwk.x, y: jwk.y },
+          { name: 'ECDSA', namedCurve: 'P-256' },
+          true,
+          ['verify']
+        );
+        cachedSigningKeyPair = { privateKey, publicKey };
+        return cachedSigningKeyPair;
+      }
+    }
+  } catch {}
+  try {
+    const pair = await subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+    cachedSigningKeyPair = pair as CryptoKeyPair;
+    try {
+      const privateJwk = await subtle.exportKey('jwk', pair.privateKey);
+      writePresenceStoredString(PRESENCE_DEVICE_KEY_STORAGE_KEY, JSON.stringify(privateJwk));
+    } catch {}
+    return cachedSigningKeyPair;
+  } catch {
+    return null;
+  }
+}
+
+async function getPresencePublicKeyString(): Promise<string | null> {
+  const subtle = getPresenceSubtle();
+  const pair = await getOrCreatePresenceSigningKeyPair();
+  if (!subtle || !pair) return null;
+  try {
+    const jwk = await subtle.exportKey('jwk', pair.publicKey);
+    return presenceBase64UrlEncode(new TextEncoder().encode(JSON.stringify(jwk)));
+  } catch {
+    return null;
+  }
+}
+
+function buildPresenceAnnounceCanonical(device: {
+  deviceId: string;
+  deviceName: string;
+  permanentPeerId: string;
+  platform?: string;
+}, ts: number): string {
+  return [
+    PRESENCE_ANNOUNCE_SIGN_DOMAIN,
+    device.deviceId,
+    device.deviceName,
+    device.permanentPeerId,
+    device.platform || '',
+    String(ts)
+  ].join('\n');
+}
+
+async function signPresenceAnnounce(device: {
+  deviceId: string;
+  deviceName: string;
+  permanentPeerId: string;
+  platform?: string;
+}): Promise<{ ts: number; pub: string; sig: string } | null> {
+  const subtle = getPresenceSubtle();
+  const pair = await getOrCreatePresenceSigningKeyPair();
+  if (!subtle || !pair) return null;
+  const pub = await getPresencePublicKeyString();
+  if (!pub) return null;
+  const ts = Date.now();
+  try {
+    const signature = await subtle.sign(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      pair.privateKey,
+      new TextEncoder().encode(buildPresenceAnnounceCanonical(device, ts))
+    );
+    return { ts, pub, sig: presenceBase64UrlEncode(new Uint8Array(signature)) };
+  } catch {
+    return null;
+  }
+}
+
+function getPinnedPresenceKey(deviceId: string): string | null {
+  try {
+    const raw = readPresenceStoredString(PRESENCE_PINNED_KEYS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && typeof parsed[deviceId] === 'string') {
+        return parsed[deviceId];
+      }
+    }
+  } catch {}
+  return pinnedKeysMemoryFallback.get(deviceId) || null;
+}
+
+function pinPresenceKey(deviceId: string, pub: string): void {
+  pinnedKeysMemoryFallback.set(deviceId, pub);
+  try {
+    const raw = readPresenceStoredString(PRESENCE_PINNED_KEYS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    const next = parsed && typeof parsed === 'object' ? parsed : {};
+    next[deviceId] = pub;
+    writePresenceStoredString(PRESENCE_PINNED_KEYS_STORAGE_KEY, JSON.stringify(next));
+  } catch {}
+}
+
+/**
+ * Verifies a signed announce. Returns true when the announce may be trusted:
+ * - signed + fresh + valid signature under the pinned key (or pins the key on
+ *   first sight when nothing is pinned yet), or
+ * - unsigned, but only when no key is pinned for this deviceId (legacy /
+ *   mixed-version compatibility).
+ * Returns false for stale, unsigned-but-pinned, wrong-key, or bad-signature
+ * announces — the holder drops those silently.
+ */
+async function verifyPresenceAnnounce(msg: any, device: any): Promise<boolean> {
+  const deviceId = String(device?.deviceId || '').trim();
+  if (!deviceId) return false;
+  const pinned = getPinnedPresenceKey(deviceId);
+  const ts = msg?.ts;
+  const pub = msg?.pub;
+  const sig = msg?.sig;
+  if (typeof ts !== 'number' || typeof pub !== 'string' || typeof sig !== 'string' || !pub || !sig) {
+    return pinned ? false : true;
+  }
+  if (Math.abs(Date.now() - ts) > PRESENCE_SIGNATURE_MAX_AGE_MS) return false;
+  if (pinned && pinned !== pub) return false;
+  const subtle = getPresenceSubtle();
+  if (!subtle) return pinned ? false : true;
+  try {
+    const jwk = JSON.parse(new TextDecoder().decode(presenceBase64UrlDecode(pub) || new Uint8Array()));
+    if (!jwk || jwk.kty !== 'EC' || jwk.crv !== 'P-256' || !jwk.x || !jwk.y) return false;
+    const publicKey = await subtle.importKey('jwk', jwk, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']);
+    const sigBytes = presenceBase64UrlDecode(sig);
+    if (!sigBytes) return false;
+    const canonicalDevice = {
+      deviceId,
+      deviceName: String(device?.deviceName || '').trim(),
+      permanentPeerId: String(device?.permanentPeerId || formatDevicePeerId(deviceId)).trim(),
+      platform: device?.platform === 'android' || device?.platform === 'web' ? device.platform : undefined
+    };
+    const ok = await subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      publicKey,
+      sigBytes,
+      new TextEncoder().encode(buildPresenceAnnounceCanonical(canonicalDevice, ts))
+    );
+    if (!ok) return false;
+    if (!pinned) pinPresenceKey(deviceId, pub);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Test hook: clears the cached device key and all pinned presence keys. */
+export function __resetPresenceSigningForTests(): void {
+  cachedSigningKeyPair = null;
+  pinnedKeysMemoryFallback.clear();
+  removePresenceStoredString(PRESENCE_PINNED_KEYS_STORAGE_KEY);
+  removePresenceStoredString(PRESENCE_DEVICE_KEY_STORAGE_KEY);
+}
+
 /**
  * Pure-JS SHA-256 fallback used only if crypto.subtle is absent (e.g., insecure HTTP test context).
  */
@@ -138,6 +378,10 @@ export function isValidPresenceMessage(msg: any): boolean {
       return false;
     }
   }
+  // Signature envelope fields, when present, must have the right shape.
+  if ('ts' in msg && typeof msg.ts !== 'number') return false;
+  if ('pub' in msg && typeof msg.pub !== 'string') return false;
+  if ('sig' in msg && typeof msg.sig !== 'string') return false;
   const t = msg.type;
   if (t !== 'announce' && t !== 'members' && t !== 'ping' && t !== 'pong') {
     return false;
@@ -384,12 +628,17 @@ class PresenceRoomService {
   private setupHolderIncomingConnection(conn: DataConnection) {
     let connDeviceId: string | null = null;
 
-    conn.on('data', (msg: any) => {
+    conn.on('data', async (msg: any) => {
       if (!isValidPresenceMessage(msg)) {
         return;
       }
       if (msg.type === 'announce') {
         const dev = msg.device as DiscoveredRoomDevice;
+        // Reject impersonation attempts: an announce for a device whose key
+        // is already pinned must carry a valid signature under that key.
+        if (!(await verifyPresenceAnnounce(msg, dev))) {
+          return;
+        }
         const cleanDev: DiscoveredRoomDevice = {
           deviceId: String(dev.deviceId).trim(),
           deviceName: String(dev.deviceName || 'Companion Device').trim(),
@@ -538,18 +787,24 @@ class PresenceRoomService {
     }
   }
 
-  private sendAnnounceToHolder() {
+  private async sendAnnounceToHolder() {
     if (!this.clientConn || !(this.clientConn as any).open || !this.localIdentity) return;
+    const device = {
+      deviceId: this.localIdentity.deviceId,
+      deviceName: this.localIdentity.deviceName,
+      permanentPeerId: formatDevicePeerId(this.localIdentity.deviceId),
+      lastSeen: Date.now(),
+      platform: this.localIdentity.platform
+    };
+    // Sign the announce with this device's persistent key (unsigned when
+    // WebCrypto is unavailable — the holder accepts unsigned announces only
+    // while no key is pinned for this deviceId).
+    const signature = await signPresenceAnnounce(device);
     try {
       this.clientConn.send({
         type: 'announce',
-        device: {
-          deviceId: this.localIdentity.deviceId,
-          deviceName: this.localIdentity.deviceName,
-          permanentPeerId: formatDevicePeerId(this.localIdentity.deviceId),
-          lastSeen: Date.now(),
-          platform: this.localIdentity.platform
-        }
+        device,
+        ...(signature ? { ts: signature.ts, pub: signature.pub, sig: signature.sig } : {})
       });
     } catch {}
   }
@@ -625,4 +880,5 @@ export function __setPresencePeerConstructorForTests(ctor: PeerConstructor | nul
 export function __resetPresenceRoomForTests() {
   presenceRoom.stop('idle');
   presenceRoom.__setFailoverJitterForTests(2000, 5000);
+  __resetPresenceSigningForTests();
 }

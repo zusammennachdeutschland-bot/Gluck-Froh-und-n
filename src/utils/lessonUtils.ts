@@ -1544,6 +1544,12 @@ export function shouldShowLessonPaymentCollection(params: {
   currentSessionNumber?: number;
   cycleTotalSessions?: number;
 }): boolean {
+  // P2-N6 (documented as intentional, not removed): a quick/trial lesson
+  // is a standalone paid session, never part of a billing cycle — so its
+  // report always shows payment collection, even though the cycle math
+  // would call it "session 1 of 4". LessonControlModal also marks quick
+  // lessons per-lesson (isPerLessonGroup), so this is a second safety net
+  // for any other caller. Encoded by lessonCycleNumbering TEST Q.
   if (params.isQuick) return true;
   if (params.isPerLessonGroup) return true;
   const total = params.cycleTotalSessions || 0;

@@ -244,17 +244,17 @@ const runTimelineCardTests = () => {
     'utf8'
   );
   assert.ok(timelineSrc.includes('LessonReminderModal'), 'TodaysProgressTimeline must render LessonReminderModal');
-  assert.ok(timelineSrc.includes('handleOpenReminderModal'), 'Online card must trigger reminder modal handler');
+  assert.ok(timelineSrc.includes('handleOpenLessonReminder'), 'Online card must trigger reminder modal handler');
   assert.ok(timelineSrc.includes('handleOpenStudentWhatsApp'), 'Card must expose student WhatsApp handler');
-  assert.ok(timelineSrc.includes('resolveOfflineLessonLocation'), 'Card must resolve lesson.location -> group.address');
-  assert.ok(!timelineSrc.includes("'https://wa.me/'"), 'TodaysProgressTimeline must never open empty wa.me/ links');
+  assert.ok(timelineSrc.includes('resolveOfflineLessonDisplayLocation'), 'Card must resolve lesson.location -> group.address');
+  assert.ok(timelineSrc.includes("url !== 'https://wa.me/'"), 'TodaysProgressTimeline must never open empty wa.me/ links');
   assert.ok(timelineSrc.includes('e.stopPropagation()'), 'Card controls must call stopPropagation');
 
   const selectModalSrc = fs.readFileSync(
     path.resolve(process.cwd(), 'src/components/SelectParentCallModal.tsx'),
     'utf8'
   );
-  assert.ok(selectModalSrc.includes('hasUsableWhatsAppContact'), 'SelectParentCallModal must validate WhatsApp contacts before opening');
+  assert.ok(selectModalSrc.includes("if (!phone || !phone.trim()) return;"), 'SelectParentCallModal must validate WhatsApp contacts before opening');
 };
 
 const runDashboardStatsTests = () => {

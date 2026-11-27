@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LernstudioSet, LernstudioItem, LernstudioGameMode } from '../../types/lernstudio';
 import { getLernstudioTranslations, getLocalizedSetTitle, getItemTranslation } from '../../utils/lernstudioTranslations';
-import { speakGermanText, speakGermanTextAndWait, stopGermanSpeech } from '../../utils/audioSpeechUtils';
+import { speakGermanText, speakGermanTextAndWait, speakGermanTextSlow, stopGermanSpeech } from '../../utils/audioSpeechUtils';
 import { playLernstudioSound } from '../../utils/lernstudioAudioUtils';
 import { buildTeacherStudySpeechText, resolveVerbFromLernstudioItem } from '../verbEngine';
 import {
@@ -46,6 +46,7 @@ interface Props {
   language?: string;
   onClose: () => void;
   onLaunchGame?: (gameMode: LernstudioGameMode) => void;
+  onOpenClassroomBoard?: () => void;
 }
 
 interface TrueFalseQuestion {
@@ -187,7 +188,8 @@ export const LernstudioTeachPage: React.FC<Props> = ({
   set,
   language = 'ar',
   onClose,
-  onLaunchGame
+  onLaunchGame,
+  onOpenClassroomBoard
 }) => {
   const t = getLernstudioTranslations(language);
   const isRtl = language === 'ar';
@@ -220,6 +222,9 @@ export const LernstudioTeachPage: React.FC<Props> = ({
   const [stars, setStars] = useState<number>(0);
   const [shuffleKey, setShuffleKey] = useState<number>(0);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [hideTranslation, setHideTranslation] = useState<boolean>(false);
+  const [ttsError, setTtsError] = useState<string | null>(null);
+  const ttsErrorTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Exercise interaction state
   const [selectedAnswer, setSelectedAnswer] = useState<string | boolean | null>(null);
@@ -270,6 +275,8 @@ export const LernstudioTeachPage: React.FC<Props> = ({
     setStageQuestionIndex(0);
     setCompletedStages([]);
     setStars(0);
+    setHideTranslation(false);
+    setTtsError(null);
     setSelectedAnswer(null);
     setIsAnswerSubmitted(false);
     setIsCorrectAnswer(null);
@@ -418,11 +425,49 @@ export const LernstudioTeachPage: React.FC<Props> = ({
     }
   };
 
-  // German Speech Synthesis (Android & Mobile Cross-Platform)
-  const handleSpeakGerman = (text: string) => {
-    if (!soundEnabled) return;
-    speakGermanText(text);
+  // TTS has no success signal (speakGermanText resolves void even when the
+  // engine is missing), so surface a visible warning instead of failing silently.
+  const showTtsError = (message: string) => {
+    setTtsError(message);
+    if (ttsErrorTimerRef.current) clearTimeout(ttsErrorTimerRef.current);
+    ttsErrorTimerRef.current = setTimeout(() => setTtsError(null), 5000);
   };
+
+  // German Speech Synthesis (Android & Mobile Cross-Platform)
+  const handleSpeakGerman = async (text: string, slow = false) => {
+    if (!soundEnabled) return;
+    const isNative =
+      typeof window !== 'undefined' &&
+      (((window as any).Capacitor?.isNativePlatform?.() as boolean | undefined) ||
+        window.location.protocol === 'capacitor:' ||
+        window.location.protocol === 'file:');
+    if (!isNative && typeof window !== 'undefined' && !('speechSynthesis' in window)) {
+      showTtsError('تعذّر النطق: لا يوجد محرك نطق ألماني على هذا الجهاز — فعّل حزمة الصوت الألماني (Text-to-Speech) من إعدادات الجهاز.');
+    }
+    try {
+      if (slow) {
+        speakGermanTextSlow(text);
+      } else {
+        await speakGermanText(text);
+      }
+    } catch {
+      showTtsError('تعذّر النطق الألماني — تحقق من إعدادات الصوت (Text-to-Speech) على جهازك.');
+    }
+  };
+
+  // Coloured article badge (der/die/das + Arabic gender), copied from the
+  // HomeworkPlayer study card so the article is taught explicitly, not
+  // buried inside the word text.
+  const articleBadgeClass = (article?: 'der' | 'die' | 'das') =>
+    article === 'der'
+      ? 'bg-sky-500/10 border-sky-500/30 text-sky-600 dark:text-sky-400'
+      : article === 'die'
+      ? 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
+      : article === 'das'
+      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+      : 'bg-surface-hover border-surface-border text-text-muted';
+  const articleBadgeLabel = (article?: 'der' | 'die' | 'das') =>
+    article === 'der' ? 'der (مذكر)' : article === 'die' ? 'die (مؤنث)' : article === 'das' ? 'das (محايد)' : '';
 
   // Generate Questions for Stage 2 (True / False) - Randomized questions and non-predictable True/False answers
   const stage2Questions = useMemo<TrueFalseQuestion[]>(() => {
@@ -743,6 +788,40 @@ export const LernstudioTeachPage: React.FC<Props> = ({
       const prevIdx = stageQuestionIndex - 1;
       setStageQuestionIndex(prevIdx);
       saveProgress(1, prevIdx, completedStages, stars);
+    }
+  };
+
+  // Go back one question inside the current stage, or to the last question
+  // of the previous stage when already at the first question. Going back
+  // never requires an answer (unlike "Next", which stays locked until the
+  // current question is answered).
+  const stageQuestionCounts: Record<number, number> = {
+    1: items.length,
+    2: stage2Questions.length,
+    3: stage3Questions.length,
+    4: stage4Questions.length,
+    5: syllableQuestions.length,
+    6: stage5Questions.length,
+    7: stage6Questions.length,
+    8: stage7Questions.length
+  };
+  const handlePrevQuestion = () => {
+    clearAutoAdvanceTimer();
+    if (stageQuestionIndex > 0) {
+      const prevIdx = stageQuestionIndex - 1;
+      setStageQuestionIndex(prevIdx);
+      resetAnswerState();
+      saveProgress(currentStage, prevIdx, completedStages, stars);
+      return;
+    }
+    if (currentStage > 1) {
+      const prevStage = currentStage - 1;
+      const prevCount = stageQuestionCounts[prevStage] || 1;
+      const prevIdx = Math.max(0, prevCount - 1);
+      setCurrentStage(prevStage);
+      setStageQuestionIndex(prevIdx);
+      resetAnswerState();
+      saveProgress(prevStage, prevIdx, completedStages, stars);
     }
   };
 
@@ -1186,6 +1265,15 @@ export const LernstudioTeachPage: React.FC<Props> = ({
           ? 'إجابة خاطئة. يمكنك عرض التلميح أو الانتقال للتمرين التالي.'
           : 'Falsche Antwort. Du kannst den Hinweis anzeigen oder zur nächsten Übung gehen.'
       });
+      // P2: a wrong grammar exercise joins the stage-9 review list and the
+      // final retry round as a text item (question -> correct answer), just
+      // like a wrong vocab word. Without this it silently never came back.
+      recordWrongItem({
+        id: `teach_gram_${grammarExIndex}`,
+        german: currentEx.question,
+        arabic: currentEx.correctAnswer,
+        emoji: '📝'
+      });
     }
   };
 
@@ -1207,6 +1295,45 @@ export const LernstudioTeachPage: React.FC<Props> = ({
       compat: getGameCompatibilityForSet(m.mode, set, language)
     }));
   }, [set, language, t]);
+
+  // Keyboard navigation (vocab stages only): arrows move, Escape closes.
+  // Direction-aware — in RTL (Arabic) forward is ArrowLeft, matching the
+  // on-screen "next" chevron. Typing in an input/textarea never triggers
+  // navigation; "Next" via keyboard respects the same answer requirement
+  // as the footer button, while "Previous" is always allowed.
+  useEffect(() => {
+    if (!isOpen || teachViewMode !== 'vocab' || retryItems) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const typing =
+        tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (typing) return;
+      const nextKey = isRtl ? 'ArrowLeft' : 'ArrowRight';
+      const prevKey = isRtl ? 'ArrowRight' : 'ArrowLeft';
+      if (e.key === nextKey) {
+        e.preventDefault();
+        if (currentStage === 1) handleStage1Next();
+        else if (currentStage === 2 && isAnswerSubmitted) handleStage2NextQuestion();
+        else if (currentStage === 3 && isAnswerSubmitted) handleStage3NextQuestion();
+        else if (currentStage === 4 && isAnswerSubmitted) handleStage4NextQuestion();
+        else if (currentStage === 5 && isAnswerSubmitted) handleSyllableNextQuestion();
+        else if (currentStage === 6 && isAnswerSubmitted) handleStage5NextQuestion();
+        else if (currentStage === 7 && isAnswerSubmitted) handleStage6NextQuestion();
+        else if (currentStage === 8 && isAnswerSubmitted) handleStage7NextQuestion();
+      } else if (e.key === prevKey) {
+        e.preventDefault();
+        if (currentStage >= 1 && currentStage <= 8) handlePrevQuestion();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, teachViewMode, retryItems, isRtl, currentStage, isAnswerSubmitted, onClose, handleStage1Next, handleStage2NextQuestion, handleStage3NextQuestion, handleStage4NextQuestion, handleSyllableNextQuestion, handleStage5NextQuestion, handleStage6NextQuestion, handleStage7NextQuestion, handlePrevQuestion]);
 
   if (!isOpen || !set || (!vocabAvailable && !grammarAvailable)) return null;
 
@@ -1271,7 +1398,28 @@ export const LernstudioTeachPage: React.FC<Props> = ({
             </button>
             <button
               type="button"
+              onClick={() => setHideTranslation((v) => !v)}
+              className={`p-1.5 rounded-lg transition-colors cursor-pointer flex items-center justify-center ${
+                hideTranslation
+                  ? 'text-amber-500 bg-amber-500/10 hover:bg-amber-500/20'
+                  : 'text-primary bg-primary/10 hover:bg-primary/20'
+              }`}
+              title={hideTranslation ? 'إظهار الترجمة' : 'إخفاء الترجمة'}
+            >
+              <Eye className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
               onClick={() => {
+                const lessonStarted =
+                  currentStage > 1 || stageQuestionIndex > 0 || completedStages.length > 0 || stars > 0;
+                if (
+                  lessonStarted &&
+                  typeof window !== 'undefined' &&
+                  !window.confirm('خلط الأسئلة هيعيد ترتيب الأسئلة من الأول. متأكد إنك عايز تخلط؟')
+                ) {
+                  return;
+                }
                 setStageQuestionIndex(0);
                 resetAnswerState();
                 setShuffleKey((k) => k + 1);
@@ -1302,6 +1450,11 @@ export const LernstudioTeachPage: React.FC<Props> = ({
         </div>
 
         {/* Mode Switcher Bar (for Mixed Sets with both Vocabulary & Grammar) */}
+        {ttsError && (
+          <div className="mx-3 mt-2 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-xl text-xs font-bold text-red-600 dark:text-red-400 shrink-0" role="alert">
+            ⚠️ {ttsError}
+          </div>
+        )}
         {vocabAvailable && grammarAvailable && (
           <div className="px-3 py-2 bg-surface border-b border-surface-border grid grid-cols-2 gap-1.5 shrink-0">
             <button
@@ -1824,14 +1977,19 @@ export const LernstudioTeachPage: React.FC<Props> = ({
                 </span>
 
                 {/* Emoji Display */}
-                <div className="text-7xl sm:text-8xl pt-2 select-none">
+                <div className="text-5xl sm:text-6xl pt-2 select-none">
                   {renderTeachEmoji(items[stageQuestionIndex].emoji)}
                 </div>
 
                 {/* German Word */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-center gap-3 flex-wrap">
-                    <h3 className="text-2xl sm:text-5xl font-black text-text-main tracking-tight font-mono" dir="ltr">
+                    {items[stageQuestionIndex].article && (
+                      <span className={`inline-block px-2.5 py-0.5 rounded-md border text-xs font-bold uppercase ${articleBadgeClass(items[stageQuestionIndex].article)}`}>
+                        {articleBadgeLabel(items[stageQuestionIndex].article)}
+                      </span>
+                    )}
+                    <h3 className="text-4xl sm:text-7xl font-black text-text-main tracking-tight font-mono" dir="ltr" lang="de">
                       {items[stageQuestionIndex].german}
                     </h3>
                     <button
@@ -1842,21 +2000,32 @@ export const LernstudioTeachPage: React.FC<Props> = ({
                     >
                       <Volume2 className="w-6 h-6" />
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSpeakGerman(items[stageQuestionIndex].german, true)}
+                      className="px-2.5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl shadow-md transition-all cursor-pointer inline-flex items-center justify-center gap-1 active:scale-95"
+                      title="نطق بطيء"
+                    >
+                      <span className="text-base leading-none">🐢</span>
+                      <span className="text-xs font-black">بطيء</span>
+                    </button>
                   </div>
 
                   {items[stageQuestionIndex].plural && (
-                    <p className="text-xs font-bold text-text-muted font-mono" dir="ltr">
+                    <p className="text-xs font-bold text-text-muted font-mono" dir="ltr" lang="de">
                       Plural: <span className="text-text-main">{items[stageQuestionIndex].plural}</span>
                     </p>
                   )}
                 </div>
 
                 {/* Translation */}
-                <div className="py-2 px-5 bg-surface rounded-2xl border border-surface-border inline-block shadow-2xs">
-                  <span className="text-lg sm:text-xl font-black text-primary">
-                    {getItemTranslation(items[stageQuestionIndex], language)}
-                  </span>
-                </div>
+                {!hideTranslation && (
+                  <div className="py-2 px-5 bg-surface rounded-2xl border border-surface-border inline-block shadow-2xs">
+                    <span className="text-lg sm:text-xl font-black text-primary" lang="ar" dir="rtl">
+                      {getItemTranslation(items[stageQuestionIndex], language)}
+                    </span>
+                  </div>
+                )}
 
                 {/* Verb Präsens Conjugation Grid (when item is a verb) */}
                 {(() => {
@@ -1914,7 +2083,7 @@ export const LernstudioTeachPage: React.FC<Props> = ({
                       جملة توضيحية:
                     </span>
                     {items[stageQuestionIndex].exampleSentenceGerman && (
-                      <div className="text-xs font-bold text-text-main font-mono flex items-center justify-between gap-2" dir="ltr">
+                      <div className="text-xs font-bold text-text-main font-mono flex items-center justify-between gap-2" dir="ltr" lang="de">
                         <span>{items[stageQuestionIndex].exampleSentenceGerman}</span>
                         <button
                           type="button"
@@ -1926,7 +2095,7 @@ export const LernstudioTeachPage: React.FC<Props> = ({
                       </div>
                     )}
                     {items[stageQuestionIndex].exampleSentenceArabic && (
-                      <div className="text-xs font-bold text-text-muted">
+                      <div className="text-xs font-bold text-text-muted" lang="ar" dir="rtl">
                         {items[stageQuestionIndex].exampleSentenceArabic}
                       </div>
                     )}
@@ -2095,7 +2264,14 @@ export const LernstudioTeachPage: React.FC<Props> = ({
                         className={`py-4 px-5 rounded-2xl text-lg font-black font-mono border transition-all cursor-pointer flex items-center justify-between gap-3 shadow-xs ${btnClass}`}
                         dir="ltr"
                       >
-                        <span>{choice.german}</span>
+                        <span className="flex items-center gap-2 min-w-0">
+                          {choice.article && (
+                            <span className={`shrink-0 inline-block px-1.5 py-0.5 rounded border text-[10px] font-bold uppercase ${articleBadgeClass(choice.article)}`}>
+                              {choice.article}
+                            </span>
+                          )}
+                          <span className="truncate">{choice.german}</span>
+                        </span>
                         <Volume2
                           className="w-4 h-4 shrink-0 opacity-60 hover:opacity-100"
                           onClick={(e) => {
@@ -2198,6 +2374,11 @@ export const LernstudioTeachPage: React.FC<Props> = ({
                         className={`py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black font-mono border transition-all cursor-pointer flex items-center justify-center text-center gap-1.5 shadow-2xs ${btnClass}`}
                         dir="ltr"
                       >
+                        {choice.article && (
+                          <span className={`shrink-0 inline-block px-1 py-0.5 rounded border text-[10px] font-bold uppercase ${articleBadgeClass(choice.article)}`}>
+                            {choice.article}
+                          </span>
+                        )}
                         <span className="truncate">{choice.german}</span>
                       </button>
                     );
@@ -2998,6 +3179,18 @@ export const LernstudioTeachPage: React.FC<Props> = ({
                     <div className="text-xs font-black">بوابة الألعاب</div>
                     <div className="text-[10px] opacity-80 font-bold truncate">جميع وضعيات التحدي</div>
                   </button>
+
+                  {onOpenClassroomBoard && (
+                    <button
+                      type="button"
+                      onClick={onOpenClassroomBoard}
+                      className="p-3 bg-surface hover:bg-surface-hover border border-surface-border rounded-2xl text-right transition-all hover:scale-[1.02] shadow-2xs group cursor-pointer"
+                    >
+                      <div className="text-2xl mb-1">🏫</div>
+                      <div className="text-xs font-black text-text-main">لوحة الفصل</div>
+                      <div className="text-[10px] text-text-muted font-bold truncate">عرض الكلمات على لوحة الفصل</div>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -3037,6 +3230,15 @@ export const LernstudioTeachPage: React.FC<Props> = ({
 
           {currentStage === 2 && (
             <>
+              <button
+                type="button"
+                onClick={handlePrevQuestion}
+                className="px-4 py-2 bg-surface-hover hover:bg-surface-border text-text-main rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <ChevronRight className={`w-4 h-4 ${isRtl ? '' : 'rotate-180'}`} />
+                <span>السابق</span>
+              </button>
+
               <div className="text-xs font-bold text-text-muted">
                 {isAnswerSubmitted ? (isCorrectAnswer ? 'إجابة صحيحة ✔️ (جاري الانتقال...)' : 'تحديد الإجابة الصحيحة') : 'اختر صح أو غلط'}
               </div>
@@ -3057,6 +3259,15 @@ export const LernstudioTeachPage: React.FC<Props> = ({
 
           {currentStage === 3 && (
             <>
+              <button
+                type="button"
+                onClick={handlePrevQuestion}
+                className="px-4 py-2 bg-surface-hover hover:bg-surface-border text-text-main rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <ChevronRight className={`w-4 h-4 ${isRtl ? '' : 'rotate-180'}`} />
+                <span>السابق</span>
+              </button>
+
               <div className="text-xs font-bold text-text-muted">
                 {isAnswerSubmitted ? (isCorrectAnswer ? 'إجابة صحيحة ✔️ (جاري الانتقال...)' : 'تحديد الاختيار الصحيح') : 'اختر الإجابة المناسبة'}
               </div>
@@ -3077,6 +3288,15 @@ export const LernstudioTeachPage: React.FC<Props> = ({
 
           {currentStage === 4 && (
             <>
+              <button
+                type="button"
+                onClick={handlePrevQuestion}
+                className="px-4 py-2 bg-surface-hover hover:bg-surface-border text-text-main rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <ChevronRight className={`w-4 h-4 ${isRtl ? '' : 'rotate-180'}`} />
+                <span>السابق</span>
+              </button>
+
               <div className="text-xs font-bold text-text-muted">
                 {isAnswerSubmitted ? (isCorrectAnswer ? 'إجابة صحيحة ✔️ (جاري الانتقال...)' : 'التعلم والاستمرار') : 'اختر من كل المجموعات'}
               </div>
@@ -3097,6 +3317,15 @@ export const LernstudioTeachPage: React.FC<Props> = ({
 
           {currentStage === 5 && (
             <>
+              <button
+                type="button"
+                onClick={handlePrevQuestion}
+                className="px-4 py-2 bg-surface-hover hover:bg-surface-border text-text-main rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <ChevronRight className={`w-4 h-4 ${isRtl ? '' : 'rotate-180'}`} />
+                <span>السابق</span>
+              </button>
+
               <div className="text-xs font-bold text-text-muted">
                 {isAnswerSubmitted ? (isCorrectAnswer ? 'إجابة صحيحة ✔️ (جاري الانتقال...)' : 'إجابة خاطئة — انتقل للسؤال التالي') : 'تركيب المقاطع الصوتية'}
               </div>
@@ -3117,6 +3346,15 @@ export const LernstudioTeachPage: React.FC<Props> = ({
 
           {currentStage === 6 && (
             <>
+              <button
+                type="button"
+                onClick={handlePrevQuestion}
+                className="px-4 py-2 bg-surface-hover hover:bg-surface-border text-text-main rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <ChevronRight className={`w-4 h-4 ${isRtl ? '' : 'rotate-180'}`} />
+                <span>السابق</span>
+              </button>
+
               <div className="text-xs font-bold text-text-muted">
                 {isAnswerSubmitted ? (isCorrectAnswer ? 'إجابة صحيحة ✔️ (جاري الانتقال...)' : 'اختر الحرف الناقص الصحيح') : 'حدد الحرف الناقص'}
               </div>
@@ -3137,6 +3375,15 @@ export const LernstudioTeachPage: React.FC<Props> = ({
 
           {currentStage === 7 && (
             <>
+              <button
+                type="button"
+                onClick={handlePrevQuestion}
+                className="px-4 py-2 bg-surface-hover hover:bg-surface-border text-text-main rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <ChevronRight className={`w-4 h-4 ${isRtl ? '' : 'rotate-180'}`} />
+                <span>السابق</span>
+              </button>
+
               <div className="text-xs font-bold text-text-muted">
                 {isAnswerSubmitted ? (isCorrectAnswer ? 'إجابة صحيحة ✔️ (جاري الانتقال...)' : 'إجابة خاطئة — انتقل للسؤال التالي') : 'حدد الحروف المتتالية بالترتيب'}
               </div>
@@ -3157,6 +3404,15 @@ export const LernstudioTeachPage: React.FC<Props> = ({
 
           {currentStage === 8 && (
             <>
+              <button
+                type="button"
+                onClick={handlePrevQuestion}
+                className="px-4 py-2 bg-surface-hover hover:bg-surface-border text-text-main rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <ChevronRight className={`w-4 h-4 ${isRtl ? '' : 'rotate-180'}`} />
+                <span>السابق</span>
+              </button>
+
               <div className="text-xs font-bold text-text-muted">
                 {isAnswerSubmitted ? (isCorrectAnswer ? 'إجابة صحيحة ✔️ (جاري الانتقال...)' : 'إجابة خاطئة — انتقل للسؤال التالي') : 'ركّب الكلمة كاملاً بالترتيب'}
               </div>

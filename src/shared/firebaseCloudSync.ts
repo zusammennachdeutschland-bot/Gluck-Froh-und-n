@@ -867,6 +867,70 @@ export async function signOutTeacherFirebase(): Promise<void> {
   }
 }
 
+/**
+ * Signs the teacher out AND wipes all app data stored on this device
+ * (localStorage, sessionStorage and every IndexedDB database, including the
+ * Firebase Auth persistence DB). Use this when the teacher hands the device
+ * to someone else or explicitly asks to erase the device. Plain
+ * signOutTeacherFirebase() above intentionally does NOT wipe anything, so a
+ * normal sign-out never destroys local data without confirmation.
+ */
+export async function signOutTeacherFirebaseAndWipeDeviceData(): Promise<void> {
+  await signOutTeacherFirebase();
+  // 1. Web storage (all app keys live here: dl_*, glueck_*, homework state)
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.clear();
+    }
+  } catch (err) {
+    console.warn('Device wipe: localStorage clear notice:', err);
+  }
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      window.sessionStorage.clear();
+    }
+  } catch (err) {
+    console.warn('Device wipe: sessionStorage clear notice:', err);
+  }
+  // 2. IndexedDB (Firebase Auth persistence + any app databases)
+  try {
+    const idb: any = typeof indexedDB !== 'undefined' ? indexedDB : (globalThis as any)?.indexedDB;
+    if (idb) {
+      let dbNames: string[] = [];
+      try {
+        if (typeof idb.databases === 'function') {
+          const infos = await idb.databases();
+          dbNames = (infos || []).map((info: any) => info?.name).filter(Boolean);
+        }
+      } catch {
+        dbNames = [];
+      }
+      // Always attempt the known Firebase databases even when enumeration
+      // is unavailable (e.g. Firefox private mode / older WebViews).
+      for (const known of ['firebaseLocalStorageDb', 'firebase-heartbeat-database']) {
+        if (!dbNames.includes(known)) dbNames.push(known);
+      }
+      await Promise.all(
+        dbNames.map(
+          (name) =>
+            new Promise<void>((resolve) => {
+              try {
+                const req = idb.deleteDatabase(name);
+                req.onsuccess = () => resolve();
+                req.onerror = () => resolve();
+                req.onblocked = () => resolve();
+              } catch {
+                resolve();
+              }
+            })
+        )
+      );
+    }
+  } catch (err) {
+    console.warn('Device wipe: IndexedDB clear notice:', err);
+  }
+}
+
 export interface HomeworkTestAuthUser {
   uid: string;
   email?: string | null;
@@ -1435,6 +1499,9 @@ export function sanitizeShortLinkAssignmentSnapshot(hw: HomeworkAssignment, owne
     ownerUid
   };
   delete copy.ownerEmail;
+  // Never embed the shareToken in the public short-link payload: the document
+  // is readable without auth, so the token would be public.
+  delete copy.shareToken;
   delete copy.cloudCreatePending;
   if (copy.setSnapshot && typeof copy.setSnapshot === 'object') {
     const cleanSnap = { ...copy.setSnapshot };
@@ -1515,7 +1582,11 @@ export async function saveShortLinkToFirestore(
     assignment.status !== 'deleted';
   const nowIso = new Date().toISOString().slice(0, 60);
   const createdAt = (assignment.createdAt || nowIso).slice(0, 60);
-  const shareToken = assignment.shareToken?.trim() ? assignment.shareToken.trim().slice(0, 128) : undefined;
+  // The shareToken is deliberately NOT written into the public short-link
+  // document (homework_short_links/{shortId} is readable without auth, so any
+  // token stored there is public). It lives only on the owner-only
+  // homework_assignments document; the server enforces it from there and the
+  // shortId alone is the (already public) key for the link itself.
 
   const publicSafeSnapshot = sanitizeShortLinkAssignmentSnapshot(
     {
@@ -1607,7 +1678,6 @@ export async function saveShortLinkToFirestore(
     shortId: cleanShortId,
     assignmentId: safeAssignmentId,
     ownerUid,
-    ...(shareToken ? { shareToken } : {}),
     isActive,
     ...((assignment as any).deleted === true ? { deleted: true } : {}),
     createdAt,
@@ -1835,19 +1905,18 @@ export async function fetchShortLinkFromFirestore(
           (typeof rawData.ownerUid === 'string' && rawData.ownerUid.trim()) ||
           (typeof parsed.ownerUid === 'string' && parsed.ownerUid.trim()) ||
           undefined;
-        const docShareToken =
-          (typeof rawData.shareToken === 'string' && rawData.shareToken.trim()) ||
-          (typeof parsed.shareToken === 'string' && parsed.shareToken.trim()) ||
-          undefined;
+        // The shareToken is never read from the public short-link document:
+        // it is not stored there anymore, and any value found in an older
+        // document must not be trusted or propagated.
         const resolvedAssignment: HomeworkAssignment = {
           ...parsed,
           id: String(parsed.id || targetAssignmentId),
           shortId: cleanShortId,
           ...(docOwnerUid ? { ownerUid: docOwnerUid } : {}),
-          ...(docShareToken ? { shareToken: docShareToken } : {}),
           isActive: true,
           cloudSynced: true
         };
+        delete (resolvedAssignment as any).shareToken;
         delete resolvedAssignment.ownerEmail;
         return {
           status: 'resolved',
@@ -2945,9 +3014,9 @@ export async function saveSubmissionToFirestoreWithDetails(
             isIdempotentRetry: Boolean(data?.isIdempotentRetry)
           };
         }
-        // Fail closed on client authoritative rejections (400, 401, 403, 409 Conflict, 410 Gone):
-        // NEVER fall back to client Firestore setDoc!
-        if (res.status >= 400 && res.status < 500 && res.status !== 404) {
+        // Fail closed on client authoritative rejections (400, 401, 403, 404,
+        // 409 Conflict, 410 Gone): NEVER fall back to client Firestore setDoc!
+        if (res.status >= 400 && res.status < 500) {
           return {
             synced: false,
             rejected: true,
@@ -2958,110 +3027,23 @@ export async function saveSubmissionToFirestoreWithDetails(
       }
     }
   } catch {
-    // Best-effort network transport error; continue to Firestore fallback only when server API was unreachable
+    // Network transport error reaching the server API.
   }
 
-  try {
-    if (!resolvedOwnerUid) {
-      const parentHw = await fetchAssignmentFromFirestore(safeAssignmentId).catch(() => null);
-      if (parentHw) {
-        if (parentHw.isActive === false || parentHw.status === 'closed' || (parentHw as any).deleted === true) {
-          return {
-            synced: false,
-            rejected: true,
-            status: 403,
-            error: 'Assignment is closed or deleted'
-          };
-        }
-        if (parentHw.ownerUid && parentHw.ownerUid.trim()) {
-          resolvedOwnerUid = parentHw.ownerUid.trim();
-        } else {
-          resolvedOwnerUid = `legacy_unclaimed_${safeAssignmentId}`;
-        }
-      } else {
-        resolvedOwnerUid = getCurrentHomeworkOwnerUid() || '';
-      }
-    }
-
-    if (!resolvedOwnerUid) {
-      return { synced: apiOk };
-    }
-
-    const ownerUid = resolvedOwnerUid.slice(0, 128);
-    const submissionDedupeSig = buildSubmissionDedupeSignature(
-      submission,
-      safeId,
-      ownerUid,
-      statusValue,
-      completedAtValue
-    );
-    if (lastSavedSubmissionPayloadHashById.get(safeId) === submissionDedupeSig) {
-      return { synced: true, isIdempotentRetry: true };
-    }
-
-    const normalized: HomeworkSubmission = {
-      ...submission,
-      id: safeId,
-      assignmentId: safeAssignmentId,
-      ownerUid,
-      status: statusValue,
-      ...(attemptSecret ? { attemptSecret } : {}),
-      completedAt: completedAtValue,
-      updatedAt: nowIso,
-      cloudSynced: true
-    };
-    delete normalized.ownerEmail;
-    const payloadJson = serializeSafeFirestorePayload(normalized, 440000);
-    const docPayload = {
-      id: safeId,
-      assignmentId: safeAssignmentId,
-      ownerUid,
-      studentName: (submission.studentName || 'طالب').slice(0, 80),
-      score: Math.max(0, Math.min(100000, Number(submission.score ?? submission.correctAnswersCount) || 0)),
-      accuracyPercent: Math.max(
-        0,
-        Math.min(100, Number(submission.accuracyPercent ?? submission.scorePercentage ?? submission.accuracy) || 0)
-      ),
-      completedAt: completedAtValue,
-      status: statusValue,
-      ...(attemptSecret ? { attemptSecret } : {}),
-      payloadJson
-    };
-
-    try {
-      await executeConfirmedFirestoreWrite(
-        () => setDoc(doc(db, 'homework_submissions', safeId), docPayload),
-        8000,
-        1
-      );
-      lastSavedSubmissionPayloadHashById.set(safeId, submissionDedupeSig);
-      return { synced: true, authoritativeSubmission: normalized };
-    } catch (sdkErr: any) {
-      const restOk = await writeFirestoreDocViaRest('homework_submissions', safeId, docPayload);
-      if (restOk) {
-        lastSavedSubmissionPayloadHashById.set(safeId, submissionDedupeSig);
-        return { synced: true, authoritativeSubmission: normalized };
-      }
-      lastSavedSubmissionPayloadHashById.delete(safeId);
-      const code = String(sdkErr?.code || '');
-      const msg = String(sdkErr?.message || '');
-      if (code === 'permission-denied' || msg.includes('permission-denied')) {
-        return {
-          synced: false,
-          rejected: true,
-          status: 403,
-          error: 'Submission rejected by security rules'
-        };
-      }
-      throw sdkErr;
-    }
-  } catch (error) {
-    if (!apiOk) {
-      lastSavedSubmissionPayloadHashById.delete(safeId);
-      handleFirestoreError(error, OperationType.WRITE, path);
-    }
-    return { synced: apiOk };
-  }
+  // Fail closed: there is NO direct-Firestore fallback anymore. Submissions
+  // are written only by the server (POST /api/homework/submit re-grades every
+  // response); a browser-computed score must never reach Firestore directly,
+  // and the rules now deny direct homework_submissions creates outright. The
+  // submission stays saved locally (cloudSynced: false) and the pending-write
+  // retry loop re-sends it through the API when the server is reachable again.
+  lastSavedSubmissionPayloadHashById.delete(safeId);
+  return {
+    synced: false,
+    rejected: true,
+    status: 503,
+    error:
+      'تعذّر إرسال الواجب إلى السيرفر الآن — تم حفظه على هذا الجهاز وستتم إعادة إرساله تلقائياً عند عودة الاتصال. إذا استمرت المشكلة، تأكد من الاتصال بالإنترنت ثم أعد المحاولة.'
+  };
 }
 
 export async function saveSubmissionToFirestore(

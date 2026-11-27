@@ -44,12 +44,22 @@ interface Props {
 interface Balloon {
   id: string;
   item: LernstudioItem;
+  /** Article-mode only: the article this balloon offers (der/die/das). */
+  article?: 'der' | 'die' | 'das';
   color: string;
   xPercent: number; // 5% to 85%
   yPercent: number; // 0 (top) to 100 (bottom)
   speed: number;
   popped: boolean;
 }
+
+const ARTICLE_CHOICES: Array<'der' | 'die' | 'das'> = ['der', 'die', 'das'];
+
+const stripLeadingArticle = (german: string) => german.replace(/^(der|die|das)\s+/i, '').trim();
+
+/** Normalized German for choice dedupe: article-stripped, lowercased, single-spaced. */
+const normalizeGermanChoice = (german: string) =>
+  stripLeadingArticle(german).trim().toLowerCase().replace(/\s+/g, ' ');
 
 const BALLOON_COLORS = [
   'bg-red-500/90 border-red-400 text-white shadow-red-500/30',
@@ -78,10 +88,17 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
   const maxLives = difficulty === 'easy' ? 4 : difficulty === 'hard' ? 2 : 3;
 
   const rawItems = useMemo(() => getSetPlayableItems(set), [set]);
+  // 'article' question type (offered by the setup screen whenever the set has
+  // articles): the round tests der/die/das instead of word meaning. Only
+  // items that actually carry an article can be targets; otherwise fall back
+  // to the normal word round.
+  const articleItems = useMemo(() => rawItems.filter((it) => !!it.article), [rawItems]);
+  const isArticleMode = gameConfig?.questionType === 'article' && articleItems.length > 0;
   const items = useMemo(() => {
-    const count = gameConfig?.questionCount && gameConfig.questionCount > 0 ? gameConfig.questionCount : rawItems.length;
-    return buildSeededSessionDeck(rawItems, count, `${set.id}::balloon::${sessionNonce}`);
-  }, [rawItems, set.id, gameConfig?.questionCount, sessionNonce]);
+    const pool = isArticleMode ? articleItems : rawItems;
+    const count = gameConfig?.questionCount && gameConfig.questionCount > 0 ? gameConfig.questionCount : pool.length;
+    return buildSeededSessionDeck(pool, count, `${set.id}::balloon::${sessionNonce}`);
+  }, [rawItems, articleItems, isArticleMode, set.id, gameConfig?.questionCount, sessionNonce]);
 
   // Game States
   const [targetIndex, setTargetIndex] = useState(0);
@@ -142,10 +159,39 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
     const rng = createSeededRandom(
       `${set.id}::balloon_wave::${sessionNonce}::${targetIndex}::${waveRev}`
     );
-    const distractors = seededShuffle(
-      rawItems.filter((it) => it.id !== targetItem.id),
+
+    // Article mode: the balloons offer der/die/das for the target noun.
+    if (isArticleMode && targetItem.article) {
+      const initialBalloons: Balloon[] = seededShuffle([...ARTICLE_CHOICES], rng).map((art, idx) => ({
+        id: `art_${art}_${targetIndex}_${waveRev}`,
+        item: targetItem,
+        article: art,
+        color: BALLOON_COLORS[idx % BALLOON_COLORS.length],
+        xPercent: 20 + idx * 30 + (rng() * 8 - 4),
+        yPercent: 85 + (idx % 2 === 0 ? 0 : 12),
+        speed: (0.28 + rng() * 0.15) * speedMultiplier,
+        popped: false
+      }));
+      balloonsRef.current = initialBalloons;
+      setBalloons(initialBalloons);
+      return;
+    }
+
+    // Dedupe distractors by normalized German text, not just id: the same
+    // word must never appear twice as two balloons (e.g. duplicate items
+    // with different ids).
+    const seenGerman = new Set<string>([normalizeGermanChoice(targetItem.german)]);
+    const distractors: LernstudioItem[] = [];
+    for (const it of seededShuffle(
+      rawItems.filter((x) => x.id !== targetItem.id),
       rng
-    ).slice(0, 3);
+    )) {
+      const key = normalizeGermanChoice(it.german);
+      if (!key || seenGerman.has(key)) continue;
+      seenGerman.add(key);
+      distractors.push(it);
+      if (distractors.length >= 3) break;
+    }
 
     const candidates = seededShuffle([targetItem, ...distractors], rng);
 
@@ -161,20 +207,11 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
 
     balloonsRef.current = initialBalloons;
     setBalloons(initialBalloons);
-  }, [targetIndex, waveRev, isGameOver, isVictory, items.length, rawItems, targetItem, set.id, sessionNonce, speedMultiplier]);
+  }, [targetIndex, waveRev, isGameOver, isVictory, items.length, rawItems, targetItem, set.id, sessionNonce, speedMultiplier, isArticleMode]);
 
-  // Auto-pronounce German target word when new round starts
-  useEffect(() => {
-    if (gameConfig?.enableAudio !== false && targetItem?.german && !isGameOver && !isVictory) {
-      const timer = setTimeout(() => {
-        speakGermanText(targetItem.german);
-      }, 350);
-      return () => {
-        clearTimeout(timer);
-        stopGermanSpeech();
-      };
-    }
-  }, [targetItem, isGameOver, isVictory, gameConfig?.enableAudio]);
+  // No auto-pronunciation of the target: speaking is only via the banner's
+  // speaker button, so the child must read the word instead of matching a
+  // sound to letters (P0 language bypass).
 
   // Floating Loop (state updates happen cleanly outside state updaters)
   useEffect(() => {
@@ -187,7 +224,10 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
 
       for (const b of prev) {
         const moved = b.popped ? b : { ...b, yPercent: b.yPercent - b.speed };
-        if (moved.yPercent < -15 && !moved.popped && moved.item.id === targetItem.id) {
+        const isTargetBalloon = isArticleMode
+          ? moved.article === targetItem.article
+          : moved.item.id === targetItem.id;
+        if (moved.yPercent < -15 && !moved.popped && isTargetBalloon) {
           missedTarget = true;
           continue;
         }
@@ -208,19 +248,21 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
     }, 40);
 
     return () => clearInterval(interval);
-  }, [isGameOver, isVictory, targetItem]);
+  }, [isGameOver, isVictory, targetItem, isArticleMode]);
 
   // Handle Popping
   const handlePopBalloon = (balloon: Balloon) => {
     if (balloon.popped || isGameOver || isVictory || !targetItem) return;
 
-    const isCorrect = balloon.item.id === targetItem.id;
+    const isCorrect = isArticleMode && balloon.article
+      ? balloon.article === targetItem.article
+      : balloon.item.id === targetItem.id;
 
     // Visual burst effect
     setPoppedBurst({
       x: balloon.xPercent,
       y: balloon.yPercent,
-      text: balloon.item.german,
+      text: isArticleMode && balloon.article ? balloon.article : balloon.item.german,
       correct: isCorrect
     });
     timeoutsRef.current.push(setTimeout(() => setPoppedBurst(null), 800));
@@ -334,7 +376,9 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
               </span>
             </h1>
             <p className="text-[11px] text-text-muted font-bold">
-              فرقع البالون الذي يحمل الكلمة الألمانية المطابقة!
+              {isArticleMode
+                ? 'فرقع البالون الذي يحمل أداة التعريف الصحيحة!'
+                : 'فرقع البالون الذي يحمل الكلمة الألمانية المطابقة!'}
             </p>
           </div>
         </div>
@@ -377,24 +421,36 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
       <GameStageBanner
         mode="balloon_pop"
         title="فرقعة البالونات (Balloon Pop)"
-        subtitle="فرقع البالون الطائر الذي يحمل المفردة الألمانية الصحيحة!"
+        subtitle={isArticleMode ? 'فرقع البالون الذي يحمل أداة التعريف الصحيحة!' : 'فرقع البالون الطائر الذي يحمل المفردة الألمانية الصحيحة!'}
         badgeText={`${targetIndex + 1} / ${items.length}`}
       />
 
-      {/* Target Word Banner */}
+      {/* Target Word Banner — no emoji: matching must use the word, not a picture. */}
       {targetItem && !isGameOver && !isVictory && (
         <div className="bg-gradient-to-r from-primary-soft/40 via-surface to-primary-soft/40 border-2 border-primary/40 rounded-2xl p-4 text-center space-y-1 shadow-sm">
           <span className="text-xs font-extrabold text-primary uppercase tracking-wider block">
-            المطلوب فرقعته الآن ({targetIndex + 1} من {items.length}):
+            {isArticleMode
+              ? `ما أداة التعريف الصحيحة؟ (${targetIndex + 1} من ${items.length})`
+              : `المطلوب فرقعته الآن (${targetIndex + 1} من ${items.length}):`}
           </span>
           <div className="flex items-center justify-center gap-3">
-            {targetItem.emoji && <span className="text-3xl select-none">{targetItem.emoji}</span>}
-            <h2 className="text-2xl sm:text-3xl font-black text-text-main">
-              {getItemTranslation(targetItem, language)}
-            </h2>
+            {isArticleMode ? (
+              <>
+                <h2 className="text-2xl sm:text-3xl font-black text-text-main font-mono" dir="ltr" lang="de">
+                  {stripLeadingArticle(targetItem.german)}
+                </h2>
+                <span className="text-sm font-bold text-text-muted">
+                  {getItemTranslation(targetItem, language)}
+                </span>
+              </>
+            ) : (
+              <h2 className="text-2xl sm:text-3xl font-black text-text-main">
+                {getItemTranslation(targetItem, language)}
+              </h2>
+            )}
             <button
               type="button"
-              onClick={() => speakGermanText(targetItem.german)}
+              onClick={() => speakGermanText(isArticleMode ? stripLeadingArticle(targetItem.german) : targetItem.german)}
               className="p-1.5 rounded-xl bg-primary/10 text-primary hover:bg-primary hover:text-white transition-colors cursor-pointer"
               title="نطق الكلمة"
             >
@@ -432,9 +488,8 @@ export const LernstudioBalloonPopGame: React.FC<Props> = ({
                 <div
                   className={`w-20 sm:w-24 h-24 sm:h-28 rounded-full border-2 flex flex-col items-center justify-center p-2 text-center shadow-lg transition-all ${balloon.color}`}
                 >
-                  {balloon.item.emoji && <span className="text-xl mb-0.5">{balloon.item.emoji}</span>}
                   <span className="text-xs sm:text-sm font-black font-mono leading-tight tracking-tight break-words max-w-full">
-                    {balloon.item.german}
+                    {isArticleMode && balloon.article ? balloon.article : balloon.item.german}
                   </span>
                 </div>
                 {/* Balloon Knot & String */}

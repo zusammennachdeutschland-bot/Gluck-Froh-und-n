@@ -60,6 +60,9 @@ export const LernstudioGameRunner: React.FC<Props> = ({
   const completedReportedRef = useRef(false);
   const correctCountRef = useRef(0);
   const attemptCountRef = useRef(0);
+  // A10: the final score is reported from this ref, not from the stale
+  // render closure captured by the auto-advance timeout.
+  const scoreRef = useRef(0);
 
   useEffect(() => {
     return () => {
@@ -80,8 +83,23 @@ export const LernstudioGameRunner: React.FC<Props> = ({
     if (gameConfig?.enableAudio !== false) playGermanVoiceFeedback(feedbackKey);
   };
 
+  // A5: a stable per-device id (created once in localStorage) so two
+  // devices opening the same set get different decks/option orders.
+  const [deviceSeedId] = useState(() => {
+    try {
+      const key = 'glueck_device_seed_id';
+      let id = localStorage.getItem(key);
+      if (!id) {
+        id = `dev_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+        localStorage.setItem(key, id);
+      }
+      return id;
+    } catch {
+      return `dev_fallback_${Math.random().toString(36).slice(2, 10)}`;
+    }
+  });
   const rawItems = useMemo(() => set.items || [], [set.items]);
-  const sessionSeed = `${set.id}::runner::${sessionNonce}`;
+  const sessionSeed = `${set.id}::${deviceSeedId}::runner::${sessionNonce}`;
   const items = useMemo(() => {
     const requested = gameConfig?.questionCount;
     if (rawItems.length === 0) return [];
@@ -120,6 +138,10 @@ export const LernstudioGameRunner: React.FC<Props> = ({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [score, setScore] = useState(0);
   const [streak, setStreak] = useState(0);
+
+  useEffect(() => {
+    scoreRef.current = score;
+  }, [score]);
   const [isCompleted, setIsCompleted] = useState(false);
 
   // Game specific states
@@ -284,6 +306,21 @@ export const LernstudioGameRunner: React.FC<Props> = ({
     setTeacherOverride(false);
   };
 
+  // A11: switching game-mode tabs starts a fresh run for the new mode —
+  // score, streak and accuracy counters must not carry over.
+  const switchGameMode = (mode: GameRunnerMode) => {
+    setSelectedGameType(mode);
+    setCurrentIndex(0);
+    setScore(0);
+    scoreRef.current = 0;
+    setStreak(0);
+    correctCountRef.current = 0;
+    attemptCountRef.current = 0;
+    completedReportedRef.current = false;
+    setIsCompleted(false);
+    resetQuestionState();
+  };
+
   const handleNextQuestion = () => {
     resetQuestionState();
     if (currentIndex + 1 < activeListLength) {
@@ -308,10 +345,12 @@ export const LernstudioGameRunner: React.FC<Props> = ({
         completedReportedRef.current = true;
         const attempts = Math.max(1, attemptCountRef.current);
         const accuracy = Math.min(100, Math.round((correctCountRef.current / attempts) * 100));
+        // A10: sentence-builder questions are worth 15, the rest 10.
+        const pointsPerQuestion = selectedGameType === 'sentence_builder' ? 15 : 10;
         onGameComplete({
           gameMode: 'game',
-          score,
-          maxScore: activeListLength * 10,
+          score: scoreRef.current,
+          maxScore: activeListLength * pointsPerQuestion,
           accuracy,
           passed: accuracy >= 60,
           difficulty: gameConfig?.difficulty
@@ -368,12 +407,18 @@ export const LernstudioGameRunner: React.FC<Props> = ({
       });
       playSfx('wrong');
       playVoice('noch_einmal');
+      // P2-N9: auto-advance after a wrong answer too (Q14), giving the
+      // child ~2.5s to read the correct answer shown in the feedback.
+      scheduleTimeout(() => handleNextQuestion(), 2500);
     }
   };
 
   // 2. Missing Letter Check (strictly exact missing char OR exact full word)
+  // A20: mask the noun itself, not the article — 'die Katze' used to show
+  // 'd_e Katze' and test the article's vowel instead of the noun.
   const activeMaskedWord = currentItem
-    ? currentItem.missingLetterWord || currentItem.german.replace(/[aeiouäöü]/i, '_')
+    ? currentItem.missingLetterWord ||
+      currentItem.german.replace(/^(der|die|das)\s+/i, '').replace(/[aeiouäöü]/i, '_')
     : '';
 
   const handleCheckMissingLetter = () => {
@@ -414,6 +459,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({
       });
       playSfx('wrong');
       playVoice('noch_einmal');
+      scheduleTimeout(() => handleNextQuestion(), 2500);
     }
   };
 
@@ -457,6 +503,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({
       });
       playSfx('wrong');
       playVoice('noch_einmal');
+      scheduleTimeout(() => handleNextQuestion(), 2500);
     }
   };
 
@@ -494,6 +541,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({
       });
       playSfx('wrong');
       playVoice('noch_einmal');
+      scheduleTimeout(() => handleNextQuestion(), 2500);
     }
   };
 
@@ -529,6 +577,40 @@ export const LernstudioGameRunner: React.FC<Props> = ({
       });
       playSfx('wrong');
       playVoice('noch_einmal');
+      scheduleTimeout(() => handleNextQuestion(), 2500);
+    }
+  };
+
+  // A9: named handler for the verb conjugation/sentence exercises (was an
+  // inline onClick that never touched attemptCountRef/correctCountRef and
+  // used a raw untracked setTimeout). Accuracy in verb modes now counts.
+  const handleCheckVerbExercise = (isRight: boolean, correctAnswer: string) => {
+    if (!currentItem || feedback) return;
+    if (!isRetryRound) attemptCountRef.current += 1;
+    if (isRight) {
+      if (isRetryRound) {
+        retryCorrectIdsRef.current.add(currentItem.id);
+      } else {
+        correctCountRef.current += 1;
+        setScore((s) => s + 10);
+        setStreak((st) => st + 1);
+      }
+      setFeedback({ isCorrect: true, message: t.rightAnswerMsg });
+      playLernstudioSound('correct');
+      playGermanVoiceFeedback('richtig');
+      triggerSparkles(50, 50, '#10b981');
+      triggerFloatingText(isRetryRound ? 'صح! 👏' : '+10 ★ Richtig!', 50, 40, '#10b981');
+      scheduleTimeout(() => handleNextQuestion(), 900);
+    } else {
+      if (!isRetryRound) setStreak(0);
+      recordWrongItem(currentItem);
+      setFeedback({
+        isCorrect: false,
+        message: `${t.wrongAnswerMsg} (${correctAnswer})`
+      });
+      playLernstudioSound('wrong');
+      playGermanVoiceFeedback('noch_einmal');
+      scheduleTimeout(() => handleNextQuestion(), 2500);
     }
   };
 
@@ -566,6 +648,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({
       });
       playSfx('wrong');
       playVoice('noch_einmal');
+      scheduleTimeout(() => handleNextQuestion(), 2500);
     }
   };
 
@@ -651,7 +734,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({
         {grammarQuestions.length > 0 && (
           <button
             type="button"
-            onClick={() => { setSelectedGameType('grammar'); setCurrentIndex(0); resetQuestionState(); }}
+            onClick={() => switchGameMode('grammar')}
             className={`flex-1 min-w-[130px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
               selectedGameType === 'grammar' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
             }`}
@@ -664,7 +747,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({
           <>
             <button
               type="button"
-              onClick={() => { setSelectedGameType('verb_conjugation'); setCurrentIndex(0); resetQuestionState(); }}
+              onClick={() => switchGameMode('verb_conjugation')}
               className={`flex-1 min-w-[120px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
                 selectedGameType === 'verb_conjugation' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
               }`}
@@ -673,7 +756,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({
             </button>
             <button
               type="button"
-              onClick={() => { setSelectedGameType('verb_sentence'); setCurrentIndex(0); resetQuestionState(); }}
+              onClick={() => switchGameMode('verb_sentence')}
               className={`flex-1 min-w-[120px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
                 selectedGameType === 'verb_sentence' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
               }`}
@@ -687,7 +770,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({
           <>
             <button
               type="button"
-              onClick={() => { setSelectedGameType('multiple_choice'); setCurrentIndex(0); resetQuestionState(); }}
+              onClick={() => switchGameMode('multiple_choice')}
               className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
                 selectedGameType === 'multiple_choice' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
               }`}
@@ -697,7 +780,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({
 
             <button
               type="button"
-              onClick={() => { setSelectedGameType('missing_letter'); setCurrentIndex(0); resetQuestionState(); }}
+              onClick={() => switchGameMode('missing_letter')}
               className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
                 selectedGameType === 'missing_letter' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
               }`}
@@ -707,7 +790,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({
 
             <button
               type="button"
-              onClick={() => { setSelectedGameType('sentence_builder'); setCurrentIndex(0); resetQuestionState(); }}
+              onClick={() => switchGameMode('sentence_builder')}
               className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
                 selectedGameType === 'sentence_builder' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
               }`}
@@ -717,7 +800,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({
 
             <button
               type="button"
-              onClick={() => { setSelectedGameType('emoji_vocab'); setCurrentIndex(0); resetQuestionState(); }}
+              onClick={() => switchGameMode('emoji_vocab')}
               className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
                 selectedGameType === 'emoji_vocab' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
               }`}
@@ -727,7 +810,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({
 
             <button
               type="button"
-              onClick={() => { setSelectedGameType('scrambled_letters'); setCurrentIndex(0); resetQuestionState(); }}
+              onClick={() => switchGameMode('scrambled_letters')}
               className={`flex-1 min-w-[110px] py-1.5 px-2.5 rounded-md transition-all cursor-pointer ${
                 selectedGameType === 'scrambled_letters' ? 'bg-surface text-primary shadow-xs' : 'text-text-muted hover:text-text-main'
               }`}
@@ -1101,29 +1184,7 @@ export const LernstudioGameRunner: React.FC<Props> = ({
                             disabled={feedback !== null}
                             onClick={() => {
                               setSelectedOptionIndex(idx);
-                              if (isRight) {
-                                if (isRetryRound) {
-                                  retryCorrectIdsRef.current.add(currentItem.id);
-                                } else {
-                                  setScore((s) => s + 10);
-                                  setStreak((st) => st + 1);
-                                }
-                                setFeedback({ isCorrect: true, message: t.rightAnswerMsg });
-                                playLernstudioSound('correct');
-                                playGermanVoiceFeedback('richtig');
-                                triggerSparkles(50, 50, '#10b981');
-                                triggerFloatingText(isRetryRound ? 'صح! 👏' : '+10 ★ Richtig!', 50, 40, '#10b981');
-                                setTimeout(() => handleNextQuestion(), 900);
-                              } else {
-                                if (!isRetryRound) setStreak(0);
-                                recordWrongItem(currentItem);
-                                setFeedback({
-                                  isCorrect: false,
-                                  message: `${t.wrongAnswerMsg} (${activeEx.correctAnswer})`
-                                });
-                                playLernstudioSound('wrong');
-                                playGermanVoiceFeedback('noch_einmal');
-                              }
+                              handleCheckVerbExercise(isRight, activeEx.correctAnswer);
                             }}
                             className={`p-4 rounded-2xl font-black text-base text-center transition-all border cursor-pointer font-mono ${
                               selectedOptionIndex === idx

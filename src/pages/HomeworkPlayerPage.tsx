@@ -187,6 +187,20 @@ function stripLeadingArticle(german: string): { article: 'der' | 'die' | 'das' |
   return { article: null, baseWord: trimmed };
 }
 
+// B2: the server re-grades vocab answers only when it knows which field of
+// the set item to check (expressApp gradeServerHomeworkResponses: 'article',
+// 'missingLetterWord', 'exampleSentenceGerman', 'arabic', 'german'). Mirror
+// the server's own type matching so the submit path carries it.
+function resolveHomeworkExpectedField(questionType: string | undefined): string | undefined {
+  const type = String(questionType || '');
+  if (type.includes('article') || type.includes('der_die_das')) return 'article';
+  if (type.includes('missing')) return 'missingLetterWord';
+  if (type.includes('sentence') || type.includes('order')) return 'exampleSentenceGerman';
+  if (type.includes('arabic')) return 'arabic';
+  if (type.includes('german') || type.includes('vocab') || type.includes('translation')) return 'german';
+  return undefined;
+}
+
 function deterministicShuffle<T>(arr: T[], seedOffset: number): T[] {
   const copy = [...arr];
   for (let i = copy.length - 1; i > 0; i--) {
@@ -1757,6 +1771,12 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       return;
     }
     if (isAttemptLimitReached) return;
+    // B4: a homework with 0 questions must never start (it would auto-
+    // complete at 0%) — the teacher has to fix the assignment first.
+    if (quizQuestions.length === 0) {
+      setIdentityError('هذا الواجب لا يحتوي على أسئلة بعد — اطلب من المعلم مراجعة الواجب وإعادة إنشائه.');
+      return;
+    }
 
     const candidateSub: Partial<HomeworkSubmission> = {
       assignmentId,
@@ -1991,7 +2011,8 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     const restoredGamBase = restoreGamificationStateFromSnapshot(
       restoredSnap,
       quizQuestions.length,
-      assignment?.timeLimitMinutes
+      assignment?.timeLimitMinutes,
+      saved.updatedAtMs
     );
 
     const savedPending = saved.gamification?.pendingBonusRound || null;
@@ -2260,11 +2281,14 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     }
 
     const isPendingGrading = Boolean(options?.pendingServerGrading);
+    // A12: an answer the remote check could not grade earns 0 points until
+    // it is graded — it must not count as correct (no points, no streak,
+    // no bonus round). isAnswered:false returns the state unchanged.
     const transition = applyAnswerGamification(gamificationRef.current, {
       questionId: currentQuestion.id,
       questionIndex: currentIdx,
-      isCorrect: isPendingGrading ? true : isCorrect,
-      isAnswered: true
+      isCorrect: isPendingGrading ? false : isCorrect,
+      isAnswered: !isPendingGrading
     });
     if (transition.ignoredDuplicate) return;
 
@@ -2274,7 +2298,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     setFeedback(isPendingGrading ? 'submitted' : isCorrect ? 'correct' : 'wrong');
 
     if (isPendingGrading) {
-      playLernstudioSound('correct');
+      // No sound: the answer is only "awaiting grading", not correct.
     } else if (isCorrect) {
       playLernstudioSound(transition.doubledApplied ? 'combo_ding' : 'correct');
       gameEffects.triggerScorePopup(
@@ -2291,16 +2315,21 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       if (currentQuestion.type !== 'true_false') {
         playGermanVoiceFeedback('noch_einmal');
       }
-      gameEffects.triggerScorePopup(`${transition.pointsDelta || -5}`, 50, 28, false);
+      gameEffects.triggerScorePopup(`${transition.pointsDelta}`, 50, 28, false);
       if (!isSoundMuted() && currentQuestion.type !== 'true_false' && currentQuestion.audioPromptText) {
         speakGermanText(currentQuestion.audioPromptText, 0.9);
       }
     }
 
     const elapsedSec = Math.max(1, Math.round((Date.now() - questionStartMs) / 1000));
+    const expectedField = resolveHomeworkExpectedField(currentQuestion.type);
     const newResponse: HomeworkQuestionResponse = {
       questionId: currentQuestion.id,
       questionType: currentQuestion.type,
+      // B2: itemId (+expectedField) lets the server re-grade this answer at
+      // submit instead of trusting the client's isCorrect.
+      ...(currentQuestion.itemId ? { itemId: currentQuestion.itemId } : {}),
+      ...(expectedField ? { expectedField } : {}),
       germanWord: currentQuestion.germanWord,
       promptText: `${currentQuestion.stageLabelAr} — ${currentQuestion.promptMainText || currentQuestion.germanWord}`,
       studentAnswer: studentAnswerStr,
@@ -2588,7 +2617,9 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     if (currResponses.length <= lastSyncedAnsweredCountRef.current) return;
     if (currResponses.length >= quizQuestions.length) return;
 
-    lastSyncedAnsweredCountRef.current = currResponses.length;
+    // B13: save the session locally FIRST — the online keepalive alone is
+    // not a save, and a failed keepalive must not be marked as synced.
+    persistCurrentActiveSession();
     const snap = gamificationRef.current;
     const payload = buildCurrentInProgressSnapshot(
       currResponses,
@@ -2606,7 +2637,11 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     sendExitProgressCheckpointKeepalive(payload, {
       shortId: activeShortId,
       shareToken: urlShareToken
-    });
+    })
+      .then((ok) => {
+        if (ok) lastSyncedAnsweredCountRef.current = currResponses.length;
+      })
+      .catch(() => {});
   };
 
   useEffect(() => {
@@ -2663,7 +2698,6 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       return;
     }
     isSubmittingRef.current = true;
-    clearActiveHomeworkSession(assignmentId);
     setActiveOverlayRound(null);
     pendingPostBonusRef.current = null;
     setSubmissionConflictError(null);
@@ -2716,6 +2750,10 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
     // Single authoritative final submission path (POST /api/homework/submit once + Firestore fallback if transient)
     try {
       const confirmRes = await saveSubmissionWithConfirmation(localSubmissionObj, assignment);
+      // B9: only clear the active session AFTER the save succeeds — a
+      // refresh mid-submit used to wipe the session and lock the student out
+      // of their last attempt (maxAttempts: 1).
+      clearActiveHomeworkSession(assignmentId);
       const syncedSubmissionObj: HomeworkSubmission = {
         ...confirmRes.submission,
         cloudSynced: confirmRes.cloudSynced
@@ -2735,6 +2773,7 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
       }
     } finally {
       setSubmitting(false);
+      isSubmittingRef.current = false;
     }
   };
 
@@ -2928,6 +2967,12 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
                   </>
                 )}
                 <span>{quizQuestions.length} سؤال تفاعلي</span>
+                {assignment?.deadline && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span>⏰ آخر موعد: {new Date(assignment.deadline).toLocaleDateString('ar-EG', { day: 'numeric', month: 'long' })}</span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -3872,6 +3917,13 @@ export const HomeworkPlayerPage: React.FC<Props> = ({
               <div className="pt-2">
                 <button
                   onClick={() => {
+                    // B8: the replay button used to skip the open-check, so a
+                    // closed/deleted homework could be replayed in full and
+                    // only fail at submit time.
+                    if (!isHomeworkAssignmentOpenForStudents(assignment)) {
+                      setError('هذا الواجب مغلق أو غير متاح حالياً من قِبل المعلم.');
+                      return;
+                    }
                     if (advanceTimeoutRef.current) {
                       clearTimeout(advanceTimeoutRef.current);
                       advanceTimeoutRef.current = null;

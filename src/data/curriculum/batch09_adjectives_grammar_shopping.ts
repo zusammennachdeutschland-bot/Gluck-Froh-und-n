@@ -331,7 +331,6 @@ export const BATCH_09_SETS: RawBatchSet[] = [
       { id: 'b09_254_01', german: 'der', arabic: 'الـ (أداة تعريف للمذكر)', emoji: '🦁', exampleSentenceGerman: 'Der Löwe schläft unter dem Baum.', exampleSentenceArabic: 'الأسد نائم تحت الشجرة.' },
       { id: 'b09_254_02', german: 'die', arabic: 'الـ (أداة تعريف للمؤنث)', emoji: '🌸', exampleSentenceGerman: 'Die Blume duftet herrlich im Park.', exampleSentenceArabic: 'الزهرة تفوح برائحة زكية في الحديقة.' },
       { id: 'b09_254_03', german: 'das', arabic: 'الـ (أداة تعريف للمحايد)', emoji: '📖', exampleSentenceGerman: 'Das Buch liegt aufgeschlagen auf dem Tisch.', exampleSentenceArabic: 'الكتاب ممدود ومفتوح على الطاولة.' },
-      { id: 'b09_254_04', german: 'die (Plural)', arabic: 'الـ (أداة تعريف للجمع دائماً)', emoji: '📚', exampleSentenceGerman: 'Die Bücher stehen im Regal.', exampleSentenceArabic: 'الكتب موضوعة في الرف.' },
       { id: 'b09_254_05', german: 'ein (Maskulin)', arabic: 'واحد / نكرة للمذكر', emoji: '🐶', exampleSentenceGerman: 'Dort drüben bellt ein kleiner Hund.', exampleSentenceArabic: 'هناك ينبح كلب صغير (نكرة).' },
       { id: 'b09_254_06', german: 'eine (Feminin)', arabic: 'واحدة / نكرة للمؤنث', emoji: '🐱', exampleSentenceGerman: 'Im Garten klettert eine Katze.', exampleSentenceArabic: 'في الحديقة تتسلق قطة (نكرة).' },
       { id: 'b09_254_07', german: 'ein (Neutrum)', arabic: 'واحد / نكرة للمحايد', emoji: '🚗', exampleSentenceGerman: 'Auf der Straße fährt ein Auto.', exampleSentenceArabic: 'على الطريق تسير سيارة (نكرة).' },
@@ -443,7 +442,7 @@ export const BATCH_09_SETS: RawBatchSet[] = [
     description: 'كلمات الاتجاهات الأساسية: يميناً، يساراً، للأمام، للخلف، وللأعلى',
     emoji: '🧭',
     items: [
-      { id: 'b09_259_01', german: 'links', arabic: 'يساراً / إلى الشمال', emoji: '⬅️', exampleSentenceGerman: 'An der Ampel biegen wir links ab.', exampleSentenceArabic: 'عند إشارة المرور ننعطف يساراً.' },
+      { id: 'b09_259_01', german: 'links', arabic: 'يساراً', emoji: '⬅️', exampleSentenceGerman: 'An der Ampel biegen wir links ab.', exampleSentenceArabic: 'عند إشارة المرور ننعطف يساراً.' },
       { id: 'b09_259_02', german: 'rechts', arabic: 'يميناً / إلى اليمين', emoji: '➡️', exampleSentenceGerman: 'Die Schule liegt auf der rechten Seite.', exampleSentenceArabic: 'المدرسة تقع على الجانب الأيمن.' },
       { id: 'b09_259_03', german: 'geradeaus', arabic: 'إلى الأمام مباشرة', emoji: '⬆️', exampleSentenceGerman: 'Gehe einfach immer geradeaus weiter.', exampleSentenceArabic: 'سر للأمام مباشرة دون انعطاف.' },
       { id: 'b09_259_04', german: 'oben', arabic: 'في الأعلى / فوق', emoji: '🪜', exampleSentenceGerman: 'Ganz oben auf dem Schrank liegt die Kiste.', exampleSentenceArabic: 'في أعلى الخزانة تماماً يرقد الصندوق.' },
@@ -490,7 +489,7 @@ export const BATCH_09_SETS: RawBatchSet[] = [
     emoji: '💶',
     items: [
       { id: 'b09_261_01', german: 'das Geld', arabic: 'النقود / المال', article: 'das', plural: 'die Gelder', emoji: '💵', exampleSentenceGerman: 'Ich spare mein Geld für ein neues Buch.', exampleSentenceArabic: 'أنا أدخر نقودي لشراء كتاب جديد.' },
-      { id: 'b09_261_02', german: 'der Euro', arabic: 'اليورو', article: 'der', plural: 'die Euros', emoji: '💶', exampleSentenceGerman: 'Das Brötchen kostet genau einen Euro.', exampleSentenceArabic: 'رغيف الخبز الصغير يكلف يورو واحداً بالضبط.' },
+      { id: 'b09_261_02', german: 'der Euro', arabic: 'اليورو', article: 'der', plural: 'die Euro', emoji: '💶', exampleSentenceGerman: 'Das Brötchen kostet genau einen Euro.', exampleSentenceArabic: 'رغيف الخبز الصغير يكلف يورو واحداً بالضبط.' },
       { id: 'b09_261_03', german: 'der Cent', arabic: 'السنت (جزء اليورو)', article: 'der', plural: 'die Cents', emoji: '🪙', exampleSentenceGerman: 'Ich habe noch zwanzig Cent im Portemonnaie.', exampleSentenceArabic: 'لا يزال لدي عشرون سنتاً في حافظة نقودي.' },
       { id: 'b09_261_04', german: 'die Münze', arabic: 'العملة المعدنية', article: 'die', plural: 'die Münzen', emoji: '🪙', exampleSentenceGerman: 'Die goldene Münze klimpert in der Spardose.', exampleSentenceArabic: 'العملة المعدنية الذهبية ترن داخل الحصالة.' },
       { id: 'b09_261_05', german: 'der Geldschein', arabic: 'الورقة النقدية', article: 'der', plural: 'die Geldscheine', emoji: '💴', exampleSentenceGerman: 'Mama hat einen Fünf-Euro-Schein eingesteckt.', exampleSentenceArabic: 'أمي وضعت في جيبها ورقة نقدية فئة خمسة يورو.' },

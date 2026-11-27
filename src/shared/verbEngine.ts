@@ -1,8 +1,8 @@
-import type { LernstudioItem, LernstudioLevel, LernstudioSet } from '../types/lernstudio';
+import type { LernstudioItem, LernstudioLevel, LernstudioSet } from '../types/lernstudio.js';
 import type {
   HomeworkContentSource,
   HomeworkQuestionType
-} from './homeworkTypes';
+} from './homeworkTypes.js';
 import {
   ALL_VERBS,
   ALL_VERB_CLASSIFICATIONS,
@@ -17,7 +17,7 @@ import {
   type VerbLevel,
   type VerbPronounSlot,
   type VerbTopicTag
-} from './verbLibrary';
+} from './verbLibrary/index.js';
 
 export {
   ALL_VERBS,

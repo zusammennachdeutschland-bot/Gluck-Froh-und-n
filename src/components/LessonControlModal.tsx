@@ -530,6 +530,10 @@ export const LessonControlModal: React.FC = () => {
     || (safeLessonTitleLower ? groups.find(g => typeof g.name === 'string' && g.name.trim() && safeLessonTitleLower.includes(g.name.toLowerCase())) : undefined)
     || (safeCleanLessonTitleLower ? groups.find(g => typeof g.name === 'string' && g.name.trim() && g.name.toLowerCase().includes(safeCleanLessonTitleLower)) : undefined);
   const isPerLessonGroup = Boolean(
+    // P2-N6: a quick/trial lesson is always a single paid session, never part
+    // of a billing cycle — so it stays per-lesson (its report always shows
+    // payment collection, matching the isQuick rule in lessonUtils).
+    isQuick ||
     isGroupPerLesson(targetGroup) ||
     (!targetGroup && targetStudent && (targetStudent.paymentPlan === 'per_lesson' || targetStudent.bundleSize === 1)) ||
     (!targetGroup && !targetStudent && selectedLesson.totalSessionsInPackage === 1)
@@ -613,7 +617,11 @@ export const LessonControlModal: React.FC = () => {
   useEffect(() => {
     if (selectedLesson) {
       const isPaid = selectedLesson.paymentStatus === 'paid' || selectedLesson.report?.paymentStatus === 'paid';
-      setIsLessonPaid(isPaid);
+      // P1-N6: an offline (in-person) single lesson is paid on the spot, so
+      // it defaults to paid — unless a saved payment status exists, which
+      // always wins (e.g. Abdo previously marked this student unpaid).
+      const hasSavedPaymentStatus = Boolean(selectedLesson.paymentStatus || selectedLesson.report?.paymentStatus);
+      setIsLessonPaid(isPaid || (selectedLesson.type === 'offline' && !hasSavedPaymentStatus));
       const pricing = targetStudent ? getStudentCyclePricing(targetStudent, targetGroup) : null;
       const defaultAmt = selectedLesson.amountPaid || selectedLesson.amountDue || pricing?.amountDue || pricing?.pricePerSession || 200;
       setPaymentAmountInput(defaultAmt);
@@ -669,6 +677,14 @@ export const LessonControlModal: React.FC = () => {
       setStudentPayments(newMap);
     } else {
       const targetStId = selectedLesson.studentId || targetStudent?.id;
+      if (targetStId) {
+        // P1-N6: mirror the toggle into the studentPayments map so the save
+        // path can derive the single student's status from the map alone.
+        setStudentPayments((prev) => ({
+          ...prev,
+          [targetStId]: { status: markPaid ? 'paid' : 'pending', amount: markPaid ? amount : 0 }
+        }));
+      }
       if (markPaid) {
         updateLessonPaymentStatus(selectedLesson.id, 'paid', amount, targetAcc, targetStId);
       } else {
@@ -906,6 +922,21 @@ export const LessonControlModal: React.FC = () => {
 
     const calculatedAttendanceStatus = isSingleStudentAbsent ? 'absent' : (attendance || 'present');
 
+    // P1-N6: single-student source of truth — the studentPayments map (which
+    // already defaults offline lessons to 'paid' and mirrors the paid toggle).
+    // isLessonPaid is only a fallback when the map has no entry at all, so the
+    // top-level paymentStatus can never contradict studentPayments[student].
+    const singleStudentIdForPayment = selectedLesson.studentId || targetStudent?.id;
+    const singleMapPayment = singleStudentIdForPayment
+      ? studentPayments[singleStudentIdForPayment]
+      : undefined;
+    const singleEffectivePaid = singleMapPayment
+      ? singleMapPayment.status === 'paid'
+      : isLessonPaid;
+    const singleEffectiveAmount = singleMapPayment?.status === 'paid'
+      ? (singleMapPayment.amount || paymentAmountInput)
+      : paymentAmountInput;
+
     const reportData: LessonReport = {
       attendanceStatus: calculatedAttendanceStatus,
       studentAttendance: isQuick ? (Object.keys(studentAttendance).length > 0 ? studentAttendance : { [qId]: calculatedAttendanceStatus }) : finalStudentAttendance,
@@ -933,12 +964,12 @@ export const LessonControlModal: React.FC = () => {
         ? (selectedLesson.paymentStatus || 'pending')
         : (activeLessonStudents.length > 1)
           ? (activeLessonStudents.every(st => studentPayments[st.id]?.status === 'paid') ? 'paid' : (activeLessonStudents.some(st => studentPayments[st.id]?.status === 'paid') ? 'partial' : 'pending'))
-          : (isLessonPaid ? 'paid' : (selectedLesson.paymentStatus || 'pending')),
+          : (singleEffectivePaid ? 'paid' : (selectedLesson.paymentStatus || 'pending')),
       amountPaid: !shouldShowPaymentCollection
         ? (selectedLesson.amountPaid || 0)
         : (activeLessonStudents.length > 1)
           ? Object.values(studentPayments).reduce((sum, sp: any) => sum + (sp?.status === 'paid' ? (sp.amount || 0) : 0), 0)
-          : (isLessonPaid ? paymentAmountInput : (selectedLesson.amountPaid || 0)),
+          : (singleEffectivePaid ? singleEffectiveAmount : (selectedLesson.amountPaid || 0)),
       studentPayments: !shouldShowPaymentCollection
         ? undefined
         : (activeLessonStudents.length > 1)
@@ -959,12 +990,12 @@ export const LessonControlModal: React.FC = () => {
               });
               return finalMap;
             })()
-          : (Object.keys(studentPayments).length > 0 
+          : (Object.keys(studentPayments).length > 0
               ? studentPayments
-              : (isLessonPaid && selectedLesson.studentId ? {
+              : (singleEffectivePaid && selectedLesson.studentId ? {
                   [selectedLesson.studentId]: {
                     status: 'paid' as PaymentStatus,
-                    amount: paymentAmountInput
+                    amount: singleEffectiveAmount
                   }
                 } : undefined)),
       savedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -992,12 +1023,24 @@ export const LessonControlModal: React.FC = () => {
           const sp = reportData.studentPayments?.[st.id];
           if (sp?.status === 'paid' && sp.amount > 0) {
             updateLessonPaymentStatus(selectedLesson.id, 'paid', sp.amount, targetAcc, st.id);
+          } else if (sp?.status === 'pending') {
+            // P1-N5: un-marking a student paid must reach Finance too —
+            // otherwise the Finance record stays 'paid' while the report
+            // says 'pending'. Only un-pay when the lesson previously had
+            // this student paid, so untouched students are left alone.
+            const prevEntry: any =
+              selectedLesson.studentPayments?.[st.id] ||
+              selectedLesson.report?.studentPayments?.[st.id];
+            const prevStatus = prevEntry?.paymentStatus || prevEntry?.status;
+            if (prevStatus === 'paid') {
+              updateLessonPaymentStatus(selectedLesson.id, 'pending', 0, undefined, st.id);
+            }
           }
         });
       } else {
-        if (isLessonPaid && paymentAmountInput > 0) {
-          updateLessonPaymentStatus(selectedLesson.id, 'paid', paymentAmountInput, targetAcc, selectedLesson.studentId || targetStudent?.id);
-        } else if (!isLessonPaid && selectedLesson.paymentStatus === 'paid') {
+        if (singleEffectivePaid && singleEffectiveAmount > 0) {
+          updateLessonPaymentStatus(selectedLesson.id, 'paid', singleEffectiveAmount, targetAcc, selectedLesson.studentId || targetStudent?.id);
+        } else if (!singleEffectivePaid && selectedLesson.paymentStatus === 'paid') {
           updateLessonPaymentStatus(selectedLesson.id, 'pending', 0, undefined, selectedLesson.studentId || targetStudent?.id);
         }
       }
