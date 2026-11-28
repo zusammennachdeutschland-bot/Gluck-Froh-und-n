@@ -173,6 +173,22 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   });
   const initialPhone = resolvedContact.contact;
 
+  // The student's own WhatsApp contact (student number/username first).
+  // Used by the "Schüler" tab, by the phone shown for that tab, and by the
+  // "send to student" shortcut below the main button.
+  const resolveStudentContact = () => resolveStudentWhatsAppContact(targetStudent, {
+    quickParentPhone: recipientPhone || lesson?.quickParentPhone,
+    quickStudentPhone: lesson?.quickStudentPhone || targetStudent?.studentPhone,
+    targetRecipient: 'student'
+  });
+  const studentContact = resolveStudentContact();
+  // The student has a usable WhatsApp contact of their own, different from the
+  // parent's number. Compared in canonical wa.me form, so +20... and 01... count
+  // as the same number and don't produce a duplicate button.
+  const hasDistinctStudentContact = studentContact.type === 'student'
+    && Boolean(studentContact.contact)
+    && formatWhatsAppPhone(studentContact.contact) !== formatWhatsAppPhone(resolvedContact.contact);
+
   // Calculate Package Cycle information from the single authoritative numbering engine (full history)
   const fullLessonsForNumbering = getFullLessonsSnapshot();
   const cycleInfo = targetGroup ? getGroupCycleInfo(targetGroup, fullLessonsForNumbering) : null;
@@ -262,6 +278,17 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
   const [sendMode, setSendMode] = useState<'individual' | 'student' | 'group'>(
     isMultiStudentGroup ? 'group' : (groupWhatsAppLink ? 'group' : 'individual')
   );
+
+  // Keep the displayed (and editable) phone in step with the chosen recipient:
+  // the "Schüler" tab shows the student's own number, "ولي الأمر" the parent's.
+  // Group mode uses the WhatsApp group link, so the phone field is untouched there.
+  useEffect(() => {
+    if (sendMode === 'student') {
+      setPhone(studentContact.contact);
+    } else if (sendMode === 'individual') {
+      setPhone(resolvedContact.contact);
+    }
+  }, [sendMode, studentContact.contact, resolvedContact.contact]);
 
   const [selectedArrivalTime, setSelectedArrivalTime] = useState('15');
   const [copied, setCopied] = useState(false);
@@ -486,8 +513,11 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     }
 
     if (sendMode === 'student') {
-      const resolvedSt = resolveStudentWhatsAppContact(targetStudent, { quickStudentPhone: targetStudent?.studentPhone });
-      if (!resolvedSt.hasContact) {
+      // NOTE: targetRecipient 'student' is essential here — without it the
+      // resolver prefers the (mandatory) parent phone and the student tab
+      // would send to the parent instead of the student.
+      const resolvedSt = resolveStudentContact();
+      if (!resolvedSt.hasContact || resolvedSt.type !== 'student') {
         alert(_t('رقم تليفون الطالب غير مسجل.', 'Student phone number is not registered.', 'Telefonnummer des Schülers ist nicht hinterlegt.'));
         return;
       }
@@ -531,6 +561,26 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
     } catch (e) {
       // ignore
     }
+  };
+
+  // Send the same message to the student's own number (shortcut shown under
+  // the main button in parent mode; in student mode the main button already
+  // sends to the student). Same Zoom-link gate as the main send.
+  const handleSendToStudent = () => {
+    if (isOnline && !resolvedZoomLink.trim()) {
+      alert(_t('برجاء إضافة رابط الزووم أولاً قبل إرسال التذكير.', 'Please add the Zoom link before sending the reminder.', 'Bitte fügen Sie zuerst den Zoom-Link hinzu.'));
+      return;
+    }
+    const resolvedSt = resolveStudentContact();
+    if (!resolvedSt.hasContact || resolvedSt.type !== 'student') {
+      alert(_t('رقم تليفون الطالب غير مسجل.', 'Student phone number is not registered.', 'Telefonnummer des Schülers ist nicht hinterlegt.'));
+      return;
+    }
+    try {
+      navigator.clipboard.writeText(activeMessage);
+    } catch (e) {}
+    const url = buildWhatsAppUrl(resolvedSt.contact, activeMessage);
+    window.open(url, '_blank');
   };
 
   const handleSendToFirstParent = (studentToTarget = firstStudent) => {
@@ -628,6 +678,11 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                 <>
                   <Users className="w-3.5 h-3.5 text-primary" />
                   <span>{_t('الجروب:', 'Group:', 'Gruppe:')}</span>
+                </>
+              ) : sendMode === 'student' ? (
+                <>
+                  <Phone className="w-3.5 h-3.5 text-primary" />
+                  <span>{_t('الطالب:', 'Student:', 'Schüler:')}</span>
                 </>
               ) : (
                 <>
@@ -978,7 +1033,9 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                   ? ((whatsAppGroupLinkInput.trim() || groupWhatsAppLink)
                       ? _t(`إرسال لجروب الواتساب (${targetGroup?.name || 'الجروب'})`, `Send to WhatsApp Group (${targetGroup?.name || 'Group'})`, `An WhatsApp-Gruppe senden (${targetGroup?.name || 'Gruppe'})`)
                       : _t(`فتح واتساب (${targetGroup?.name || 'الجروب'})`, `Open WhatsApp (${targetGroup?.name || 'Group'})`, `WhatsApp öffnen (${targetGroup?.name || 'Gruppe'})`))
-                  : _t(`إرسال عبر واتساب`, `Send via WhatsApp`, `Über WhatsApp senden`)}
+                  : sendMode === 'student'
+                    ? _t(`إرسال للطالب عبر واتساب`, `Send to Student via WhatsApp`, `An Schüler per WhatsApp senden`)
+                    : _t(`إرسال عبر واتساب`, `Send via WhatsApp`, `Über WhatsApp senden`)}
               </span>
             </button>
 
@@ -1012,6 +1069,21 @@ export const LessonReminderModal: React.FC<LessonReminderModalProps> = ({
                 className="text-[11px] font-bold text-text-muted hover:text-primary transition-colors cursor-pointer inline-flex items-center gap-1 truncate max-w-full"
               >
                 <span className="truncate">{_t(`أو إرسال فردي لولي أمر (${firstStudent.name})`, `Or send individually to parent of (${firstStudent.name})`, `Oder einzeln an Eltern von (${firstStudent.name}) senden`)}</span>
+              </button>
+            </div>
+          )}
+
+          {/* Secondary send-to-student option (parent mode only: in student mode
+              the main button already sends to the student). Shown only when the
+              student has their own WhatsApp contact, different from the parent's. */}
+          {!isMultiStudentGroup && sendMode === 'individual' && targetStudent && hasDistinctStudentContact && (
+            <div className="text-center pt-0.5">
+              <button
+                type="button"
+                onClick={handleSendToStudent}
+                className="text-[11px] font-bold text-text-muted hover:text-primary transition-colors cursor-pointer inline-flex items-center gap-1 truncate max-w-full"
+              >
+                <span className="truncate">{_t(`أو إرسال للطالب (${targetStudent.name}) عبر واتساب`, `Or send to the student (${targetStudent.name}) via WhatsApp`, `Oder an den Schüler (${targetStudent.name}) per WhatsApp senden`)}</span>
               </button>
             </div>
           )}
