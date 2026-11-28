@@ -48,6 +48,17 @@ import { LernstudioHomeworkModal } from './LernstudioHomeworkModal';
 import { GameEffectsProvider } from './effects/GameEffectsOverlay';
 import { getLernstudioTranslations, getLocalizedSetTitle, getLocalizedSetTopic, getLocalizedGrade, getLocalizedSetDescription, PROGRAM_GRADES, matchesGradeFilter } from '../../utils/lernstudioTranslations';
 import { DEFAULT_LERNSTUDIO_SETS } from '../../data/defaultLernstudioSets';
+import {
+  SERIES_LIST,
+  SERIES_META,
+  GRADE_FOLDERS,
+  MINE_FOLDER_ID,
+  getSetSeriesKey,
+  getSetEdition,
+  matchesGradeFolder,
+  seriesExpectedInGrade,
+  stagesForBookInGrade
+} from '../seriesMeta';
 
 const BUILTIN_SET_IDS = new Set(DEFAULT_LERNSTUDIO_SETS.map((s) => s.id));
 
@@ -56,7 +67,6 @@ export function isBuiltinLernstudioSet(set: Partial<LernstudioSet> | null | unde
   return set.id.startsWith('curric_') || set.id.startsWith('set_def_') || BUILTIN_SET_IDS.has(set.id);
 }
 
-export type SetSourceFilter = 'all' | 'custom' | 'builtin';
 import { CHILDREN_LEVEL_CATEGORIES } from '../../data/childrenTopicsPreset';
 import { useApp } from '../../context/AppContext';
 import { auth } from '../firebaseCloudSync';
@@ -116,6 +126,8 @@ import {
   Layers,
   Award,
   ChevronRight,
+  ChevronLeft,
+  Folder,
   BookOpen,
   Eye,
   Share2,
@@ -491,7 +503,14 @@ export const LernstudioView: React.FC<Props> = ({
 
   // Filters (Vocabulary Sets tab excludes vgrp_* verb groups so the two libraries stay clearly separated)
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedSourceFilter, setSelectedSourceFilter] = useState<SetSourceFilter>('all');
+  // Folder browsing (replaces the old 3 source tabs): by book or by grade.
+  // null = folder overview; a selected folder scopes the set list below.
+  // Search stays global: while a search term is present, folder scope is ignored.
+  const [folderViewMode, setFolderViewMode] = useState<'book' | 'grade'>('book');
+  const [selectedSeriesFolder, setSelectedSeriesFolder] = useState<string | null>(null);
+  const [selectedStageFolder, setSelectedStageFolder] = useState<string | null>(null);
+  const [selectedGradeFolder, setSelectedGradeFolder] = useState<string | null>(null);
+  const [selectedGradeBookFolder, setSelectedGradeBookFolder] = useState<string | null>(null);
   const [selectedSetKindFilter, setSelectedSetKindFilter] = useState<'all' | LernstudioSetKind>('all');
   const [selectedTeacherFilter, setSelectedTeacherFilter] = useState<string>('all');
   const [selectedGradeFilter, setSelectedGradeFilter] = useState<string>('all');
@@ -516,18 +535,13 @@ export const LernstudioView: React.FC<Props> = ({
     [teacherName, activeAuthUid]
   );
 
-  // Dynamic counts for custom created sets vs ready-made built-in curriculum sets
-  const { customSetsCount, builtinSetsCount } = useMemo(() => {
+  // Dynamic count for custom created sets (shown on the "مجموعاتي" folder)
+  const customSetsCount = useMemo(() => {
     let custom = 0;
-    let builtin = 0;
     vocabSets.forEach((s) => {
-      if (isBuiltinLernstudioSet(s)) {
-        builtin++;
-      } else {
-        custom++;
-      }
+      if (!isBuiltinLernstudioSet(s)) custom++;
     });
-    return { customSetsCount: custom, builtinSetsCount: builtin };
+    return custom;
   }, [vocabSets]);
 
   // Dynamic Creator Teachers from custom/shared sets
@@ -557,6 +571,23 @@ export const LernstudioView: React.FC<Props> = ({
       .sort((a, b) => a.cat.localeCompare(b.cat));
   }, [vocabSets]);
 
+  // Folder counts (sets per series, per grade folder, per series+stage)
+  const folderCounts = useMemo(() => {
+    const bySeries = new Map<string, number>();
+    const byGrade = new Map<string, number>();
+    const byStage = new Map<string, number>();
+    vocabSets.forEach((s) => {
+      const key = getSetSeriesKey(s);
+      bySeries.set(key, (bySeries.get(key) || 0) + 1);
+      const ed = getSetEdition(s);
+      if (ed) byStage.set(`${key}:${ed}`, (byStage.get(`${key}:${ed}`) || 0) + 1);
+    });
+    GRADE_FOLDERS.forEach((g) => {
+      byGrade.set(g.id, vocabSets.filter((s) => matchesGradeFolder(s, g.id)).length);
+    });
+    return { bySeries, byGrade, byStage };
+  }, [vocabSets]);
+
   // Filtered Sets (with Deduplication Protection)
   const filteredSets = useMemo(() => {
     const seenIds = new Set<string>();
@@ -580,13 +611,30 @@ export const LernstudioView: React.FC<Props> = ({
         return false;
       }
 
-      // Filter by Source (All / My Custom Sets / Built-in Ready Curriculum)
-      const matchSource =
-        selectedSourceFilter === 'all'
-          ? true
-          : selectedSourceFilter === 'custom'
-          ? !isBuiltin
-          : isBuiltin;
+      // Folder scope (book mode / grade mode). Search is global: while a
+      // search term is present the folder scope is ignored.
+      const q = searchTerm.trim().toLowerCase();
+      const searching = q.length > 0;
+      let matchFolder = true;
+      if (!searching) {
+        if (folderViewMode === 'book') {
+          if (selectedSeriesFolder) {
+            const key = getSetSeriesKey(set);
+            matchFolder = key === selectedSeriesFolder;
+            if (matchFolder && selectedStageFolder) {
+              matchFolder = getSetEdition(set) === selectedStageFolder;
+            }
+          }
+        } else if (selectedGradeFolder) {
+          matchFolder = matchesGradeFolder(set, selectedGradeFolder);
+          if (matchFolder && selectedGradeBookFolder) {
+            matchFolder = getSetSeriesKey(set) === selectedGradeBookFolder;
+            if (matchFolder && selectedStageFolder) {
+              matchFolder = getSetEdition(set) === selectedStageFolder;
+            }
+          }
+        }
+      }
 
       // Filter by Creator Teacher Name
       const matchTeacher =
@@ -599,7 +647,6 @@ export const LernstudioView: React.FC<Props> = ({
       const matchCategory = selectedCategoryFilter === 'all' || set.topic === selectedCategoryFilter;
       const matchGroup = selectedGroupFilter === 'all' || set.assignedGroupId === selectedGroupFilter;
 
-      const q = searchTerm.trim().toLowerCase();
       const matchQuery =
         !q ||
         set.title.toLowerCase().includes(q) ||
@@ -609,14 +656,14 @@ export const LernstudioView: React.FC<Props> = ({
         (set.grammarContent?.lessonTitleAr && set.grammarContent.lessonTitleAr.toLowerCase().includes(q)) ||
         (set.grammarContent?.lessonTitleDe && set.grammarContent.lessonTitleDe.toLowerCase().includes(q));
 
-      if (matchSource && matchTeacher && matchGrade && matchKind && matchCategory && matchGroup && matchQuery) {
+      if (matchFolder && matchTeacher && matchGrade && matchKind && matchCategory && matchGroup && matchQuery) {
         seenIds.add(set.id);
         if (cleanTitleKey) seenTitles.add(cleanTitleKey);
         return true;
       }
       return false;
     });
-  }, [vocabSets, selectedSourceFilter, selectedSetKindFilter, selectedTeacherFilter, selectedGradeFilter, selectedCategoryFilter, selectedGroupFilter, searchTerm, getEffectiveSetTeacherName]);
+  }, [vocabSets, folderViewMode, selectedSeriesFolder, selectedStageFolder, selectedGradeFolder, selectedGradeBookFolder, selectedSetKindFilter, selectedTeacherFilter, selectedGradeFilter, selectedCategoryFilter, selectedGroupFilter, searchTerm, getEffectiveSetTeacherName]);
 
   // Pagination State & Logic
   const ITEMS_PER_PAGE = 12;
@@ -624,7 +671,7 @@ export const LernstudioView: React.FC<Props> = ({
 
   React.useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedSourceFilter, selectedSetKindFilter, selectedTeacherFilter, selectedGradeFilter, selectedCategoryFilter, selectedGroupFilter]);
+  }, [searchTerm, folderViewMode, selectedSeriesFolder, selectedStageFolder, selectedGradeFolder, selectedGradeBookFolder, selectedSetKindFilter, selectedTeacherFilter, selectedGradeFilter, selectedCategoryFilter, selectedGroupFilter]);
 
   const totalPages = Math.ceil(filteredSets.length / ITEMS_PER_PAGE) || 1;
   const paginatedSets = useMemo(() => {
@@ -1506,49 +1553,317 @@ export const LernstudioView: React.FC<Props> = ({
         {/* Source Filter Segment Switcher Tabs (Vocab Section Only) */}
         {hubSection === 'vocab' && (
           <>
-            <div className="grid grid-cols-3 gap-1 bg-surface-hover p-1 rounded-lg text-[10.5px] sm:text-xs font-bold border border-surface-border">
+            {/* Folder Browser: by book or by grade (replaces the old source tabs) */}
+            <div className="grid grid-cols-2 gap-1 bg-surface-hover p-1 rounded-lg text-[11px] sm:text-xs font-bold border border-surface-border">
               <button
                 type="button"
-                onClick={() => setSelectedSourceFilter('all')}
-                className={`py-1 sm:py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer truncate ${
-                  selectedSourceFilter === 'all'
+                onClick={() => {
+                  setFolderViewMode('book');
+                  setSelectedSeriesFolder(null);
+                  setSelectedStageFolder(null);
+                  setSelectedGradeFolder(null);
+                  setSelectedGradeBookFolder(null);
+                }}
+                className={`py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer truncate ${
+                  folderViewMode === 'book'
                     ? 'bg-surface text-primary shadow-xs border border-surface-border'
                     : 'text-text-muted hover:text-text-main hover:bg-surface/50'
                 }`}
               >
                 <BookOpen className="w-3.5 h-3.5 shrink-0" />
-                <span>{language === 'ar' ? 'الكل' : language === 'de' ? 'Alle Sets' : 'All Sets'}</span>
-                <span className="opacity-75 tabular-nums">({vocabSets.length})</span>
+                <span>{language === 'ar' ? 'بالكتاب' : language === 'de' ? 'Nach Buch' : 'By Book'}</span>
               </button>
-
               <button
                 type="button"
-                onClick={() => setSelectedSourceFilter('custom')}
-                className={`py-1 sm:py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer truncate ${
-                  selectedSourceFilter === 'custom'
-                    ? 'bg-surface text-primary shadow-xs border border-surface-border'
-                    : 'text-text-muted hover:text-text-main hover:bg-surface/50'
-                }`}
-              >
-                <Layers className="w-3.5 h-3.5 shrink-0" />
-                <span>{language === 'ar' ? 'مجموعاتي الخاصة' : language === 'de' ? 'Meine Sets' : 'Custom'}</span>
-                <span className="opacity-75 tabular-nums">({customSetsCount})</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSelectedSourceFilter('builtin')}
-                className={`py-1 sm:py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer truncate ${
-                  selectedSourceFilter === 'builtin'
+                onClick={() => {
+                  setFolderViewMode('grade');
+                  setSelectedSeriesFolder(null);
+                  setSelectedStageFolder(null);
+                  setSelectedGradeFolder(null);
+                  setSelectedGradeBookFolder(null);
+                }}
+                className={`py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer truncate ${
+                  folderViewMode === 'grade'
                     ? 'bg-surface text-primary shadow-xs border border-surface-border'
                     : 'text-text-muted hover:text-text-main hover:bg-surface/50'
                 }`}
               >
                 <GraduationCap className="w-3.5 h-3.5 shrink-0" />
-                <span>{language === 'ar' ? 'المنهاج الجاهز' : language === 'de' ? 'Lehrplan' : 'Curriculum'}</span>
-                <span className="opacity-75 tabular-nums">({builtinSetsCount})</span>
+                <span>{language === 'ar' ? 'بالجريد' : language === 'de' ? 'Nach Klasse' : 'By Grade'}</span>
               </button>
             </div>
+
+            {searchTerm.trim() ? (
+              <div className="text-[11px] font-bold text-text-muted px-0.5">
+                {language === 'ar' ? '🔍 البحث يشمل كل المجلدات' : language === 'de' ? '🔍 Die Suche umfasst alle Ordner' : '🔍 Search covers all folders'}
+              </div>
+            ) : folderViewMode === 'book' ? (
+              !selectedSeriesFolder ? (
+                /* Book folders overview: one folder per series + "مجموعاتي" */
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {SERIES_LIST.map((meta) => {
+                    const count = folderCounts.bySeries.get(meta.id) || 0;
+                    return (
+                      <button
+                        key={meta.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedSeriesFolder(meta.id);
+                          setSelectedStageFolder(null);
+                        }}
+                        className="p-2.5 bg-surface border border-surface-border rounded-xl text-start cursor-pointer hover:border-primary/60 transition-all space-y-1"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <Folder className="w-4 h-4 shrink-0" style={{ color: meta.color }} />
+                          <span className="text-xs font-black text-text-main truncate">
+                            {language === 'ar' ? meta.nameAr : meta.nameDe}
+                          </span>
+                        </span>
+                        <span className="block text-[10.5px] text-text-muted truncate">
+                          {meta.publisher} · {meta.ageGroup}
+                        </span>
+                        <span className="block text-[11px] font-bold text-text-main tabular-nums">
+                          {count === 0
+                            ? (language === 'ar' ? 'لسه متعملش' : language === 'de' ? 'Noch keine Sets' : 'No sets yet')
+                            : language === 'ar'
+                              ? `${count} سيت`
+                              : `${count} Sets`}
+                          {meta.stages.length > 0 && (
+                            <span className="text-text-muted font-medium">
+                              {' · '}
+                              {language === 'ar' ? `${meta.stages.length} مراحل` : `${meta.stages.length} Stufen`}
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedSeriesFolder(MINE_FOLDER_ID);
+                      setSelectedStageFolder(null);
+                    }}
+                    className="p-2.5 bg-surface border border-surface-border rounded-xl text-start cursor-pointer hover:border-primary/60 transition-all space-y-1"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Folder className="w-4 h-4 shrink-0 text-primary" />
+                      <span className="text-xs font-black text-text-main truncate">
+                        {language === 'ar' ? 'مجموعاتي' : language === 'de' ? 'Meine Sets' : 'My Sets'}
+                      </span>
+                    </span>
+                    <span className="block text-[10.5px] text-text-muted truncate">
+                      {language === 'ar' ? 'المجموعات التي أنشأتها' : language === 'de' ? 'Von mir erstellte Sets' : 'Sets I created'}
+                    </span>
+                    <span className="block text-[11px] font-bold text-text-main tabular-nums">
+                      {customSetsCount === 0
+                        ? (language === 'ar' ? 'لسه متعملش' : language === 'de' ? 'Noch keine Sets' : 'No sets yet')
+                        : language === 'ar'
+                          ? `${customSetsCount} سيت`
+                          : `${customSetsCount} Sets`}
+                    </span>
+                  </button>
+                </div>
+              ) : (
+                /* Inside a book folder: back + stage chips + sets below */
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedSeriesFolder(null);
+                        setSelectedStageFolder(null);
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface border border-surface-border text-[11px] font-bold text-text-main cursor-pointer hover:bg-surface-hover"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                      <span>{language === 'ar' ? 'كل المجلدات' : language === 'de' ? 'Alle Ordner' : 'All folders'}</span>
+                    </button>
+                    <span className="text-xs font-black text-text-main">
+                      {selectedSeriesFolder === MINE_FOLDER_ID
+                        ? (language === 'ar' ? 'مجموعاتي' : language === 'de' ? 'Meine Sets' : 'My Sets')
+                        : (language === 'ar' ? SERIES_META[selectedSeriesFolder as keyof typeof SERIES_META]?.nameAr : SERIES_META[selectedSeriesFolder as keyof typeof SERIES_META]?.nameDe) || selectedSeriesFolder}
+                    </span>
+                  </div>
+                  {selectedSeriesFolder !== MINE_FOLDER_ID &&
+                    SERIES_META[selectedSeriesFolder as keyof typeof SERIES_META]?.stages.length > 0 && (
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedStageFolder(null)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 cursor-pointer transition-all border ${
+                          !selectedStageFolder
+                            ? 'bg-primary text-white border-primary shadow-2xs'
+                            : 'bg-surface hover:bg-surface-hover text-text-main border-surface-border'
+                        }`}
+                      >
+                        {language === 'ar' ? 'كل المراحل' : language === 'de' ? 'Alle Stufen' : 'All stages'}
+                      </button>
+                      {SERIES_META[selectedSeriesFolder as keyof typeof SERIES_META].stages.map((stage) => {
+                        const active = selectedStageFolder === stage.id;
+                        const count = folderCounts.byStage.get(`${selectedSeriesFolder}:${stage.id}`) || 0;
+                        return (
+                          <button
+                            key={stage.id}
+                            type="button"
+                            onClick={() => setSelectedStageFolder(active ? null : stage.id)}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 cursor-pointer transition-all border flex items-center gap-1 ${
+                              active
+                                ? 'bg-primary text-white border-primary shadow-2xs'
+                                : 'bg-surface hover:bg-surface-hover text-text-main border-surface-border'
+                            }`}
+                          >
+                            <span>{language === 'ar' ? stage.labelAr : stage.labelDe}</span>
+                            <span className="opacity-75 tabular-nums">({count})</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            ) : !selectedGradeFolder ? (
+              /* Grade folders overview */
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {GRADE_FOLDERS.map((g) => {
+                  const count = folderCounts.byGrade.get(g.id) || 0;
+                  return (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedGradeFolder(g.id);
+                        setSelectedGradeBookFolder(null);
+                        setSelectedStageFolder(null);
+                      }}
+                      className="p-2.5 bg-surface border border-surface-border rounded-xl text-start cursor-pointer hover:border-primary/60 transition-all space-y-1"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <GraduationCap className="w-4 h-4 shrink-0 text-primary" />
+                        <span className="text-xs font-black text-text-main truncate">
+                          {language === 'ar' ? g.labelAr : g.labelDe}
+                        </span>
+                      </span>
+                      <span className="block text-[11px] font-bold text-text-main tabular-nums">
+                        {count === 0
+                          ? (language === 'ar' ? 'لسه متعملش' : language === 'de' ? 'Noch keine Sets' : 'No sets yet')
+                          : language === 'ar'
+                            ? `${count} سيت`
+                            : `${count} Sets`}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              /* Inside a grade folder: back + books of that grade + stage chips */
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedGradeFolder(null);
+                      setSelectedGradeBookFolder(null);
+                      setSelectedStageFolder(null);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface border border-surface-border text-[11px] font-bold text-text-main cursor-pointer hover:bg-surface-hover"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span>{language === 'ar' ? 'كل الجريدات' : language === 'de' ? 'Alle Klassen' : 'All grades'}</span>
+                  </button>
+                  <span className="text-xs font-black text-text-main">
+                    {language === 'ar'
+                      ? GRADE_FOLDERS.find((g) => g.id === selectedGradeFolder)?.labelAr
+                      : GRADE_FOLDERS.find((g) => g.id === selectedGradeFolder)?.labelDe}
+                  </span>
+                </div>
+                {seriesExpectedInGrade(selectedGradeFolder).length > 0 && !selectedGradeBookFolder && (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {seriesExpectedInGrade(selectedGradeFolder).map((seriesId) => {
+                      const meta = SERIES_META[seriesId as keyof typeof SERIES_META];
+                      if (!meta) return null;
+                      const count = vocabSets.filter(
+                        (s) => matchesGradeFolder(s, selectedGradeFolder) && getSetSeriesKey(s) === seriesId
+                      ).length;
+                      return (
+                        <button
+                          key={seriesId}
+                          type="button"
+                          onClick={() => {
+                            setSelectedGradeBookFolder(seriesId);
+                            setSelectedStageFolder(null);
+                          }}
+                          className="p-2.5 bg-surface border border-surface-border rounded-xl text-start cursor-pointer hover:border-primary/60 transition-all space-y-1"
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <Folder className="w-4 h-4 shrink-0" style={{ color: meta.color }} />
+                            <span className="text-xs font-black text-text-main truncate">
+                              {language === 'ar' ? meta.nameAr : meta.nameDe}
+                            </span>
+                          </span>
+                          <span className="block text-[11px] font-bold text-text-main tabular-nums">
+                            {count === 0
+                              ? (language === 'ar' ? 'لسه متعملش' : language === 'de' ? 'Noch keine Sets' : 'No sets yet')
+                              : language === 'ar'
+                                ? `${count} سيت`
+                                : `${count} Sets`}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {selectedGradeBookFolder && (
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedGradeBookFolder(null);
+                        setSelectedStageFolder(null);
+                      }}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 cursor-pointer transition-all border bg-surface hover:bg-surface-hover text-text-main border-surface-border inline-flex items-center gap-1"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                      <span>
+                        {language === 'ar'
+                          ? SERIES_META[selectedGradeBookFolder as keyof typeof SERIES_META]?.nameAr
+                          : SERIES_META[selectedGradeBookFolder as keyof typeof SERIES_META]?.nameDe}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedStageFolder(null)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 cursor-pointer transition-all border ${
+                        !selectedStageFolder
+                          ? 'bg-primary text-white border-primary shadow-2xs'
+                          : 'bg-surface hover:bg-surface-hover text-text-main border-surface-border'
+                      }`}
+                    >
+                      {language === 'ar' ? 'كل المراحل' : language === 'de' ? 'Alle Stufen' : 'All stages'}
+                    </button>
+                    {stagesForBookInGrade(selectedGradeBookFolder, selectedGradeFolder).map((stage) => {
+                      const active = selectedStageFolder === stage.id;
+                      const count = folderCounts.byStage.get(`${selectedGradeBookFolder}:${stage.id}`) || 0;
+                      return (
+                        <button
+                          key={stage.id}
+                          type="button"
+                          onClick={() => setSelectedStageFolder(active ? null : stage.id)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 cursor-pointer transition-all border flex items-center gap-1 ${
+                            active
+                              ? 'bg-primary text-white border-primary shadow-2xs'
+                              : 'bg-surface hover:bg-surface-hover text-text-main border-surface-border'
+                          }`}
+                        >
+                          <span>{language === 'ar' ? stage.labelAr : stage.labelDe}</span>
+                          <span className="opacity-75 tabular-nums">({count})</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Compact Filters Bar */}
             <div className="p-3 bg-surface border border-surface-border rounded-xl space-y-2 sm:space-y-0 sm:flex sm:items-center sm:gap-2.5">
@@ -1579,24 +1894,8 @@ export const LernstudioView: React.FC<Props> = ({
                 </select>
 
                 <select
-                  value={selectedSourceFilter}
-                  onChange={(e) => setSelectedSourceFilter(e.target.value as SetSourceFilter)}
-                  className="w-full sm:w-auto px-2.5 py-1.5 bg-surface-hover/70 border border-surface-border rounded-lg text-xs font-medium text-text-main focus:outline-none focus:ring-1 focus:ring-primary min-w-0 truncate cursor-pointer"
-                >
-                  <option value="all">🏷️ {language === 'ar' ? 'المصدر: الكل' : language === 'de' ? 'Quelle: Alle' : 'Source: All'} ({vocabSets.length})</option>
-                  <option value="custom">✍️ {language === 'ar' ? 'مجموعات المعلمين' : language === 'de' ? 'Lehrer-Sets' : 'Teacher Sets'} ({customSetsCount})</option>
-                  <option value="builtin">🇩🇪 {language === 'ar' ? 'المناهج الجاهزة' : language === 'de' ? 'Lehrplan-Sets' : 'Curriculum Sets'} ({builtinSetsCount})</option>
-                </select>
-
-                <select
                   value={selectedTeacherFilter}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setSelectedTeacherFilter(val);
-                    if (val !== 'all' && selectedSourceFilter === 'builtin') {
-                      setSelectedSourceFilter('all');
-                    }
-                  }}
+                  onChange={(e) => setSelectedTeacherFilter(e.target.value)}
                   className="w-full sm:w-auto px-2.5 py-1.5 bg-surface-hover/70 border border-surface-border rounded-lg text-xs font-medium text-text-main focus:outline-none focus:ring-1 focus:ring-primary min-w-0 truncate cursor-pointer"
                 >
                   <option value="all">
@@ -1676,9 +1975,6 @@ export const LernstudioView: React.FC<Props> = ({
                       type="button"
                       onClick={() => {
                         setSelectedTeacherFilter(active ? 'all' : tItem.name);
-                        if (!active && selectedSourceFilter === 'builtin') {
-                          setSelectedSourceFilter('all');
-                        }
                       }}
                       className={`px-2.5 py-1 rounded-lg text-[11px] font-bold shrink-0 cursor-pointer transition-all border flex items-center gap-1 ${
                         active
@@ -1731,10 +2027,13 @@ export const LernstudioView: React.FC<Props> = ({
                       : (language === 'ar' ? 'مزامنة P2P للأجهزة' : 'P2P Sync Devices')}
                   </span>
                 </button>
-                {(selectedSourceFilter !== 'all' || selectedSetKindFilter !== 'all' || selectedTeacherFilter !== 'all' || selectedGradeFilter !== 'all' || selectedCategoryFilter !== 'all' || searchTerm || selectedGroupFilter !== 'all') && (
+                {(selectedSeriesFolder || selectedStageFolder || selectedGradeFolder || selectedGradeBookFolder || selectedSetKindFilter !== 'all' || selectedTeacherFilter !== 'all' || selectedGradeFilter !== 'all' || selectedCategoryFilter !== 'all' || searchTerm || selectedGroupFilter !== 'all') && (
                   <button
                     onClick={() => {
-                      setSelectedSourceFilter('all');
+                      setSelectedSeriesFolder(null);
+                      setSelectedStageFolder(null);
+                      setSelectedGradeFolder(null);
+                      setSelectedGradeBookFolder(null);
                       setSelectedSetKindFilter('all');
                       setSelectedTeacherFilter('all');
                       setSelectedGradeFilter('all');
@@ -1756,8 +2055,16 @@ export const LernstudioView: React.FC<Props> = ({
         {hubSection === 'vocab' && (filteredSets.length === 0 ? (
           <div className="p-12 text-center bg-surface/80 rounded-3xl border border-surface-border space-y-4">
             <Layers className="w-12 h-12 text-primary mx-auto opacity-50" />
-            <h3 className="text-base font-black text-text-main">{t.noSetsFound}</h3>
-            <p className="text-xs text-text-muted">{t.noSetsDesc}</p>
+            <h3 className="text-base font-black text-text-main">
+              {!searchTerm.trim() && (selectedSeriesFolder || selectedGradeFolder)
+                ? (language === 'ar' ? 'لسه متعملش' : language === 'de' ? 'Noch keine Sets in diesem Ordner' : 'No sets in this folder yet')
+                : t.noSetsFound}
+            </h3>
+            <p className="text-xs text-text-muted">
+              {!searchTerm.trim() && (selectedSeriesFolder || selectedGradeFolder)
+                ? (language === 'ar' ? 'المجلد ده لسه فاضي — اعمل أول سيت ليه من زرار الاستيراد بالذكاء الاصطناعي.' : language === 'de' ? 'Dieser Ordner ist noch leer — erstelle das erste Set über den KI-Import.' : 'This folder is still empty — create its first set with the AI import.')
+                : t.noSetsDesc}
+            </p>
             <button
               type="button"
               onClick={() => {
@@ -2041,15 +2348,13 @@ export const LernstudioView: React.FC<Props> = ({
             {/* Level Stats & Filter Bar */}
             <div className="p-3 bg-surface border border-surface-border rounded-xl space-y-2.5">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-xs font-bold">
-                {(['all', 'A1', 'A2', 'B1'] as const).map((lvl) => {
+                {(['all', 'A1', 'A2'] as const).map((lvl) => {
                   const count =
                     lvl === 'all'
                       ? verbLibraryCounts.total
                       : lvl === 'A1'
                       ? verbLibraryCounts.a1
-                      : lvl === 'A2'
-                      ? verbLibraryCounts.a2
-                      : verbLibraryCounts.b1;
+                      : verbLibraryCounts.a2;
                   return (
                     <button
                       key={lvl}
@@ -2862,10 +3167,9 @@ export const LernstudioView: React.FC<Props> = ({
                     onChange={(e) => setEditorVerbLevel(e.target.value as 'all' | VerbLevel)}
                     className="px-2.5 py-1.5 rounded-lg bg-surface-hover border border-surface-border text-xs font-bold"
                   >
-                    <option value="all">A1-B1</option>
+                    <option value="all">A1-A2</option>
                     <option value="A1">A1</option>
                     <option value="A2">A2</option>
-                    <option value="B1">B1</option>
                   </select>
                   <span className="text-xs font-black text-primary tabular-nums">
                     {language === 'ar' ? `${verbGroupEditor.verbIds.length} فعل مختار` : `${verbGroupEditor.verbIds.length} selected`}

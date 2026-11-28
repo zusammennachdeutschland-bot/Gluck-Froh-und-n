@@ -572,6 +572,9 @@ export async function extractLernstudioSetFromImages(
       title: parsed.data.title || context.title || 'مجموعة مستخرجة من الصور',
       topic: parsed.data.topic || context.topic || parsed.data.title || context.title || 'ألماني',
       level: parsed.data.level || context.level || 'A1',
+      // Book/stage inferred by the model (or the validator default 'general').
+      series: parsed.data.series || 'general',
+      edition: parsed.data.edition,
       difficulty: parsed.data.difficulty || context.difficulty || 'medium',
       // An explicit teacher choice wins; auto-detect falls back to what
       // the model/validator resolved from the photos.

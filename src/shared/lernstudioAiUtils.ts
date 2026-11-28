@@ -24,6 +24,7 @@ import {
   normalizeGrammarExercise,
   stripHeavyGrammarMediaForSync
 } from './grammarEngine';
+import { sanitizeSeriesEdition } from './seriesMeta';
 
 export interface PromptGenConfig {
   topic: string;
@@ -46,13 +47,14 @@ export function generateUniversalSmartLernstudioPrompt(teacherName?: string): st
 مهمتك الذكية (التصرف التلقائي خطوة بخطوة):
 1. افحص صورة الدرس المرفقة جيداً واستنتج تلقائياً:
    - عنوان الدرس وموضوعه (title & topic)
-   - المستوى الأوروبي المناسب (level: A1 أو A2 أو B1 أو B2) ومستوى الصعوبة (difficulty: easy أو medium أو hard)
+   - المستوى الأوروبي المناسب (level: A1 أو A2) ومستوى الصعوبة (difficulty: easy أو medium أو hard)
    - نوع السيت الأنسب لمحتوى الصورة (setKind):
      * "vocab" -> إذا كانت الصفحة تركز على كلمات ومفردات جديدة.
      * "verb_group" -> إذا كانت الصفحة تركز على أفعال وتصريف الأفعال (Konjugation).
      * "grammar" -> إذا كانت الصفحة تشرح قاعدة نحوية أو تدريبات قواعد فقط.
      * "mixed" -> إذا كانت الصفحة تجمع بين كلمات جديدة + شرح وتدريبات قواعد معاً.
    - الصف الدراسي المستهدف (grade: من "جريد 1" إلى "جريد 12").
+   - الكتاب والمرحلة إن كانا واضحين من الصورة (series: sonnenschein أو dabei أو beste_freunde أو deutsch_profis أو menschen أو schritte أو ping_pong، و edition: المرحلة داخل الكتاب مثل A1.1 أو A1.2 أو A2.1 أو A2.2 أو grade1 إلى grade6 أو grade10 أو vol1 إلى vol3) — وإن لم يكونا واضحين اتركهما وسيُحفظ السيت في "المنهج العام" (general).
 
 2. قاعدة السؤال الذكي قبل التوليد (مهم جداً):
    - إذا لم أذكر لك (نوع السيت) أو (الصف الدراسي / الجريد) مع الصورة، ولم تكن واضحة بنسبة 100% من الصورة، توقف واسألني أولاً بالعربية في رسالة قصيرة جداً ومباشرة:
@@ -99,6 +101,8 @@ export function generateUniversalSmartLernstudioPrompt(teacherName?: string): st
   "topic": "موضوع الدرس",
   "grade": "جريد 4",
   "level": "A1",
+  "series": "dabei",
+  "edition": "A1.2",
   "difficulty": "medium",
   "setKind": "vocab | verb_group | grammar | mixed",
   "contentOrigin": "teacher_created",
@@ -738,6 +742,7 @@ export function validateAndParseLernstudioJson(
     const difficulty: LernstudioDifficulty = ['easy', 'medium', 'hard'].includes(parsed.difficulty)
       ? parsed.difficulty
       : 'medium';
+    const { series, edition } = sanitizeSeriesEdition(parsed.series, parsed.edition);
 
     const grammarContent = parsed.grammarContent
       ? normalizeGrammarContent(parsed.grammarContent, title, topic, 'teacher_created')
@@ -787,6 +792,8 @@ export function validateAndParseLernstudioJson(
       grade: parsed.grade ? String(parsed.grade).trim() : undefined,
       level,
       difficulty,
+      series,
+      ...(edition ? { edition } : {}),
       ...(parsed.titleTranslations ? { titleTranslations: parsed.titleTranslations } : {}),
       ...(parsed.topicTranslations ? { topicTranslations: parsed.topicTranslations } : {}),
       ...(cleanedTeacherName ? { createdByTeacherName: cleanedTeacherName } : {}),

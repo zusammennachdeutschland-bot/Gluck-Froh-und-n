@@ -6,6 +6,7 @@ const BUILTIN_UPDATED_AT = 1769904000000;
 export const BUILTIN_GRAMMAR_SETS: LernstudioSet[] = [
   {
     id: 'curric_grammar_personalpronomen',
+    series: 'general',
     title: 'Personalpronomen (الضمائر الشخصية)',
     titleTranslations: {
       ar: 'الضمائر الشخصية (Personalpronomen)',
@@ -193,6 +194,7 @@ export const BUILTIN_GRAMMAR_SETS: LernstudioSet[] = [
   },
   {
     id: 'curric_grammar_praesens_regular',
+    series: 'general',
     title: 'Präsens: Regelmäßige Verben (المضارع المنتظم)',
     titleTranslations: {
       ar: 'تصريف الأفعال المنتظمة في المضارع (Präsens)',
@@ -327,6 +329,7 @@ export const BUILTIN_GRAMMAR_SETS: LernstudioSet[] = [
   },
   {
     id: 'curric_grammar_sein_haben',
+    series: 'general',
     title: 'Verben „sein“ und „haben“ (أفعال الكينونة والملكية)',
     titleTranslations: {
       ar: 'أهم فعلين في الألمانية: sein و haben',
@@ -449,6 +452,7 @@ export const BUILTIN_GRAMMAR_SETS: LernstudioSet[] = [
   },
   {
     id: 'curric_grammar_artikel_der_die_das',
+    series: 'general',
     title: 'Bestimmte & unbestimmte Artikel (أدوات التعريف والتنكير)',
     titleTranslations: {
       ar: 'أدوات التعريف والتنكير (der/die/das & ein/eine)',
@@ -573,6 +577,7 @@ export const BUILTIN_GRAMMAR_SETS: LernstudioSet[] = [
   },
   {
     id: 'curric_grammar_negation_nicht_kein',
+    series: 'general',
     title: 'Negation: „nicht“ und „kein“ (أسلوب النفي)',
     titleTranslations: {
       ar: 'النفي في الألمانية: الفرق بين nicht و kein',
@@ -691,6 +696,7 @@ export const BUILTIN_GRAMMAR_SETS: LernstudioSet[] = [
   },
   {
     id: 'curric_grammar_akkusativ',
+    series: 'general',
     title: 'Der Akkusativ (حالة المفعول به / النصب)',
     titleTranslations: {
       ar: 'حالة المفعول به (Akkusativ): der → den / ein → einen',
@@ -814,6 +820,7 @@ export const BUILTIN_GRAMMAR_SETS: LernstudioSet[] = [
   },
   {
     id: 'curric_grammar_modalverben',
+    series: 'general',
     title: 'Modalverben: können, müssen, wollen (الأفعال الناقصة)',
     titleTranslations: {
       ar: 'الأفعال الناقصة (Modalverben) وتركيب الإطار الجُملي',
@@ -938,6 +945,7 @@ export const BUILTIN_GRAMMAR_SETS: LernstudioSet[] = [
   },
   {
     id: 'curric_grammar_wortstellung_fragen',
+    series: 'general',
     title: 'Satzbau: Aussagesatz, W-Frage & Ja/Nein-Frage (ترتيب الجملة والسؤال)',
     titleTranslations: {
       ar: 'ترتيب الجملة الخبرية وأنواع الأسئلة (W-Fragen / Ja-Nein-Fragen)',

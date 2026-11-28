@@ -33,6 +33,7 @@ import {
   VALID_GRAMMAR_EXERCISE_TYPES
 } from '../grammarEngine';
 import { deletePageImageRecord } from '../lernstudioPageImageStore';
+import { SERIES_LIST, SERIES_META, isSeriesId } from '../seriesMeta';
 
 export type GrammarExtractionExerciseMode = 'original_only' | 'original_and_similar';
 export interface ExtractionPageInput {
@@ -222,6 +223,8 @@ export const LernstudioAiModal: React.FC<Props> = ({
         topic: targetPreview.topic || targetPreview.title || 'ألماني',
         grade: targetPreview.grade || undefined,
         level: targetPreview.level || 'A1',
+        series: targetPreview.series || 'general',
+        edition: targetPreview.edition || undefined,
         difficulty: targetPreview.difficulty || 'medium',
         setKind: targetPreview.setKind,
         contentOrigin: 'teacher_created',
@@ -804,9 +807,6 @@ export const LernstudioAiModal: React.FC<Props> = ({
                   >
                     <option value="A1">A1</option>
                     <option value="A2">A2</option>
-                    <option value="B1">B1</option>
-                    <option value="B2">B2</option>
-                    <option value="C1">C1</option>
                   </select>
                 </div>
               </div>
@@ -1184,6 +1184,49 @@ export const LernstudioAiModal: React.FC<Props> = ({
                         />
                       </div>
                     )}
+                    <div>
+                      <label className="text-[10.5px] font-bold text-text-muted block mb-1">
+                        {isRtl ? 'الكتاب (اختياري):' : 'Book (optional):'}
+                      </label>
+                      <select
+                        value={extractedDraft.series || 'general'}
+                        onChange={(e) =>
+                          setExtractedDraft({ ...extractedDraft, series: e.target.value, edition: undefined })
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-surface-border bg-surface text-xs font-bold text-text-main"
+                      >
+                        {SERIES_LIST.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {isRtl ? s.nameAr : s.nameDe}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10.5px] font-bold text-text-muted block mb-1">
+                        {isRtl ? 'المرحلة (اختياري):' : 'Stage (optional):'}
+                      </label>
+                      <select
+                        value={extractedDraft.edition || ''}
+                        disabled={
+                          SERIES_META[isSeriesId(extractedDraft.series) ? extractedDraft.series : 'general']
+                            .stages.length === 0
+                        }
+                        onChange={(e) =>
+                          setExtractedDraft({ ...extractedDraft, edition: e.target.value || undefined })
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-surface-border bg-surface text-xs font-bold text-text-main disabled:opacity-50"
+                      >
+                        <option value="">{isRtl ? '-- اختر المرحلة --' : '-- Select Stage --'}</option>
+                        {SERIES_META[
+                          isSeriesId(extractedDraft.series) ? extractedDraft.series : 'general'
+                        ].stages.map((st) => (
+                          <option key={st.id} value={st.id}>
+                            {isRtl ? st.labelAr : st.labelDe}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                     {extractedDraft.grammarContent && (
                       <div className="sm:col-span-2">
                         <label className="text-[10.5px] font-bold text-text-muted block mb-1">

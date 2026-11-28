@@ -10,6 +10,8 @@ export const BATCH_11_SETS: LernstudioSet[] = [
   // Dabei! A1.2 – Lektion 15: Was machen wir heute?
   {
     id: 'curric_b11_dabei_15',
+    series: 'dabei',
+    edition: 'A1.2',
     title: 'Dabei! A1.2 – Lektion 15: Was machen wir heute?',
     titleTranslations: { ar: 'داباي! A1.2 – الدرس 15: ماذا نفعل اليوم؟', de: 'Dabei! A1.2 – Lektion 15: Was machen wir heute?', en: 'Dabei! A1.2 – Lektion 15: Was machen wir heute?' },
     topic: 'Dabei! A1.2 · November',
@@ -60,6 +62,8 @@ export const BATCH_11_SETS: LernstudioSet[] = [
   // Dabei! A1.2 – Modul 5: Zum Schluss (Wiederholung)
   {
     id: 'curric_b11_dabei_modul5',
+    series: 'dabei',
+    edition: 'A1.2',
     title: 'Dabei! A1.2 – Modul 5: Zum Schluss (Wiederholung)',
     titleTranslations: { ar: 'داباي! A1.2 – الوحدة 5: في النهاية (مراجعة)', de: 'Dabei! A1.2 – Modul 5: Zum Schluss (Wiederholung)', en: 'Dabei! A1.2 – Modul 5: Zum Schluss (Wiederholung)' },
     topic: 'Dabei! A1.2 · November',
@@ -86,6 +90,8 @@ export const BATCH_11_SETS: LernstudioSet[] = [
   // Dabei! A1.2 – Lektion 16: Ein Geburtstagsgeschenk
   {
     id: 'curric_b11_dabei_16',
+    series: 'dabei',
+    edition: 'A1.2',
     title: 'Dabei! A1.2 – Lektion 16: Ein Geburtstagsgeschenk',
     titleTranslations: { ar: 'داباي! A1.2 – الدرس 16: هدية عيد ميلاد', de: 'Dabei! A1.2 – Lektion 16: Ein Geburtstagsgeschenk', en: 'Dabei! A1.2 – Lektion 16: Ein Geburtstagsgeschenk' },
     topic: 'Dabei! A1.2 · November',
@@ -138,6 +144,8 @@ export const BATCH_11_SETS: LernstudioSet[] = [
   // Dabei! A1.2 – Lektion 17: Jakob und Julia
   {
     id: 'curric_b11_dabei_17',
+    series: 'dabei',
+    edition: 'A1.2',
     title: 'Dabei! A1.2 – Lektion 17: Jakob und Julia',
     titleTranslations: { ar: 'داباي! A1.2 – الدرس 17: ياكوب ويوليا', de: 'Dabei! A1.2 – Lektion 17: Jakob und Julia', en: 'Dabei! A1.2 – Lektion 17: Jakob und Julia' },
     topic: 'Dabei! A1.2 · November',

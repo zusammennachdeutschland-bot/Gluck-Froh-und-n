@@ -10,6 +10,7 @@ import { BATCH_08_SETS } from './batch08_actions_sports.js';
 import { BATCH_09_SETS } from './batch09_adjectives_grammar_shopping.js';
 import { BATCH_10_SETS } from './batch10_culture_tech_stories_expansion.js';
 import { BATCH_11_SETS } from './batch11_dabei_a1_2.js';
+import { BATCH_12_SETS } from './batch12_sonnenschein.js';
 import { BUILTIN_GRAMMAR_SETS } from '../builtinGrammarSets.js';
 
 export interface RawCurriculumSet {
@@ -43,7 +44,8 @@ const RAW_ALL_SETS: RawCurriculumSet[] = [
   ...(BATCH_08_SETS as unknown as RawCurriculumSet[]),
   ...(BATCH_09_SETS as unknown as RawCurriculumSet[]),
   ...(BATCH_10_SETS as unknown as RawCurriculumSet[]),
-  ...(BATCH_11_SETS as unknown as RawCurriculumSet[])
+  ...(BATCH_11_SETS as unknown as RawCurriculumSet[]),
+  ...(BATCH_12_SETS as unknown as RawCurriculumSet[])
 ];
 
 function mapGrade(rawGrade?: string): { grade: string; level: LernstudioLevel; difficulty: LernstudioDifficulty } {
@@ -153,6 +155,10 @@ const MAPPED_VOCAB_SETS: LernstudioSet[] = RAW_ALL_SETS.map((raw: any, setIndex)
     grade,
     level,
     difficulty,
+    // Book-series folder: explicit series wins, builtin sets without one
+    // default to the general curriculum folder.
+    series: (raw as any).series || 'general',
+    ...((raw as any).edition ? { edition: (raw as any).edition } : {}),
     hasArticles,
     sentenceBuilderSupported: true,
     setKind: raw.setKind || 'vocab',

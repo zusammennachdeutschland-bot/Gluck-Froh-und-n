@@ -244,6 +244,8 @@ export interface LernstudioSet {
   grade?: string;                // e.g. "الصف الأول", "Grade 1", etc.
   level: LernstudioLevel;
   topic: string;
+  series?: string;               // Book-series folder id, e.g. 'dabei', 'sonnenschein', 'general'
+  edition?: string;              // Stage/edition inside the series, e.g. 'A1.2', 'grade3', 'vol1'
   category?: string;
   topicTranslations?: { ar?: string; de?: string; en?: string };
   difficulty: LernstudioDifficulty;

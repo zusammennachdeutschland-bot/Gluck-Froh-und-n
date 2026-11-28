@@ -1936,7 +1936,7 @@ export const LernstudioHomeworkModal: React.FC<Props> = ({
                         />
                       </div>
                       <div className="flex items-center gap-1">
-                        {(['all', 'A1', 'A2', 'B1'] as const).map((lvl) => (
+                        {(['all', 'A1', 'A2'] as const).map((lvl) => (
                           <button
                             key={lvl}
                             type="button"

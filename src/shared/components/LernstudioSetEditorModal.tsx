@@ -25,6 +25,7 @@ import {
   VALID_GRAMMAR_EXERCISE_TYPES
 } from '../grammarEngine';
 import { GrammarPageImagesPanel } from './GrammarPageImagesPanel';
+import { SERIES_LIST, SERIES_META, sanitizeSeriesEdition, type SeriesId } from '../seriesMeta';
 import { AlertCircle, AlertTriangle, BookOpen, Plus, Save, Sparkles, Trash2, Wand2, X } from 'lucide-react';
 
 interface Props {
@@ -70,6 +71,9 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
   const [topic, setTopic] = useState(setToEdit?.topic || '');
   const [grade, setGrade] = useState(setToEdit?.grade || '');
   const [level, setLevel] = useState<LernstudioLevel>(setToEdit?.level || 'A1');
+  const initialSeriesEdition = sanitizeSeriesEdition(setToEdit?.series, setToEdit?.edition);
+  const [series, setSeries] = useState<SeriesId>(initialSeriesEdition.series);
+  const [edition, setEdition] = useState(initialSeriesEdition.edition || '');
   const [difficulty, setDifficulty] = useState<LernstudioDifficulty>(setToEdit?.difficulty || 'medium');
   const [assignedGroupId, setAssignedGroupId] = useState(setToEdit?.assignedGroupId || '');
   const [creatorTeacherName, setCreatorTeacherName] = useState(defaultCreatorName);
@@ -339,6 +343,8 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
         topic: topic.trim() || grammarTopic.trim() || title.trim(),
         grade: grade.trim() || undefined,
         level,
+        series,
+        edition: edition || undefined,
         difficulty,
         assignedGroupId: assignedGroupId || undefined,
         ...(resolvedTeacherName ? { createdByTeacherName: resolvedTeacherName } : {}),
@@ -487,10 +493,45 @@ export const LernstudioSetEditorModal: React.FC<Props> = ({
               >
                 <option value="A1">A1</option>
                 <option value="A2">A2</option>
-                <option value="B1">B1</option>
-                <option value="B2">B2</option>
-                <option value="C1">C1</option>
-                <option value="C2">C2</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-text-muted block mb-1">
+                {isRtl ? 'الكتاب (اختياري):' : 'Book (optional):'}
+              </label>
+              <select
+                value={series}
+                onChange={(e) => {
+                  setSeries(e.target.value as SeriesId);
+                  setEdition('');
+                }}
+                className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary cursor-pointer"
+              >
+                {SERIES_LIST.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {isRtl ? s.nameAr : s.nameDe}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-text-muted block mb-1">
+                {isRtl ? 'المرحلة (اختياري):' : 'Stage (optional):'}
+              </label>
+              <select
+                value={edition}
+                disabled={SERIES_META[series].stages.length === 0}
+                onChange={(e) => setEdition(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-surface-border bg-surface text-text-main text-xs font-bold focus:outline-none focus:border-primary cursor-pointer disabled:opacity-50"
+              >
+                <option value="">{isRtl ? '-- اختر المرحلة --' : '-- Select Stage --'}</option>
+                {SERIES_META[series].stages.map((st) => (
+                  <option key={st.id} value={st.id}>
+                    {isRtl ? st.labelAr : st.labelDe}
+                  </option>
+                ))}
               </select>
             </div>
 
