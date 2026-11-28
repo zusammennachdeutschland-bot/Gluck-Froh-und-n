@@ -2767,6 +2767,13 @@ export function evaluateRecordingMatchAgainstLessons(
     parseStandardizedZoomTopic(recording.title) ||
     parseStandardizedZoomTopic(recording.calendarEventTitle);
   const cleanRecCalendarUid = String(recording.calendarEventUid || '').trim();
+  // The recording's UID is Google's real iCalUID (from calendar_event.ical_uid),
+  // so it must be compared against the session's stored Google iCalUID too —
+  // NOT only the program-internal calendarEventUid, which is never sent to
+  // Google and therefore can never match what Grain returns.
+  const sessionMatchesCalendarUid = (s: GroupWeeklySession) =>
+    s.calendarEventUid === cleanRecCalendarUid ||
+    (s.googleCalendarIcalUid ? s.googleCalendarIcalUid === cleanRecCalendarUid : false);
   const normRecTitle = normalizeNameForComparison(`${recording.title} ${recording.calendarEventTitle || ''}`);
   const normParticipants = (recording.participantNames || []).map(normalizeNameForComparison).filter(Boolean);
 
@@ -2784,7 +2791,7 @@ export function evaluateRecordingMatchAgainstLessons(
   const zoomIdOwnerSessionId = zoomIdActiveOwner?.id || zoomIdHistoryOwner?.sessionId;
 
   const calendarUidOwner = cleanRecCalendarUid
-    ? weeklySessions.find((s) => s.calendarEventUid === cleanRecCalendarUid)
+    ? weeklySessions.find(sessionMatchesCalendarUid)
     : undefined;
 
   let parsedTopicOwnerGroupId: string | undefined;
@@ -3082,7 +3089,7 @@ export function evaluateRecordingMatchAgainstLessons(
     // Tier 4 Calendar Event UID Match
     let calendarUidMatched = false;
     const matchedCalendarSession = cleanRecCalendarUid
-      ? groupSessions.find((s) => s.calendarEventUid === cleanRecCalendarUid)
+      ? groupSessions.find(sessionMatchesCalendarUid)
       : undefined;
     if (matchedCalendarSession) {
       calendarUidMatched = true;
@@ -3203,6 +3210,28 @@ export function evaluateRecordingMatchAgainstLessons(
         ((learnedRecurringRuleId && !scheduleChangedRequiresConfirmation && clampedScore >= 78) ||
           hasStrongStandardizedEvidence)
     );
+
+    // Identifier gate (automatic matching, no confirmation UI): a recording
+    // only becomes a candidate for a lesson when it carries at least one
+    // program identifier for that lesson — a matching Zoom Meeting ID, a
+    // matching standardized Zoom topic, a matching calendar UID, or a
+    // teacher-confirmed recurring-learning rule for the group. A rule exists
+    // only because the teacher explicitly confirmed a previous link, keyed by
+    // the stable groupId (it is auto-revoked when corrected away); a changed
+    // schedule keeps the candidate but still returns needs_confirmation below,
+    // never a silent auto-link. Date/time + duration + participants alone are
+    // never enough: without an identifier, a recording from another lesson
+    // (same day, close in time) would be suggested and picked up by the
+    // title picker as if it belonged to this lesson.
+    const hasProgramIdentifier =
+      tier1ZoomIdMatched ||
+      standardizedTopicMatched ||
+      calendarUidMatched ||
+      Boolean(learnedRecurringRuleId) ||
+      scheduleChangedRequiresConfirmation;
+    if (!hasProgramIdentifier) {
+      continue;
+    }
 
     candidates.push({
       lessonId: lesson.id,

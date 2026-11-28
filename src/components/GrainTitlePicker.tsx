@@ -250,34 +250,20 @@ export const GrainTitlePicker: React.FC<GrainTitlePickerProps> = ({
           return 'error';
         }
         const recs = result.recordings;
-        // Same match as the panel's visible recordings for this lesson.
-        // P1-N4: the date-only fallback must ALSO match the lesson time
-        // (within +-30 minutes) AND the same group — otherwise a day with
-        // two lessons for different groups could fill in the wrong title.
-        const lessonStartMs = (() => {
-          const timePart = (selectedLesson.time || '').match(/(\d{1,2}):(\d{2})/);
-          if (!timePart) return NaN;
-          return Date.parse(
-            `${selectedLesson.date}T${timePart[1].padStart(2, '0')}:${timePart[2]}:00`
-          );
-        })();
-        const matchesDateFallback = (r: (typeof recs)[number]) => {
-          const sameDate =
-            r.evidence?.recordingDateLocal === selectedLesson.date ||
-            r.startDatetime?.startsWith(selectedLesson.date);
-          if (!sameDate) return false;
-          const recMs = Date.parse(r.startDatetime || '');
-          if (!Number.isFinite(lessonStartMs) || !Number.isFinite(recMs)) return false;
-          if (Math.abs(recMs - lessonStartMs) > 30 * 60 * 1000) return false;
-          return r.matchedGroupId === selectedLesson.groupId;
-        };
+        // Only trust identifier-backed matches: an already-linked recording,
+        // an automatically matched one, or a strong match (>= 75). A weak
+        // suggestion (needs_confirmation / suggested_match) or a bare
+        // date/time fallback must never supply titles — a recording from
+        // another lesson (same day, close in time) would otherwise leak its
+        // content into this lesson's report. With no trusted match the picker
+        // shows the existing "recording hasn't arrived yet" state and retries
+        // every 2 minutes until the real recording appears.
         const matched =
           recs.find((r) => r.confirmedLessonId === selectedLesson.id) ||
-          recs.find((r) => r.suggestedLessonId === selectedLesson.id) ||
           recs.find(
             (r) =>
-              matchesDateFallback(r) ||
-              r.candidates.some((c) => c.lessonId === selectedLesson.id)
+              r.suggestedLessonId === selectedLesson.id &&
+              (r.matchStatus === 'automatically_matched' || r.matchStatus === 'strong_match')
           );
         if (!matched) {
           return 'not-found';

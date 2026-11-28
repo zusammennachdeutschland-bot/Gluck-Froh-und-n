@@ -406,7 +406,10 @@ async function runGrainIntegrationTests() {
   const multiEval = evaluateRecordingMatchAgainstLessons(
     {
       id: 'rec_multi',
-      title: 'Deutschstunde',
+      // Identifier gate: the recording carries the group's standardized Zoom
+      // topic, so it is a candidate for BOTH parallel lessons of the same
+      // group and the ambiguity is preserved (not resolved by dropping one).
+      title: `Wednesday - ${recLocalTime} - Klasse 4 Gruppe A`,
       startDatetime: '2026-11-18T16:05:00.000Z',
       durationSeconds: 3600,
       recordingUrl: 'https://grain.com/share/recording/rec_multi',
@@ -884,12 +887,18 @@ async function runGrainIntegrationTests() {
     groupsForLearning,
     studentsForLearning
   );
+  // Identifier gate: date + start time + student-group evidence alone must
+  // NOT match a recording — without a program identifier (Zoom ID,
+  // standardized topic, calendar UID, or a teacher-confirmed learning rule)
+  // the recording stays unmatched. The first-time pattern is confirmed
+  // manually from the assistant panel, which creates the learning rule that
+  // auto-matches later recordings of this group.
   assert.equal(
-    matchNoZoom.matchStatus === 'strong_match' || matchNoZoom.matchStatus === 'suggested_match',
-    true,
-    'Recording without Zoom link must match on date + start time + student-group evidence'
+    matchNoZoom.matchStatus,
+    'unmatched',
+    'Recording without any program identifier must NOT match on date + time + participants alone'
   );
-  assert.equal(matchNoZoom.suggestedLessonId, 'lesson_no_zoom_1');
+  assert.equal(matchNoZoom.candidates.length, 0);
 
   // Record teacher confirmation for Gruppe Alpha -> saves learning record keyed by group.id
   const learnedRecord = recordConfirmedGrainGroupLearning({
@@ -1299,9 +1308,9 @@ async function runGrainIntegrationTests() {
     [] // No learned preference yet -> ambiguous time overlap
   );
   assert.equal(
-    evalAmb.matchStatus === 'multiple_possible_lessons' || evalAmb.matchStatus === 'needs_confirmation',
-    true,
-    'Multiple overlapping groups without disambiguating evidence must NOT auto-assign'
+    evalAmb.matchStatus,
+    'unmatched',
+    'Multiple overlapping groups without any program identifier must NOT match at all, let alone auto-assign'
   );
 
   // Case 5: Schedule change (Monday 17:00 -> Tuesday 19:30) asks for confirmation once, then updates rule
@@ -1759,7 +1768,9 @@ async function runGrainIntegrationTests() {
   };
   const summerRec = {
     id: 'rec_dst_summer',
-    title: 'Montag B1 Summer',
+    // Identifier gate: the recording carries the group's standardized Zoom
+    // topic so it passes the gate; the DST goal of this test is unaffected.
+    title: 'Monday - 17:00 - Montag B1 Intensiv Neu',
     startDatetime: tzOffsetLocal,
     durationSeconds: 2400,
     durationMinutes: 40,
